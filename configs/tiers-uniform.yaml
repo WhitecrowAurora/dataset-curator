@@ -1,0 +1,78 @@
+# 备选分档表：全员统一口径
+#
+# 与 tiers.yaml 的区别：
+#   tiers.yaml      按显存分档，12-16G 跑 4B、24G+ 跑 8B —— 吞吐高，但数据集里混两种模型
+#   本文件           全员同一个模型 + 同一精度 + 同一分辨率，只让 dev 端参数分档
+#
+# 核心思路：影响"输出长什么样"的参数（model / precision / max_pixels / 温度）
+# 全部锁死；只让影响"跑多快"的参数（max_model_len / max_num_seqs）按显存调。
+#
+# 这条路的代价很明确：12G 卡跑 8B int4 会慢（batch 上不去），
+# 但换来的是整批数据只有一个 model_id，不存在代际混合，训练侧不用做配比。
+#
+# 主创定了口径后二选一：
+#   tagger serve --tiers configs/tiers.yaml           # 混合档，快
+#   tagger serve --tiers configs/tiers-uniform.yaml   # 统一档，干净
+
+defaults:
+  # 与 tiers.yaml 完全一致：768×768 总预算（面积口径，不是短边），分 5 个桶。
+  # 统一档的意义就是"影响输出长什么样的参数全锁死"，分辨率当然也在其中。
+  max_pixels: 589824
+
+  buckets:
+    align: 32
+    ratios: [1.0, 1.3333, 1.5, 1.7778, 0.5625]
+
+  gpu_memory_utilization: 0.88
+  temperature: 0.2
+  top_p: 0.9
+  max_tokens: 512
+  request_timeout_s: 120
+
+models:
+  qwen3vl-8b:
+    path: Qwen/Qwen3-VL-8B-Instruct
+    # [TODO] 必须 pin commit
+    revision: null
+    family: qwen3vl
+    # [TODO] 生成 int4 权重后填这里；为空会以 bf16 加载，12G/16G 卡直接 OOM
+    quantized_path: null
+    precision: int4
+
+tiers:
+  # 12G：8B int4 权重约 4.8G，KV 只能给到 2-3G，batch 压小
+  - name: uniform-lowest-12g
+    vram_min: 0
+    vram_max: 13
+    model: qwen3vl-8b
+    precision: int4
+    max_model_len: 3072
+    max_num_seqs: 4
+    note: "12G：能跑但慢。若实测低于 1.5 img/s，考虑退回 tiers.yaml 的 4B。"
+
+  - name: uniform-low-16g
+    vram_min: 13
+    vram_max: 20
+    model: qwen3vl-8b
+    precision: int4
+    max_model_len: 6144
+    max_num_seqs: 8
+    note: "16G：主力档，768² 下约 1.6-2.3 img/s（估算）"
+
+  - name: uniform-mid-24g
+    vram_min: 20
+    vram_max: 28
+    model: qwen3vl-8b
+    precision: int4
+    max_model_len: 8192
+    max_num_seqs: 16
+    note: "24G：batch 能开到 16，吞吐明显上一个台阶"
+
+  - name: uniform-high-32g
+    vram_min: 28
+    vram_max: 999
+    model: qwen3vl-8b
+    precision: int4
+    max_model_len: 16384
+    max_num_seqs: 24
+    note: "32G：可以承担黄金集与难样本重跑"

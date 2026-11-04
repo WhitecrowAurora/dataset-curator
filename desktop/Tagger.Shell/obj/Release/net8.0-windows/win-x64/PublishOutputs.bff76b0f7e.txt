@@ -1,0 +1,13 @@
+H:\tagger\dist\desktop\Tagger.Shell.exe
+H:\tagger\dist\desktop\runtimes\win-x64\native\WebView2Loader.dll
+H:\tagger\dist\desktop\Tagger.Shell.dll
+H:\tagger\dist\desktop\Tagger.Shell.deps.json
+H:\tagger\dist\desktop\Tagger.Shell.runtimeconfig.json
+H:\tagger\dist\desktop\Tagger.Shell.pdb
+H:\tagger\dist\desktop\WebView2Loader.dll
+H:\tagger\dist\desktop\Microsoft.Web.WebView2.Core.dll
+H:\tagger\dist\desktop\Microsoft.Web.WebView2.WinForms.dll
+H:\tagger\dist\desktop\Microsoft.Web.WebView2.Wpf.dll
+H:\tagger\dist\desktop\Microsoft.Web.WebView2.Core.xml
+H:\tagger\dist\desktop\Microsoft.Web.WebView2.WinForms.xml
+H:\tagger\dist\desktop\Microsoft.Web.WebView2.Wpf.xml

@@ -1,0 +1,8 @@
+{
+  "artist_outputs": 0,
+  "parameters": 320940057,
+  "policy": "wdft-hub-export-v1",
+  "source_checkpoint": "runs/odd_pink_python/canary-v1/recentered-v2/checkpoint.pt",
+  "source_step": 38252,
+  "tag_outputs": 16473
+}

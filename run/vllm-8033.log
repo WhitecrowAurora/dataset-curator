@@ -1,0 +1,73 @@
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 启动失败：TypeError: test_stop_while_starting_reaps_the_process.<locals>.fake_start() got an unexpected keyword argument 'data_root'
+[web] 启动失败：TypeError: test_stop_while_starting_reaps_the_process.<locals>.fake_start() got an unexpected keyword argument 'data_root'
+[web] 启动失败：TypeError: fake_start() got an unexpected keyword argument 'data_root'
+[web] 启动失败：TypeError: test_stop_while_starting_reaps_the_process.<locals>.fake_start() got an unexpected keyword argument 'data_root'
+[web] 启动失败：TypeError: test_stop_while_starting_reaps_the_process.<locals>.fake_start() got an unexpected keyword argument 'data_root'
+[web] 启动失败：TypeError: test_stop_while_starting_reaps_the_process.<locals>.fake_start() got an unexpected keyword argument 'data_root'
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 启动失败：ConfigError: 找不到 llama-server。两种装法：
+  1) 从 llama.cpp 的 releases 下 Windows CUDA 包（llama-*-bin-win-cuda-*.zip
+     与同版本的 cudart-*.zip），解压后把目录加进 PATH；
+  2) 设环境变量 TAGGER_LLAMA_SERVER 指向 llama-server.exe 的完整路径。
+GitHub 直连不通时可用本地代理或镜像。
+[web] 启动失败：TypeError: test_stop_while_starting_reaps_the_process.<locals>.fake_start() got an unexpected keyword argument 'engine'
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止
+[web] 服务已停止

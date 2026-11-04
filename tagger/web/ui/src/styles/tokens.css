@@ -1,0 +1,145 @@
+/* ---------------------------------------------------------------------------
+   Tagger design tokens (--lx-* prefix)
+
+   命名与 lulynx-trainer 的 launcher 完全一致，色值是 tagger 自己的：
+   深色工业底 + PyTorch 橙（#ee4c2c）做唯一强调色。一屏里除了橙和红绿状态色，
+   没有第四个彩色，界面就不会花。
+
+   与 lulynx 的差异：**默认是深色**（那边默认浅色）。要浅色时给 <html> 挂
+   data-theme="light" 即可，组件不写 dark: 变体，只认 token。
+--------------------------------------------------------------------------- */
+
+:root {
+  /* 画布与表面 */
+  --lx-bg:              #0c0f13;
+  --lx-surface:         #12161c;
+  --lx-surface-raised:  #171d25;
+  --lx-border:          #232a33;
+  --lx-border-card:     #232a33;
+  --lx-border-hover:    #303945;
+  --lx-input:           #171d25;
+  --lx-scrollbar:       rgba(255, 255, 255, 0.08);
+  --lx-scrollbar-hover: rgba(255, 255, 255, 0.16);
+
+  /* 文字四档 */
+  --lx-text:            #e7eaef;
+  --lx-text-secondary:  #b6c0ce;
+  --lx-text-muted:      #8a94a3;
+  --lx-text-dim:        #5b6673;
+
+  /* 唯一强调色：PyTorch 橙 */
+  --lx-accent:          #ee4c2c;
+  --lx-accent-light:    #f4694c;
+  --lx-accent-dark:     #d33d20;
+  --lx-accent-subtle:   rgba(238, 76, 44, 0.12);
+  --lx-accent-border:   rgba(238, 76, 44, 0.34);
+  --lx-accent-ring:     rgba(238, 76, 44, 0.18);
+  --lx-accent-shadow:   rgba(238, 76, 44, 0.22);
+  --lx-accent-text:     #f4735a;
+  --lx-accent-glow:     rgba(238, 76, 44, 0.38);
+  --lx-on-accent:       #ffffff;
+
+  /* 状态色 */
+  --lx-secondary:         #7c8ba1;
+  --lx-secondary-text:    #9aa7b8;
+  --lx-success:           #33b981;
+  --lx-success-text:      #4ad19a;
+  --lx-success-subtle:    rgba(51, 185, 129, 0.10);
+  --lx-success-border:    rgba(51, 185, 129, 0.28);
+  --lx-warning:           #e0a12c;
+  --lx-warning-text:      #edb64f;
+  --lx-warning-subtle:    rgba(224, 161, 44, 0.10);
+  --lx-warning-border:    rgba(224, 161, 44, 0.28);
+  --lx-warning-bg:        #2a2110;
+  --lx-danger:            #ef5350;
+  --lx-danger-text:       #f87876;
+  --lx-danger-subtle:     rgba(239, 83, 80, 0.10);
+  --lx-danger-border:     rgba(239, 83, 80, 0.28);
+
+  /* 侧栏 / 终端底 */
+  --lx-sidebar-bg:      #0a0d11;
+  --lx-console-bg:      #0a0d11;
+
+  /* 中性进度条：accent 只留给"正在发生"和告警 */
+  --lx-bar-track:       #1c232c;
+  --lx-bar-fill:        #3a4553;
+
+  /* 圆角 */
+  --lx-radius:          8px;
+  --lx-radius-sm:       6px;
+  --lx-radius-lg:       12px;
+
+  /* 排版 */
+  --lx-font-sans:       -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+                        "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --lx-font-display:    "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                        "Noto Sans SC", "Microsoft YaHei", Roboto, Arial, sans-serif;
+  --lx-font-mono:       "JetBrains Mono", "Cascadia Mono", "Cascadia Code", Consolas,
+                        "Fira Code", "Noto Sans SC", monospace;
+  --lx-font-xs:         10px;
+  --lx-font-sm:         12px;
+  --lx-font-base:       14px;
+  --lx-font-md:         16px;
+  --lx-font-lg:         20px;
+  --lx-font-xl:         24px;
+
+  /* 动效 */
+  --lx-duration-fast:   150ms;
+  --lx-duration-normal: 250ms;
+  --lx-duration-slow:   400ms;
+  --lx-ease-spring:     cubic-bezier(0.23, 1, 0.32, 1);
+  --lx-ease-bounce:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  --lx-ease-smooth:     cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---------------------------------------------------------------------------
+   浅色：同一个橙，换到白纸上。只覆盖 token，组件一行都不用改。
+--------------------------------------------------------------------------- */
+[data-theme="light"] {
+  --lx-bg:              #f4f6f8;
+  --lx-surface:         #ffffff;
+  --lx-surface-raised:  #f7f9fb;
+  --lx-border:          #e3e7ed;
+  --lx-border-card:     #e3e7ed;
+  --lx-border-hover:    #c6cedb;
+  --lx-input:           #ffffff;
+  --lx-scrollbar:       rgba(15, 23, 42, 0.14);
+  --lx-scrollbar-hover: rgba(15, 23, 42, 0.26);
+
+  --lx-text:            #161b22;
+  --lx-text-secondary:  #48525f;
+  --lx-text-muted:      #78838f;
+  --lx-text-dim:        #aab4c0;
+
+  --lx-accent:          #ee4c2c;
+  --lx-accent-light:    #f4694c;
+  --lx-accent-dark:     #d33d20;
+  --lx-accent-subtle:   rgba(238, 76, 44, 0.09);
+  --lx-accent-border:   rgba(238, 76, 44, 0.32);
+  --lx-accent-ring:     rgba(238, 76, 44, 0.14);
+  --lx-accent-shadow:   rgba(238, 76, 44, 0.18);
+  --lx-accent-text:     #cf3d1c;
+  --lx-accent-glow:     rgba(238, 76, 44, 0.30);
+  --lx-on-accent:       #ffffff;
+
+  --lx-secondary:         #64748b;
+  --lx-secondary-text:    #52606f;
+  --lx-success:           #0f9d6b;
+  --lx-success-text:      #0b7f56;
+  --lx-success-subtle:    rgba(15, 157, 107, 0.09);
+  --lx-success-border:    rgba(15, 157, 107, 0.26);
+  --lx-warning:           #b87a12;
+  --lx-warning-text:      #96620c;
+  --lx-warning-subtle:    rgba(184, 122, 18, 0.09);
+  --lx-warning-border:    rgba(184, 122, 18, 0.26);
+  --lx-warning-bg:        #fdf3df;
+  --lx-danger:            #d93a37;
+  --lx-danger-text:       #bb2b28;
+  --lx-danger-subtle:     rgba(217, 58, 55, 0.08);
+  --lx-danger-border:     rgba(217, 58, 55, 0.26);
+
+  --lx-sidebar-bg:      #eef1f5;
+  --lx-console-bg:      #f7f9fb;
+  --lx-bar-track:       #e6eaf0;
+  --lx-bar-fill:        #b9c2ce;
+}

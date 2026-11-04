@@ -1,0 +1,114 @@
+# 实验分档表：MoE 模型（Qwen3-VL-30B-A3B）
+#
+# 用这张表的场景：主创想验证「MoE 能不能用更少的激活参数拿到接近大 dense 的精度」。
+# 用法：tagger serve --tiers configs/tiers-moe.yaml
+#
+# ---------------------------------------------------------------------------
+# 先说清楚一件事：Qwen3-VL 没有 12B-A3B 这个型号
+#
+# 官方 HF 组织下 Qwen3-VL 全系共 40 个仓库，参数档位只有：
+#   dense: 2B / 4B / 8B / 32B
+#   MoE  : 30B-A3B / 235B-A22B
+# 全库检索不到任何 12B，也找不到除这两组以外的 A3B。所以这里按 30B-A3B 配置。
+#
+# 主创的判断「12B-A3B 和 8B dense 差不多」如果是想指 30B-A3B，那大概率说反了：
+# 30B 总参 / 3B 激活的 MoE，在多数 VLM benchmark 上明显高于 8B dense，
+# 通常落在 8B 与 32B 之间。这对我们是好事，但代价是显存。
+#
+# ---------------------------------------------------------------------------
+# 显存账（int4 W4A16）
+#
+#   权重      30B × 0.5 GB/B ≈ 15 GB
+#   KV cache  48 层 / GQA 4 kv-heads / head_dim 128
+#             ≈ 96 KB per token → 1100 tok 序列约 105 MB
+#   视觉激活  576 vision token，远小于 8B 的 KV 压力
+#   框架余量  ~2 GB
+#   ------------------------------------------------------------
+#   合计约 18-19 GB 起步
+#
+# 结论：24G 能跑（batch 要压），32G 舒服，12G / 16G 直接出局。
+# 这是硬门槛，不是调参能绕过去的——所以本表没有 16G 以下的分档。
+# ---------------------------------------------------------------------------
+
+defaults:
+  # 与主线保持一致。MoE 与 dense 的输出口径必须能直接对比，
+  # 否则 S1 的 A/B 结果里混着分辨率差异，看不出模型差异。
+  max_pixels: 589824
+
+  buckets:
+    align: 32
+    ratios: [1.0, 1.3333, 1.5, 1.7778, 0.5625]
+
+  gpu_memory_utilization: 0.90
+  temperature: 0.2
+  top_p: 0.9
+  max_tokens: 512
+  request_timeout_s: 120
+
+models:
+  qwen3vl-30b-a3b:
+    path: Qwen/Qwen3-VL-30B-A3B-Instruct
+    # [TODO] 必须 pin commit。MoE 换版本对路由分布影响更大，比 dense 更不能漂
+    revision: null
+    family: qwen3vl-moe
+    # [TODO] 生成 int4 权重后填这里。30B 量化一次约需 40-60 分钟
+    quantized_path: null
+    precision: int4
+
+  # 对照组。同一张卡上换 --model 即可切回来做 A/B
+  qwen3vl-8b:
+    path: Qwen/Qwen3-VL-8B-Instruct
+    revision: null
+    family: qwen3vl
+    quantized_path: null
+    precision: int4
+
+  # ---------------------------------------------------------------------------
+  # 备选：Kimi-VL-A3B（16.4B 总参 / 2.8B 激活）
+  #
+  # 为什么列在这里：主创说的「12B-A3B」大概率是 Kimi 官方 README 那张对比表
+  # 串行了——表里 Gemma3-12B（12B dense）与 Kimi-VL-A3B（16B/2.8B）相邻两列，
+  # 横着读就会拼成「12B-A3B」。真实存在的只有 Kimi 这一支。
+  #
+  # 先说结论：不建议作为主力，理由在精度而非工程。
+  #   MMMU            57.0  vs Qwen3-VL-8B 的 69.6   （-12.6）
+  #   HallusionBench  65.3  vs 73.5                  （-8.2，幻觉控制更差）
+  #   MathVerse       29.8  vs 54.5                  （-24.7）
+  #   只有 AI2D 84.6 和 ChartQA 87.0 反超（读图表更强）
+  # 打标最怕的就是幻觉——它会编造画面里没有的东西，而 quality.py 的 L1
+  # 规则抓不住这类错。除非数据里图表/文档占绝对主力，否则换它没有收益。
+  #
+  # 显存上也不省：int4 约 11 GB（总参 16.4B 全要加载），比 8B 的 4.8 GB 更吃紧。
+  # MoE 的账是「显存看总参、速度看激活参」，对 12G 卡是加压不是减负。
+  #
+  # [TODO] 启用前必须逐项验证，不能照抄 Qwen 的参数：
+  #   1. vision encoder 是 MoonViT 不是 SigLIP，patch 尺寸与 token 换算不同，
+  #      我们的 max_pixels=589824 是按 Qwen 的 32×32/token 算的，对它会失真；
+  #   2. --mm-processor-kwargs 的字段名需按它的 processor 确认；
+  #   3. 原生支持到 1792²，比 Qwen 的 4096² 上限低。
+  # ---------------------------------------------------------------------------
+  kimi-vl-a3b:
+    path: moonshotai/Kimi-VL-A3B-Instruct
+    revision: null
+    family: kimi-vl
+    quantized_path: null
+    precision: int4
+
+tiers:
+  - name: moe-24g
+    vram_min: 20
+    vram_max: 28
+    model: qwen3vl-30b-a3b
+    precision: int4
+    max_model_len: 4096
+    max_num_seqs: 8
+    note: "24G(3090/4090)：30B-A3B int4 约 15G 权重，KV 只剩 6-7G。能跑，batch 压到 8。"
+
+  - name: moe-32g
+    vram_min: 28
+    vram_max: 999
+    model: qwen3vl-30b-a3b
+    precision: int4
+    max_model_len: 8192
+    max_num_seqs: 16
+    note: "32G+(5090)：主力实验档。可与 8B 同卡 A/B，口径完全一致。"

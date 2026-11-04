@@ -1,0 +1,344 @@
+/**
+ * W4A16 量化对话框。
+ *
+ * 为什么要有这一步：W4A16 不是运行时开关——它需要一份**预先量化好**的权重。
+ * 页面上一选就生效的话，实际只是 plan 里多一句"回退 BF16"，用户还以为省了
+ * 显存。所以把"要不要现在量化"摆到台面上。
+ *
+ * 取消 = 回默认精度（BF16）。这是刻意的：留在 W4A16 会得到一个"看起来选了
+ * 4bit、实际跑 16bit"的状态，比直接退回去更误导。量化已经跑起来时才取消，
+ * 会顺带把子进程收掉（半成品目录保留，下次覆盖写）。
+ */
+import { useEffect, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { CheckCircle2, Loader2, TriangleAlert, X } from 'lucide-react'
+import { api, type QuantState, type QuantTaskState } from '../lib/api'
+import { StatusChip } from './ui/launcher'
+
+function msg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function fmtElapsed(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return m > 0 ? `${m} 分 ${String(s).padStart(2, '0')} 秒` : `${s} 秒`
+}
+
+export function QuantizeDialog({
+  open,
+  modelKey,
+  onCancel,
+  onUse,
+}: {
+  open: boolean
+  /** '' = 按显存自动落档 */
+  modelKey: string
+  /** 放弃：调用方把精度退回 BF16 */
+  onCancel: () => void
+  /** 确认使用 W4A16（已有权重或刚量化完） */
+  onUse: () => void
+}) {
+  const [info, setInfo] = useState<QuantState | null>(null)
+  const [task, setTask] = useState<QuantTaskState | null>(null)
+  const [outDir, setOutDir] = useState('')
+  const [method, setMethod] = useState('gptq')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // 已有权重时默认只显示"直接用"，点「重新量化」才展开目录/方法
+  const [showForm, setShowForm] = useState(false)
+
+  const running = task?.status === 'running'
+  const canUse = Boolean(info?.has_quantized) || task?.status === 'done'
+
+  // 打开时拉一次：能不能量化、有没有现成权重、默认落哪
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setError(null)
+    setShowForm(false)
+    setTask(null)
+    setInfo(null)
+    api
+      .quantize(modelKey || undefined)
+      .then((s) => {
+        if (!alive) return
+        setInfo(s)
+        setTask(s.task)
+        setOutDir(s.suggested_dir)
+        setMethod(s.methods.includes('gptq') ? 'gptq' : (s.methods[0] ?? 'gptq'))
+        // 没有现成权重时直接展开表单，少点一次
+        setShowForm(!s.has_quantized)
+      })
+      .catch((err) => alive && setError(msg(err)))
+    return () => {
+      alive = false
+    }
+  }, [open, modelKey])
+
+  // 量化期间轮询。1.5s 一次：进度是阶段级的，再密也看不出差别。
+  useEffect(() => {
+    if (!open || !running) return
+    let alive = true
+    const timer = window.setInterval(() => {
+      api
+        .quantize(modelKey || undefined)
+        .then((s) => {
+          if (!alive) return
+          setInfo(s)
+          if (s.task) setTask(s.task)
+        })
+        .catch(() => {
+          /* 轮询失败不该把弹窗变成报错页，下一次再试 */
+        })
+    }, 1500)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [open, running, modelKey])
+
+  // ESC 与遮罩点击同义：取消并回到默认精度。量化跑着的时候要先掐掉子进程，
+  // 否则弹窗关了它还在偷偷吃显存。
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (running) void api.quantizeCancel().catch(() => {})
+      onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, running, onCancel])
+
+  async function start() {
+    setBusy(true)
+    setError(null)
+    try {
+      setTask(
+        await api.quantizeStart({
+          model: modelKey || undefined,
+          out_dir: outDir.trim() || undefined,
+          method,
+        }),
+      )
+    } catch (err) {
+      setError(msg(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function close() {
+    if (running) {
+      try {
+        await api.quantizeCancel()
+      } catch {
+        /* 已经自己结束了 */
+      }
+    }
+    onCancel()
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) void close()
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="量化为 W4A16"
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--lx-bg) 62%, transparent)',
+              backdropFilter: 'blur(3px)',
+            }}
+          />
+
+          <motion.div
+            className="lx-sheet relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden"
+            initial={{ opacity: 0, scale: 0.97, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: 4 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+          >
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-lx px-[18px] py-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-[15px] font-semibold text-lx">量化为 W4A16</h3>
+                {running && (
+                  <StatusChip tone="warning" icon={<Loader2 size={11} className="animate-spin" />}>
+                    {task?.percent.toFixed(0) ?? 0}%
+                  </StatusChip>
+                )}
+                {!running && task?.status === 'done' && (
+                  <StatusChip tone="success" icon={<CheckCircle2 size={11} />}>
+                    已完成
+                  </StatusChip>
+                )}
+              </div>
+              <button className="lx-btn-ghost-icon" onClick={() => void close()} aria-label="关闭">
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-[18px] py-3.5 text-[12px] leading-relaxed text-lx-muted">
+              {!info && !error && (
+                <div className="flex items-center gap-2 py-2">
+                  <Loader2 size={14} className="animate-spin" /> 读取量化环境…
+                </div>
+              )}
+
+              {info && !info.available && !info.has_quantized && (
+                <div className="rounded-lx-sm border border-lx-warning/40 bg-lx-warning/5 px-3 py-2.5 text-lx-warning">
+                  <div className="mb-1 flex items-center gap-1.5 font-medium">
+                    <TriangleAlert size={13} /> 这台机器现在不能量化
+                  </div>
+                  <p className="leading-relaxed text-lx-muted">{info.reason}</p>
+                </div>
+              )}
+
+              {info?.available && (
+                <p>
+                  选中的模型是 <code className="font-mono text-lx">{info.model}</code>。
+                  W4A16 需要一份预先量化好的权重，不能由 BF16 在启动时直接转换；
+                  量化要跑几十分钟，产物约是原权重的四分之一。
+                </p>
+              )}
+
+              {info?.has_quantized && !running && !showForm && (
+                <div className="rounded-lx-sm border border-lx px-3 py-2.5">
+                  <div className="mb-1 text-lx">已有量化权重</div>
+                  <code className="break-all font-mono text-[11px] text-lx-secondary">
+                    {info.quantized_path}
+                  </code>
+                </div>
+              )}
+
+              {showForm && info?.available && !running && task?.status !== 'done' && (
+                <div className="space-y-2.5">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-lx-muted">产物目录（必须在 models/ 之内）</span>
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={outDir}
+                      onChange={(e) => setOutDir(e.target.value)}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-lx-muted">量化算法</span>
+                    <select
+                      className="lx-select"
+                      value={method}
+                      onChange={(e) => setMethod(e.target.value)}
+                    >
+                      {info.methods.map((m) => (
+                        <option key={m} value={m}>
+                          {m === 'gptq' ? 'GPTQ（推荐，校准稳定）' : 'AWQ（激活感知）'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+
+              {task && (
+                <div className="space-y-1.5 rounded-lx-sm border border-lx px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-lx">{task.stage}</span>
+                    <span className="font-mono tabular-nums text-lx-muted">
+                      {task.percent.toFixed(0)}% · {fmtElapsed(task.elapsed)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-lx-surface-raised">
+                    <div
+                      className="h-full rounded-full bg-lx-accent transition-[width] duration-500"
+                      style={{ width: `${Math.max(2, task.percent)}%` }}
+                    />
+                  </div>
+                  {task.message && (
+                    <p
+                      className={`text-[11px] ${
+                        task.status === 'error'
+                          ? 'text-lx-danger'
+                          : task.status === 'done'
+                            ? 'text-lx-success'
+                            : 'text-lx-muted'
+                      }`}
+                    >
+                      {task.message}
+                    </p>
+                  )}
+                  {task.log_tail.length > 0 && (
+                    <details className="pt-0.5">
+                      <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
+                        量化日志（最近 {task.log_tail.length} 行）
+                      </summary>
+                      <pre className="mt-1.5 max-h-40 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
+                        {task.log_tail.join('\n')}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {error && <p className="text-[11px] text-lx-danger">{error}</p>}
+            </div>
+
+            <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-lx px-[18px] py-3">
+              {running ? (
+                <button type="button" className="lx-btn-ghost" onClick={() => void close()}>
+                  取消量化
+                </button>
+              ) : (
+                <button type="button" className="lx-btn-ghost" onClick={() => void close()}>
+                  取消（回到 BF16）
+                </button>
+              )}
+
+              {/* 已有量化权重时不受 available 限制：权重是现成的，这台机器
+                  不能量化也不影响直接用它（比如权重在共享盘、vLLM 跑在别处）。 */}
+              {!running && (info?.available || canUse) && (
+                canUse && (!showForm || task?.status === 'done') ? (
+                  <>
+                    {info?.available && (
+                      <button
+                        type="button"
+                        className="lx-btn-ghost"
+                        onClick={() => setShowForm(true)}
+                      >
+                        重新量化
+                      </button>
+                    )}
+                    <button type="button" className="lx-btn-primary" onClick={onUse}>
+                      使用 W4A16
+                    </button>
+                  </>
+                ) : info?.available ? (
+                  <button
+                    type="button"
+                    className="lx-btn-primary"
+                    disabled={busy || !outDir.trim()}
+                    onClick={() => void start()}
+                  >
+                    {busy ? '启动中…' : '开始量化'}
+                  </button>
+                ) : null
+              )}
+            </footer>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}

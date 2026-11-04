@@ -1,0 +1,132 @@
+{
+  "engine": "llamacpp-q4km-8b",
+  "url": "http://127.0.0.1:8080",
+  "model": "qwen3vl",
+  "mode": "nl",
+  "images": 16,
+  "max_pixels": 589824,
+  "max_tokens": 800,
+  "prep": [
+    {
+      "threads": 1,
+      "wall_s": 1.0557998000003863,
+      "ms_per_img": 65.98748750002414,
+      "img_per_s": 15.15438817093368
+    },
+    {
+      "threads": 4,
+      "wall_s": 0.32105980000051204,
+      "ms_per_img": 20.066237500032003,
+      "img_per_s": 49.83495286539917
+    },
+    {
+      "threads": 8,
+      "wall_s": 0.2550480999998399,
+      "ms_per_img": 15.940506249989994,
+      "img_per_s": 62.73326482341975
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "images": 16,
+      "ok": 16,
+      "errors": 0,
+      "error_sample": [],
+      "wall_s": 38.62672139999631,
+      "img_per_s": 0.414221021616438,
+      "lat_p50": 2.342445199999929,
+      "lat_p95": 2.684635400000843,
+      "lat_max": 2.748582100000931,
+      "completion_tokens_avg": 164.0625,
+      "tok_per_s": 67.95813635894686,
+      "usable_rate": 1.0,
+      "caption_chars_avg": 790.5625,
+      "leak_rate": 0.0
+    },
+    {
+      "concurrency": 2,
+      "images": 16,
+      "ok": 16,
+      "errors": 0,
+      "error_sample": [],
+      "wall_s": 21.548064499998873,
+      "img_per_s": 0.7425260862756763,
+      "lat_p50": 2.514540849999321,
+      "lat_p95": 3.1995438000012655,
+      "lat_max": 3.3337123000019346,
+      "completion_tokens_avg": 165.625,
+      "tok_per_s": 122.98088303940888,
+      "usable_rate": 1.0,
+      "caption_chars_avg": 804.625,
+      "leak_rate": 0.0
+    },
+    {
+      "concurrency": 4,
+      "images": 16,
+      "ok": 16,
+      "errors": 0,
+      "error_sample": [],
+      "wall_s": 12.575369199999841,
+      "img_per_s": 1.2723284498080742,
+      "lat_p50": 2.8143917500019597,
+      "lat_p95": 3.386716199995135,
+      "lat_max": 3.4040987999978825,
+      "completion_tokens_avg": 162.125,
+      "tok_per_s": 206.27624992513404,
+      "usable_rate": 1.0,
+      "caption_chars_avg": 779.75,
+      "leak_rate": 0.0
+    },
+    {
+      "concurrency": 8,
+      "images": 16,
+      "ok": 16,
+      "errors": 0,
+      "error_sample": [],
+      "wall_s": 11.96555090000038,
+      "img_per_s": 1.3371720310846273,
+      "lat_p50": 5.221002649999718,
+      "lat_p95": 6.325463599998329,
+      "lat_max": 6.4384204000016325,
+      "completion_tokens_avg": 160.5625,
+      "tok_per_s": 214.6996842410255,
+      "usable_rate": 1.0,
+      "caption_chars_avg": 770.625,
+      "leak_rate": 0.0
+    }
+  ],
+  "best": {
+    "concurrency": 8,
+    "images": 16,
+    "ok": 16,
+    "errors": 0,
+    "error_sample": [],
+    "wall_s": 11.96555090000038,
+    "img_per_s": 1.3371720310846273,
+    "lat_p50": 5.221002649999718,
+    "lat_p95": 6.325463599998329,
+    "lat_max": 6.4384204000016325,
+    "completion_tokens_avg": 160.5625,
+    "tok_per_s": 214.6996842410255,
+    "usable_rate": 1.0,
+    "caption_chars_avg": 770.625,
+    "leak_rate": 0.0
+  },
+  "fleet": {
+    "3000000": {
+      "total_images": 3000000,
+      "img_per_s": 1.3371720310846273,
+      "seconds": 2243540.7937500714,
+      "hours": 623.2057760416865,
+      "days": 25.96690733507027
+    },
+    "30000000": {
+      "total_images": 30000000,
+      "img_per_s": 1.3371720310846273,
+      "seconds": 22435407.937500715,
+      "hours": 6232.057760416866,
+      "days": 259.6690733507027
+    }
+  }
+}

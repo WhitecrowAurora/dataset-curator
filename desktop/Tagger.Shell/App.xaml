@@ -1,0 +1,78 @@
+﻿<Application x:Class="Tagger.Shell.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+
+    <!-- 与网页端 tokens.css 同一套色值，避免"启动页一个色、进去另一个色" -->
+    <Color x:Key="BgColor">#FF0C0F13</Color>
+    <Color x:Key="SurfaceColor">#FF12161C</Color>
+    <Color x:Key="RaisedColor">#FF171D25</Color>
+    <Color x:Key="BorderColor">#FF232A33</Color>
+    <Color x:Key="TextColor">#FFE7EAEF</Color>
+    <Color x:Key="MutedColor">#FF8A94A3</Color>
+    <Color x:Key="DimColor">#FF5B6673</Color>
+    <Color x:Key="AccentColor">#FFEE4C2C</Color>
+    <Color x:Key="DangerColor">#FFEF5350</Color>
+
+    <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
+    <SolidColorBrush x:Key="RaisedBrush" Color="{StaticResource RaisedColor}" />
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
+    <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}" />
+    <SolidColorBrush x:Key="MutedBrush" Color="{StaticResource MutedColor}" />
+    <SolidColorBrush x:Key="DimBrush" Color="{StaticResource DimColor}" />
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+
+    <Style x:Key="BaseButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+      <Setter Property="Background" Value="{StaticResource RaisedBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="16,8" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="6"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#FF303945" />
+                <Setter TargetName="Bd" Property="Background" Value="#FF1C232C" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#FF11161C" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.45" />
+                <Setter Property="Cursor" Value="Arrow" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource BaseButton}">
+      <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource BaseButton}">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+  </Application.Resources>
+</Application>

@@ -1,0 +1,81 @@
+{
+  "engine": "llamacpp-smoke",
+  "url": "http://127.0.0.1:8080",
+  "model": "qwen3vl",
+  "mode": "nl",
+  "images": 4,
+  "max_pixels": 589824,
+  "max_tokens": 800,
+  "prep": [
+    {
+      "threads": 1,
+      "wall_s": 0.3501366000054986,
+      "ms_per_img": 87.53415000137466,
+      "img_per_s": 11.424112760383185
+    },
+    {
+      "threads": 4,
+      "wall_s": 0.15309100000013132,
+      "ms_per_img": 38.27275000003283,
+      "img_per_s": 26.12825051764355
+    },
+    {
+      "threads": 8,
+      "wall_s": 0.16353299999900628,
+      "ms_per_img": 40.88324999975157,
+      "img_per_s": 24.459894944899844
+    }
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "images": 4,
+      "ok": 4,
+      "errors": 0,
+      "error_sample": [],
+      "wall_s": 10.205531100000371,
+      "img_per_s": 0.39194432517087274,
+      "lat_p50": 2.426468699999532,
+      "lat_p95": 2.524058499999228,
+      "lat_max": 2.7165996999974595,
+      "completion_tokens_avg": 169.5,
+      "tok_per_s": 66.43456311646293,
+      "usable_rate": 1.0,
+      "caption_chars_avg": 792.0,
+      "leak_rate": 0.0
+    }
+  ],
+  "best": {
+    "concurrency": 1,
+    "images": 4,
+    "ok": 4,
+    "errors": 0,
+    "error_sample": [],
+    "wall_s": 10.205531100000371,
+    "img_per_s": 0.39194432517087274,
+    "lat_p50": 2.426468699999532,
+    "lat_p95": 2.524058499999228,
+    "lat_max": 2.7165996999974595,
+    "completion_tokens_avg": 169.5,
+    "tok_per_s": 66.43456311646293,
+    "usable_rate": 1.0,
+    "caption_chars_avg": 792.0,
+    "leak_rate": 0.0
+  },
+  "fleet": {
+    "3000000": {
+      "total_images": 3000000,
+      "img_per_s": 0.39194432517087274,
+      "seconds": 7654148.325000279,
+      "hours": 2126.152312500077,
+      "days": 88.58967968750322
+    },
+    "30000000": {
+      "total_images": 30000000,
+      "img_per_s": 0.39194432517087274,
+      "seconds": 76541483.25000279,
+      "hours": 21261.523125000775,
+      "days": 885.8967968750322
+    }
+  }
+}

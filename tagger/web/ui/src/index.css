@@ -1,0 +1,375 @@
+/* ===========================================================================
+   Tagger UI —— 样式入口
+
+   `.lx-*` 组件类与 Tailwind 配置搬自 lulynx-trainer 的 launcher 设计系统，
+   色值走本项目自己的 tokens.css（深色工业底 + PyTorch 橙）。
+
+   注意：Tailwind v3 要求 `@layer components` 必须和 `@tailwind components`
+   在同一个文件里，所以这里不拆成多个 css。
+   =========================================================================== */
+
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------- 基础 */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--lx-bg);
+  color: var(--lx-text);
+  font-family: var(--lx-font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 细滚动条：默认那根在深色面上像一道白条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--lx-scrollbar) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--lx-scrollbar);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--lx-scrollbar-hover);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 焦点环：键盘操作必须看得见，鼠标点击不出现 */
+:focus-visible {
+  outline: 2px solid var(--lx-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--lx-accent-subtle);
+}
+
+/* ---------------------------------------------------------------- 入场动效 */
+
+@keyframes lx-page-enter-kf {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lx-page-enter {
+  animation: lx-page-enter-kf 0.26s cubic-bezier(0.25, 1, 0.35, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lx-page-enter {
+    animation: none;
+  }
+}
+
+/* ===========================================================================
+   组件层
+   =========================================================================== */
+
+@layer components {
+  /* ── 顶级卡片 ─────────────────────────────────────────────────────────── */
+  .lx-card {
+    @apply bg-lx-surface border border-lx rounded-lx-lg;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -22px rgba(0, 0, 0, 0.9);
+  }
+
+  [data-theme='light'] .lx-card {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 32px -18px rgba(15, 23, 42, 0.18);
+  }
+
+  /* 嵌套卡片：纯发丝框数据格，不要再套一层阴影 */
+  .lx-card .lx-card {
+    @apply bg-lx-surface-raised border border-lx rounded-lx;
+    box-shadow: none;
+  }
+
+  .lx-card-interactive {
+    @apply lx-card cursor-pointer;
+    transition:
+      transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+      border-color 0.2s ease,
+      box-shadow 0.25s ease,
+      background-color 0.2s ease;
+  }
+  .lx-card-interactive:hover {
+    transform: translateY(-2px);
+    border-color: var(--lx-border-hover) !important;
+    box-shadow: 0 10px 22px -6px rgba(0, 0, 0, 0.55);
+  }
+
+  /* ── Button ──────────────────────────────────────────────────────────── */
+  .lx-btn {
+    @apply rounded-lx-sm px-4 py-2 text-sm font-medium cursor-pointer;
+    transition:
+      transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 0.2s ease,
+      background-color 0.2s ease,
+      color 0.2s ease;
+  }
+  .lx-btn:hover {
+    transform: scale(1.02);
+  }
+  .lx-btn:active {
+    transform: scale(0.97);
+    transition-duration: 0.08s;
+  }
+  .lx-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+    transform: none;
+  }
+
+  .lx-btn-primary {
+    @apply lx-btn bg-lx-accent;
+    color: var(--lx-on-accent);
+    box-shadow: 0 2px 10px rgba(238, 76, 44, 0.28);
+  }
+  .lx-btn-primary:hover {
+    box-shadow: 0 4px 16px rgba(238, 76, 44, 0.36);
+  }
+
+  @keyframes launch-glow-breathe {
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .lx-launch-glow {
+    position: relative;
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.1),
+      0 4px 12px var(--lx-accent-glow);
+  }
+  .lx-launch-glow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      0 6px 18px var(--lx-accent-glow),
+      0 0 18px var(--lx-accent-shadow);
+    opacity: 0.4;
+    animation: launch-glow-breathe 2.4s ease-in-out infinite;
+    contain: layout paint;
+  }
+  .lx-launch-glow:hover::after {
+    animation: none;
+    opacity: 1;
+  }
+
+  .lx-btn-ghost {
+    @apply lx-btn bg-lx-surface-raised border border-lx-card;
+    color: var(--lx-text-secondary);
+  }
+  .lx-btn-ghost:hover {
+    border-color: var(--lx-border-hover);
+    color: var(--lx-text);
+  }
+
+  .lx-btn-ghost-icon {
+    @apply inline-flex h-[30px] w-[30px] items-center justify-center rounded-lx-sm transition-colors;
+    color: var(--lx-text-muted);
+    background-color: transparent;
+  }
+  .lx-btn-ghost-icon:hover {
+    color: var(--lx-text);
+    background-color: color-mix(in srgb, var(--lx-text) 7%, transparent);
+  }
+  .lx-btn-ghost-icon:focus-visible {
+    outline: 2px solid var(--lx-accent);
+    outline-offset: 1px;
+  }
+  .lx-btn-ghost-icon:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .lx-btn-danger {
+    @apply lx-btn bg-lx-danger-subtle border border-lx-danger;
+    color: var(--lx-danger-text);
+  }
+  .lx-btn-danger:hover {
+    background-color: var(--lx-danger);
+    color: #ffffff;
+  }
+
+  .lx-btn-danger-solid {
+    @apply lx-btn border border-lx-danger;
+    background-color: var(--lx-danger);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(217, 58, 55, 0.35);
+  }
+
+  /* ── Badge ───────────────────────────────────────────────────────────── */
+  .lx-badge {
+    @apply inline-flex items-center px-2.5 py-1 rounded-lx-sm text-[11px] font-semibold;
+    border: 1px solid transparent;
+  }
+  .lx-badge-success {
+    @apply lx-badge bg-lx-success-subtle;
+    color: var(--lx-success-text);
+  }
+  .lx-badge-accent {
+    @apply lx-badge bg-lx-accent-subtle;
+    color: var(--lx-accent-text);
+  }
+  .lx-badge-warning {
+    @apply lx-badge bg-lx-warning-subtle;
+    color: var(--lx-warning-text);
+  }
+  .lx-badge-danger {
+    @apply lx-badge bg-lx-danger-subtle;
+    color: var(--lx-danger-text);
+  }
+  .lx-badge-neutral {
+    @apply lx-badge bg-lx-surface-raised;
+    color: var(--lx-text-muted);
+  }
+
+  /* ── Input / Select ──────────────────────────────────────────────────── */
+  .lx-input {
+    @apply bg-lx-input border border-lx rounded-lx-sm px-3 py-2 text-sm w-full outline-none;
+    color: var(--lx-text);
+    color-scheme: dark;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .lx-input::placeholder {
+    color: color-mix(in srgb, var(--lx-text-muted) 72%, transparent);
+  }
+  .lx-input:focus {
+    border-color: var(--lx-accent) !important;
+    box-shadow:
+      0 0 0 3px var(--lx-accent-ring),
+      0 0 12px -4px var(--lx-accent-glow);
+  }
+  .lx-input[aria-invalid='true'] {
+    border-color: var(--lx-danger) !important;
+  }
+  .lx-input[aria-invalid='true']:focus {
+    box-shadow: 0 0 0 3px var(--lx-danger-subtle);
+  }
+  .lx-input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .lx-select {
+    @apply lx-input;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a94a3' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 2rem;
+  }
+
+  [data-theme='light'] .lx-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2378838f' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  [data-theme='light'] .lx-input {
+    color-scheme: light;
+  }
+
+  select,
+  select option {
+    background-color: var(--lx-input);
+    color: var(--lx-text);
+  }
+
+  /* ── Checkbox / Slider ───────────────────────────────────────────────── */
+  .lx-checkbox {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--lx-border-hover);
+    border-radius: 4px;
+    background: var(--lx-input);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .lx-checkbox:checked {
+    background-color: var(--lx-accent);
+    border-color: var(--lx-accent);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23ffffff' viewBox='0 0 24 24'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E");
+    background-size: 12px;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  .lx-checkbox:focus-visible {
+    box-shadow: 0 0 0 3px var(--lx-accent-ring);
+  }
+
+  .lx-slider {
+    @apply w-full;
+    accent-color: var(--lx-accent);
+    cursor: pointer;
+  }
+
+  /* ── Sheet：整块工作面 + 发丝分隔行 ──────────────────────────────────── */
+  .lx-sheet {
+    @apply rounded-lx-lg border border-lx bg-lx-surface;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -22px rgba(0, 0, 0, 0.9);
+  }
+
+  [data-theme='light'] .lx-sheet {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 32px -18px rgba(15, 23, 42, 0.18);
+  }
+
+  .lx-sheet-row {
+    border-top: 1px solid var(--lx-border);
+    transition: background-color 0.15s ease;
+  }
+  .lx-sheet-row:hover {
+    background-color: color-mix(in srgb, var(--lx-text) 3%, transparent);
+  }
+  .lx-sheet-row:last-child {
+    border-bottom-left-radius: var(--lx-radius-lg, 12px);
+    border-bottom-right-radius: var(--lx-radius-lg, 12px);
+  }
+
+  .lx-sheet-inset {
+    background-color: color-mix(in srgb, var(--lx-bg) 72%, var(--lx-surface));
+    border-radius: var(--lx-radius, 8px);
+    box-shadow: inset 0 0 0 1px var(--lx-border);
+  }
+
+  .lx-step-idle {
+    background-color: color-mix(in srgb, var(--lx-text) 10%, transparent);
+  }
+}

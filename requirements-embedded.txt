@@ -1,0 +1,32 @@
+# 嵌入式环境（env/python）里装的小包清单，全量锁版本。
+#
+# 为什么锁死：几个人分别装"最新的" httpx / pyarrow，几个月后跑同一批图
+# 会得到不同结果（图片解码、parquet 行为都可能变），而这种差异在产物里
+# 看不出来。环境是产出的一部分，所以版本必须钉住。
+#
+# 不包含的东西（按需自己装进同一个 env/python）：
+#   torch torchvision         tag 反推（pixai / wd-eva02 后端）
+#   transformers timm safetensors  同上
+#   onnxruntime               cl-tagger-v2 后端（不需要 torch）
+#   datasets                  HuggingFace 输入源
+#   vllm                      NL 生成服务（仅 Linux / WSL2）
+# 装法见 devtools/embedded-env.md，一句话：
+#   env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+anyio==4.16.0
+certifi==2026.10.23
+colorama==0.4.6
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+iniconfig==2.3.1
+packaging==26.3
+pillow==13.0.0
+pluggy==1.7.0
+pyarrow==26.0.0
+Pygments==2.21.0
+pytest==9.2.0
+PyYAML==6.0.3
+# socks5 代理（模型管理页的下载代理）。httpx 需要它才认 socks5:// 前缀
+socksio==1.0.0
+typing_extensions==4.16.0

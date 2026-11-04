@@ -22,20 +22,41 @@
     离线安装：从本地 wheel 目录装，不访问 PyPI。
     准备离线包：python -m pip download -r requirements-embedded.txt -d env\initialization\wheels
 
+.PARAMETER IndexUrl
+    指定 pip 索引，例如 https://pypi.org/simple。
+    默认用本机 pip 配置，很多机器上是国内镜像；镜像滞后时会出现
+    "Could not find a version that satisfies the requirement <包>==<新版本>"，
+    而列出的可用版本停在某个旧版本——那不是清单写错了，是源太旧。
+
 .PARAMETER Force
     删掉 env\python 从头重建。
+
+.PARAMETER TorchIndex
+    torch/torchvision 从哪个索引装。留空按机器自动选：
+    有 nvidia-smi 用 cu126，没有用 cpu。想装别的 CUDA 版本时显式传，
+    例如 https://download.pytorch.org/whl/cu124。
+
+.PARAMETER SkipTag
+    跳过打标运行时（torch/transformers/timm/onnxruntime/datasets，约 2.5 GB）。
+    只做打包、不跑打标时可以加，能省十分钟。
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File devtools\setup_embedded_env.ps1
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File devtools\setup_embedded_env.ps1 -Force -WheelDir env\initialization\wheels
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File devtools\setup_embedded_env.ps1 -SkipTag
 #>
 [CmdletBinding()]
 param(
     [string]$PythonZip = "",
     [string]$WheelDir = "",
-    [switch]$Force
+    [string]$IndexUrl = "",
+    [string]$TorchIndex = "",
+    [switch]$Force,
+    [switch]$SkipTag
 )
 
 $ErrorActionPreference = 'Stop'
@@ -70,6 +91,7 @@ $pyDir = Join-Path $envRoot 'python'
 $initDir = Join-Path $envRoot 'initialization'
 $sitePackages = Join-Path $pyDir 'Lib\site-packages'
 $reqFile = Join-Path $repo 'requirements-embedded.txt'
+$tagReqFile = Join-Path $repo 'requirements-tag.txt'
 
 Write-Host "[env] 仓库: $repo"
 
@@ -152,14 +174,135 @@ if (Test-Path $reqFile) {
         if (-not $resolved) { throw "离线 wheel 目录不存在: $WheelDir" }
         $pipArgs += @('--no-index', '--find-links', $resolved.Path)
         Write-Host "[env] 离线安装，来源 $($resolved.Path)"
+    } elseif ($IndexUrl) {
+        # 只在这里加：--no-index 与 --index-url 同时给会互相打架。
+        $pipArgs += @('--index-url', $IndexUrl)
+        Write-Host "[env] pip 索引: $IndexUrl"
     }
     Write-Host "[env] 安装 requirements-embedded.txt"
     $code = Invoke-Native $py $pipArgs
     if ($code -ne 0) {
-        throw "pip install 失败（退出码 $code）。网络受限时用 -WheelDir 走离线包。"
+        # 这两种失败的下一步完全相反，不能合并成一句"网络受限"：
+        #   镜像滞后 → 换源；真没网 → 离线包。照着错的那条走会白折腾。
+        throw @"
+pip install 失败（退出码 $code）。
+
+若上面是 "No matching distribution found" / "Could not find a version"，
+且 pip 列出的可用版本停在某个旧版本：那是 pip 用的镜像滞后了，不是清单写错。
+  查当前源      env\python\python.exe -m pip config list
+  换官方源重跑  install.bat -IndexUrl https://pypi.org/simple
+
+若上面是 ConnectionError / timeout / 代理报错：那是网络问题。
+  install.bat -WheelDir env\initialization\wheels
+"@
     }
 } else {
     Write-Warning "没找到 $reqFile，跳过依赖安装"
+}
+
+# ---------------------------------------------------------------- 5b. 打标运行时
+# 默认 tag 后端是 pixai，它要 transformers + torch + timm / safetensors。这几样
+# 以前只写在文档里"按需自己装"，结果是任何人按标准流程装完，第一次跑打标就
+# 得到 "tag 后端不可用：pip install torch ..."——而用户没有任何理由知道这句
+# 话该去哪敲。所以这里默认装，-SkipTag 才跳过。
+#
+# 分两批装，因为 torch 的 wheel 不在 PyPI：
+#   1. torch / torchvision  → PyTorch 自己的索引（cu126 或 cpu）
+#   2. 其余（transformers / timm / safetensors）→ 普通索引
+# 清单只有 requirements-tag.txt 一份，批怎么分由包名前缀决定。
+if ($SkipTag) {
+    Write-Host "[env] 跳过打标运行时（-SkipTag）"
+} elseif (-not (Test-Path $tagReqFile)) {
+    Write-Warning "[env] 没找到 $tagReqFile，跳过打标运行时（打标会失败）"
+} else {
+    $entries = @(Get-Content $tagReqFile |
+        Where-Object { $_ -and -not $_.TrimStart().StartsWith('#') } |
+        ForEach-Object { $_.Trim() })
+    $torchReqs = @($entries | Where-Object { $_ -match '^(torch|torchvision)\b' })
+    $otherReqs = @($entries | Where-Object { $_ -notmatch '^(torch|torchvision)\b' })
+
+    if (-not $TorchIndex) {
+        # 有卡就装 CUDA 版：CPU 版跑 tag 反推是 10 张/秒量级，装错了会让人
+        # 以为"这软件就这么慢"。没卡只能 CPU，那也是唯一能跑的。
+        if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+            $TorchIndex = 'https://download.pytorch.org/whl/cu126'
+        } else {
+            $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+            Write-Host "[env] 没检测到 nvidia-smi，装 CPU 版 torch"
+        }
+    }
+
+    # 离线模式：只有 wheel 目录里真的有 torch 才按离线装。没有就跳过并警告——
+    # 硬失败会让"我只想打个包"的人连 CLI 都装不上。
+    $tagOffline = $false
+    $wheelPath = ""
+    if ($WheelDir) {
+        $resolvedWheels = Resolve-Path $WheelDir -ErrorAction SilentlyContinue
+        if ($resolvedWheels) {
+            $wheelPath = $resolvedWheels.Path
+            if (Get-ChildItem $wheelPath -Filter 'torch-*.whl' -ErrorAction SilentlyContinue) {
+                $tagOffline = $true
+            } else {
+                Write-Warning "[env] $wheelPath 里没有 torch 的 wheel，跳过打标运行时（打标会失败）"
+            }
+        }
+    }
+
+    $tagOk = $true
+    if ($tagOffline -or -not $WheelDir) {
+        Write-Host "[env] 安装打标运行时（torch 来源: $TorchIndex）"
+        Write-Host "      首次约 2.5 GB，装过一次之后就是秒过。"
+        $pArgs = @('-m', 'pip', 'install', '--disable-pip-version-check',
+            '--no-warn-script-location', '-q') + $torchReqs
+        if ($tagOffline) {
+            $pArgs += @('--no-index', '--find-links', $wheelPath)
+        } else {
+            $pArgs += @('--index-url', $TorchIndex)
+        }
+        $code = Invoke-Native $py $pArgs
+        if ($code -ne 0) { $tagOk = $false }
+
+        if ($tagOk -and $otherReqs.Count -gt 0) {
+            $pArgs = @('-m', 'pip', 'install', '--disable-pip-version-check',
+                '--no-warn-script-location', '-q') + $otherReqs
+            if ($tagOffline) {
+                $pArgs += @('--no-index', '--find-links', $wheelPath)
+            } elseif ($IndexUrl) {
+                $pArgs += @('--index-url', $IndexUrl)
+            }
+            $code = Invoke-Native $py $pArgs
+            if ($code -ne 0) { $tagOk = $false }
+        }
+    }
+
+    if ($tagOk) {
+        $tagProbe = "import torch, torchvision, transformers, timm, safetensors; print('  tag runtime: torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| transformers', transformers.__version__)"
+        $tagCode = Invoke-Native $py @('-c', $tagProbe)
+        if ($tagCode -ne 0) { $tagOk = $false }
+    }
+    # 这三个不是每个后端都要：onnxruntime 只服务 cl-tagger-v2，open_clip 只
+    # 服务图文一致度打分，datasets 只在 HF 输入源时用。缺了打标照样跑，所以
+    # 只报状态、不判失败——否则一次网络抖动就会让人以为整个环境坏了。
+    if ($tagOk) {
+        foreach ($opt in @(@('onnxruntime', 'cl-tagger-v2 后端'), @('open_clip', '图文一致度打分'), @('datasets', 'HF 数据集输入'))) {
+            $optCode = Invoke-Native $py @('-c', "import $($opt[0])") -Quiet
+            if ($optCode -ne 0) {
+                Write-Host "  可选缺失：$($opt[0])（$($opt[1])）—— 需要时 pip install $($opt[0])"
+            }
+        }
+    }
+    if (-not $tagOk) {
+        # 这里**不能 throw**：装不上 torch 只影响打标，打包与 NL 仍然可用。
+        # 把它变成硬失败，等于让人为了一个可选依赖连界面都进不去。
+        Write-Warning @"
+打标运行时没装完（打标任务会失败，打包与 NL 不受影响）。手动重试：
+  有 N 卡：
+    env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+    env\python\python.exe -m pip install -r requirements-tag.txt
+  没有 N 卡：把上面的 cu126 换成 cpu
+  只想打包、不打标：install.bat -SkipTag 可以彻底跳过这一步
+"@
+    }
 }
 
 # ---------------------------------------------------------------- 6. NL 引擎
@@ -193,6 +336,13 @@ if ($vllmCmd -and $env:OS -ne 'Windows_NT') {
 Write-Host "[env] 自检:"
 $probe = "import sys, httpx, yaml, PIL, pyarrow; print('  python', sys.version.split()[0]); print('  httpx', httpx.__version__); print('  pyarrow', pyarrow.__version__); print('  pillow', PIL.__version__)"
 $null = Invoke-Native $py @('-c', $probe)
+# web 栈单独探：它不在上面那条主链里，缺了要在这里就暴露，而不是等用户
+# 双击壳子、点开界面才看到 "缺 web 依赖"（那是这个包最常见的首次报错）。
+$webProbe = "import fastapi, uvicorn, websockets; print('  web', fastapi.__version__, uvicorn.__version__, websockets.__version__)"
+$webCode = Invoke-Native $py @('-c', $webProbe)
+if ($webCode -ne 0) {
+    Write-Warning "  web deps 缺失：env\python\python.exe -m pip install -r requirements-embedded.txt"
+}
 $helpCode = Invoke-Native $py @('-m', 'tagger.cli', '--help') -Quiet
 Write-Host "  tagger.cli --help: $(if ($helpCode -eq 0) { 'OK' } else { "失败（退出码 $helpCode）" })"
 
@@ -202,5 +352,8 @@ Write-Host "       .\tagger.cmd --help"
 Write-Host "       env\python\python.exe -m pytest"
 Write-Host "  起 NL 服务（Windows 原生）："
 Write-Host "       env\python\python.exe -m tagger.cli serve --engine llamacpp"
-Write-Host "  装大包（按需，装进同一个环境）："
-Write-Host "       env\python\python.exe -m pip install torch torchvision"
+Write-Host "  装 llama-server（网页上也有按钮）："
+Write-Host "       env\python\python.exe -m tagger.cli llama install"
+if ($SkipTag) {
+    Write-Host "  注意：本次用了 -SkipTag，打标运行时没装，跑打标前重跑 install.bat"
+}

@@ -3,16 +3,23 @@ rem ===========================================================================
 rem  One-click installer (Windows).
 rem
 rem  Builds the embedded Python environment in env\python and installs the
-rem  small runtime packages. Torch / vLLM are NOT installed here - those are
-rem  big and each member installs them on demand into the same environment.
+rem  small runtime packages, then the full tagging runtime (torch /
+rem  torchvision / transformers / timm / safetensors / onnxruntime /
+rem  datasets / open_clip). The tagging runtime is ~2.5 GB and takes several
+rem  minutes the first time; it is installed by default because the default
+rem  tag backend needs it - without it the first tagging job fails with
+rem  "tag backend unavailable".
 rem
 rem  All real logic lives in devtools\setup_embedded_env.ps1. This file only
 rem  forwards arguments, so there is exactly one implementation to maintain.
 rem
 rem  Usage:
 rem    install.bat                                        normal (idempotent)
+rem    install.bat -SkipTag                                packing / NL only
+rem    install.bat -TorchIndex https://.../whl/cu126        pick CUDA build
 rem    install.bat -Force                                 rebuild from scratch
 rem    install.bat -WheelDir env\initialization\wheels     offline install
+rem    install.bat -IndexUrl https://pypi.org/simple        use official PyPI
 rem
 rem  Linux / macOS: use install.sh instead.
 rem
@@ -44,7 +51,8 @@ if errorlevel 1 (
     echo  [ERROR] setup failed. Common causes:
     echo    1. env\initialization\ has no python-*-embed-amd64.zip
     echo    2. no network and no -WheelDir given
-    echo    3. antivirus blocked the PowerShell script
+    echo    3. pip mirror is stale - retry with -IndexUrl https://pypi.org/simple
+    echo    4. antivirus blocked the PowerShell script
     exit /b 1
 )
 
@@ -57,8 +65,12 @@ echo    tagger.cmd --help
 echo    tagger.cmd report --help
 echo    env\python\python.exe -m pytest
 echo.
-echo  Big packages (optional, install into the same environment):
-echo    env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+echo  Tagging runtime (torch / transformers / timm / onnxruntime / datasets):
+echo    installed by default. If this run used -SkipTag, re-run install.bat
+echo    without it before running a tagging job.
+echo.
+echo  NL engine (llama.cpp server):
+echo    env\python\python.exe -m tagger.cli llama install
 echo.
 endlocal
 exit /b 0

@@ -8,6 +8,7 @@ import {
   Layers,
   ListChecks,
   Merge,
+  Package,
   PlayCircle,
   PlusCircle,
   Settings2,
@@ -30,6 +31,7 @@ import { Dedup } from './pages/Dedup'
 import { Models } from './pages/Models'
 import { Downloads } from './pages/Downloads'
 import { TagManage } from './pages/TagManage'
+import { Deps } from './pages/Deps'
 import { Settings } from './pages/Settings'
 import { GlobalProgress } from './components/GlobalProgress'
 import { SelfCheckDialog } from './components/SelfCheckDialog'
@@ -50,6 +52,7 @@ type Route =
   | { name: 'tag-manage' }
   | { name: 'stats' }
   | { name: 'history' }
+  | { name: 'deps' }
   | { name: 'settings' }
 
 const LAST_KEY = 'tagger-last-job'
@@ -66,6 +69,7 @@ function parseRoute(hash: string): Route {
   if (path === '/downloads') return { name: 'downloads' }
   if (path === '/tag-manage') return { name: 'tag-manage' }
   if (path === '/stats') return { name: 'stats' }
+  if (path === '/deps') return { name: 'deps' }
   if (path === '/settings') return { name: 'settings' }
   return { name: 'new' }
 }
@@ -145,6 +149,14 @@ export default function App() {
       active: selfCheckOpen,
       hint: '装完点一下：逐项验证环境、目录与服务，并真跑一张图',
       onClick: () => setSelfCheckOpen(true),
+    },
+    {
+      key: 'deps',
+      label: '依赖检测',
+      icon: <Package size={15} />,
+      active: route.name === 'deps',
+      hint: '逐个查看依赖装没装、版本对不对，可单独装卸',
+      onClick: () => go('/deps'),
     },
     {
       key: 'models',
@@ -289,6 +301,7 @@ export default function App() {
       {route.name === 'dedup' && <Dedup />}
       {route.name === 'packaging' && <Packaging />}
       {route.name === 'stats' && <Stats />}
+      {route.name === 'deps' && <Deps />}
       {route.name === 'settings' && (
         <Settings
           progressInterval={progressInterval}

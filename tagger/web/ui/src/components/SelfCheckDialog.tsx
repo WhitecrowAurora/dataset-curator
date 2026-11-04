@@ -16,7 +16,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { FolderOpen, Play, RotateCcw, Square, X } from 'lucide-react'
 
 import { api, type SelfCheckState, type SelfCheckStep } from '../lib/api'
-import { FolderPicker } from './FolderPicker'
+import { useFolderPicker } from './FolderPicker'
 
 const C = {
   pending: 'var(--lx-border-hover)',
@@ -189,7 +189,7 @@ export function SelfCheckDialog({ open, onClose }: { open: boolean; onClose: () 
   const [recursive, setRecursive] = useState(true)
   const [sample, setSample] = useState(3)
   const [url, setUrl] = useState('')
-  const [picker, setPicker] = useState(false)
+  const folder = useFolderPicker()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [focus, setFocus] = useState<string | null>(null)
@@ -338,7 +338,7 @@ export function SelfCheckDialog({ open, onClose }: { open: boolean; onClose: () 
                     <button
                       type="button"
                       className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
-                      onClick={() => setPicker(true)}
+                      onClick={() => folder.pick(dir, setDir)}
                     >
                       <FolderOpen size={12} />
                       浏览
@@ -538,15 +538,7 @@ export function SelfCheckDialog({ open, onClose }: { open: boolean; onClose: () 
         )}
       </AnimatePresence>
 
-      <FolderPicker
-        open={picker}
-        start={dir}
-        onClose={() => setPicker(false)}
-        onPick={(path) => {
-          setDir(path)
-          setPicker(false)
-        }}
-      />
+      {folder.dialog}
     </>
   )
 }

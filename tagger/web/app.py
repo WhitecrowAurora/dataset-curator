@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import platform
 import sys
 import threading
@@ -45,6 +46,7 @@ from .packaging import DATAJOBS
 from .vllm_service import VLLM
 from .multi_gpu import MULTI
 from .selfcheck import SELFCHECK
+from .deps import DEPS
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 DIST_DIR = UI_DIR / "dist"
@@ -610,6 +612,94 @@ def _thumbnail_bytes(data: bytes, width: int) -> bytes:
 
 # ---------------------------------------------------------------- 目录浏览
 
+def _volume_label(root: str) -> str:
+    """盘符的卷标，读不到就是空串。
+
+    空卷标很常见（新分区、内存盘、刚格式化的盘），那不是错误——前端会退化
+    成只显示盘符。所以这里把失败也归到空串，不抛。
+    """
+    try:
+        import ctypes
+
+        buf = ctypes.create_unicode_buffer(261)
+        gvi = ctypes.windll.kernel32.GetVolumeInformationW   # type: ignore[attr-defined]
+        # 不设 argtypes 的话，64 位下指针参数会被按 32 位截断，调用直接崩。
+        gvi.argtypes = [
+            ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32,
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_wchar_p, ctypes.c_uint32,
+        ]
+        gvi.restype = ctypes.c_int
+        # 卷标最长 32 字符，261（MAX_PATH）绰绰有余
+        ok = gvi(root, buf, 261, None, None, None, None, 0)
+        return buf.value if ok else ""
+    except (AttributeError, OSError):
+        return ""
+
+
+def _probe_drives() -> list[dict[str, str]]:
+    """枚举"点进去确实能读"的盘符，带卷标。"""
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32          # type: ignore[attr-defined]
+        mask = kernel32.GetLogicalDrives()
+        get_type = kernel32.GetDriveTypeW
+        get_type.argtypes = [ctypes.c_wchar_p]
+        get_type.restype = ctypes.c_uint
+
+        # 2=可移动 3=固定 6=内存盘：类型本身就说明它在那，直接列。
+        #
+        # 4=网络盘必须再 exists 一次。`GetLogicalDrives` 只说明"映射还挂在
+        # 注册表里"——`net use` 连过的 NAS 早断了，位图照样亮着，类型也照样
+        # 报 4。这类鬼影盘符点进去就是一次 TCP 超时，列表里混进一排更糟。
+        #
+        # 5=光驱不列：空盘探测会一直等到驱动超时，把整个浏览拖死。
+        local = {2, 3, 6}
+        network = 4
+
+        out: list[dict[str, str]] = []
+        for i in range(26):
+            if not (mask >> i) & 1:
+                continue
+            root = f"{chr(ord('A') + i)}:\\"
+            kind = get_type(root)
+            if kind in local or (kind == network and os.path.exists(root)):
+                out.append({"path": root, "label": _volume_label(root)})
+        return out
+    except (AttributeError, OSError):
+        # 拿不到就返回空：前端会退化成"只有上一级"，不该因此让浏览失败。
+        return []
+
+
+# 探测断开的网络映射要等 TCP 超时，而每点一次"浏览"都会请求一次盘符列表。
+# 盘符的变化粒度是"插拔 U 盘"，缓存一分钟看不出来。
+_DRIVES_TTL = 60.0
+_drives_cache: tuple[float, list[dict[str, str]]] | None = None
+
+
+def _drives() -> list[dict[str, str]]:
+    """可以切换的盘符（Windows）/ 挂载根（其他系统）。
+
+    "只能选训练器所在的那块盘"是目录浏览器最常被抱怨的一点：往上翻到
+    `C:\\` 之后 `parent` 就是自己，再没有出口。这里把**真能用**的盘列出来，
+    带上卷标（大家都会给盘起名，光有字母根本分不清哪块是哪个），
+    前端做成一行可点的切换。
+    """
+    if os.name != "nt":
+        # Linux / macOS 从 `/` 一路往下就能走到任何挂载点，不需要额外入口。
+        return []
+
+    global _drives_cache
+    now = time.monotonic()
+    if _drives_cache is not None and now - _drives_cache[0] < _DRIVES_TTL:
+        return [dict(d) for d in _drives_cache[1]]
+
+    out = _probe_drives()
+    _drives_cache = (now, out)
+    return [dict(d) for d in out]
+
+
 def _list_dirs(path: Path) -> dict:
     """给"选输入"用的极简浏览器。子目录 + 当前层图片/zip 数量。
 
@@ -658,6 +748,8 @@ def _list_dirs(path: Path) -> dict:
         "images": own,
         "zips": zips,
         "dirs": dirs,
+        # 每次都给：盘符是这台机器的固定信息，让前端多记一份状态反而容易过期。
+        "drives": _drives(),
     }
 
 
@@ -1838,6 +1930,67 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     @app.post("/api/selfcheck/stop")
     def selfcheck_stop() -> dict:
         return SELFCHECK.stop()
+
+    # ---- 依赖检测
+    #
+    # 与「部署自检」的分工：自检回答"这些包能不能 import"，这里回答
+    # "装了没、版本对不对、要不要现在动它"，并且能真的装/卸。
+
+    @app.get("/api/deps")
+    def deps_state() -> dict:
+        return DEPS.snapshot()
+
+    def _deps_guard() -> None:
+        """装卸依赖会改 site-packages。正在跑的任务每隔几秒就要 import 一次
+        （图片解码、pyarrow 写盘），装到一半的东西会让它以"找不到模块"崩掉，
+        而那种报错看起来像代码 bug。所以直接拦住。"""
+        if MANAGER.running() is not None:
+            raise HTTPException(
+                409, "有任务正在跑，装卸依赖会让它中途崩溃。先停下任务再来。")
+
+    def _deps_call(fn, *args) -> dict:
+        try:
+            return fn(*args)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/deps/{name}/{action}", status_code=202)
+    def deps_action(name: str, action: str) -> dict:
+        if action not in ("install", "uninstall", "reinstall"):
+            raise HTTPException(404, f"不认识的操作：{action}")
+        _deps_guard()
+        return _deps_call({"install": DEPS.install,
+                           "uninstall": DEPS.uninstall,
+                           "reinstall": DEPS.reinstall}[action], name)
+
+    # ---- 批量
+    #
+    # 三个按钮共用一条串行队列：pip 互斥是硬约束（同时改 site-packages 会
+    # 各自读到对方写了一半的目录），批量只是把多个包排进同一个循环。
+
+    @app.post("/api/deps/install-missing", status_code=202)
+    def deps_install_missing() -> dict:
+        """装上所有「缺失」的包。不动版本不符的——那等于降级。"""
+        _deps_guard()
+        return _deps_call(DEPS.install_missing)
+
+    @app.post("/api/deps/uninstall-all", status_code=202)
+    def deps_uninstall_all() -> dict:
+        """卸掉所有已装的包（只限清单内的）。页面那边要求二次确认。"""
+        _deps_guard()
+        return _deps_call(DEPS.uninstall_all)
+
+    @app.post("/api/deps/verify", status_code=202)
+    def deps_verify() -> dict:
+        """逐个真 import 一遍。只读，所以不拦正在跑的任务——
+        它改的是内存里的检查结果，不碰 site-packages。"""
+        return _deps_call(DEPS.verify_all)
+
+    @app.post("/api/deps/cancel")
+    def deps_cancel() -> dict:
+        return DEPS.cancel()
 
     # ---- 图片
 

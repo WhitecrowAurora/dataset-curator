@@ -2,9 +2,11 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Tagger.Shell.Services;
 
@@ -17,12 +19,24 @@ public partial class MainWindow : Window
     private bool _booting;
     private bool _reallyClose;
 
+    private CancellationTokenSource? _installCts;
+    private bool _installing;
+
+    // 安装输出走批量刷新：pip 一次能刷出几百行，逐行 BeginInvoke 会把
+    // 界面卡成幻灯片（而它正是这时候最需要保持可响应的）。
+    private readonly StringBuilder _pendingLog = new();
+    private readonly object _pendingLock = new();
+    private readonly DispatcherTimer _logTimer;
+
     public MainWindow()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         Closing += OnClosing;
         PreviewKeyDown += OnPreviewKeyDown;
+
+        _logTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _logTimer.Tick += (_, _) => FlushInstallLog();
     }
 
     // ---- 启动
@@ -71,10 +85,20 @@ public partial class MainWindow : Window
                 catch (Exception openEx) { AppLog.Write(openEx, "打开浏览器失败"); }
             }
         }
+        catch (EnvNotInitializedException ex)
+        {
+            // 这个错误有唯一的解：装一次环境。别的错误（端口占用、服务崩了）
+            // 点安装只会白等十分钟，所以按钮只在这一条分支上出现。
+            AppLog.Write(ex, "环境未初始化");
+            ShowError(ex.Message, "", canInstall: true);
+        }
         catch (Exception ex)
         {
             AppLog.Write(ex, "启动失败");
-            ShowError(ex.Message, _server?.LogTail ?? "");
+            var log = _server?.LogTail ?? "";
+            // 环境装到一半、或有人把 env\python 删了：服务能起来但 cli 报
+            // 缺依赖。这种也能用安装按钮修。
+            ShowError(ex.Message, log, canInstall: log.Contains("缺 web 依赖"));
         }
         finally
         {
@@ -152,18 +176,127 @@ public partial class MainWindow : Window
         ErrorPanel.Visibility = Visibility.Collapsed;
         LoadingPanel.Visibility = Visibility.Visible;
         Overlay.Visibility = Visibility.Visible;
+        InstallPanel.Visibility = Visibility.Collapsed;
         StatusText.Text = status;
         StatusDetail.Text = detail;
         HintText.Text = hint;
     }
 
-    private void ShowError(string message, string log)
+    private void ShowError(string message, string log, bool canInstall = false)
     {
         LoadingPanel.Visibility = Visibility.Collapsed;
         ErrorPanel.Visibility = Visibility.Visible;
         Overlay.Visibility = Visibility.Visible;
         ErrorText.Text = message;
         LogText.Text = string.IsNullOrWhiteSpace(log) ? "（没有更多输出）" : log;
+        InstallPanel.Visibility = canInstall ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ---- 初始化环境（首次运行 / 环境残缺）
+
+    private async void OnInstallClick(object sender, RoutedEventArgs e)
+    {
+        if (_installing) return;
+
+        var root = PythonServer.FindRoot();
+        if (root is null)
+        {
+            MessageBox.Show(this,
+                "找不到 tagger 仓库根目录。\n\n" +
+                "把 Tagger.Shell.exe 放进仓库里，或用 TAGGER_ROOT 指向它。",
+                "初始化", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _installing = true;
+        InstallButton.IsEnabled = false;
+        InstallButton.Content = "正在安装…";
+        InstallStage.Text = "准备中…";
+        InstallProgress.Visibility = Visibility.Visible;
+        RetryButton.IsEnabled = false;
+        LogText.Text = "";
+        LogScroll.ScrollToEnd();
+
+        AppLog.Write($"开始初始化环境：{root}");
+
+        var installer = new EnvInstaller();
+        installer.Output += OnInstallOutput;
+        installer.StageChanged += OnInstallStageChanged;
+        _installCts = new CancellationTokenSource();
+
+        _logTimer.Start();
+        bool ok;
+        try
+        {
+            ok = await installer.RunAsync(root, _installCts.Token);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write(ex, "初始化失败");
+            AppendLine($"[界面] 初始化过程异常：{ex.Message}");
+            ok = false;
+        }
+        finally
+        {
+            _logTimer.Stop();
+            FlushInstallLog();
+            installer.Output -= OnInstallOutput;
+            installer.StageChanged -= OnInstallStageChanged;
+            _installCts?.Dispose();
+            _installCts = null;
+            _installing = false;
+        }
+
+        InstallProgress.Visibility = Visibility.Collapsed;
+
+        if (ok)
+        {
+            InstallStage.Text = "装好了，正在启动…";
+            InstallButton.Content = "已完成";
+            await Task.Delay(500);
+            RetryButton.IsEnabled = true;
+            InstallButton.IsEnabled = true;
+            InstallButton.Content = "重新初始化";
+            await BootAsync();
+        }
+        else
+        {
+            // 失败要让日志留在眼前：pip 的报错（网络、权限、版本不匹配）
+            // 都在这块里，复制日志按钮能直接给出去。
+            InstallStage.Text = "没有装完，日志在上面";
+            InstallButton.Content = "重试初始化";
+            InstallButton.IsEnabled = true;
+            RetryButton.IsEnabled = true;
+        }
+    }
+
+    private void OnInstallOutput(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return;
+        lock (_pendingLock) _pendingLog.AppendLine(line);
+    }
+
+    private void OnInstallStageChanged(string stage) =>
+        Dispatcher.BeginInvoke(() => InstallStage.Text = stage);
+
+    private void AppendLine(string line)
+    {
+        lock (_pendingLock) _pendingLog.AppendLine(line);
+        FlushInstallLog();
+    }
+
+    /// <summary>把攒下的输出一次性贴进日志框，然后滚到底。</summary>
+    private void FlushInstallLog()
+    {
+        string chunk;
+        lock (_pendingLock)
+        {
+            if (_pendingLog.Length == 0) return;
+            chunk = _pendingLog.ToString();
+            _pendingLog.Clear();
+        }
+        LogText.AppendText(chunk);
+        LogScroll.ScrollToEnd();
     }
 
     // ---- 出错面板按钮
@@ -265,6 +398,10 @@ public partial class MainWindow : Window
         }
 
         _reallyClose = true;
+
+        // 安装跑到一半关窗 = 用户主动放弃。取消后子进程树会被收掉，
+        // 不留下的半成品 env\python 会由下次 install 的幂等逻辑补齐。
+        try { _installCts?.Cancel(); } catch (ObjectDisposedException) { /* 刚装完 */ }
 
         if (Overlay.Visibility == Visibility.Visible)
         {

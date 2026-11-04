@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowUp, Folder, Image as ImageIcon, Loader2, Package, X } from 'lucide-react'
 import { api, type FsListing } from '../lib/api'
@@ -50,7 +51,10 @@ export function FolderPicker({
 
   const empty = listing && listing.dirs.length === 0 && listing.zips.length === 0
 
-  return (
+  // 挂到 body 上，而不是留在页面 DOM 里：页面根节点带 .lx-page-enter（入场动画
+  // 残留 transform），会让 position:fixed 相对那个整页高的容器定位，弹窗于是
+  // 出现在"整页的中间"，用户在顶部时要往下滚才看得见。
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -108,6 +112,35 @@ export function FolderPicker({
                 </StatusChip>
               )}
             </div>
+
+            {/* 盘符切换：不靠"上一级"翻到根再猜，一步就能换盘。
+                只有一个盘时不渲染——那行字只是噪音。 */}
+            {listing && listing.drives.length > 1 && (
+              <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-lx px-[18px] py-1.5 md:px-7">
+                <span className="mr-1 shrink-0 text-[10px] text-lx-dim">磁盘</span>
+                {listing.drives.map((d) => {
+                  // "H:" —— 卷标可能为空，那时只显示盘符
+                  const letter = d.path.replace(/\\$/, '')
+                  const active = listing.path.toLowerCase().startsWith(d.path.toLowerCase())
+                  return (
+                    <button
+                      key={d.path}
+                      type="button"
+                      // 卷标被截断时靠它看全名
+                      title={d.label ? `${d.label} (${d.path})` : d.path}
+                      onClick={() => load(d.path)}
+                      className={`max-w-[11rem] shrink-0 truncate rounded px-2 py-0.5 text-[11px] transition-colors ${
+                        active
+                          ? 'bg-[color-mix(in_srgb,var(--lx-accent)_16%,transparent)] text-lx-accent'
+                          : 'text-lx-muted hover:bg-[color-mix(in_srgb,var(--lx-text)_6%,transparent)] hover:text-lx-secondary'
+                      }`}
+                    >
+                      {d.label ? `${d.label} (${letter})` : letter}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               {loading && (
@@ -186,6 +219,44 @@ export function FolderPicker({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   )
+}
+
+/**
+ * 各页面「浏览」按钮的统一入口。
+ *
+ * 原本这里先试 Tagger.Shell 的系统对话框、失败再回退。实际跑下来，
+ * 系统框在 WebView2 里不稳定，而且握手失败时要等一两秒才回退——那段时间
+ * 界面什么都不发生，比"没有这个功能"更难受。所以现在就一条路径：
+ * 直接开自绘窗口。它够快，也永远拿得到绝对路径。
+ *
+ * 返回值里的 `dialog` 必须渲染在页面上。
+ */
+export function useFolderPicker() {
+  const [open, setOpen] = useState(false)
+  const [start, setStart] = useState<string | undefined>(undefined)
+  // 回调放 ref：窗口是异步打开的，不能依赖闭包里的旧 state。
+  const pending = useRef<((path: string) => void) | null>(null)
+
+  const pick = useCallback((startPath: string | undefined, apply: (path: string) => void) => {
+    pending.current = apply
+    setStart(startPath)
+    setOpen(true)
+  }, [])
+
+  const dialog = (
+    <FolderPicker
+      open={open}
+      start={start}
+      onClose={() => setOpen(false)}
+      onPick={(path) => {
+        setOpen(false)
+        pending.current?.(path)
+      }}
+    />
+  )
+
+  return { pick, dialog }
 }

@@ -107,6 +107,47 @@ env\python\python.exe -m tagger.cli client --url http://127.0.0.1:8010 ^
 代码：`tagger/client.py` 的 `run_batch(paused=...)`、`tagger/web/jobs.py` 的
 `pause / resume / resume_last`、`tagger/web/ui/src/components/ResumeBanner.tsx`。
 
+### 依赖检测（侧栏「依赖检测」）
+
+把 `requirements-embedded.txt`（运行环境）与 `requirements-tag.txt`（打标运行时）里的
+每一条列成一行，外加一组"可选功能"（onnxruntime / datasets / vllm），可以**单独装、
+卸、重装任意一个包**，不必为了一个包重跑 install.bat。
+
+- 清单**现读现算**，页面不存版本表：改了 requirements 刷新就能看到，也不会出现
+  "页面说装了、实际没装"这种最难查的错觉。
+- 三种状态：已装（绿）/ 缺失（红）/ 版本不符（黄）。**一致时不重复显示版本**
+  （包名旁已有 `==2.5.4`），只有对不上才并排 `实装 1.0.30 → 清单要求 1.0.11`。
+- 装走 `sys.executable -m pip`，不是 `pip install`：嵌入式环境里 PATH 上的 pip
+  很可能指向别的 Python，装完这个环境里什么都没有。
+- **torch / torchvision 自动走 PyTorch 索引**（有 nvidia-smi 用 cu124，没有用 cpu）。
+  PyPI 上没有它们的轮子，指错了会以"找不到满足要求的版本"收场。
+- **同一时刻只允许一个 pip 动作**（`DepManager` 串行 + 409）。两个 pip 同时改一个
+  site-packages，会各自读到对方写到一半的目录，最后炸在一个完全无关的包名上。
+- **有任务在跑时拒绝装卸**（409）：跑批每隔几秒就要 import 图片解码、pyarrow，
+  装到一半的东西会让它以"找不到模块"崩掉，而那种报错看起来像代码 bug。
+- `卸载` / `重装` 前端要二次确认：重装的语义是"按清单版本装回去"，本机手动装过
+  更新的 torch 时，这一下会把它降级并重下 2.5GB。
+- pip 输出逐行进日志（400 行环形），页面每秒轮询；装 torch 的十几分钟里，
+  没有输出是最难熬的。可中途取消（terminate 子进程）。
+
+**顶部的三个批量按钮**（`install-missing` / `uninstall-all` / `verify`）都走
+`_start_many` 这一条队列，`batch` 字段里逐项报进度，失败项在面板上单独列出来：
+
+- **安装缺失**：只装 `missing`，**不碰 `mismatch`**。把版本不符的包装回清单版本
+  等于降级（开发机手动装过更新的 torch 时尤其明显），批量做这种事太容易误伤；
+  要降级请单独点那一行的「重装」。
+- **卸载全部**：只卸清单里、且确实装着的包，清单外的不动。前端强制二次确认——
+  卸掉 fastapi/uvicorn 之后这个页面看着还在（模块已加载），下次启动就没了。
+- **检查完整性**：逐个在**子进程**里 `import` 一次，不是看 dist-info。
+  `dist-info 在` 和 `包能用` 是两件事：下载中断留下半个目录、杀软删掉某个 .pyd、
+  CUDA 版 torch 缺 dll，这些情况下 `version()` 照样返回值，页面一片绿，真跑
+  打标才炸。用子进程而不是本进程 importlib，是因为 torch 会往服务进程里塞几百
+  MB 的库且再也退不回来；子进程还能超时 kill（`VERIFY_TIMEOUT = 60s`）。
+  结果落在 `DepManager.verify`（内存），行上以红字覆盖显示「导入失败 · 原因」。
+
+代码：`tagger/web/deps.py`（清单解析、状态判定、pip 子进程）、
+`tagger/web/ui/src/pages/Deps.tsx`。
+
 ### 部署自检（侧栏「部署自检」）
 
 给接收方用的：装完点一下，15 个方块逐格亮起——转圈 → 打勾 / 打叉 / 划掉。
@@ -1224,3 +1265,340 @@ Linux `/proc/stat`），差值就是两次轮询之间的平均占用；内存�
 与命令行，与默认值无关）。
 
 `pytest tests -q` → 558 passed；`npm run build` 通过。
+
+## 19. 2026-11-04：启动器的「初始化环境」按钮
+
+### 19.1 那句「缺 web 依赖」的真正来源
+
+`pack-dist.bat` 默认不带 `env\python`（约 60MB），接收方要先跑 `install.bat`。
+有人直接双击 `Tagger.Shell.exe` 时，`ResolvePython` 找不到 `env\python`，
+**静默回退到 PATH 上的系统 Python**，那个解释器没有 fastapi/uvicorn，
+`tagger.cli web` 抛 `ConfigError` 退出，界面上看到的就是「缺 web 依赖」。
+
+两件事的修法完全不同（跑 install.bat vs 往某个解释器里装包），却混成了一句报错。
+
+### 19.2 不再静默回退
+
+只有 `env\python` / `env\linux\bin\python` 直接信（它们是 install.bat 的产物，
+缺东西时安装脚本的自检会先报）；`.venv` 和 PATH 上的解释器必须先过探针：
+
+    python -c "import fastapi, uvicorn, websockets"
+
+探不过就返回 `null`，抛 `EnvNotInitializedException`（与 `ServerStartException`
+并列，界面据此决定给不给安装按钮）。探针 8 秒超时——Microsoft Store 那个
+`python.exe` 桩会挂住去弹商店。
+
+### 19.3 一键初始化
+
+错误面板里出现「初始化环境」按钮。只在 `EnvNotInitializedException`，或日志里
+含「缺 web 依赖」（装到一半断了）时出现；端口占用、WebView2 缺失之类给了也没用。
+
+`Services/EnvInstaller.cs` 跑的是 `install.bat` 本身，不在 Shell 里再实现一遍 pip：
+装什么版本、怎么写 `._pth`、离线从哪取轮子全在 `setup_embedded_env.ps1` 里，
+复制一份必然漂移——"点按钮装出来的环境"和"跑 install.bat 装出来的环境"
+不一样，是最难查的那类问题。
+
+几个必须踩对的点：
+
+- **完整路径调用 cmd**：`Environment.SystemDirectory\cmd.exe`。裸 `cmd.exe`
+  在 PATH 被污染的机器上会命中别人的副本。
+- **`/d`**：跳过 `Command Processor\AutoRun`，那里挂着坏路径时 cmd 每次启动
+  都会先报「系统找不到指定的路径」。
+- **`chcp 65001 >nul & call install.bat`**：用单个 `&`，chcp 被策略拦掉时安装
+  照跑（只是日志中文变乱码）。编码链路实测过：PowerShell 输出按 UTF-8 写字节，
+  `StandardOutputEncoding = Encoding.UTF8` 能正确解出中文。
+- **日志 150ms 批量刷新**：pip 一次刷几百行，逐行 `BeginInvoke` 会把界面卡住，
+  而那正是最需要保持可响应的时候。
+- 装完自动 `BootAsync()` 重启；失败保留日志给「复制日志」；关窗即取消并收进程树
+  （install.bat 幂等，下次接着补）。
+
+### 19.4 已知取舍
+
+不做"启动时静默自动安装"：要联网拉几十 MB、失败原因很多，静默跑的结果是用户
+盯着一行「正在启动」等十分钟还不知道在下东西。显式点按钮 = 他知道在等什么。
+
+### 19.5 pip 镜像滞后 ≠ 清单写错
+
+有人报 `ERROR: No matching distribution found for idna==3.20`（可用版本列到 3.15）。
+官方 PyPI 上有 3.20，`pip index versions idna` 能看到 3.16–3.20 全在——所以是那台
+机器的 pip 走了滞后镜像，不是版本号敲错了。
+
+两处改动：
+
+- `requirements-embedded.txt` 的 idna 改成 `idna>=3.10,<4`。它是 httpx 的传递
+  依赖，只做 URL 的国际化域名编码，不参与任何产物计算；钉死在这里的唯一效果是
+  让"镜像慢"伪装成"清单错"，把排查引向错误的方向。
+- `setup_embedded_env.ps1` 加 `-IndexUrl`（`install.bat` 用 `%*` 透传，所以
+  `install.bat -IndexUrl https://pypi.org/simple` 直接可用）。失败提示按成因分开写：
+  `No matching distribution` → 换源；`ConnectionError` → `-WheelDir`。原先只有一句
+  "网络受限时用 -WheelDir"，把镜像问题也归进网络问题，照着走会白折腾。
+
+判据：pip 报错里 `from versions: ...` 的最高版本明显落后于已知最新版 = 源旧。
+
+## 20. 2026-11-04：目录弹窗跑偏 + 只能选一个盘
+
+### 20.1 弹窗为什么出现在"整页的中间"
+
+`.lx-page-enter` 的入场动画用了 `animation-fill-mode: both`，动画结束后继续保留
+`transform: translateY(0)`。**任何非 none 的 transform 都会把这个元素变成
+position:fixed 后代的包含块**——于是 FolderPicker 的 `fixed inset-0` 撑满的是
+整页高的容器而不是视口，弹窗居中在整页中间，用户在顶部要往下滚才看得见。
+
+两处修：
+
+- `.lx-page-enter` 改 `backwards`：结束后退回元素自身样式（与 `to` 完全一致，
+  opacity 1 / 无位移，没有可见跳变），transform 回到 none。这一处同时修好了
+  页面里的其它 fixed 弹窗（QuantizeDialog / ShardAssets / Results 抽屉）。
+- FolderPicker 再走 `createPortal(..., document.body)`。模态框本来就不该活在
+  页面 DOM 里：以后哪个祖先加了 filter / transform / contain，都不会重演。
+
+### 20.2 只能选训练器所在的盘
+
+`_list_dirs` 只会往下走，`parent` 到盘根就成了自己，再没有出口。`/api/fs` 增加
+`drives`：Windows 用 `GetLogicalDrives` + `GetDriveTypeW` 枚举固定/可移动/网络/
+内存盘，**跳过光驱**（空盘探测会一直等到驱动超时，把浏览拖死）；Linux/macOS
+返回空数组，从 `/` 本来就能走到任何挂载点。
+
+前端在地址栏下面渲染一排盘符（`flex-wrap`：这台开发机有 16 个盘，单行会挤成
+横向滚动），当前盘高亮。只有一个盘时不渲染，那行只是噪音。
+
+`test_web.py::test_fs_lists_zip_files` 补断言：Windows 上给出的必须都是 `X:\`
+形式，否则那排按钮点下去是死路。
+
+### 20.3 盘符列表里混进了断开的网络映射
+
+第一版把 `net use` 留下的鬼影也列出来了。那台开发机 `C:` 到 `Z:` 亮了 16 个，
+其中 `O:/P:/Q:/R:/U:/V:` 是**已断开的网络映射**：`GetDriveTypeW` 报 4（网络），
+但 `os.path.exists` 是 False——点进去就是一次 TCP 超时。
+
+`GetLogicalDrives` 只反映"映射还挂在注册表里"，不代表目标还在。所以现在：
+
+- 本地盘（2 可移动 / 3 固定 / 6 内存盘）只信类型，直接列；
+- 网络盘（4）额外 `os.path.exists` 一次，连不上就不列；
+- 光驱（5）仍然不列（空盘探测会等到驱动超时）。
+
+列表整体缓存 60 秒，因为探测不可达的 NAS 正好要等 TCP 超时，而这个接口每点
+一次「浏览」就被请求一次。代价是插上 U 盘要等一分钟才出现在那排按钮里。
+
+### 20.4 盘符带上卷标
+
+只有字母的 `C: D: E:` 分不清哪块是哪块——大家都是会给盘起名字的。`drives` 从
+`string[]` 改成 `[{path, label}]`，卷标走 `GetVolumeInformationW`：
+
+- 没设卷标的盘返回空串（新分区、内存盘很常见），前端退化成只显示盘符；
+- 读失败也归到空串，不抛——一个读不到名字的盘不该让整排按钮消失；
+- **必须设 `argtypes`**，64 位下不设的话指针参数按 32 位截断，调用直接崩；
+- 只对已经确认存在的盘调用（本地盘 + `exists` 过的网络盘），不会对着鬼影盘
+  再发一次网络请求。
+
+前端渲染成 `系统 (C:)`、`开发 (H:)`，`max-w-[11rem] truncate` 兜住超长卷标，
+`title` 里给全名。
+
+## 21. 2026-11-04：试过 Windows 原生目录对话框，已回退
+
+> 结局先说：**这条链路最终删掉了**，目录选择仍然走自绘的 FolderPicker。
+> 下面记录的是过程与教训，以及为什么"先试原生、失败再回退"这个设计不成立。
+
+### 21.1 为什么非走宿主不可
+
+浏览器里**拿不到绝对路径**：`<input webkitdirectory>` 只给相对路径，
+File System Access API 给的是 handle。可后端 `/api/fs`、`/api/preview`
+都要按绝对路径读盘。所以自绘的 FolderPicker 在没有宿主时是唯一选择，
+在有宿主（Tagger.Shell）时就是多余的一层——系统对话框能看缩略图、
+能搜索、能直接跳任意盘。
+
+### 21.2 通道
+
+`window.chrome.webview.postMessage` ↔ `CoreWebView2.WebMessageReceived`：
+
+    前端 → 宿主   { type: 'pick-folder', id, start }
+    宿主 → 前端   { type: 'pick-folder-result', id, path }   // path=null = 取消
+
+用 WebMessage 而不是拦自定义 URL scheme：路径里的中文、空格、`#` 塞进 URL
+要来回转义，写错一次就是"选了却拿不到"的隐形 bug。带 `id` 是因为通道全局，
+两个请求的响应对不上就会写错字段。
+
+宿主侧用 `Microsoft.Win32.OpenFolderDialog`（.NET 8 WPF 自带，不必为了
+一个对话框去引 WinForms）。系统框是模态的，必须在 Dispatcher 里弹；
+异常也要回一个 null，让前端退回自绘窗口，而不是点了没反应。
+
+### 21.3 三态，不是布尔
+
+`NativePick` 是 `path / canceled / unsupported`：
+
+- `canceled` **绝不能**再弹自绘窗口——用户刚关掉对话框，你立刻给他弹第二个
+  就是在耍人；
+- `unsupported`（不在 Shell 里，或宿主没应答）才回退。
+
+超时设 60 秒而不是几秒：用户在系统对话框里翻目录本来就慢，短超时会在对话框
+还开着的时候把第二个窗口顶出来。旧 exe 没有这条通道，会吃一次 60 秒，所以
+超时后把 `hostReplied` 置 false，之后点击直接走自绘。
+
+### 21.4 调用点收敛成 hook
+
+5 个页面、8 个按钮原本各自维护 `picker` 布尔 + `<FolderPicker>`。现在统一成
+`useFolderPicker()` 返回 `{ pick(start, apply), dialog }`：先试原生，不行再开
+自绘，`dialog` 渲染在页面上即可。Packaging 那页四种目标共用一个
+`openPicker(target, index)`，选完按 target 写回不同字段。
+
+### 21.5 第一版"点了没反应"的三个坑
+
+上线后有人报"点浏览呼不出系统对话框，没有任何反应"。代码确实编进了 exe
+（dll 里能搜到 `OpenFolderDialog` / `WebMessageReceived`），所以是运行时的问题。
+三个坑叠在一起，症状都是"没反应"：
+
+1. **没有握手。** 原先前端发完消息只能干等 60 秒。在这 60 秒里，
+   "宿主不认这条通道"和"用户正在系统框里翻目录"在网页看来完全一样——
+   而前者要立刻回退，后者绝不能打扰。加了 `pick-folder-ack`：宿主收到就回，
+   网页 1.5 秒收不到就直接开自绘窗口，收到就把超时换成 10 分钟。
+2. **在 WebView2 事件回调里同步弹模态框。** 原来用 `Dispatcher.Invoke`，
+   `ShowDialog` 会把当前线程堵到用户关窗，而这条回调卡在浏览器进程的消息回路上，
+   界面就整体假死。改成 `Dispatcher.BeginInvoke`，回调立刻返回，对话框排队去弹。
+3. **异常被静默吞掉。** `OpenFolderDialog` 抛异常时原来只写日志、回 `path: null`，
+   前端把 null 理解成"用户取消"——于是什么都不做。现在异常原因随
+   `{ path: null, error }` 回传，前端进入 `failed` 分支照样回退自绘。
+
+另外自绘窗口顶部会说明为什么会落到它（"当前启动器版本不支持系统对话框" /
+"系统目录对话框打不开（原因）"），别再让人以为按钮坏了。
+
+排查入口：`%LOCALAPPDATA%\Tagger\shell.log`，点一次浏览应该出现
+"收到目录选择请求，起始目录：..."。没有这行 = 消息根本没到宿主，
+先确认跑的是新 exe、并且是在 Shell 里点的（浏览器里本来就没有系统对话框）。
+
+### 21.6 最终决定：整条链路删除
+
+加了 ack 之后第一次点仍然呼不出系统框。用户的原话是"不然会给人一种怎么卡了一
+两秒的感觉"——这就是结论：**任何"先试 A、失败再 B"的交互，只要 A 的失败不能
+在几十毫秒内被感知，用户感受到的就不是回退，而是卡顿。**
+
+删掉的东西：
+
+- 前端 `web/ui/src/lib/native.ts`（消息封装 + ack 超时）；
+- `useFolderPicker` 里的原生分支，现在只 `setOpen(true)`；
+- Shell 侧 `core.WebMessageReceived += OnWebMessage`、`PickFolderRequest`、
+  整个 `OnWebMessage` 方法，以及 `FolderPicker` 的 `notice` 参数。
+
+保留的东西（是真正的改进，与原生对话框无关）：
+
+- 弹窗 `createPortal` 到 body，不再被 `.lx-page-enter` 的 transform 困住；
+- 盘符切换行；
+- `animation-fill-mode: backwards`。
+
+如果以后还想接系统对话框，前提是**能同步拿到结果**（比如 WPF 侧直接把选中
+路径写进一个剪贴板/文件，由后端读），而不是走"发消息—等回执"这种天然有延迟
+的异步路径。
+
+---
+
+## 22. 2026-11-04：install.bat 不装 torch，第一次打标必然失败
+
+**现象**：别人按标准流程跑完 `install.bat`，新建打标任务，任务直接失败：
+
+```
+tag 后端不可用：pixai tagger 需要 transformers/torch/Pillow：
+  pip install torch torchvision transformers timm
+```
+
+**根因**：`requirements-embedded.txt` 的注释里写着"torch/transformers 按需
+自己装"，`install.bat` 也就没装。但**默认 tag 后端是 pixai**，它必须要
+`transformers` + `torch` + `timm`。于是"按需"这两字在现实里等于"必然漏装"：
+用户没有任何理由知道这句话该去哪敲，报错又只在他已经等着结果的时候出现。
+
+顺带发现开发机自己也没有 `transformers`——不是某个人装漏了，是清单从来没
+包含过它，只是开发机早年手动装过其余几个，把缺口掩盖了。
+
+**修法**：
+
+1. 新增 `requirements-tag.txt`（tag 反推运行时）：`torch` / `torchvision` /
+   `transformers` / `timm` / `safetensors`，版本钉死（环境是产出的一部分，
+   换 torch 版本可能换内核与数值）。**这一版钉的版本是错的，以 §23 为准。**
+2. `install.bat` / `install.sh` **默认装这套**，`-SkipTag` / `--skip-tag` 跳过。
+   只想打包或跑 NL 的人不该等这十分钟。
+3. **torch 的 wheel 不在 PyPI**（CUDA 版在 `download.pytorch.org`），所以分
+   两批装：`torch`/`torchvision` 走 PyTorch 索引，其余走普通索引。分批评
+   的依据是包名前缀，版本号仍然只有清单一处。有 `nvidia-smi` 用 `cu124`，
+   没有用 `cpu`；换 CUDA 版本用 `-TorchIndex`。
+4. **装不上只警告，不中断**。这一条是刻意的：torch 装不下时打包与 NL 仍然
+   可用，把它变成硬失败等于让人为了一个可选依赖连界面都进不去。离线模式下
+   wheel 目录里没有 `torch-*.whl` 同样只警告并跳过。
+5. `pack-dist.bat` 的复制清单加上新文件（漏了的话发布包里 `install.bat`
+   找不到清单，表现是"又回到手动装"）。
+6. `tagger doctor` 多一行 tag 运行时体检：缺包直接说缺哪个、怎么补。这几个
+   包是懒加载的，缺了不影响命令启动，只会在真正跑任务时炸——而那通常是
+   "别人机器跑了一夜、早上全失败"的场景。
+7. 报错文案从 `pip install torch ...` 改成"重跑 install.bat / 见
+   requirements-tag.txt"：让人照着自己机器上的装法走，而不是猜路径。
+
+8. `prune-env.bat`：删除组补上 `transformers` / `tokenizers` / `regex`（以前
+   prune 后它们留在发布包里白占一百多 MB，而 tag 后端已经因为缺 torch 跑不了），
+   恢复提示改指 `requirements-tag.txt`。
+
+**验证**：`install.bat -SkipTag` 实跑退出码 0（脚本分支与提示都对）；
+`pip install --dry-run -r requirements-tag.txt` 在 PyPI 上五个版本全部可解析。
+`cu124` 索引的 dry-run 本机网络太慢没跑完，版本组合按 PyTorch 官方配套表
+（torch 2.5.1 ↔ torchvision 0.20.1）。
+
+**别忘了**：老环境不会自己变好。已经装过的人要重跑一次 `install.bat`（幂等），
+或者看 `tagger doctor` 那一行缺什么补什么。
+
+---
+
+## 23. 2026-11-04（续 §22）：安装脚本装齐依赖，打包维持精简
+
+§22 只补了 pixai 需要的那五个包。这一轮把"装齐"做实：`install.bat` /
+`install.sh` 装**代码里 import 到的全部第三方包**，`pack-dist.bat` 与
+`prune-env.bat` 保持上一轮的样子不动（发布包仍然瘦，接收方跑一次
+`install.bat` 就补齐）。
+
+### 23.1 先扫再列，别凭印象
+
+用 AST 扫 `tagger/**/*.py` 的顶层 import，减去标准库与 `tagger` 自身，得到
+真实依赖全集：`PIL` `datasets` `fastapi` `httpx` `huggingface_hub`
+`llmcompressor` `numpy` `onnxruntime` `open_clip` `packaging` `pyarrow`
+`pydantic` `safetensors` `timm` `torch` `torchvision` `transformers`
+`uvicorn` `yaml`。对照两份清单，缺的是：`datasets` `onnxruntime`
+`open_clip_torch`（`huggingface_hub` 由 transformers 带进来）。
+
+### 23.2 §22 钉的版本是错的，这次按本机实测
+
+§22 我凭印象写了 `torch==2.5.1` / `torchvision==0.20.1` / `timm==1.0.11`。
+本机 `env\python` 里实际是：
+
+```
+torch 2.14.1+cu126   torchvision 0.29.1+cu126   timm 1.0.30
+safetensors 0.8.0    datasets 5.1.0
+```
+
+差了一整个大版本。照 §22 那份清单装，会把开发机上本来能跑的 torch **降级**，
+而且 cu124/cu126 一换，权重与内核行为都跟着变。现在清单按实测值钉死，
+默认索引也从 `cu124` 改成 `cu126`（实测就是 cu126；换版本仍用 `-TorchIndex`）。
+
+**教训**：钉版本要读 `site-packages/*.dist-info` 或 `import x; x.__version__`，
+不能凭记忆——钉错的版本比不钉更难发现，因为 `pip install` 会安静地降级。
+
+`transformers` / `onnxruntime` / `open_clip_torch` 本机从没装过，所以这三行
+给范围（`>=4.46,<6` / `>=1.20` / `>=2.30`）而不是精确值：钉一个没验证过的
+精确版本，报错会和"缺包"长得一模一样。等有人真跑通了再收。
+
+### 23.3 自检区分"必须"与"可选"
+
+`setup_embedded_env.ps1` 装完会探一遍：`torch` / `torchvision` /
+`transformers` / `timm` / `safetensors` 缺任何一个 → 警告（打标会失败）；
+`onnxruntime`（cl-tagger-v2 后端）、`open_clip`（图文一致度打分）、
+`datasets`（HF 输入源）缺了只打一行"可选缺失"，不影响判定——否则一次网络
+抖动就会让人以为整个环境坏了。
+
+### 23.4 仍然故意不装的
+
+- `llmcompressor`：4bit 量化那条路，几百 MB，对 torch 版本卡得死，只在做
+  量化那一次需要。
+- `vllm`：只有 Linux 能装，而且它会强制换掉上面钉好的 torch 版本——
+  默认引擎已经是 llama.cpp，没必要为了备选引擎砸掉主路径。
+
+### 23.5 验证
+
+- `install.bat -SkipTag` 实跑退出码 0（文案与分支都对）
+- `pip install --dry-run -r requirements-tag.txt`（PyPI）→ 全部可解析
+- `pip install --dry-run torch==2.14.1 torchvision==0.29.1 --index-url
+  https://download.pytorch.org/whl/cu126` → 可解析
+- `pytest tests -q` 全绿；三个 `.bat` 仍是纯 ASCII

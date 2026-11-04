@@ -63,12 +63,26 @@ public sealed class PythonServer : IAsyncDisposable
                        "或者设置环境变量 TAGGER_ROOT 指向它。");
 
         var python = ResolvePython(root)
-                     ?? throw new ServerStartException(
+                     // 单独一个类型：界面据此显示「初始化环境」按钮。
+                     // 混在 ServerStartException 里的话，只能靠匹配错误文案决定要不要给按钮。
+                     ?? throw new EnvNotInitializedException(
                          $"在 {root} 下没找到可用的 Python。\n\n" +
-                         "先跑一次 install.bat 建出 env\\python，或用 TAGGER_PYTHON 指定解释器路径。");
+                         "这个仓库多半还没初始化：没有 env\\python，而系统里找到的\n" +
+                         "Python 又缺 web 依赖（fastapi / uvicorn / websockets）。\n" +
+                         "直接用那个解释器起服务，最后只会报「缺 web 依赖」，\n" +
+                         "看不出根子是「包还没装」。\n\n" +
+                         "点下面的「初始化环境」按钮装一次即可（需要联网）。");
 
         return new PythonServer(root, python);
     }
+
+    /// <summary>
+    /// 只找仓库根目录，不要求里面有可用的 Python。
+    ///
+    /// 「初始化环境」按钮需要它：那种情况下 ResolvePython 必然失败，
+    /// 但 install.bat 恰恰要在这个目录里跑。
+    /// </summary>
+    public static string? FindRoot(string? explicitRoot = null) => ResolveRoot(explicitRoot);
 
     private static string? ResolveRoot(string? explicitRoot)
     {
@@ -97,25 +111,81 @@ public sealed class PythonServer : IAsyncDisposable
         var fromEnv = Environment.GetEnvironmentVariable("TAGGER_PYTHON");
         if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv)) return fromEnv;
 
-        // Windows 便携环境优先；其次是本地 venv；再不行交给 PATH。
-        string[] candidates =
+        // 仓库自带的便携环境直接信：它由 install.bat 建出来，缺东西时
+        // install.bat 的自检会先报出来，这里再探一遍纯属浪费启动时间。
+        string[] portable =
         [
             Path.Combine(root, "env", "python", "python.exe"),
-            Path.Combine(root, ".venv", "Scripts", "python.exe"),
             Path.Combine(root, "env", "linux", "bin", "python"),
+        ];
+        foreach (var c in portable)
+        {
+            if (File.Exists(c)) return c;
+        }
+
+        // 其余都是"别人的 Python"（本地 venv，或 PATH 上的系统解释器），
+        // 必须验过能起 web 再交出去。
+        //
+        // 原先这里是直接 return 的：找不到 env\python 就默默用系统 Python，
+        // 于是一个根本没装依赖的解释器被当成"环境齐了"拿去起服务，最后
+        // 报出来的是「缺 web 依赖」。用户看到的是"依赖缺失"，根子却是
+        // "这个仓库还没 install"——两件事的修法完全不同，不能混。
+        string[] candidates =
+        [
+            Path.Combine(root, ".venv", "Scripts", "python.exe"),
             Path.Combine(root, ".venv", "bin", "python"),
         ];
         foreach (var c in candidates)
         {
-            if (File.Exists(c)) return c;
+            if (File.Exists(c) && CanServeWeb(root, c)) return c;
         }
 
         foreach (var name in new[] { "python.exe", "python", "python3" })
         {
             var resolved = SearchPath(name);
-            if (resolved is not null) return resolved;
+            if (resolved is not null && CanServeWeb(root, resolved)) return resolved;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 用这个解释器跑一次最轻的导入探针，确认它能承担 web 服务。
+    ///
+    /// 只探 fastapi / uvicorn / websockets：Shell 的唯一用途就是起这个服务，
+    /// tagger 包本身靠 WorkingDirectory=仓库根就能 import，不必验证。
+    /// 探不动的一律当不可用——宁可让用户跑一次 install.bat，也不要把一个
+    /// 注定起不来的解释器交给后面的流程（那会变成 90 秒超时 + 一屏日志）。
+    /// </summary>
+    private static bool CanServeWeb(string root, string python)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(python)
+            {
+                WorkingDirectory = root,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add("import fastapi, uvicorn, websockets");
+
+            using var probe = Process.Start(psi);
+            if (probe is null) return false;
+            // Microsoft Store 那个 python.exe 桩会挂住去弹商店，必须设上限。
+            if (!probe.WaitForExit(8000))
+            {
+                try { probe.Kill(entireProcessTree: true); } catch (Exception) { /* 已退出 */ }
+                return false;
+            }
+            return probe.ExitCode == 0;
+        }
+        catch (Exception)
+        {
+            // 路径里有引号、被策略拦、权限不足……都不该让启动崩在这一步。
+            return false;
+        }
     }
 
     private static string? SearchPath(string exe)
@@ -287,3 +357,12 @@ public sealed class PythonServer : IAsyncDisposable
 }
 
 public sealed class ServerStartException(string message) : Exception(message);
+
+/// <summary>
+/// 仓库还没初始化（没有 env\python，能兜底的解释器也带不动 web 服务）。
+///
+/// 和普通启动失败分开，是因为两者的"下一步"完全不同：
+/// 这个可以一键修（跑 install.bat），别的（端口被占、WebView2 缺失、
+/// 服务崩了）点了安装也没用，只会让人多等十分钟。
+/// </summary>
+public sealed class EnvNotInitializedException(string message) : Exception(message);

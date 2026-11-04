@@ -18,6 +18,7 @@
 #    ./install.sh                    常规安装（已装过就只补缺的）
 #    ./install.sh --force            删掉 env/linux 重建
 #    ./install.sh --offline          从 env/initialization/wheels 离线安装
+#    ./install.sh --skip-tag         不装打标运行时（只打包 / 跑 NL）
 #    ./install.sh --no-tests         装完不跑测试
 #    ./install.sh --python python3.12    指定解释器
 # ===========================================================================
@@ -32,6 +33,7 @@ WHEELS="$ROOT/env/initialization/wheels"
 FORCE=0
 OFFLINE=0
 RUN_TESTS=1
+SKIP_TAG=0
 PYTHON_BIN="${PYTHON:-}"
 
 die() { printf '\n [错误] %s\n' "$*" >&2; exit 1; }
@@ -47,6 +49,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --force|-f)   FORCE=1 ;;
         --offline)    OFFLINE=1 ;;
+        --skip-tag)   SKIP_TAG=1 ;;
         --no-tests)   RUN_TESTS=0 ;;
         --python)     shift || die "--python 后面要跟解释器路径"; PYTHON_BIN="${1:-}" ;;
         -h|--help)    usage ;;
@@ -143,6 +146,29 @@ else
     fi
 fi
 
+# --------------------------------------------------------------- 打标运行时
+# 默认 tag 后端是 pixai，要 torch / transformers / timm。缺了它第一次跑打标
+# 就报 "tag 后端不可用"，而那句话以前只能让人自己去猜该装什么。
+# 失败不算致命：打包与 NL 不碰 torch，不该因为一个依赖就连 CLI 都用不了。
+TAGREQ="$ROOT/requirements-tag.txt"
+if [ "$SKIP_TAG" -eq 1 ]; then
+    note "[3.5/5] 跳过打标运行时（--skip-tag）"
+elif [ ! -f "$TAGREQ" ]; then
+    note "      没找到 $TAGREQ，跳过打标运行时（打标会失败）"
+elif "$PY" -c 'import torch, transformers, timm' >/dev/null 2>&1; then
+    note "[3.5/5] 打标运行时已就绪"
+else
+    note "[3.5/5] 安装打标运行时（约 2.5 GB，仅首次）"
+    if [ "$OFFLINE" -eq 1 ] && [ -d "$WHEELS" ]; then
+        "$PY" -m pip install --disable-pip-version-check -q \
+            --no-index --find-links "$WHEELS" -r "$TAGREQ" \
+            || note "      没装完；打标会失败，打包/NL 不受影响"
+    else
+        "$PY" -m pip install --disable-pip-version-check -q -r "$TAGREQ" \
+            || note "      没装完；打标会失败，打包/NL 不受影响"
+    fi
+fi
+
 # --------------------------------------------------------------- 自检
 note "[4/5] 自检"
 "$PY" - <<'PY'
@@ -168,8 +194,7 @@ echo " 完成。下一步："
 echo "   ./tagger.sh --help"
 echo "   $PY -m pytest"
 echo
-echo " 装大包（按需，装进同一个环境）："
-echo "   $PY -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124"
+echo " 打标运行时（torch/transformers/timm/onnxruntime/datasets）默认已装；跳过过就重跑 ./install.sh"
 echo "   # vLLM 只跑 Linux（本机有 NVIDIA 卡时）："
 echo "   $PY -m pip install vllm"
 echo

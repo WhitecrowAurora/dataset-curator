@@ -4,21 +4,25 @@
 # 会得到不同结果（图片解码、parquet 行为都可能变），而这种差异在产物里
 # 看不出来。环境是产出的一部分，所以版本必须钉住。
 #
-# 不包含的东西（按需自己装进同一个 env/python）：
-#   torch torchvision         tag 反推（pixai / wd-eva02 后端）
-#   transformers timm safetensors  同上
-#   onnxruntime               cl-tagger-v2 后端（不需要 torch）
-#   datasets                  HuggingFace 输入源
-#   vllm                      NL 生成服务（仅 Linux / WSL2）
-# 装法见 devtools/embedded-env.md，一句话：
-#   env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# 不包含的东西：
+#   torch torchvision transformers timm safetensors onnxruntime datasets
+#   open_clip_torch           → **另一份清单 requirements-tag.txt**，由
+#                               install.bat / install.sh 默认安装（约 2.5 GB）。
+#                               不并进来是因为这份清单是"每次装都重跑"的
+#                               小包，混进 2.5 GB 会让只想打包的人多等十分钟。
+#   llmcompressor             4bit 量化，几百 MB 且对 torch 版本卡得死，按需装
+#   vllm                      NL 生成服务（仅 Linux / WSL2），按需装
 anyio==4.16.0
 certifi==2026.10.23
 colorama==0.4.6
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
-idna==3.20
+# idna 只用于 httpx 拼 URL 时的国际化域名编码（我们访问的域名全是 ASCII），
+# 不参与任何产物计算，所以这里**故意不钉死**：镜像同步常滞后一两个小版本，
+# 钉死会让"镜像慢"表现成"清单写错了"——报错看起来像我们把版本号敲错了，
+# 排查方向从一开始就偏。
+idna>=3.10,<4
 iniconfig==2.3.1
 # numpy 是 pyarrow 的硬依赖，但 pip 只会装"当时最新的那个"。不钉住的话，
 # 不同时间装的两个人拿到不同 numpy，parquet 的数值/布尔行为可能悄悄不一致。

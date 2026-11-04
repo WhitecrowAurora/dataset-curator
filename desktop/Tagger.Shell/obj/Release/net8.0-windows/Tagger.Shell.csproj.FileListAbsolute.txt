@@ -9,9 +9,6 @@ h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Tagger.Shell.pdb
 h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Microsoft.Web.WebView2.Core.dll
 h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Microsoft.Web.WebView2.WinForms.dll
 h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Microsoft.Web.WebView2.Wpf.dll
-h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Microsoft.Web.WebView2.Core.xml
-h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Microsoft.Web.WebView2.WinForms.xml
-h:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\Microsoft.Web.WebView2.Wpf.xml
 h:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\Tagger.Shell.csproj.AssemblyReference.cache
 h:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\MainWindow.baml
 h:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\App.baml

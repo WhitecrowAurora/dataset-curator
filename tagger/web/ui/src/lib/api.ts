@@ -708,6 +708,11 @@ export type FsListing = {
   images: number
   zips: { name: string; path: string; bytes: number }[]
   dirs: { name: string; path: string; images: number; zips: number }[]
+  /**
+   * 可切换的盘符 + 卷标（只有 Windows 有；其他系统为空，从 / 走就够了）。
+   * `label` 可能为空串——没给盘起名字很常见，前端要能退化。
+   */
+  drives: { path: string; label: string }[]
 }
 
 // ---- 多卡（数据并行）：一张卡一个服务进程
@@ -774,6 +779,81 @@ export type MultiGpuCapability = {
   ok: boolean
   reason: string
   gpus: { index: number; name: string; vram_gb: number }[]
+}
+
+// ---- 依赖检测
+//
+// 清单来自两份 requirements 文件，后端现读现算——页面不存版本表，
+// 否则 pip 装完之后两边会对不上。
+
+export type DepStatus = 'ok' | 'missing' | 'mismatch'
+
+/** 「检查完整性」的结果：真的 import 一次，不是只看 dist-info 在不在 */
+export type DepVerify = {
+  ok: boolean
+  detail: string
+  ms: number
+}
+
+export type DepItem = {
+  name: string
+  spec: string
+  /** 只要版本那一段：==2.5.4 / >=3.10,<4 / 空 */
+  requirement: string
+  module: string
+  group: string
+  note: string
+  torch_index: boolean
+  installed: string | null
+  status: DepStatus
+  detail: string
+  /** 上次检查的结果；没检查过就是 null */
+  verified: DepVerify | null
+}
+
+/** 批量动作里的一项。单包动作也有一条，前端统一按列表画 */
+export type DepBatchItem = {
+  name: string
+  status: 'pending' | 'running' | 'ok' | 'failed' | 'skipped'
+  detail: string
+}
+
+export type DepJob = {
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  action: string
+  target: string
+  started: number
+  finished: number
+  elapsed: number
+  exit_code: number | null
+  log: string[]
+  batch: DepBatchItem[]
+}
+
+export type DepGroup = {
+  key: string
+  title: string
+  hint: string
+  items: DepItem[]
+  ok: number
+  total: number
+}
+
+export type DepState = {
+  python: string
+  torch_index: string
+  summary: {
+    total: number
+    ok: number
+    missing: number
+    mismatch: number
+    /** 元数据在但 import 失败：包坏了、DLL 缺了 */
+    broken: number
+  }
+  /** 上次完整性检查的时间（0 = 还没查过） */
+  verify_at: number
+  groups: DepGroup[]
+  job: DepJob | null
 }
 
 // ---- 部署自检
@@ -1366,6 +1446,19 @@ export const api = {
       body: JSON.stringify(opts),
     }),
   selfcheckStop: () => json<SelfCheckState>('/api/selfcheck/stop', { method: 'POST' }),
+  // ---- 依赖检测
+  deps: () => json<DepState>('/api/deps'),
+  depAction: (name: string, action: 'install' | 'uninstall' | 'reinstall') =>
+    json<DepState>(`/api/deps/${encodeURIComponent(name)}/${action}`, {
+      method: 'POST',
+    }),
+  /** 装上所有缺失的包（不动版本不符的，那等于降级） */
+  depInstallMissing: () => json<DepState>('/api/deps/install-missing', { method: 'POST' }),
+  /** 卸掉所有已装的包（只限清单内的） */
+  depUninstallAll: () => json<DepState>('/api/deps/uninstall-all', { method: 'POST' }),
+  /** 逐个真 import 一遍，验证包是真能用的 */
+  depVerify: () => json<DepState>('/api/deps/verify', { method: 'POST' }),
+  depCancel: () => json<DepState>('/api/deps/cancel', { method: 'POST' }),
   results: (id: string, params: { offset?: number; limit?: number; q?: string; only_failed?: boolean }) => {
     const qs = new URLSearchParams()
     if (params.offset) qs.set('offset', String(params.offset))

@@ -158,7 +158,7 @@ if "%WITHENV%"=="1" (
 for %%F in (install.bat install.sh tagger.cmd tagger.sh run-web.cmd run-web.sh) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
 )
-for %%F in (requirements-embedded.txt pyproject.toml HANDOFF.md prune-env.bat pack-dist.bat) do (
+for %%F in (requirements-embedded.txt requirements-tag.txt pyproject.toml HANDOFF.md prune-env.bat pack-dist.bat) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
 )
 

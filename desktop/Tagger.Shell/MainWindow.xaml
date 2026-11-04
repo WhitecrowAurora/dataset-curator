@@ -77,12 +77,51 @@
                      Foreground="{StaticResource MutedBrush}"
                      FontSize="12" LineHeight="19" />
 
+          <!-- 未初始化引导：双击 exe 的人多数卡在这里，给一条一键路径 -->
+          <Border x:Name="InstallPanel"
+                  Visibility="Collapsed"
+                  Margin="0,16,0,0"
+                  Padding="14,12"
+                  Background="{StaticResource SurfaceBrush}"
+                  BorderBrush="{StaticResource AccentBrush}"
+                  BorderThickness="1"
+                  CornerRadius="6">
+            <StackPanel>
+              <TextBlock Text="这台机器还没装运行环境"
+                         Foreground="{StaticResource TextBrush}"
+                         FontSize="13" FontWeight="SemiBold" />
+              <TextBlock Margin="0,6,0,0"
+                         TextWrapping="Wrap"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="11.5" LineHeight="18"
+                         Text="要先建出 env\python 并装上依赖。点下面的按钮开始，需要联网，大约 3–10 分钟；装完会自动重新启动。这个过程可以关掉窗口中止。" />
+              <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Button x:Name="InstallButton"
+                        Content="初始化环境"
+                        Style="{StaticResource PrimaryButton}"
+                        Click="OnInstallClick" />
+                <TextBlock x:Name="InstallStage"
+                           Margin="12,0,0,0"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource DimBrush}"
+                           FontSize="11" />
+              </StackPanel>
+              <ProgressBar x:Name="InstallProgress"
+                           IsIndeterminate="True"
+                           Visibility="Collapsed"
+                           Height="2" Margin="0,10,0,0"
+                           Background="{StaticResource RaisedBrush}"
+                           Foreground="{StaticResource AccentBrush}"
+                           BorderThickness="0" />
+            </StackPanel>
+          </Border>
+
           <Border Margin="0,14,0,0"
                   Background="{StaticResource SurfaceBrush}"
                   BorderBrush="{StaticResource BorderBrush}"
                   BorderThickness="1"
                   CornerRadius="6">
-            <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="LogScroll" MaxHeight="180" VerticalScrollBarVisibility="Auto">
               <TextBox x:Name="LogText"
                        IsReadOnly="True"
                        BorderThickness="0"
@@ -96,7 +135,7 @@
           </Border>
 
           <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-            <Button Content="重试" Style="{StaticResource PrimaryButton}" Click="OnRetryClick" />
+            <Button x:Name="RetryButton" Content="重试" Style="{StaticResource PrimaryButton}" Click="OnRetryClick" />
             <Button Content="复制日志" Style="{StaticResource GhostButton}" Margin="8,0,0,0" Click="OnCopyClick" />
             <Button Content="用浏览器打开" Style="{StaticResource GhostButton}" Margin="8,0,0,0" Click="OnOpenBrowserClick" />
             <Button Content="退出" Style="{StaticResource GhostButton}" Margin="8,0,0,0" Click="OnExitClick" />

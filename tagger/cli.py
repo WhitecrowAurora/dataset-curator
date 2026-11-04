@@ -70,10 +70,29 @@ def _load_profile(args: argparse.Namespace):
 # ---------------------------------------------------------------- doctor
 
 
+def _tag_runtime_summary() -> str:
+    """tag 反推那几个包在不在。
+
+    为什么值得单独一行：它们是懒加载的，缺了不影响命令跑起来，只会在第一次
+    跑打标任务时炸掉——而那时的场景通常是"别人机器上跑了一夜，早上一看全
+    失败"。doctor 是"装完先看一眼"的地方，这件事该在这里暴露。
+    """
+    import importlib.util
+
+    missing = [m for m in ("torch", "transformers", "timm", "safetensors")
+               if importlib.util.find_spec(m) is None]
+    if not missing:
+        return "OK"
+    return ("缺 " + " ".join(missing)
+            + " —— 重跑 install.bat（Linux 用 ./install.sh），它会装 requirements-tag.txt")
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     profile = _load_profile(args)
     print()
     print(profile.summary())
+    print()
+    print(f"tag 反推运行时：{_tag_runtime_summary()}")
     print()
     print("把上面这段原样贴到群里，用于核对全池参数是否一致。")
     return 0
@@ -1623,6 +1642,21 @@ def _subsampling_label(value: int) -> str:
     return {0: "4:4:4", 1: "4:2:2", 2: "4:2:0"}.get(int(value), "4:4:4")
 
 
+def _missing_web_deps() -> list[str]:
+    """Web 栈缺了哪几个包。
+
+    只探 uvicorn 是不够的：fastapi / websockets 缺了会在 `create_app` 里抛
+    `ModuleNotFoundError`，那时用户看到的是一段 traceback，而不是"跑一次
+    install 就好的"提示——而这正是首次接触这个工具的人最容易卡住的地方。
+    """
+    import importlib.util
+
+    return [pkg for mod, pkg in (("fastapi", "fastapi"),
+                                 ("uvicorn", "uvicorn"),
+                                 ("websockets", "websockets"))
+            if importlib.util.find_spec(mod) is None]
+
+
 def cmd_web(args: argparse.Namespace) -> int:
     """起本地 UI 服务。
 
@@ -1632,13 +1666,18 @@ def cmd_web(args: argparse.Namespace) -> int:
     import threading
     import webbrowser
 
-    try:
-        import uvicorn
-    except ImportError as exc:                # pragma: no cover - 环境问题
+    missing = _missing_web_deps()
+    if missing:
+        # 不要把包名直接列给用户让他 pip install <最新版>：这份清单是钉死版本的
+        # （fastapi/starlette/pydantic 三者互相咬合），装成最新的反而可能起不来。
         raise ConfigError(
-            "缺 web 依赖，装一次即可：\n"
-            "  env\\python\\python.exe -m pip install fastapi uvicorn websockets"
-        ) from exc
+            "缺 web 依赖：" + "、".join(missing) + "\n"
+            "在仓库根目录跑一次 install.bat（Linux/macOS 用 install.sh）即可补齐，\n"
+            "已经装好的包不会被重装。手动补时用钉住版本的清单：\n"
+            f'  "{sys.executable}" -m pip install -r requirements-embedded.txt'
+        )
+
+    import uvicorn
 
     from .web.app import create_app
 

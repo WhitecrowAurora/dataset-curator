@@ -67,9 +67,17 @@ Linux 没有对应物。可移植的替代是 python-build-standalone，但要�
 
 ```bash
 python -m pip download -r requirements-embedded.txt -d env/initialization/wheels
+
+# 离线也要跑打标的话，tag 运行时得一起下（约 2.5 GB）。torch 不在 PyPI：
+python -m pip download torch torchvision -d env/initialization/wheels --index-url https://download.pytorch.org/whl/cu126
+python -m pip download transformers timm safetensors -d env/initialization/wheels
+
 ./install.sh --offline          # Linux
 install.bat -WheelDir env\initialization\wheels   # Windows
 ```
+
+离线 wheel 目录里没有 `torch-*.whl` 时，两个脚本都会**跳过**打标运行时并给一条
+警告——装不上可选依赖不该让打包和 NL 也跟着不可用。
 
 ## 3. 里面装了什么
 
@@ -83,22 +91,35 @@ install.bat -WheelDir env\initialization\wheels   # Windows
 | `pyarrow` | parquet 分片（打包默认格式）的读写 |
 | `pytest` | 测试套件 |
 
-**故意没装的**（都靠懒加载，不用就不装）：
+**另一份清单 `requirements-tag.txt`（打标运行时，默认安装）：**
 
 | 包 | 什么时候需要 | 体积 |
 |---|---|---|
-| `torch` + `torchvision` | tag 反推（pixai / wd-eva02 后端） | ~2.5 GB |
-| `transformers` `timm` `safetensors` `huggingface_hub` | 同上 | ~100 MB |
-| `onnxruntime` | cl-tagger-v2 后端（**不需要 torch**） | ~15 MB，连带 numpy/protobuf/sympy 约 50 MB |
-| `datasets` | HuggingFace 输入源 | ~50 MB |
-| `vllm` | NL 生成服务（仅 Linux / WSL2） | ~1 GB + CUDA |
+| `torch` + `torchvision` | 所有 torch 后端（pixai / wd-eva02） | ~2.5 GB |
+| `transformers` `timm` `safetensors` | 同上 | ~200 MB |
+| `onnxruntime` | cl-tagger-v2 后端（**不需要 torch**） | ~15 MB，连带 protobuf/sympy 约 50 MB |
+| `datasets` | HuggingFace 数据集输入源 | ~50 MB |
+| `open_clip_torch` | 图文一致度打分（缺了只少一个分项） | ~10 MB |
+
+这些**默认由 `install.bat` / `install.sh` 装好**：默认 tag 后端是 pixai，
+没有它们第一次跑打标就会失败。只想打包或跑 NL 时用 `-SkipTag` /
+`--skip-tag` 跳过（省十分钟）。torch 的 wheel 不在 PyPI，所以脚本把它单独
+提到 PyTorch 索引去装：有 `nvidia-smi` 用 `cu126`（本机实测组合），没有用
+`cpu`；换 CUDA 版本用 `-TorchIndex https://download.pytorch.org/whl/cu128`。
+
+**仍然按需装的**：
+
+| 包 | 什么时候需要 | 体积 |
+|---|---|---|
+| `llmcompressor` | 4bit 量化（`quantize_worker.py`），对 torch 版本卡得死 | 几百 MB + 编译依赖 |
+| `vllm` | NL 生成服务（仅 Linux / WSL2），会强制换掉钉好的 torch | ~1 GB + CUDA |
 
 装大包时**装进同一个环境**，不要另开 venv：
 
 ```powershell
-# NVIDIA 卡（按驱动选 cu121 / cu124 / cu126 之一）
-env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-env\python\python.exe -m pip install transformers timm safetensors huggingface_hub
+# 手动重装 tag 运行时（install.bat 里那一步的等价命令）
+env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+env\python\python.exe -m pip install -r requirements-tag.txt
 
 # 只有 CPU 也能跑 tag（慢）
 env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu

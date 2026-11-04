@@ -34,7 +34,7 @@ import { basename, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/ui/launcher'
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { OverviewFigure, OverviewFigureRow } from '../components/ui/OverviewFigures'
-import { FolderPicker } from '../components/FolderPicker'
+import { useFolderPicker } from '../components/FolderPicker'
 import { LlamaSetup } from '../components/LlamaSetup'
 import { MultiGpuPanel } from '../components/MultiGpuPanel'
 import { QuantizeDialog } from '../components/QuantizeDialog'
@@ -200,7 +200,8 @@ export function NewJob({
   const [recursive, setRecursive] = useState(true)
   const [includeZips, setIncludeZips] = useState(true)
   const [includeLoose, setIncludeLoose] = useState(true)
-  const [picker, setPicker] = useState(false)
+  // 有宿主（Tagger.Shell）就弹系统目录框，没有才用自绘的浏览窗口
+  const folder = useFolderPicker()
   const [scan, setScan] = useState<{ path: string; images: number; zips: number } | null>(null)
   const [preview, setPreview] = useState<PlanPreview | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -1002,7 +1003,7 @@ export function NewJob({
         }
         actions={
           <>
-            <button type="button" className="lx-btn-ghost" onClick={() => setPicker(true)}>
+            <button type="button" className="lx-btn-ghost" onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}>
               <FolderOpen size={14} className="mr-1.5 inline" />
               浏览输入
             </button>
@@ -1264,7 +1265,7 @@ export function NewJob({
                     <button
                       type="button"
                       className="lx-btn-ghost shrink-0 px-3"
-                      onClick={() => setPicker(true)}
+                      onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}
                     >
                       浏览
                     </button>
@@ -1313,7 +1314,7 @@ export function NewJob({
                   <button
                     type="button"
                     className="lx-btn-ghost shrink-0 px-3"
-                    onClick={() => setPicker(true)}
+                    onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}
                   >
                     浏览
                   </button>
@@ -3180,15 +3181,7 @@ export function NewJob({
         </aside>
       </div>
 
-      <FolderPicker
-        open={picker}
-        start={inputDir || defaults?.models_dir}
-        onClose={() => setPicker(false)}
-        onPick={(path) => {
-          setInputDir(path)
-          setPicker(false)
-        }}
-      />
+      {folder.dialog}
 
       <ShardAssets
         open={assetsOpen}

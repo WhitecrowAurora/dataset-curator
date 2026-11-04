@@ -39,7 +39,7 @@ import { PageHeader, SectionPanel, SettingRow, StatusChip, type StatusTone } fro
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { OverviewFigure, OverviewFigureRow } from '../components/ui/OverviewFigures'
 import { ProgressBar } from '../components/ui/ProgressBar'
-import { FolderPicker } from '../components/FolderPicker'
+import { useFolderPicker } from '../components/FolderPicker'
 
 // 数据打包页：分包 / 拼接 / 封包 三条数据物流链路，与打标分家。
 //
@@ -149,13 +149,28 @@ export function Packaging() {
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [picker, setPicker] = useState<
-    | { target: 'split-input' }
-    | { target: 'pack-input' }
-    | { target: 'shard-dir' }
-    | { target: 'merge-root'; index: number }
-    | null
-  >(null)
+  const folder = useFolderPicker()
+  // 四种目标共用一个入口：字段不同，但"从哪开始选、选完写到哪"完全同构。
+  // 有宿主时弹系统对话框，没有才落到自绘窗口（这一页目标多，尤其值得）。
+  const openPicker = (
+    target: 'split-input' | 'pack-input' | 'shard-dir' | 'merge-root',
+    index = 0,
+  ) => {
+    const start =
+      target === 'split-input'
+        ? splitInput
+        : target === 'pack-input'
+          ? packInput
+          : target === 'shard-dir'
+            ? shardDir
+            : (roots[index] ?? '')
+    folder.pick(start, (path) => {
+      if (target === 'split-input') setSplitInput(path)
+      else if (target === 'pack-input') setPackInput(path)
+      else if (target === 'shard-dir') setShardDir(path)
+      else setRoots((prev) => prev.map((x, j) => (j === index ? path : x)))
+    })
+  }
 
   useEffect(() => {
     api
@@ -466,7 +481,7 @@ export function Packaging() {
                   <button
                     type="button"
                     className="lx-btn-ghost shrink-0 px-3"
-                    onClick={() => setPicker({ target: 'split-input' })}
+                    onClick={() => openPicker('split-input')}
                   >
                     <FolderOpen size={14} className="mr-1 inline" />
                     浏览
@@ -664,7 +679,7 @@ export function Packaging() {
                       <button
                         type="button"
                         className="lx-btn-ghost shrink-0 px-2.5"
-                        onClick={() => setPicker({ target: 'merge-root', index: i })}
+                        onClick={() => openPicker('merge-root', i)}
                         aria-label="浏览目录"
                       >
                         <FolderOpen size={14} />
@@ -750,7 +765,7 @@ export function Packaging() {
                       <button
                         type="button"
                         className="lx-btn-ghost shrink-0 px-3"
-                        onClick={() => setPicker({ target: 'shard-dir' })}
+                        onClick={() => openPicker('shard-dir')}
                       >
                         <FolderOpen size={14} className="mr-1 inline" />
                         浏览
@@ -828,7 +843,7 @@ export function Packaging() {
                   <button
                     type="button"
                     className="lx-btn-ghost shrink-0 px-3"
-                    onClick={() => setPicker({ target: 'pack-input' })}
+                    onClick={() => openPicker('pack-input')}
                   >
                     <FolderOpen size={14} className="mr-1 inline" />
                     浏览
@@ -1224,31 +1239,7 @@ export function Packaging() {
         </div>
       </div>
 
-      <FolderPicker
-        open={picker !== null}
-        start={
-          picker?.target === 'split-input'
-            ? splitInput
-            : picker?.target === 'pack-input'
-              ? packInput
-              : picker?.target === 'shard-dir'
-                ? shardDir
-                : picker && picker.target === 'merge-root'
-                  ? roots[picker.index] ?? ''
-                  : ''
-        }
-        onClose={() => setPicker(null)}
-        onPick={(path) => {
-          if (picker?.target === 'split-input') setSplitInput(path)
-          else if (picker?.target === 'pack-input') setPackInput(path)
-          else if (picker?.target === 'shard-dir') setShardDir(path)
-          else if (picker && picker.target === 'merge-root') {
-            const idx = picker.index
-            setRoots((prev) => prev.map((x, j) => (j === idx ? path : x)))
-          }
-          setPicker(null)
-        }}
-      />
+      {folder.dialog}
     </div>
   )
 }

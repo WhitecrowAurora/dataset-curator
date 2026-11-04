@@ -1,0 +1,53 @@
+# tag 打标相关的运行时（图 → 标签 / 质量打分 / 数据集输入）。
+#
+# 为什么不并进 requirements-embedded.txt：
+#   那份清单是"每次装都重跑"的小包（几十 MB，几秒装完）。这一份是 2.5 GB
+#   的大包，混在一起会让只想跑 NL / 打包的人每次安装都多等十分钟。
+#
+# 为什么**默认要装**：默认 tag 后端是 pixai，它依赖 transformers + torch +
+# timm。以前这几样只在文档里写着"按需自己装"，结果是任何人按标准流程装完，
+# 第一次跑打标就得到"tag 后端不可用：pip install torch ..."——而用户没有任何
+# 理由知道这句话该去哪敲。install.bat / install.sh 现在默认装齐这一份，
+# -SkipTag / --skip-tag 才跳过（打包和 NL 用不到它们）。
+#
+# 版本钉死的是**本机 env\python 里实测能跑的那一套**：torch 2.14.1+cu126 /
+# torchvision 0.29.1+cu126 / timm 1.0.30 / safetensors 0.8.0 / datasets 5.1.0。
+# 钉死的理由同主清单：环境是产出的一部分，换 torch 版本可能换内核、换数值，
+# 同一批图会得到不同 tag，而这种差异在产物里看不出来。
+#
+# 下面三行没钉死，是有意的：它们在本机从没装过（本轮才补进清单），钉一个
+# 没验证过的精确版本比给范围更危险——尤其 transformers，钉错版本会让 pixai
+# 的 remote code 直接抛错，而报错看上去和"缺包"没区别。给下限让它挑最新的
+# 兼容版本，等有人真跑通了再收回精确版本。
+#
+# torch / torchvision 的轮子**不在 PyPI**（CUDA 版在 download.pytorch.org），
+# 安装脚本会把这两行单独提到 PyTorch 索引去装，其余仍走普通索引。
+# 判断依据就是下面两行的包名，改包名时别改这个前缀。
+
+torch==2.14.1
+torchvision==0.29.1
+
+# ---- 打标后端 ----
+# pixai-tagger-v1.0（默认后端）：transformers.pipeline + trust_remote_code
+transformers>=4.46,<6
+# wd-eva02 后端建模型；pixai 也间接用它的预处理实现
+timm==1.0.30
+# 权重加载器，transformers 与 timm 都要
+safetensors==0.8.0
+# cl-tagger-v2 后端（onnx 计算图，不需要 torch，但和它们是同一批任务）
+onnxruntime>=1.20
+
+# ---- 质量打分 / 输入源 ----
+# quality.py 用 CLIP 算图文一致度；缺了只降级成一个分项，不中断打标
+open_clip_torch>=2.30
+# HuggingFace 数据集作为输入源（hf_source.py）
+datasets==5.1.0
+
+# 传递依赖（tokenizers / huggingface-hub / regex / filelock / tqdm / requests
+# / fsspec / dill / sympy 等）交给 pip 按上面的约束解析：它们跟着上游跑，
+# 钉死反而会在换机器时因为"某个间接包没有对应平台的轮子"装不上。
+#
+# 故意不在这一份里：
+#   llmcompressor  4bit 量化（quantize_worker.py），几百 MB 且对 torch 版本
+#                  卡得很死，只有做量化那一次需要
+#   vllm           NL 引擎，只支持 Linux，且会强制换掉上面钉好的 torch 版本

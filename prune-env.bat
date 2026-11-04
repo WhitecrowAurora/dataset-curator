@@ -13,7 +13,7 @@ rem  Usage:
 rem    prune-env.bat                          list what would go
 rem    prune-env.bat -Apply                   delete it
 rem    prune-env.bat -Apply -StripBytecode    also drop __pycache__ / *.pyc
-rem    prune-env.bat -KeepTaggerStack         keep torch/timm (no size win)
+rem    prune-env.bat -KeepTaggerStack         keep torch/transformers (no size win)
 rem
 rem  The script also rewrites env\python\Lib\site-packages\_tagger_repo.pth.
 rem  That file holds an ABSOLUTE path to the repo, so it has to be repointed on
@@ -75,7 +75,10 @@ rem Matched by prefix, so one entry covers both "torch" and
 rem "torch-2.14.1+cu126.dist-info".
 rem "torch" already covers torchvision / torchgen / torch-*.dist-info; "attr"
 rem covers attrs. Listing both again would make the loop visit a directory twice.
-set "G_TAG=torch functorch timm safetensors"
+rem transformers / tokenizers / regex used to be missing here: after prune they
+rem stayed in the package (wasting ~150 MB) while the tag backend was still
+rem broken because torch was gone.
+set "G_TAG=torch functorch timm safetensors transformers tokenizers regex"
 set "G_MATH=sympy mpmath networkx"
 set "G_HF=huggingface_hub hf_xet datasets truststore opentelemetry dill multiprocess _multiprocess xxhash fsspec filelock tqdm"
 set "G_PD=pandas dateutil python_dateutil tzdata"
@@ -182,8 +185,9 @@ echo          node_modules dist.bak dist\desktop
 echo  [prune] On the target machine run install.bat ONCE before starting
 echo          Tagger.Shell.exe - it repoints .pth and installs missing deps.
 if "%KEEP%"=="0" (
-    echo  [prune] torch was removed. To get the tag backends back:
-    echo            env\python\python.exe -m pip install torch torchvision timm safetensors
+    echo  [prune] tag runtime was removed. To get the tag backends back:
+    echo            env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+    echo            env\python\python.exe -m pip install -r requirements-tag.txt
 )
 echo.
 goto end
@@ -208,7 +212,7 @@ echo.
 echo    prune-env.bat                          list what would go
 echo    prune-env.bat -Apply                   delete it
 echo    prune-env.bat -Apply -StripBytecode    also drop __pycache__ / *.pyc
-echo    prune-env.bat -KeepTaggerStack         keep torch/timm
+echo    prune-env.bat -KeepTaggerStack         keep torch/transformers (tag backends)
 echo.
 exit /b 0
 

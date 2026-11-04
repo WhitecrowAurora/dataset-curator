@@ -402,8 +402,10 @@ class PixAITagger(TagBackend):
             from transformers import pipeline
         except ImportError as exc:
             raise TaggerUnavailable(
-                "pixai tagger 需要 transformers/torch/Pillow：\n"
-                "  pip install torch torchvision transformers timm"
+                "pixai tagger 需要 transformers/torch/Pillow。\n"
+                "  一键补装：重跑 install.bat（Windows）/ ./install.sh（Linux），\n"
+                "  它们默认会装 requirements-tag.txt；或手动：\n"
+                "    python -m pip install -r requirements-tag.txt"
             ) from exc
 
         kwargs: dict[str, Any] = {
@@ -509,8 +511,9 @@ class WDEva02Tagger(TagBackend):
             from safetensors.torch import load_file
         except ImportError as exc:
             raise TaggerUnavailable(
-                "wd-eva02 tagger 需要 torch/timm/safetensors：\n"
-                "  pip install torch timm safetensors"
+                "wd-eva02 tagger 需要 torch/timm/safetensors。\n"
+                "  一键补装：重跑 install.bat（Windows）/ ./install.sh（Linux），\n"
+                "  或手动：python -m pip install -r requirements-tag.txt"
             ) from exc
 
         root = self._resolve_dir()

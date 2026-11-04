@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { History as HistoryIcon, ListChecks, PlayCircle, RefreshCw } from 'lucide-react'
+import {
+  History as HistoryIcon,
+  ListChecks,
+  Loader2,
+  Play,
+  PlayCircle,
+  RefreshCw,
+} from 'lucide-react'
 import { api, type Snapshot } from '../lib/api'
 import { basename, fmtCount, fmtSeconds } from '../lib/format'
 import { PageHeader, SectionPanel, SheetHead, StatusChip, type StatusTone } from '../components/ui/launcher'
@@ -9,6 +16,7 @@ import { ProgressBar } from '../components/ui/ProgressBar'
 const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   pending: { label: '排队中', tone: 'neutral' },
   running: { label: '打标中', tone: 'accent' },
+  paused: { label: '已暂停', tone: 'warning' },
   done: { label: '已完成', tone: 'success' },
   stopped: { label: '已停止', tone: 'warning' },
   failed: { label: '失败', tone: 'danger' },
@@ -37,6 +45,8 @@ export function History({
   const [jobs, setJobs] = useState<Snapshot[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 哪一行正在"继续"。用一个 id 而不是布尔：行与行的按钮互不牵连。
+  const [busyId, setBusyId] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -51,6 +61,29 @@ export function History({
     }
   }, [])
 
+  /** 继续。两种状态走两条路，但对用户是同一件事：
+   *  - paused：worker 还挂着，叫醒它即可，同一个 id 接着跑；
+   *  - stopped / failed：线程已经退出了，只能按原参数重开一个任务，
+   *    已打完的图由产物 + 指纹判定跳过，等于续做（历史里会多一条）。 */
+  async function continueJob(job: Snapshot) {
+    setBusyId(job.id)
+    setError(null)
+    try {
+      if (job.status === 'paused') {
+        await api.resume(job.id)
+        onOpenRun(job.id)
+      } else {
+        const snap = await api.restart(job.id)
+        await load()
+        onOpenRun(snap.id)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyId('')
+    }
+  }
+
   useEffect(() => {
     void load()
   }, [load])
@@ -61,7 +94,7 @@ export function History({
         icon={<HistoryIcon size={17} />}
         eyebrow="本进程内最近 20 条"
         title="历史任务"
-        description="刷新页面或切走都不影响这里。想接着看某一批，点「进度」回到实时视图，或直接「结果」翻产物。"
+        description="刷新页面或切走都不影响这里。点「进度」回到实时视图，「结果」翻产物；停下或失败的任务点「继续」接着做。"
         actions={
           <button
             type="button"
@@ -110,7 +143,8 @@ export function History({
                         {active && <span className="ml-1.5 text-[10px] text-lx-accent">当前</span>}
                       </div>
                       <div className="mt-0.5 truncate font-mono text-[10.5px] text-lx-muted" title={job.out_dir}>
-                        {job.spec.backend} · {job.spec.precision} · batch {job.spec.batch} ·{' '}
+                        {job.spec.backend} · {job.spec.precision} · batch {job.spec.batch}
+                        {job.spec.preprocess === 'tensor' ? ' · GPU 预处理' : ''} ·{' '}
                         {basename(job.out_dir) || '默认输出'}
                       </div>
                     </div>
@@ -151,6 +185,26 @@ export function History({
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1.5">
+                    {['paused', 'stopped', 'failed'].includes(job.status) && (
+                      <button
+                        type="button"
+                        className="lx-btn-ghost inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px] text-lx-accent"
+                        disabled={busyId === job.id}
+                        title={
+                          job.status === 'paused'
+                            ? '原地继续：模型和连接都还热着，立刻接着跑'
+                            : '用同一套参数重开一批，已打完的图会自动跳过'
+                        }
+                        onClick={() => void continueJob(job)}
+                      >
+                        {busyId === job.id ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Play size={13} />
+                        )}
+                        继续
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="lx-btn-ghost inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px]"

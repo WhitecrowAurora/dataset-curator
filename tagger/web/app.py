@@ -31,6 +31,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .. import nl_api
 from ..config import ConfigError
 from ..local_tag import EXTS
 from ..pipeline import plan_inputs, plan_stats
@@ -39,8 +40,11 @@ from .jobs import GUARD_KNOBS, MANAGER, STAT_FINE, Job, JobSpec
 from .models import MODELS
 from .uploads import UPLOADS, parquet_rows
 from .dedup import DEDUPS
+from .hf_downloads import HfDownloads
 from .packaging import DATAJOBS
 from .vllm_service import VLLM
+from .multi_gpu import MULTI
+from .selfcheck import SELFCHECK
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 DIST_DIR = UI_DIR / "dist"
@@ -67,6 +71,8 @@ class JobRequest(BaseModel):
     device: str = "auto"
     precision: str = "bf16"
     batch: int = 4
+    # pil = CPU 缩放/归一化（现状）；tensor = 缩放/归一化上卡（解码仍在 CPU）
+    preprocess: str = "pil"
     threshold: float | None = None
     # tag 后端补充（两种引擎通用）
     keep_categories: list[str] = Field(default_factory=list)
@@ -80,6 +86,12 @@ class JobRequest(BaseModel):
     check_space: bool = True
 
     # ---- VLM 服务（engine="vlm"）
+    # 推理来源：local = 本机/自建服务；openai = OpenAI 兼容 API；
+    # anthropic = Anthropic Messages API。后两者不加载本地权重、不读指纹。
+    vlm_provider: str = "local"
+    # API 模式地址与密钥。地址留空按来源取默认域名；密钥不进快照（会被抹成 ***）。
+    api_base: str = ""
+    api_key: str = ""
     url: str = "http://127.0.0.1:8000"
     vlm_model: str = "tagger"
     # both = NL + tag；nl = 只要 NL；tag = 只要 tag（单模式都由 VLM 出，本地后端强制 none）
@@ -87,8 +99,17 @@ class JobRequest(BaseModel):
     temperature: float = 0.2
     top_p: float = 0.9
     max_tokens: int = 0
+    # 描述长度引导（字符区间），例如 [250, 500]。空 = 按 token 区间派生。
+    # 它与 max_tokens 是两件事：max_tokens 管"写不下就截断"，这个管"往多长写"。
+    # 实测 400-1024 → 250-500：字数 −33%、延迟 −36%、要素覆盖只掉 2~3pp。
+    caption_chars: list[int] | None = None
     timeout_s: int = 90
     concurrency: int = 2
+    # 多卡（数据并行）。multi_gpu 打开时忽略 url，改用多卡服务组的地址；
+    # per_card_seqs 是"每张卡同时跑几条"（0 = 按分档表/显存推算）。
+    multi_gpu: bool = False
+    multi_gpus: list[int] = []
+    per_card_seqs: int = 0
     max_pixels: int = 0
     seed: int | None = None
     # 同一张图累计失败多少次后跳过（0 = 不限制）
@@ -131,6 +152,21 @@ class JobRequest(BaseModel):
     hf_token: str = ""
     hf_revision: str = "main"
     hf_files: list[str] = Field(default_factory=list)
+    # auto / parquet / webdataset。parquet 是逐行流式（不落盘），
+    # tar 分片要先下到本地再打——磁盘策略完全不同，所以必须能让用户看见。
+    hf_format: str = "auto"
+    # tar 模式：预取几片（下载与打标并行）；0 = 严格串行
+    hf_prefetch: int = 1
+    # 单片用几条并发连接（1 = 单连接；文件 < 16 MB 时自动单连接）
+    hf_conns: int = 4
+    # HF 请求的代理。空 = 用设置里的全局代理
+    hf_proxy: str = ""
+    # 给产物留的磁盘余量（GB）；0 = 自动（最大分片的 30%，不少于 2 GB）
+    hf_reserve_gb: float = 0.0
+
+    # 结果缓存：同图同参复用上次产出。默认关（首轮命中率为 0）
+    cache: bool = False
+    cache_max_gb: float = 8.0
 
     # ---- 产物形态（vlm 引擎：parquet 回传给汇总机）
     artifact_format: str = "parquet"
@@ -248,6 +284,66 @@ class VllmStartRequest(BaseModel):
     local_media_root: str | None = None
 
 
+class NlApiProbeRequest(BaseModel):
+    """探测外部推理 API：地址通不通、模型认不认、图看不看得见。
+
+    本机模式下有「启动 → 就绪」这个红灯，API 模式没有进程可看；没有这个
+    接口的话，密钥/模型名写错要等任务跑起来、第一条产物失败才暴露。
+    key 可以留空——免鉴权的自建网关很常见，留空时走环境变量。
+    """
+    provider: str = "openai"
+    base: str = ""
+    model: str = ""
+    key: str = ""
+    timeout_s: float = 30.0
+
+
+class NlApiKeyRequest(BaseModel):
+    """记住 / 忘记一把密钥。key 传空 = 删除该来源的存档。
+
+    remember=false 时把刚存的删掉：页面上的勾选框取消要能立刻生效，不能
+    留下一个"看不见但还在盘上"的密钥。
+    """
+    provider: str = "openai"
+    base: str = ""
+    key: str = ""
+    remember: bool = True
+
+
+class MultiStartRequest(BaseModel):
+    """多卡：每张卡各起一个单卡服务。
+
+    gpus 是 nvidia-smi 的物理卡号，空 = 用全部卡。base_port 是第 0 个
+    worker 的端口，其余按卡顺序 +1、+2……所以选卡时端口会跳号，
+    页面照 gpus 里的顺序显示真实端口，不要自己算。
+
+    per_card_seqs 是每卡开几个 slot（= 该卡服务的 max_num_seqs / -np）。
+    它决定"每张卡同时处理几条"，与任务表单里的并发是同一个数——
+    填了任务侧就不用再填。
+    """
+    engine: str | None = None
+    gpus: list[int] = []
+    base_port: int = 8010
+    model: str | None = None
+    tier: str | None = None
+    precision: str | None = None
+    served_name: str | None = None
+    per_card_seqs: int | None = None
+    timeout_s: int = 1800
+
+
+class SelfCheckRequest(BaseModel):
+    """部署自检：给一个装图片的文件夹，逐项验一遍这台机器能不能干活。
+
+    url 留空时自动找多卡服务组的第一个；都没起就跳过"服务/推理"两项——
+    skip 不算失败，装机验证不该因为"还没开那个可选功能"整片飘红。
+    """
+    input_dir: str
+    recursive: bool = True
+    sample: int = 3
+    url: str = ""
+
+
 class QuantStartRequest(BaseModel):
     """页内量化：把当前模型压成 W4A16。
 
@@ -363,12 +459,45 @@ def _defaults() -> dict:
         "device": str(tagging.get("device") or "auto"),
         "precision": "bf16",
         "batch": int(tagging.get("batch") or 4),
+        # 配置里没写就默认 pil：tensor 只有大 PNG 才真赚（见 perf-baseline §12）
+        "preprocess": str(tagging.get("preprocess") or "pil"),
         "threshold": float(((tagging.get("thresholds") or {}).get("default")) or 0.35),
         "keep_categories": list(tagging.get("keep_categories") or []),
         # 各 tag 后端在配置里绑定的 HF 仓库（按后端分组，切换后端时才不会拿错）。
         "tag_models": {str(k): str(v) for k, v in (tagging.get("models") or {}).items()},
         "vllm_models": vllm_models,
         "vllm_tiers": vllm_tiers,
+        # 多卡组默认值。基端口故意和单卡服务的 8000 错开：两个面板的默认
+        # 值撞在一起时，先起的那个会让后起的报"端口被占用"，而人第一反应
+        # 是去查进程而不是改端口。
+        "multi": {"base_port": 8010, "per_card_seqs": 0},
+        # 推理来源下拉。默认地址与"密钥去哪个环境变量找"都由后端给，
+        # 前端只负责显示——把 api.openai.com 写进 JSX 的话，改一次要发两处。
+        "vlm_providers": [
+            {
+                # 后端的本机用空串表示，页面上一律写 "local"（少一层空串判断）。
+                "value": value or "local",
+                "label": nl_api.LABELS[value],
+                "base": nl_api.DEFAULT_BASES.get(value, ""),
+                "env_key": (nl_api.ENV_KEYS.get(value) or [""])[0],
+                # 免鉴权的自建网关很常见（LM Studio / one-api 默认不开 key），
+                # 所以不能把"必须填密钥"写死成通用规则。
+                "requires_key": False,
+                # 云端要的是"每分钟请求数"，与本机显存无关，默认值各给一档。
+                "concurrency": nl_api.default_concurrency(value),
+                # 推荐输入尺寸（总像素）。云端看不到更多细节时，多给的像素
+                # 只是多付钱，所以基线由来源决定而不是沿用本地预算。
+                "max_pixels": nl_api.default_max_pixels(value),
+                # 模型名建议（<datalist>）：只是提示，可以填任何 id。
+                "models": nl_api.model_hints(value),
+                # 记住过密钥就回一份脱敏值，页面知道"这里有一份存档"，
+                # 但拿不到明文——浏览器不该能捞出密钥。
+                "saved": ({"base": entry.get("base", ""),
+                           "key_masked": nl_api.mask_key(entry.get("key", ""))}
+                          if (entry := nl_api.saved_for(value)) else None),
+            }
+            for value in nl_api.PROVIDERS
+        ],
         "guard": guard,
         # 质检的配置默认值。0 在这套表单里是"不覆盖"的哨兵值，所以页面
         # 必须能读到真实数字才能把占位说明写对。
@@ -540,6 +669,90 @@ def _start_path(raw: str) -> Path:
     return Path.cwd()
 
 
+# ---------------------------------------------------------------- 下载管理
+
+# 下载队列是懒建的：模块导入时就起后台线程，会让每个测试进程都多一个
+# 跑着的线程，也让 `tagger` 命令行在不需要下载时白占一份状态文件。
+_downloads: HfDownloads | None = None
+_downloads_lock = threading.Lock()
+
+
+def downloads() -> HfDownloads:
+    global _downloads
+    with _downloads_lock:
+        if _downloads is None:
+            _downloads = HfDownloads(
+                state_path=Path("run") / "hf-downloads.json")
+        return _downloads
+
+
+# ---------------------------------------------------------------- 计划任务
+
+# 同样懒建：计划任务要起一个盯任务的线程，导入即启动会让测试进程凭空多一条。
+_plan: "PlanWatcher | None" = None
+_plan_lock = threading.Lock()
+
+
+def plans() -> "PlanWatcher":
+    global _plan
+    from .plan import PlanWatcher
+
+    with _plan_lock:
+        if _plan is None:
+            _plan = PlanWatcher(state_path=Path("run") / "plan.json")
+        return _plan
+
+
+class TagPreviewRequest(BaseModel):
+    files: list[str] = Field(default_factory=list)
+    limit: int = 5
+    key: str = "image_id"
+    # 空 = 保留产物自带的 image_path
+    image_root: str = ""
+    image_ext: str = ".jpg"
+
+
+class PlanRequest(BaseModel):
+    """跑到 N 张之后：停任务 / 关机。"""
+
+    after_images: int = 0
+    action: str = "stop"      # stop | shutdown
+    enabled: bool = True
+
+
+class TagMergeRequest(BaseModel):
+    files: list[str] = Field(default_factory=list)
+    out_path: str = ""
+    # full = 保留字段并集（便于核对）；train = 只留四项（训练侧口径）
+    format: str = "full"
+    as_jsonl: bool = False
+    key: str = "image_id"
+    # first = 先读到的胜出；last = 后读到的覆盖
+    on_conflict: str = "first"
+    require: str = "any"
+    indent: int = 2
+    # 图片路径前缀：填了就覆盖成 <root>[/目录]/<image_id><ext>，留空保留原值
+    image_root: str = ""
+    image_ext: str = ".jpg"
+    # 自检时把 image_path 的前缀换成这台机器上的实际目录
+    local_root: str = ""
+    # 0 = 自动（估算量大时自动分桶）；>0 = 强制分桶，每桶约这么多条
+    batch_size: int = 0
+
+
+class DownloadRequest(BaseModel):
+    repo: str = ""
+    token: str = ""
+    revision: str = "main"
+    files: list[str] = Field(default_factory=list)
+    # 文件名 → 字节数。列表接口顺手带过来的 size 能省掉一次 HEAD。
+    sizes: dict[str, int] = Field(default_factory=dict)
+    # 给产物留的余量（GB）。0 = 沿用上一次设置
+    reserve_gb: float = 0.0
+    # 单个分片用几条并发连接。1 = 单连接；上限 16
+    conns: int = 4
+
+
 def _artist_context_default(enabled: bool, depth: int, inject: bool = True):
     """预览接口用的画师上下文。与任务执行时同一份配置口径。"""
     from .jobs import _artist_context
@@ -554,6 +767,12 @@ def _artist_context_default(enabled: bool, depth: int, inject: bool = True):
 def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # 计划任务是懒建的，但服务一启动就得把线程拉起来：否则用户设了
+        # "跑完关机"、关掉页面再重启服务，计划就再也不会触发了。
+        try:
+            plans()
+        except Exception:               # noqa: BLE001 - 计划坏了不该让服务起不来
+            pass
         yield
         # Web 进程退出时收掉自己拉起的 vllm 子进程。不收的话它会继续占着
         # 显存（子进程在自己的进程组里，Ctrl+C 打不到），下次启动报显存不足，
@@ -563,6 +782,12 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             if VLLM.snapshot()["status"] != "stopped":
                 VLLM.stop()
         except Exception:               # noqa: BLE001 - 退出路径上不值得再报错
+            pass
+        # 多卡组的进程同样要收：留着的话每张卡都被占住，下次启动直接 OOM。
+        try:
+            if MULTI.snapshot()["status"] != "stopped":
+                MULTI.stop()
+        except Exception:               # noqa: BLE001
             pass
         # 量化的子进程同样要收：它比 vLLM 更贪显存，留着会让下一次启动直接 OOM。
         try:
@@ -756,6 +981,81 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             raise HTTPException(409, "这个任务已经结束或不存在")
         job = MANAGER.get(job_id)
         return {"ok": True, "snapshot": job.snapshot() if job else None}
+
+    @app.post("/api/jobs/{job_id}/pause")
+    def pause_job(job_id: str) -> dict:
+        """暂停：在途的几张打完就挂起，产物照常落盘。"""
+        try:
+            if not MANAGER.pause(job_id):
+                raise HTTPException(409, "这个任务没有在跑，无法暂停")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        job = MANAGER.get(job_id)
+        return {"ok": True, "snapshot": job.snapshot() if job else None}
+
+    @app.post("/api/jobs/{job_id}/resume")
+    def resume_job(job_id: str) -> dict:
+        """原地继续：进程还在，worker 只是挂着。"""
+        if not MANAGER.resume(job_id):
+            raise HTTPException(409, "这个任务不是暂停状态")
+        job = MANAGER.get(job_id)
+        return {"ok": True, "snapshot": job.snapshot() if job else None}
+
+    @app.post("/api/jobs/{job_id}/restart", status_code=202)
+    def restart_job(job_id: str) -> dict:
+        """续跑一个已经停下的任务：同一套参数重开，已打完的图自动跳过。
+
+        与 `/resume` 的分工：`resume` 叫醒还活着的 worker，`restart` 是
+        线程已经退出、只能按原参数重来一个。两者对用户都叫"继续"。
+        """
+        try:
+            return MANAGER.restart(job_id).snapshot()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, ConfigError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/resume")
+    def resume_state() -> dict:
+        """上次没跑完的任务（暂停/停止后把程序关了）。页面打开时问一次。
+
+        只回摘要，不回完整 spec：那份里有 API 密钥，而页面上要看的只是
+        "哪个目录、做到第几张"。
+        """
+        data = MANAGER.wanted_resume()
+        if data is None:
+            return {"ok": False, "resume": None}
+        spec = data.get("spec") or {}
+        return {
+            "ok": True,
+            "resume": {
+                "job_id": data.get("job_id"),
+                "why": data.get("why"),
+                "saved_at": data.get("saved_at"),
+                "out_dir": data.get("out_dir"),
+                "counts": data.get("counts") or {},
+                "engine": spec.get("engine"),
+                "input_dir": spec.get("input_dir"),
+                "vlm_model": spec.get("vlm_model"),
+                "output_mode": spec.get("output_mode"),
+            },
+        }
+
+    @app.delete("/api/resume")
+    def resume_dismiss() -> dict:
+        """不再提示（只删记录，产物一张不动）。给"这个活儿我不打算继续了"用。"""
+        MANAGER._clear_resume()
+        return {"ok": True}
+
+    @app.post("/api/resume", status_code=202)
+    def resume_start() -> dict:
+        """用 resume.json 重建任务并开跑。已打完的图由产物判定自动跳过。"""
+        try:
+            return MANAGER.resume_last().snapshot()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, ConfigError) as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/jobs/{job_id}/results")
     def job_results(job_id: str, offset: int = 0, limit: int = 40,
@@ -953,22 +1253,329 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         job = DATAJOBS.get(job_id)
         return {"ok": True, "snapshot": job.snapshot() if job else None}
 
+    @app.get("/api/disk")
+    def disk_free(path: str = "") -> dict:
+        """目录所在盘的剩余空间（字节）。给"按硬盘空间下载分片"的表单用。
+
+        路径不存在时往上找存在的父级——用户经常还没建输出目录。
+        """
+        from ..hf_source import free_bytes
+
+        target = (path or "").strip()
+        return {"path": target or ".", "free_bytes": free_bytes(target or ".")}
+
     @app.get("/api/hf/files")
-    def hf_files(repo: str = "", token: str = "", revision: str = "main") -> dict:
+    def hf_files(repo: str = "", token: str = "", revision: str = "main",
+                 format: str = "auto") -> dict:
         """仓库里的分片清单，供表单"查看文件列表"。token 只在本次请求内
-        使用：不落盘、不进日志、不进任何任务状态。"""
+        使用：不落盘、不进日志、不进任何任务状态。
+
+        `format` 决定列哪种：parquet 是逐行流式（一行不落盘），tar 分片
+        要先下载到本地——两者的磁盘行为差别太大，不能在页面上混着看。
+        """
         from .. import hf_source
+        from .models import proxy_url
 
         if not repo.strip():
             raise HTTPException(400, "缺少 repo")
+        proxy = proxy_url()
+        fmt = (format or "auto").strip().lower()
         try:
-            names = hf_source.list_parquet(repo.strip(), revision=revision,
-                                           token=token or None)
+            if fmt == "auto":
+                fmt = hf_source.detect_format(repo.strip(), revision=revision,
+                                              token=token or None, proxy=proxy)
+                if not fmt:
+                    raise hf_source.HFError(
+                        "仓库里既没有 *.parquet 也没有 *.tar 分片。")
+            # 两种格式都从 tree 接口拿，顺手带上 size——下载页要按大小
+            # 做空间检查，没有 size 就只能"下完再看"，那等于没有限流。
+            pattern = "*.tar" if fmt == "webdataset" else "*.parquet"
+            sized = hf_source.list_shards_sized(
+                repo.strip(), revision=revision, pattern=pattern,
+                token=token or None, proxy=proxy)
+            names = [n for n, _ in sized]
+            sizes = dict(sized)
         except hf_source.HFError as exc:
             raise HTTPException(400, f"HF 访问失败：{exc}") from exc
         except Exception as exc:          # noqa: BLE001 - 网络/权限统一翻 400
             raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
-        return {"repo": repo.strip(), "revision": revision, "files": names}
+        return {"repo": repo.strip(), "revision": revision,
+                "format": fmt, "files": names, "sizes": sizes}
+
+    # ---- 打标管理（多个 json → 一个单体 json）
+
+    @app.get("/api/tag-manage/scan")
+    def tag_manage_scan(dir: str = "", recursive: bool = True) -> dict:
+        """扫目录下的 json。只按文件名分类，不读内容——几万个文件也不卡。"""
+        from .. import tag_manage as tm
+
+        root = (dir or "").strip()
+        if not root:
+            raise HTTPException(400, "缺少目录")
+        try:
+            files = tm.scan(root, recursive=recursive)
+        except tm.TagManageError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        counts = {"tag": 0, "nl": 0, "parquet": 0, "other": 0,
+                  "empty": 0, "bytes": 0}
+        for row in files:
+            # 用 setdefault：以后再加一种产物形态，这里不该再变成 KeyError
+            counts[str(row["kind"])] = counts.get(str(row["kind"]), 0) + 1
+            counts["bytes"] += int(row["size"])
+            if row["empty"]:
+                counts["empty"] += 1
+        return {"root": root, "files": files, "counts": counts}
+
+    @app.post("/api/tag-manage/preview")
+    def tag_manage_preview(req: "TagPreviewRequest") -> dict:
+        """合并前预览前几条。预览走的是真合并逻辑，不是随便读几行。"""
+        from .. import tag_manage as tm
+
+        if not req.files:
+            raise HTTPException(400, "没有选中文件")
+        rows = tm.preview(req.files, limit=max(1, min(20, req.limit)),
+                          key=req.key or "image_id",
+                          image_root=req.image_root,
+                          image_ext=req.image_ext or ".jpg")
+        fields: list[str] = []
+        for row in rows:
+            for name in row:
+                if name not in fields:
+                    fields.append(name)
+        return {"rows": rows, "fields": fields}
+
+    @app.post("/api/tag-manage/check", status_code=202)
+    def tag_manage_check(req: "TagMergeRequest") -> dict:
+        """合并后逐条核对 image_path 指向的图在不在本地。
+
+        路径填错是**静默失败**：合并照样成功，直到训练侧读第一批才炸。
+        所以宁可多花几秒先查一遍。
+
+        几十万条在网络盘上是分钟级，挂在一个 HTTP 请求里就是"页面转圈、
+        切页丢掉、超时算失败"——和合并同一个道理，所以也走后台 + 轮询。
+        """
+        from .. import tag_manage as tm
+        from . import tag_merge_tasks
+
+        if not req.files:
+            raise HTTPException(400, "没有选中文件")
+
+        def run(tick):
+            return tm.check_paths(
+                req.files, key=req.key or "image_id",
+                image_root=req.image_root,
+                image_ext=req.image_ext or ".jpg",
+                local_root=req.local_root,
+                on_progress=tick)
+
+        return {"task_id": tag_merge_tasks.start(run, kind="check").id}
+
+    @app.get("/api/tag-manage/check/{task_id}")
+    def tag_manage_check_status(task_id: str) -> dict:
+        from . import tag_merge_tasks
+
+        task = tag_merge_tasks.get(task_id)
+        if task is None:
+            raise HTTPException(404, "没有这个自检任务（服务重启过？）")
+        return task.as_dict()
+
+    @app.get("/api/activities")
+    def activities() -> dict:
+        """底部进度条的唯一数据源：所有"正在跑"的活儿，一种形态。
+
+        刻意只返回进行中的条目：底部条要么有东西显示、要么整条不占位。
+        打标/数据打包各自维护状态，这里只做归一化，不复制它们的语义。
+        """
+        from . import tag_merge_tasks
+
+        items: list[dict] = []
+
+        for job in MANAGER.all():
+            if job.status not in ("pending", "running"):
+                continue
+            s = job.snapshot()
+            counts = s.get("counts") or {}
+            done = int(counts.get("done") or 0) + int(counts.get("skipped") or 0) \
+                + int(counts.get("failed") or 0)
+            total = int(counts.get("total") or 0)
+            spec = s.get("spec") or {}
+            items.append({
+                "kind": "tag",
+                "id": s["id"],
+                "title": "打标",
+                "detail": str(spec.get("input_dir") or ""),
+                "phase": str(s.get("phase") or ""),
+                "done": done,
+                "total": total,
+                "progress": s.get("progress"),
+                "rate": s.get("rate") or 0,
+                "eta_s": s.get("eta_s"),
+                "href": f"/run/{s['id']}",
+            })
+
+        kind_label = {"split": "分包", "merge": "拼接", "pack": "封包"}
+        for job in DATAJOBS.all():
+            if job.status not in ("pending", "running"):
+                continue
+            s = job.snapshot()
+            items.append({
+                "kind": "data",
+                "id": s["id"],
+                "title": kind_label.get(s.get("kind", ""), "数据任务"),
+                "detail": str(s.get("current") or ""),
+                "phase": str(s.get("kind") or ""),
+                "done": int(s.get("done") or 0),
+                "total": int(s.get("total") or 0),
+                "progress": None,
+                "rate": s.get("rate") or 0,
+                "eta_s": s.get("eta_s"),
+                "href": "/packaging",
+            })
+
+        for task in tag_merge_tasks.running():
+            items.append({
+                "kind": task.kind,
+                "id": task.id,
+                "title": "自检" if task.kind == "check" else "合并",
+                "detail": task.stage,
+                "phase": task.stage,
+                "done": task.done,
+                "total": task.total,
+                "progress": None,
+                "rate": 0,
+                "eta_s": None,
+                "href": "/tag-manage",
+            })
+
+        return {"items": items}
+
+    @app.get("/api/sysinfo")
+    def sysinfo() -> dict:
+        """底栏右侧的四个数：CPU 占用/温度、GPU 占用/温度。
+
+        读数在 sysinfo 模块里做了缓存（GPU 子进程 2s、CPU 用累计差），
+        所以这里被 1 秒轮询一次也不会把机器压出额外开销。
+        """
+        from . import sysinfo as si
+
+        return si.snapshot()
+
+    @app.get("/api/plan")
+    def get_plan() -> dict:
+        return plans().snapshot()
+
+    @app.put("/api/plan")
+    def put_plan(req: PlanRequest) -> dict:
+        """设置"跑到 N 张后停止/关机"。关机不可逆，页面必须二次确认。"""
+        try:
+            return plans().configure(after_images=req.after_images,
+                                     action=req.action, enabled=req.enabled)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.delete("/api/plan")
+    def delete_plan() -> dict:
+        return plans().cancel()
+
+    @app.post("/api/tag-manage/merge", status_code=202)
+    def tag_manage_merge(req: "TagMergeRequest") -> dict:
+        """把选中的 json 合并成一个大单体 json（后台跑，前台轮询进度）。
+
+        校验留在同步这一段：参数错了要立刻 400，而不是让用户先拿到一个
+        task_id、轮询两秒才发现"输出路径没填"。
+        """
+        from .. import tag_manage as tm
+
+        from . import tag_merge_tasks
+
+        if not req.files:
+            raise HTTPException(400, "没有选中文件")
+        out_path = (req.out_path or "").strip()
+        if not out_path:
+            raise HTTPException(400, "缺少输出文件路径")
+        if not out_path.lower().endswith((".json", ".jsonl")):
+            raise HTTPException(400, "输出文件请用 .json 或 .jsonl")
+        batch = max(0, int(req.batch_size))
+
+        def run(tick):
+            return tm.merge_files(
+                req.files, out_path,
+                fmt=req.format, as_jsonl=req.as_jsonl,
+                key=req.key or "image_id",
+                on_conflict=req.on_conflict,
+                require=req.require,
+                indent=max(0, min(8, int(req.indent))),
+                image_root=req.image_root,
+                image_ext=req.image_ext or ".jpg",
+                batch_size=batch,
+                on_progress=tick)
+
+        return {"task_id": tag_merge_tasks.start(run).id}
+
+    @app.get("/api/tag-manage/merge/{task_id}")
+    def tag_manage_merge_status(task_id: str) -> dict:
+        from . import tag_merge_tasks
+
+        task = tag_merge_tasks.get(task_id)
+        if task is None:
+            # 服务重启过、或 id 拼错。页面据此停止轮询。
+            raise HTTPException(404, "没有这个合并任务（服务重启过？）")
+        return task.as_dict()
+
+    # ---- 分片下载队列（下载页；与打标任务解耦）
+
+    @app.get("/api/downloads")
+    def downloads_state() -> dict:
+        """队列快照 + 缓存目录 + 剩余空间 + 当前全局代理。前端每秒拉一次。"""
+        from .models import proxy_url
+
+        snap = downloads().snapshot()
+        # 代理是"这台机器怎么上网"的全局设置（与模型下载共用一份），
+        # 下载页显示它，避免"以为设了、其实这里没走"。
+        snap["proxy"] = proxy_url()
+        return snap
+
+    @app.post("/api/downloads")
+    def downloads_submit(req: DownloadRequest) -> dict:
+        """把选中的分片排进队列。已经在下/在排的同一片不会重复排。"""
+        from .models import proxy_url
+
+        if not req.repo.strip():
+            raise HTTPException(400, "缺少 repo")
+        mgr = downloads()
+        if req.reserve_gb > 0:
+            mgr.set_reserve(int(req.reserve_gb * (1 << 30)))
+        try:
+            created = mgr.submit(req.repo, req.files, sizes=req.sizes,
+                                 token=req.token, revision=req.revision,
+                                 conns=req.conns, proxy=proxy_url())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:          # noqa: BLE001
+            raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+        return {"created": created}
+
+    @app.post("/api/downloads/{item_id}/cancel")
+    def downloads_cancel(item_id: str) -> dict:
+        """取消/暂停一片。正在下的会保留 .part，再点一次从断点续传。"""
+        return {"ok": downloads().cancel(item_id)}
+
+    @app.post("/api/downloads/cancel-all")
+    def downloads_cancel_all() -> dict:
+        downloads().cancel_all()
+        return {"ok": True}
+
+    @app.post("/api/downloads/clear")
+    def downloads_clear() -> dict:
+        """清掉已结束的条目（不删磁盘文件）。"""
+        return {"removed": downloads().clear_finished()}
+
+    @app.get("/api/downloads/cached")
+    def downloads_cached(repo: str = "") -> dict:
+        """本地已经下好的分片。用来在清单上标"已就绪"、避免重复下。"""
+        if not repo.strip():
+            raise HTTPException(400, "缺少 repo")
+        return {"repo": repo.strip(), "files": downloads().cached(repo)}
 
     # ---- vLLM 服务（NL 模式的前置）
 
@@ -1058,6 +1665,140 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def vllm_probe(url: str = "") -> dict:
         """远程服务只能探：/health 说明活着，/v1/models 说明模型名对不对。"""
         return VLLM.probe(url)
+
+    # ---- 外部推理 API（NL 打标的 openai / anthropic 来源）
+    #
+    # 这两条只服务"不走本地权重"的用法，所以与 /api/vllm/* 并列：那个是
+    # "进程怎么起"，这个是"对方接口通不通"。
+
+    @app.post("/api/nl-api/probe")
+    def nl_api_probe(req: NlApiProbeRequest) -> dict:
+        """发一张 8×8 的小图走一次真实请求：一次拿全地址/密钥/模型/视觉能力。"""
+        try:
+            provider = nl_api.normalize_provider(req.provider)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not provider:
+            raise HTTPException(400, "本机模式不需要探测；请用 /api/vllm/probe")
+        key = req.key.strip() or nl_api.env_api_key(provider)
+        return nl_api.probe(
+            provider=provider,
+            base=req.base.strip() or nl_api.default_base(provider),
+            model=req.model.strip(),
+            api_key=key,
+            timeout_s=max(5.0, min(120.0, float(req.timeout_s or 30.0))),
+        )
+
+    @app.get("/api/nl-api/keys")
+    def nl_api_keys() -> dict:
+        """已记住的密钥（脱敏）+ 价目是否存在。明文永远不出后端。"""
+        saved = nl_api.load_saved()
+        providers = {}
+        for name in nl_api.PROVIDERS:
+            if not name:
+                continue
+            entry = nl_api.saved_for(name)
+            providers[name] = ({"base": entry.get("base", ""),
+                                "key_masked": nl_api.mask_key(entry.get("key", ""))}
+                               if entry else None)
+        return {"providers": providers,
+                "prices": sorted((saved.get("prices") or {}).keys())}
+
+    @app.post("/api/nl-api/keys")
+    def nl_api_keys_save(req: NlApiKeyRequest) -> dict:
+        try:
+            provider = nl_api.normalize_provider(req.provider)
+            if not provider:
+                raise ValueError("本机模式没有 API 密钥可存")
+            if req.remember and req.key.strip():
+                nl_api.store_key(provider, req.base, req.key)
+            elif not req.remember:
+                nl_api.store_key(provider, "", "")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"写不进 {nl_api.SAVED_CONFIG}：{exc}") from exc
+        entry = nl_api.saved_for(provider) if provider else {}
+        return {"provider": provider,
+                "saved": ({"base": entry.get("base", ""),
+                           "key_masked": nl_api.mask_key(entry.get("key", ""))}
+                          if entry else None)}
+
+    # ---- 多卡（数据并行）
+    #
+    # 与 /api/vllm/* 并列而不是塞进它：单卡服务是一个进程一份状态，
+    # 多卡是一组进程一张表，字段结构完全不同。混在一起的话每个消费方
+    # 都要先判断"这是哪一种"，页面上也会出现一堆对当前模式无意义的字段。
+
+    @app.get("/api/multi")
+    def multi_status() -> dict:
+        """每张卡的状态、端口、已处理数、显存与利用率。页面每 4 秒拉一次。"""
+        return MULTI.snapshot()
+
+    @app.get("/api/multi/capability")
+    def multi_capability(engine: str = "llamacpp") -> dict:
+        """组多卡的前提：引擎装好、卡至少两张。顺带把卡列表给页面选。"""
+        ok, reason, gpus = MULTI.capability(engine)
+        return {
+            "engine": engine,
+            "ok": ok,
+            "reason": reason,
+            "gpus": [{"index": g.index, "name": g.name,
+                      "vram_gb": g.vram_gb} for g in gpus],
+        }
+
+    @app.post("/api/multi/start", status_code=202)
+    def multi_start(req: MultiStartRequest) -> dict:
+        # 单卡服务占着的卡不能再给 worker：两个进程抢同一张卡时，谁先 OOM
+        # 取决于加载顺序，而报错会指向模型，看不出是冲突。
+        if VLLM.snapshot()["status"] in ("starting", "ready"):
+            raise HTTPException(
+                409, "单卡服务正在运行，会和多卡抢显存；先停掉单卡服务再启动多卡。")
+        try:
+            return MULTI.start(
+                # 空值时给 llamacpp：这是 Windows 原生唯一能上 GPU 的引擎，
+                # 也是页面默认值；Linux 上页面会显式传 vllm。
+                engine=req.engine or "llamacpp",
+                gpus=req.gpus,
+                base_port=req.base_port,
+                model=req.model, tier=req.tier, precision=req.precision,
+                served_name=req.served_name or "tagger",
+                per_card_seqs=req.per_card_seqs,
+                timeout_s=req.timeout_s,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, ConfigError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/multi/stop")
+    def multi_stop() -> dict:
+        return MULTI.stop()
+
+    # ---- 部署自检
+    #
+    # 装完机器点一下，把"能不能干活"逐项跑一遍。与 /api/health 的分工：
+    # health 回答"服务活着吗"，这里回答"它现在能不能真的打出一张图"。
+
+    @app.get("/api/selfcheck")
+    def selfcheck_state() -> dict:
+        """进度快照。页面在弹窗里每 0.4 秒拉一次，所以这里必须无副作用。"""
+        return SELFCHECK.snapshot()
+
+    @app.post("/api/selfcheck/start", status_code=202)
+    def selfcheck_start(req: SelfCheckRequest) -> dict:
+        try:
+            return SELFCHECK.start(input_dir=req.input_dir,
+                                   recursive=req.recursive,
+                                   sample=req.sample, url=req.url)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/selfcheck/stop")
+    def selfcheck_stop() -> dict:
+        return SELFCHECK.stop()
 
     # ---- 图片
 

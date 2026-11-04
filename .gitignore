@@ -4,3 +4,5 @@
 /env/python/Lib/site-packages
 /tagger/__pycache__
 /models/nl
+*.log
+/work/_mt

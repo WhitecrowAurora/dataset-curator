@@ -376,10 +376,10 @@ def collect(
 
 # 只在 tag 产物里有的维度。混进 NL 产物去查会永远得到"(缺失)"，
 # 而且会把"这个成员只交了 NL"误报成"溯源缺失"。
-TAG_ONLY_DIMS = frozenset({"tag_backend", "tag_precision"})
+TAG_ONLY_DIMS = frozenset({"tag_backend", "tag_precision", "tag_preprocess"})
 
 PROVENANCE_DIMS = ("prompt_ver", "model_id", "tag_backend", "tag_precision",
-                   "variant")
+                   "tag_preprocess", "variant")
 
 
 def collect_provenance(

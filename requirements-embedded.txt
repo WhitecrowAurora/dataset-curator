@@ -20,6 +20,9 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
 iniconfig==2.3.1
+# numpy 是 pyarrow 的硬依赖，但 pip 只会装"当时最新的那个"。不钉住的话，
+# 不同时间装的两个人拿到不同 numpy，parquet 的数值/布尔行为可能悄悄不一致。
+numpy==2.5.4
 packaging==26.3
 pillow==13.0.0
 pluggy==1.7.0
@@ -30,3 +33,19 @@ PyYAML==6.0.3
 # socks5 代理（模型管理页的下载代理）。httpx 需要它才认 socks5:// 前缀
 socksio==1.0.0
 typing_extensions==4.16.0
+
+# ---- Web UI ----
+# 壳子（Tagger.Shell）唯一的入口就是 `python -m tagger.cli web`，下面这些是它的
+# 硬依赖。它们原先漏在这份清单之外，只有开发机手动装过——别人跑完 install.bat
+# 拿到的是"能跑 CLI、一开界面就报缺 web 依赖"的半残环境，test_web*.py 也全挂。
+# 版本按本机 env\python 里实际可用的那一套钉死，与上面的包属于同一时刻的快照。
+annotated-doc==0.0.5
+annotated-types==0.8.0
+click==8.5.0
+fastapi==0.162.0
+pydantic==2.14.2
+pydantic_core==2.50.2
+starlette==1.10.0
+typing-inspection==0.4.4
+uvicorn==0.54.0
+websockets==17.4

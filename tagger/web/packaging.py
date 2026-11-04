@@ -260,7 +260,8 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
     for plan in plans:
         if should_stop():
             raise DataJobStopped()
-        write_shard(plan, str(out_dir), compress="stored")
+        write_shard(plan, str(out_dir), layout=params.layout,
+                    compress="stored")
         done += 1
         on_progress(done, len(plans), plan.name)
 

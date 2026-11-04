@@ -17,13 +17,17 @@ export function AppShell({
   onToggleTheme,
   children,
   footer,
+  statusBar,
 }: {
   items: NavItem[]
   health: Health | null
   theme: Theme
   onToggleTheme: () => void
   children: ReactNode
+  /** 侧栏底部的小字（版本/监听地址之类） */
   footer?: ReactNode
+  /** 主区底部的全局状态条：所有页面都能看到"现在在跑什么" */
+  statusBar?: ReactNode
 }) {
   const gpu = health?.gpus?.[0]
   return (
@@ -70,6 +74,13 @@ export function AppShell({
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="px-4 py-6 md:px-7 md:py-7">{children}</div>
         </main>
+
+        {/* 没有任务时整条不渲染：不留一条空边框占高度 */}
+        {statusBar ? (
+          <footer className="shrink-0 border-t border-lx bg-lx-surface/70 px-4 py-1.5 md:px-6">
+            {statusBar}
+          </footer>
+        ) : null}
       </div>
     </div>
   )

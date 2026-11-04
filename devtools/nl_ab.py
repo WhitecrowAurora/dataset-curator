@@ -84,6 +84,13 @@ def sample_identity(blob: bytes) -> str:
 def cmd_collect(args: argparse.Namespace) -> int:
     files = collect_images(args.images, args.limit)
     prompt = _prompt_for(OutputSpec(mode=args.mode))
+    if args.caption_range:
+        # 只改"写多长"这一条，别的条款一个字不动 —— 否则测出来的差异
+        # 归因不清（可能是换了内容要求，而不是换了长度）。
+        lo, hi = args.caption_range
+        prompt = re.sub(r"\d+-\d+ characters", f"{lo}-{hi} characters", prompt)
+        if f"{lo}-{hi} characters" not in prompt:
+            raise SystemExit("prompt 里没找到长度引导，--caption-range 无效")
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -305,6 +312,9 @@ def main() -> int:
     c.add_argument("--url", default="http://127.0.0.1:8080")
     c.add_argument("--model", default="tagger")
     c.add_argument("--mode", default="nl", choices=["nl", "tag", "both"])
+    c.add_argument("--caption-range", type=int, nargs=2, default=None,
+                   dest="caption_range", metavar=("LO", "HI"),
+                   help="覆盖 prompt 里的长度引导，例如 --caption-range 250 500")
     c.add_argument("--max-pixels", type=int, default=589824, dest="max_pixels")
     c.add_argument("--max-tokens", type=int, default=800, dest="max_tokens")
     c.add_argument("--temperature", type=float, default=0.2)

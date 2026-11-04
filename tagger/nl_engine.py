@@ -171,17 +171,26 @@ KV_TYPE = "q8_0"         # 只换显存，不换产出分布
 MIN_CTX_HEADROOM = 1024  # prompt + 输出至少要这么多，低于它就必然截断
 
 
-def slot_plan(profile: RunProfile, vram_gb: float | None = None) -> tuple[int, int, str]:
+def slot_plan(profile: RunProfile, vram_gb: float | None = None,
+              override: int | None = None) -> tuple[int, int, str]:
     """按显存给 (slot 数, 每 slot 上下文, KV 类型)。
 
     vram 未知时给最保守的 2 slot —— 这个值只影响吞吐，不影响产出，
     所以按"肯定起得来"选，不猜。
+
+    override 是用户在页面上填的"每卡并发"（多卡时每张卡一份服务，各按
+    这个数开 slot）。它只改吞吐不改产出，所以允许覆盖显存推算值；
+    但每 slot 上下文仍取 CTX_PER_SLOT，总上下文随之线性增长——显存不够时
+    会 OOM，这是用户显式选择的结果，不做二次猜测。
     """
-    slots = SLOT_TIERS[-1][1]
-    for floor, n in SLOT_TIERS:
-        if (vram_gb or 0.0) >= floor:
-            slots = n
-            break
+    if override:
+        slots = max(1, min(64, int(override)))
+    else:
+        slots = SLOT_TIERS[-1][1]
+        for floor, n in SLOT_TIERS:
+            if (vram_gb or 0.0) >= floor:
+                slots = n
+                break
     # 模型自带的最长上下文是硬上限，不能超过
     ctx_per_slot = min(int(profile.max_model_len), CTX_PER_SLOT)
     need = image_tokens_for(profile) + MIN_CTX_HEADROOM
@@ -201,12 +210,13 @@ def build_command(
     gguf: Path,
     mmproj: Path,
     vram_gb: float | None = None,
+    slots_override: int | None = None,
 ) -> list[str]:
     """拼 llama-server 命令行。每个参数都对应一个会让产出漂移的变量。"""
     binary = find_server_binary()
     if binary is None:                      # check_engine 已经拦过，这里兜底
         raise ConfigError("找不到 llama-server")
-    slots, ctx_per_slot, kv_type = slot_plan(profile, vram_gb)
+    slots, ctx_per_slot, kv_type = slot_plan(profile, vram_gb, slots_override)
     ctx_total = slots * ctx_per_slot
     cmd = [
         binary,

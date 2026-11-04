@@ -63,6 +63,8 @@ public partial class MainWindow : Window
                 "本地服务已经在跑，已用系统浏览器打开同一个地址；" +
                 "想让窗口内嵌，安装 Microsoft Edge WebView2 Runtime 即可。",
                 ex.Message);
+            // 顺手给个下载入口——比让人自己去搜"WebView2 运行时"省事。
+            RuntimeCheck.OfferWebView2Download();
             if (_server is not null)
             {
                 try { OpenExternal(_server.Url); }

@@ -280,6 +280,8 @@ def start_server(
     timeout_s: int = 900,
     served_name: str = "tagger",
     engine: str = "vllm",
+    device_index: int | None = None,
+    slots_override: int | None = None,
 ) -> ServerHandle:
     """起一个服务并等待就绪。
 
@@ -290,6 +292,13 @@ def start_server(
     engine=llamacpp 时走 nl_engine：Windows 原生唯一能上 GPU 的路。
     两条路只共用"起进程 / 等就绪 / 交手柄"，命令行构造完全分开——
     参数没有一一对应关系（见 nl_engine 开头的换算说明）。
+
+    device_index 非空 = 把这一份服务钉死在第 N 张卡上：通过子进程自己的
+    CUDA_VISIBLE_DEVICES 隔离，而不是给引擎传 --device。原因有两个：
+    两个引擎都认这个变量（llama.cpp 的 CUDA 构建与 vLLM 一致），而
+    "--device cuda:3" 这类参数各版本写法不一；更重要的是隔离之后子进程
+    眼里的卡号是 0，slot 规划、显存分配都还在它熟悉的那套假设里。
+    多卡并行就是靠这个起 N 份互不相干的单卡服务。
     """
     engine = engine or "vllm"
     from . import nl_engine
@@ -303,13 +312,20 @@ def start_server(
             from .hardware import query_gpus
 
             gpus = query_gpus()
-            vram_gb = max((g.vram_gb for g in gpus), default=None)
+            if device_index is None:
+                vram_gb = max((g.vram_gb for g in gpus), default=None)
+            else:
+                # 多卡时必须按"这一份服务用的那张卡"算 slot：拿全场最大显存取
+                # 套 12 个 slot，小卡上会直接 OOM，而 OOM 发生在加载后一分钟。
+                vram_gb = next((g.vram_gb for g in gpus if g.index == device_index),
+                               None)
         except Exception:                   # noqa: BLE001 - 探测失败不该拦住起服务
             vram_gb = None
         cmd = nl_engine.build_command(profile, port=port,
                                       served_name=served_name or "tagger",
                                       gguf=gguf, mmproj=mmproj,
-                                      vram_gb=vram_gb)
+                                      vram_gb=vram_gb,
+                                      slots_override=slots_override)
         # llama-server 没有 --allowed-local-media-path，file:// 一律别用。
         data_root = None
     else:
@@ -327,6 +343,12 @@ def start_server(
     log_file = open(log_path, "a", encoding="utf-8", buffering=1)
     print(f"[tagger] 服务日志: {Path(log_path).resolve()}")
 
+    env = None
+    if device_index is not None:
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(int(device_index))
+        print(f"[tagger] 绑定显卡: CUDA_VISIBLE_DEVICES={device_index}")
+
     print(f"[tagger] 启动: {' '.join(cmd)}")
     process = subprocess.Popen(
         cmd,
@@ -334,6 +356,7 @@ def start_server(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=env,
         # 独立进程组，便于整组回收
         start_new_session=(platform.system() != "Windows"),
     )

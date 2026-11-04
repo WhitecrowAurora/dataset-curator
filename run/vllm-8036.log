@@ -1,4 +1,3 @@
-[web] 服务已停止
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
@@ -21,28 +20,12 @@
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：TypeError: _svc_with_fake_start.<locals>.fake_start() got an unexpected keyword argument 'data_root'
-[web] 启动失败：TypeError: _svc_with_fake_start.<locals>.fake_start() got an unexpected keyword argument 'data_root'
-[web] 启动失败：TypeError: _svc_with_fake_start.<locals>.fake_start() got an unexpected keyword argument 'data_root'
-[web] 启动失败：TypeError: _svc_with_fake_start.<locals>.fake_start() got an unexpected keyword argument 'data_root'
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 启动失败：RuntimeError: 测试结束
-[web] 服务已停止
-[web] 启动失败：TypeError: _svc_with_fake_start.<locals>.fake_start() got an unexpected keyword argument 'engine'
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束
 [web] 启动失败：RuntimeError: 测试结束

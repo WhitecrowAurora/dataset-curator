@@ -133,7 +133,12 @@ if (-not (Test-Path (Join-Path $sitePackages 'pip\__init__.py'))) {
 # ---------------------------------------------------------------- 4. 仓库路径
 # 让 env\python 里任何位置都能 import tagger，不必 pip install -e（那要 setuptools）。
 # 路径按当前仓库位置写，所以换台机器解压后要重跑本脚本一次。
-Set-Content -Path (Join-Path $sitePackages '_tagger_repo.pth') -Value $repo -Encoding ascii
+# 必须 UTF-8（无 BOM）：站点模块按 UTF-8 解 .pth，而仓库目录带中文时
+# ascii 会把路径写成问号，结果是"装了但 import 不到 tagger"。
+[System.IO.File]::WriteAllText(
+    (Join-Path $sitePackages '_tagger_repo.pth'),
+    $repo + [Environment]::NewLine,
+    (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "[env] 写入 _tagger_repo.pth -> $repo"
 
 # ---------------------------------------------------------------- 5. 依赖

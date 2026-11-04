@@ -3,14 +3,10 @@ H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Tagger.Shell.e
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Tagger.Shell.deps.json
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Tagger.Shell.runtimeconfig.json
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Tagger.Shell.dll
-H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Tagger.Shell.pdb
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\WebView2Loader.dll
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Microsoft.Web.WebView2.Core.dll
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Microsoft.Web.WebView2.WinForms.dll
 H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Microsoft.Web.WebView2.Wpf.dll
-H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Microsoft.Web.WebView2.Core.xml
-H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Microsoft.Web.WebView2.WinForms.xml
-H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Microsoft.Web.WebView2.Wpf.xml
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.csproj.AssemblyReference.cache
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\MainWindow.baml
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\App.baml
@@ -26,6 +22,6 @@ H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.c
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.S.FB01A9D0.Up2Date
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.dll
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\refint\Tagger.Shell.dll
-H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.pdb
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.genruntimeconfig.cache
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\ref\Tagger.Shell.dll
+H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.sourcelink.json

@@ -283,6 +283,38 @@ def _estimate_vram_headroom_check(profile: RunProfile, gpu: GPUInfo) -> list[str
     return warns
 
 
+def parse_caption_chars(value) -> tuple[int, int] | None:
+    """把各种写法归一成 (下限, 上限)，空值 → None。
+
+    接受 `"250-500"`、`[250, 500]`、`(250, 500)`、`None`、`0`。
+    越界（<100 或 >3000）一律报错：那已经不是"调长度"，而是把任务改成了
+    别的形态 —— 100 字符塞不下 prompt 要求的六段要素。
+    """
+    if value is None or value == 0 or value == "" or value == []:
+        return None
+    if isinstance(value, str):
+        parts = value.replace("，", ",").replace("~", "-").replace(",", "-").split("-")
+        if len(parts) != 2:
+            raise ConfigError(f"caption_chars 要写成 '下限-上限'，收到 {value!r}")
+        try:
+            lo, hi = int(parts[0]), int(parts[1])
+        except ValueError:
+            raise ConfigError(
+                f"caption_chars 两边必须是整数，收到 {value!r}") from None
+    else:
+        try:
+            lo, hi = int(value[0]), int(value[1])
+        except (TypeError, ValueError, IndexError):
+            raise ConfigError(
+                f"caption_chars 要是一对数，收到 {value!r}") from None
+    if not 100 <= lo < hi <= 3000:
+        raise ConfigError(
+            f"caption_chars 要求 100 ≤ 下限 < 上限 ≤ 3000，收到 {lo}-{hi}。\n"
+            f"低于 100 塞不下 prompt 要求的六段要素（主体/外观/环境/构图/光线/文字）；"
+            f"高于 3000 会让单张耗时翻几倍。")
+    return lo, hi
+
+
 @dataclass(slots=True)
 class OutputSpec:
     """产出什么、多长。决定一次打标要生成哪些字段。
@@ -301,6 +333,16 @@ class OutputSpec:
     nl_max_tokens: int = 256
     tag_min_count: int = 12
     tag_max_count: int = 160
+    # 描述长度的**引导值**（字符区间），与上面两个**硬约束**（token 区间）分开。
+    # 这两个数字回答的问题不同：
+    #   nl_min/max_tokens —— 写出来的东西算不算合格（越界判废）
+    #   caption_chars     —— 让模型往多长写
+    # 混在一起改不了的坑：把一个调小会同时把闸门调松，把另一个调大会把闸门调紧。
+    # None = 按 token 区间派生（400 ~ min(1200, max_tokens*4)），即今天的默认行为。
+    # ★改它等于改产出分布，必须进 provenance/fingerprint，否则两批数据无法判断同源。
+    #   实测（Q4 8B，126 张）：400-1024 → 250-500 时字数 −33%、延迟 −36%，
+    #   而要素覆盖只掉 2~3pp（见 devtools/nl-quant-ab.md §5.2）。
+    caption_chars: tuple[int, int] | None = None
 
     @property
     def wants_nl(self) -> bool:
@@ -324,6 +366,7 @@ class OutputSpec:
             nl_max_tokens=int(d.get("nl_max_tokens", 256)),
             tag_min_count=int(d.get("tag_min_count", 12)),
             tag_max_count=int(d.get("tag_max_count", 160)),
+            caption_chars=parse_caption_chars(d.get("caption_chars")),
         )
         if spec.nl_max_tokens and spec.nl_min_tokens > spec.nl_max_tokens:
             raise ConfigError(

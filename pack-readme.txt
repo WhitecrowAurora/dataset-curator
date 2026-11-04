@@ -1,0 +1,42 @@
+﻿Tagger 打标器 —— 解压之后怎么跑
+================================
+
+第 1 步   解压
+    放哪个盘都行（路径带空格、带中文都没问题），但别放进 C:\Program Files，
+    那里普通权限写不进去，安装会失败。
+
+第 2 步   运行 install.bat（只跑一次，约 3 分钟）
+    它做三件事：解出仓库自带的 Python（env\python）、装依赖包、把当前仓库
+    路径写进环境。这一步不能省——跳过的话双击 exe 只会看到"本地服务刚启动
+    就退出了"。
+
+    机器没网的话，如果包里带了 env\initialization\wheels，改成：
+        install.bat -WheelDir env\initialization\wheels
+
+第 3 步   双击 Tagger.Shell.exe
+    它会起一个本地服务，然后在窗口里打开界面。关窗口即停止服务。
+
+环境要求
+--------
+* Windows 10 / 11，64 位
+* .NET 8 桌面运行时（Desktop Runtime）
+  缺了会弹窗说明，点"确定"直接跳到微软官方下载页。
+  注意是 Desktop Runtime，只装 Console 或 ASP.NET Core 运行时不够。
+* Microsoft Edge WebView2 运行时
+  近几年的 Windows 基本都预装了，没装的话壳子会提示并提供下载入口。
+
+出问题看这里
+------------
+* 窗口一闪而过，或提示"本地服务刚启动就退出了"
+  → install.bat 没跑，或者跑失败了。重跑一次，看它的输出。
+
+* 想排查具体原因
+  → 日志在 %LOCALAPPDATA%\Tagger\shell.log
+
+* 界面能打开但里面是"前端还没构建"的说明页
+  → 打包时漏了 tagger\web\ui\dist。正常的包里应该有
+    tagger\web\ui\dist\index.html。
+
+* 用的不是自己电脑，想确认环境对不对
+  → 在仓库目录里跑：env\python\python.exe -m tagger.cli --help
+    能打出帮助就说明 Python 这边是好的。

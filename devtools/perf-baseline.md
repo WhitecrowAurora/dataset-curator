@@ -666,3 +666,80 @@ Resize(size=(448,448), interpolation=bicubic) → CenterCrop(448) → Normalize
 
 `pytest` 161 passed（新增 2 个：开关透传、CPU 上必须退回串行），lint 0。
 
+
+
+## 14. 第五轮：预处理上卡（2026-11-04）
+
+### 14.1 结论先说
+
+解码**不搬**，只把 timm transform 的缩放+归一化搬到卡上（`preprocess=tensor`）。
+
+理由是量出来的，不是猜的（4070 Ti SUPER / torch 2.14.1+cu126 / 1024² q90）：
+
+| 场景 | PIL（现状） | GPU nvJPEG | 结果 |
+|---|---:|---:|---|
+| 单张解码（生产是逐张喂） | 11.3 ms | 15.2 ms | GPU 更慢 |
+| 批 8 仅解码 | 5.4 ms/张 | 4.6 ms/张 | 只省 0.8 |
+| 批 8 解码 + 回 PIL 做 transform | 15.6 ms/张 | 23.3 ms/张 | 0.67×，净亏 |
+| 批 8 解码+缩放+归一化全留张量 | 15.5 ms/张 | 4.5 ms/张 | 3.4× |
+
+即：nvJPEG 的优势全在批量上，而 `_decode_batch` 是逐张；而 15.5 ms 里有
+约 10 ms 是 PIL 的 bicubic 缩放 + 归一化，不是解码。所以只搬那 10 ms。
+
+### 14.2 端到端实测（bf16 + batch=4 + CUDA Graph，chunk=batch*8）
+
+| 素材（各 32 张） | pil | tensor | 加速 |
+|---|---:|---:|---:|
+| 1024² PNG 3 MB | 29.3 ms/张 | 20.0 ms/张 | **1.47×** |
+| 1024² JPEG q90 | 27.0 ms/张 | 25.0 ms/张 | 1.08× |
+| 768×512 PNG（平滑） | 19.1 ms/张 | 18.1 ms/张 | 1.06× |
+
+分阶段（768×512 PNG，每批 4 张）：
+
+- pil：decode 6.0 ms/张，forward 16.0 ms/张
+- tensor：decode 1.3 ms/张（只解码 + 数组化），forward 15.8 ms/张（已含 H2D + 缩放 + 归一化）
+
+**什么时候开**：预取在的时候墙钟 ≈ `max(CPU 预处理, GPU 前向)`。tensor 把 CPU 侧
+砍掉 transform、给 GPU 侧加 1~2 ms/张，所以只有"CPU 预处理本来就比前向重"才赚。
+1024² PNG 这种解码就 20 ms 的赚到 1.5×；JPEG / 小图基本打平，别开。
+
+### 14.3 代价：tag 会变（重采样换了实现）
+
+PIL 的 bicubic 与 `F.interpolate(bicubic, antialias=True)` 是两套核。归一化后的
+像素差 p99 ≤ 0.013（约 1 个灰阶），但边缘像素能到 0.25，阈值 0.35 附近的 tag 会翻。
+
+真权重实测（默认阈值 0.35）：
+
+| 素材 | 改判图 | 平均 tag IOU |
+|---|---:|---:|
+| 40 张平滑 PNG（work/_lt_smoke） | 0/40 | 1.000 |
+| 25 张 skimage 合成/线稿/超小图 | 15/25 | 0.921（最低 0.696） |
+
+所以它是 opt-in、默认 `pil`；并且**线稿/高对比素材别开**——那些图的重采样差最大。
+（对照组：同一后端连跑两遍 tag 逐条一致，说明上面不是噪声。）
+
+### 14.4 实现要点
+
+- `normalize_preprocess`：`pil`（默认）/`tensor`，认 `gpu`/`cuda`/`pillow` 等别名。
+- `_tensor_prep_plan(transform)`：**从 timm 建好的 transform 里读** Resize /
+  CenterCrop / Normalize，认不出来（RandomResizedCrop、LANCZOS、没有 Normalize）
+  就返回 None → 回落 PIL 并打一行日志。不写死 448/bicubic：换个分类头就是另一套参数，
+  写死等于埋"换模型悄悄换口径"。
+- `_pixels_uint8`：解码仍走 PIL，只到 uint8 CHW（`np.array` 而不是 `asarray`——
+  PIL 的数组视图只读，`torch.from_numpy` 会告警）。
+- `_prep_on_device`：H2D → `F.interpolate`（bicubic + antialias；nearest 关 antialias）
+  → 中心裁剪（`round` 对齐 torchvision）→ `/255` → `(x-mean)/std`。
+- 计时口径：tensor 的 H2D + 缩放 + 归一化**算进 forward**（它占的就是前向那条流），
+  decode 只算 CPU 解码。否则 `tag_decode` 会凭空变小，看着像解码变快了。
+- 预取保留：解码仍在 CPU，照样能和 GPU 前向重叠。
+
+### 14.5 接线与校验
+
+- CLI：`tagger tag --preprocess`、`tagger pack --preprocess`、`tagger client --tag-preprocess`
+- Web：`JobSpec.preprocess` → `build_backend(preprocess=…)`；UI「模型与性能 → 预处理」
+  两档 `CPU（默认）/ GPU`；运行页/历史页在开了时显示 `· GPU 预处理`
+- 溯源：`tag_preprocess` 进 `Provenance`、`TAG_ONLY_DIMS`、`PROVENANCE_DIMS`
+  （事后比两批 tag 数量时，得能分辨是口径变了还是模型变了）
+- 测试：`tests/test_cpu_tagger.py` 新增 7 条（别名/默认/pil 与 tensor 两条路的
+  transform 解析、不支持的算子必须回落、CPU 上两条路的像素差 < 0.05）
+- 全量 `pytest tests` 通过；`cd tagger/web/ui && npm run build`（tsc + vite）通过

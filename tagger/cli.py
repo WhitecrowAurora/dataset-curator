@@ -796,7 +796,7 @@ def cmd_split(args: argparse.Namespace) -> int:
     print()
 
     for plan in plans:
-        write_shard(plan, args.out_dir, compress="stored")
+        write_shard(plan, args.out_dir, layout=layout, compress="stored")
 
     table_path = write_table(plans, args.table, next_seq=1 + len(dist_items))
     print()
@@ -1348,6 +1348,7 @@ def cmd_tag(args: argparse.Namespace) -> int:
         args.backend, model=args.model, model_dir=args.model_dir,
         device=resolve_device(args.device), precision=args.precision,
         batch_size=max(1, args.batch),
+        preprocess=getattr(args, "preprocess", "pil"),
         thresholds=({"default": args.threshold} if args.threshold is not None else None),
         verbose=True,
     )
@@ -1495,6 +1496,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
             args.backend, model=args.model, model_dir=args.model_dir,
             device=resolve_device(args.device), precision=args.precision,
             batch_size=max(1, args.batch),
+            preprocess=getattr(args, "preprocess", "pil"),
             thresholds=({"default": args.threshold} if args.threshold is not None else None),
             verbose=True,
         )
@@ -1784,12 +1786,32 @@ def build_parser() -> argparse.ArgumentParser:
     sp_client.add_argument("--hf-pattern", default="*.tar", dest="hf_pattern",
                            help="分片文件名匹配，默认 *.tar")
     sp_client.add_argument("--hf-revision", default="main", dest="hf_revision")
+    # 代理：列清单 / 下分片 / parquet 流式共用一份。空 = 直连（但仍信任
+    # HTTP(S)_PROXY 环境变量，很多机器本来就靠它出网）。
+    sp_client.add_argument("--hf-proxy", default="", dest="hf_proxy",
+                           help="HF 请求走的代理，如 http://127.0.0.1:7890 或 "
+                                "socks5://127.0.0.1:7891（需 socksio）。空 = 直连/"
+                                "沿用环境变量")
     sp_client.add_argument("--hf-cache", default=None, dest="hf_cache",
-                           help="分片临时目录，默认 <out-dir>/.hf-cache（只需要放得下一个分片）")
+                           help="分片缓存目录，默认 run/hf-cache/<org--name>"
+                                "（跨任务共享；UI 的下载页往同一个目录备片）")
     sp_client.add_argument("--hf-shards", type=int, default=0, dest="hf_shards",
                            help="只跑前 N 个分片（试跑用）")
     sp_client.add_argument("--hf-keep", action="store_true", dest="hf_keep",
                            help="跑完不删分片（默认删，为了省 SSD）；parquet 模式不落盘")
+    # 预取：下载与打标并行。串行时每片要空等下载完（0.5~2 GB / 几十秒）。
+    sp_client.add_argument("--hf-prefetch", type=int, default=1, dest="hf_prefetch",
+                           help="预取几个分片（默认 1；0 = 严格串行）。"
+                                "磁盘剩余空间不够时会自动暂停预取")
+    # 单文件多连接：国内单条 TCP 常被压到几百 KB/s，靠并发才能跑满带宽。
+    sp_client.add_argument("--hf-conns", type=int, default=4, dest="hf_conns",
+                           help="下载单个分片用几条并发连接（默认 4，1 = 单连接；"
+                                "上限 16）。文件小于 16 MB 或服务端不支持 Range "
+                                "时自动退回单连接")
+    sp_client.add_argument("--hf-reserve-gb", type=float, default=0.0,
+                           dest="hf_reserve_gb",
+                           help="给产物留的磁盘余量（GB）；0 = 自动"
+                                "（最大分片的 30%%，且不少于 2 GB）")
     sp_client.add_argument("--hf-format", default="auto", dest="hf_format",
                            choices=["auto", "parquet", "webdataset"],
                            help="仓库格式，默认自动探测（先看 parquet 再看 tar）")
@@ -1800,9 +1822,25 @@ def build_parser() -> argparse.ArgumentParser:
                            help="写进总表的 image_path 模板，可用 {image_id} {index} {shard} {repo}")
     sp_client.add_argument("--out-dir", default="work/out", dest="out_dir",
                            help="产物目录，最终整目录交回总机")
-    sp_client.add_argument("--url", default="http://127.0.0.1:8000")
+    sp_client.add_argument("--url", default="http://127.0.0.1:8000",
+                           help="本机/自建服务地址（API 模式请改用 --api-base）")
+    sp_client.add_argument("--urls", nargs="*", default=[], dest="urls",
+                           help="多卡：其余推理服务的地址。--url 是第一个，"
+                                "这里放剩下的；任务按轮询分发，产物照旧写"
+                                "--out-dir，不需要事后合并")
     sp_client.add_argument("--model-name", default="tagger", dest="model_name",
-                           help="对应 serve 的 --served-model-name")
+                           help="本机：serve 的 --served-model-name；"
+                                "API 模式：API 侧的模型 id（如 gpt-4o / claude-sonnet-4-5）")
+    # ---- 外部推理 API。三个参数一组，缺 --api-provider 就还是本机引擎。
+    sp_client.add_argument("--api-provider", default="", dest="api_provider",
+                           choices=["", "local", "openai", "anthropic"],
+                           help="推理来源：留空/local = 本机自建；openai = OpenAI 兼容接口"
+                                "（也覆盖 LM Studio、one-api）；anthropic = Messages API")
+    sp_client.add_argument("--api-base", default="", dest="api_base",
+                           help="API 地址，例如 https://api.openai.com/v1 或 "
+                                "https://api.anthropic.com；留空按来源取默认域名")
+    sp_client.add_argument("--api-key", default="", dest="api_key",
+                           help="API 密钥；留空则读 OPENAI_API_KEY / ANTHROPIC_API_KEY")
     sp_client.add_argument("--mode", default=None, choices=["nl", "tag", "both"],
                            help="覆盖配置里的 output.mode")
     sp_client.add_argument("--temperature", type=float, default=None)
@@ -1814,6 +1852,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp_client.add_argument("--limit", type=int, default=None)
     sp_client.add_argument("--force", action="store_true",
                            help="忽略已有产物，全部重打")
+    # 结果缓存。默认关：首轮命中率为 0，而算图哈希本身要 1~2 ms/张。
+    sp_client.add_argument("--cache", action="store_true",
+                           help="结果缓存：同图同参数直接复用上次产出，不送模型。"
+                                "重跑 / 换输出目录 / 多机处理有重叠素材时才划算")
+    sp_client.add_argument("--cache-db", default=None, dest="cache_db",
+                           help="缓存库路径，默认 run/result-cache.sqlite3（跨任务共享）")
+    sp_client.add_argument("--cache-max-gb", type=float, default=8.0,
+                           dest="cache_max_gb",
+                           help="缓存库上限（GB），超了按最久未用淘汰，默认 8")
     sp_client.add_argument("--layout", default=None, choices=["flat", "mirror"],
                            help="产物目录布局，默认跟配置 distribute.layout")
     sp_client.add_argument("--fingerprint", default="run/fingerprint.json",
@@ -1821,6 +1868,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp_client.add_argument("--model-id", default=None, dest="model_id",
                            help="强制指定 provenance 里的 model_id")
     sp_client.add_argument("--max-pixels", type=int, default=None, dest="max_pixels")
+    # 描述长度引导（字符区间）。只决定"往多长写"，不移动 nl_min/max_tokens
+    # 那两道合格线；改它会改变产出分布，所以会写进 provenance。
+    sp_client.add_argument("--caption-chars", type=int, nargs=2, default=None,
+                           dest="caption_chars", metavar=("LO", "HI"),
+                           help="描述长度引导，例如 250 500（默认按 token 区间派生 400-1024）")
     sp_client.add_argument("--tier", default=None, help="写进 provenance 的分档名")
     sp_client.add_argument("--seed", type=int, default=None, help="固定采样种子（可复现）")
     sp_client.add_argument("--tag-backend", default=None, dest="tag_backend",
@@ -1841,6 +1893,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp_client.add_argument("--tag-batch", type=int, default=None, dest="tag_batch",
                            help="tag 攒批张数（仅 wd-eva02 生效）；"
                                 "批处理主要在 bf16 下兑现收益，fp32 单给 batch 只有 1.15×")
+    sp_client.add_argument("--tag-preprocess", default=None, dest="tag_preprocess",
+                           choices=["pil", "tensor"],
+                           help="tag 预处理：pil = 现状（CPU 缩放/归一化）；"
+                                "tensor = 缩放/归一化上卡（解码仍在 CPU）。"
+                                "1024² 大 PNG 实测 1.47×，JPEG/小图只有 1.06~1.08×，"
+                                "且重采样换了实现（线稿类图约 1 成 tag 会变）")
     sp_client.add_argument("--hf-token", default=None, dest="hf_token",
                            help="HF token，私有仓库/受限模型需要（也可用环境变量 HF_TOKEN）")
     sp_client.add_argument("--use-file-url", action="store_true", dest="use_file_url",
@@ -1952,6 +2010,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp_tag.add_argument("--precision", default="bf16",
                         choices=["fp32", "tf32", "bf16"])
     sp_tag.add_argument("--batch", type=int, default=4)
+    sp_tag.add_argument("--preprocess", default="pil", choices=["pil", "tensor"],
+                        help="预处理位置：pil = CPU 缩放/归一化（默认）；"
+                             "tensor = 缩放/归一化上卡，大 PNG 约 1.5×")
     sp_tag.add_argument("--threshold", type=float, default=None,
                         help="覆盖 tagging.thresholds.default（默认 0.35）")
     sp_tag.add_argument("--limit", type=int, default=0, help="只跑前 N 张")
@@ -2006,6 +2067,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp_pack.add_argument("--precision", default="bf16",
                          choices=["fp32", "tf32", "bf16"])
     sp_pack.add_argument("--batch", type=int, default=4)
+    sp_pack.add_argument("--preprocess", default="pil", choices=["pil", "tensor"],
+                         help="预处理位置：pil = CPU 缩放/归一化（默认）；"
+                              "tensor = 缩放/归一化上卡，大 PNG 约 1.5×")
     sp_pack.add_argument("--threshold", type=float, default=None)
     sp_pack.add_argument("--limit", type=int, default=0, help="只跑前 N 张")
     sp_pack.add_argument("--force", action="store_true", help="忽略已有产物全部重打")

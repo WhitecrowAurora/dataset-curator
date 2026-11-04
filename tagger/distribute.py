@@ -203,6 +203,24 @@ class _ZipPool:
         self._open.clear()
 
 
+def _mirror_member(rel_path: str, image_id: str, ext: str) -> str:
+    """mirror 布局下的成员名：保留原目录树，但去掉一切能穿出包外的路径。
+
+    为什么不能直接拿 `rel_path` 当成员名：它来自磁盘遍历，可能是
+    `D:\\素材\\a.jpg` 或 `../lb/a.jpg`。`../` 进了 zip 就是 zip-slip，
+    解包时能写到包外；盘符段在 zip 里是个叫 `D:` 的目录，纯属噪音。
+    所以只保留"干净的相对路径段"，其他一律丢弃。
+    """
+    parts = [p for p in str(rel_path or "").replace("\\", "/").split("/")
+             if p and p not in (".", "..")]
+    # 首段是盘符（`D:`）时丢掉——它是绝对路径残留，不是目录
+    if parts and len(parts[0]) == 2 and parts[0][1] == ":":
+        parts = parts[1:]
+    if not parts:
+        return f"{image_id}{ext}"
+    return "/".join(parts)
+
+
 def write_shard(
     plan: ShardPlan,
     out_dir: str | Path,
@@ -213,14 +231,26 @@ def write_shard(
 ) -> Path:
     """把一个计划落成一个 zip 分发包。
 
-    包内布局：
-        <image_id>.jpg            图片，平铺（分发阶段一律平铺，方便成员直接按
-                                  manifest 顺序处理，不必关心原目录）
-        manifest.jsonl            本包负责的 image_id 与来源，一行一条
+    包内布局（`layout` 决定，与产出侧同名同义）：
+        flat    <image_id>.jpg      全部平铺。成员按 manifest 顺序读即可，
+                                    不关心原目录，适合"只管打标"的批次
+        mirror  <rel_path>          保留原始目录树（如 `artist/0001.jpg`）。
+                                    成员解包后目录结构就是素材原样，适合还要
+                                    按画师分目录、或与产出侧镜像对齐的批次
+        manifest.jsonl              本包负责的 image_id 与来源，一行一条；
+                                    其中 `file` 恒为**实际成员名**，读侧只看它
 
-    分发用 flat 而不是 mirror：成员拿到包就该能直接顺序读，不需要还原目录树。
-    需要保目录结构的是**产出侧**，那两个是不同阶段的事。
+    manifest 的 `file` 是读侧唯一依据（`client._load_shard_tasks` 用
+    `row["file"]` 取图），所以两种布局都能直接工作，不需要成员侧分支。
+
+    重名保命：mirror 下不同来源可能有同一个相对路径（两个 zip 里都叫
+    `a/0001.jpg`），撞名时追加 `-<image_id>`。覆盖掉一张图比目录不好看严重得多。
     """
+    layout = str(layout or "flat").lower()
+    if layout not in ("flat", "mirror"):
+        # 拼错时不能静默按 flat 走：用户会以为镜像生效了（这正是这个参数
+        # 之前一直没接上时最难发现的地方）。
+        raise ValueError(f"分发布局只能是 flat / mirror，收到 {layout!r}")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     final = out_dir / plan.name
@@ -231,9 +261,20 @@ def write_shard(
     try:
         with zipfile.ZipFile(tmp, "w", compression=comp, allowZip64=True) as zf:
             rows: list[str] = []
+            # 小写比较：zip 内大小写敏感，但 Windows 解包不敏感。宁可多改一个
+            # 名字，也不要让成员在自己的机器上解出"少了一张"。
+            used = {MANIFEST_NAME.lower()}
             for it in plan.items:
                 data = _read_member(it.source, it.member, pool)
-                name = f"{it.image_id}{it.ext}"
+                if layout == "mirror":
+                    name = _mirror_member(it.rel_path, it.image_id, it.ext)
+                else:
+                    name = f"{it.image_id}{it.ext}"
+                if name.lower() in used:
+                    p = Path(name)
+                    name = str(p.with_name(
+                        f"{p.stem}-{it.image_id}{p.suffix}")).replace("\\", "/")
+                used.add(name.lower())
                 zf.writestr(name, data)
                 rows.append(json.dumps({
                     "image_id": it.image_id,

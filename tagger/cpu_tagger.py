@@ -80,6 +80,21 @@ def normalize_precision(value: str | None) -> str:
     raise ValueError(f"未知精度 {value!r}，可选：fp32 / tf32 / bf16")
 
 
+def normalize_preprocess(value: str | None) -> str:
+    """预处理放在哪：pil = 现状（PIL 缩放/归一化，CPU）；tensor = 上卡。
+
+    "解码"本身没有搬：实测 nvJPEG 单张比 PIL 还慢（15.2 vs 11.3 ms），批量
+    才赢，而这里是逐张喂。真正吃时间的是缩放+归一化那一半（15.6 ms 里的
+    10 ms 左右），把它留在张量上才划算——见 devtools/perf-baseline.md §12。
+    """
+    p = (value or "pil").strip().lower().replace("-", "_").replace(" ", "")
+    if p in ("", "pil", "cpu", "pillow"):
+        return "pil"
+    if p in ("tensor", "gpu", "cuda", "torch", "tensor_gpu", "pil_gpu"):
+        return "tensor"
+    raise ValueError(f"未知预处理 {value!r}，可选：pil / tensor")
+
+
 @dataclass(slots=True)
 class TagPrediction:
     tags: list[tuple[str, float]] = field(default_factory=list)
@@ -111,6 +126,95 @@ class _CudaGraph:
         self.graph.replay()
 
 
+@dataclass(slots=True)
+class _TensorPrep:
+    """timm 的 PIL transform 翻译成"整条留在张量上"的等价步骤。
+
+    只认 Resize / CenterCrop / ToTensor / Normalize 这四种组合；出现别的
+    算子（RandomResizedCrop、Normalize 缺失、Lanczos…）就返回 None，让调用
+    方回落 PIL——宁可慢，不可悄悄换一套预处理口径。
+    """
+
+    # 拉到指定 (h, w)：timm 的 squash 模式，直接拉伸、不做等比。
+    resize: tuple[int, int] | None = None
+    # 短边缩到这个值：timm 的 center 模式，等比缩放后再 CenterCrop。
+    short_edge: int | None = None
+    crop: tuple[int, int] | None = None
+    mode: str = "bicubic"
+    mean: Any = None
+    std: Any = None
+
+    def target_size(self, height: int, width: int) -> tuple[int, int]:
+        """按 torchvision Resize 的语义算出缩放后的 (h, w)。"""
+        if self.resize is not None:
+            return self.resize
+        if self.short_edge is not None:
+            edge = self.short_edge
+            if height <= width:
+                return (edge, max(1, int(edge * width / height)))
+            return (max(1, int(edge * height / width)), edge)
+        return (height, width)
+
+
+def _interp_name(interpolation: Any) -> str | None:
+    """torchvision 的插值枚举 → F.interpolate 的 mode；认不出就 None。"""
+    from torchvision.transforms import InterpolationMode
+
+    # BOX / HAMMING / LANCZOS 没有对应的 F.interpolate 实现。PIL 的 LANCZOS
+    # 是这里最可能遇到的一种，而它恰好是"在 CPU 上做"的理由之一。
+    return {
+        InterpolationMode.NEAREST: "nearest",
+        InterpolationMode.NEAREST_EXACT: "nearest",
+        InterpolationMode.BILINEAR: "bilinear",
+        InterpolationMode.BICUBIC: "bicubic",
+    }.get(interpolation)
+
+
+def _tensor_prep_plan(transform: Any) -> _TensorPrep | None:
+    """从 timm 建好的 transform 里读出等价的可上卡步骤。
+
+    为什么要读而不是写死 448/bicubic：这套参数来自模型自己的 data config，
+    换一个分类头就变（wd-eva02 是 squash 拉伸；别的模型可能是短边缩放 +
+    CenterCrop 0.875）。写死等于把"换个模型悄悄换口径"埋进去。
+    """
+    import torch
+    from torchvision import transforms as T
+
+    ops = list(getattr(transform, "transforms", [transform]))
+    plan = _TensorPrep()
+    seen_norm = False
+    for op in ops:
+        name = type(op).__name__
+        if isinstance(op, T.Resize):
+            size = op.size
+            if isinstance(size, (tuple, list)):
+                if len(size) != 2:
+                    return None
+                plan.resize = (int(size[0]), int(size[1]))
+            else:
+                plan.short_edge = int(size)
+            mode = _interp_name(getattr(op, "interpolation", None))
+            if mode is None:
+                return None
+            plan.mode = mode
+        elif isinstance(op, T.CenterCrop):
+            size = op.size
+            plan.crop = ((int(size), int(size)) if not isinstance(size, (tuple, list))
+                         else (int(size[0]), int(size[1])))
+        elif isinstance(op, T.Normalize):
+            plan.mean = torch.as_tensor(op.mean, dtype=torch.float32).view(-1, 1, 1)
+            plan.std = torch.as_tensor(op.std, dtype=torch.float32).view(-1, 1, 1)
+            seen_norm = True
+        elif isinstance(op, (T.ToTensor, T.PILToTensor, T.ConvertImageDtype)) or name in (
+                "MaybeToTensor", "MaybePILToTensor"):
+            continue
+        else:
+            return None
+    if not seen_norm or plan.mean is None or plan.std is None:
+        return None
+    return plan
+
+
 class TagBackend(ABC):
     """统一接口：给一张 PIL 图，回来的是一串 (tag, prob)，已按概率降序。"""
 
@@ -120,7 +224,12 @@ class TagBackend(ABC):
                  thresholds: dict[str, float] | None = None,
                  max_tags: int = 160, verbose: bool = True,
                  precision: str = "fp32", batch_size: int = 1,
-                 use_graph: bool = True):
+                 use_graph: bool = True, prefetch: bool = True,
+                 preprocess: str = "pil"):
+        # prefetch 只有 wd-eva02 真的用（它在 __init__ 里自己消费掉了）。
+        # 但 build_backend 对所有后端都会传，而注释里"传进去不报错"的前提
+        # 原先并不成立：pixai / cl / onnx 一路漏到基类，直接 TypeError。
+        # 收在这里，调用方就不用按后端名字分枝。
         self.keep = tuple(keep)
         self.thresholds = dict(thresholds or {})
         self.max_tags = max_tags
@@ -129,6 +238,9 @@ class TagBackend(ABC):
         # 放在基类是为了让调用方无论传哪个后端都不会 TypeError。
         self.precision = normalize_precision(precision)
         self.batch_size = max(1, int(batch_size))
+        # 预处理放哪。解码留在 CPU（逐张喂，nvJPEG 单张反而更慢），
+        # 只有缩放+归一化这一段上卡；目前只有 wd-eva02 实现了。
+        self.preprocess = normalize_preprocess(preprocess)
         # 基类只收着，不实现：CUDA Graph 目前只有 wd-eva02 有。
         self.use_graph = bool(use_graph)
         # 上一次 predict_batch 的耗时拆分（毫秒）。给 --stats-json 用：
@@ -376,6 +488,8 @@ class WDEva02Tagger(TagBackend):
         self._last_ratings: list[dict[str, float]] = []
         # 非 None 时 _filter 改用这张表（predict_raw 用）
         self._plan_override: list[tuple[int, str, float]] | None = None
+        # 预处理上卡的计划（见 _tensor_prep_plan）；None = 走原 PIL 路径
+        self._tensor_prep: _TensorPrep | None = None
 
     def _resolve_dir(self) -> Path:
         if self.model_dir is not None:
@@ -461,6 +575,25 @@ class WDEva02Tagger(TagBackend):
 
         data_cfg = timm.data.resolve_data_config({}, model=model)
         self._transform = timm.data.create_transform(**data_cfg, is_training=False)
+        # 预处理上卡：读出 timm transform 的等价步骤。读不出来（换了算子、
+        # 或者本来就没装 torchvision）就回落 PIL，绝不自己写死一套参数。
+        self._tensor_prep = None
+        if self.preprocess == "tensor":
+            if not str(self.device).startswith("cuda"):
+                if self.verbose:
+                    print(f"[tagger] 预处理 tensor 需要 CUDA（当前 {self.device}），"
+                          "已回落 PIL", flush=True)
+            else:
+                try:
+                    self._tensor_prep = _tensor_prep_plan(self._transform)
+                except Exception as exc:  # noqa: BLE001 - 认不出来就回落
+                    self._tensor_prep = None
+                    if self.verbose:
+                        print(f"[tagger] 解析 timm transform 失败，回落 PIL："
+                              f"{type(exc).__name__}: {exc}", flush=True)
+                if self._tensor_prep is None and self.verbose:
+                    print("[tagger] 这套 transform 不在支持列表（Resize/CenterCrop/"
+                          "Normalize），已回落 PIL", flush=True)
 
         self._maybe_capture_graph(img_size)
         if self.verbose:
@@ -567,16 +700,69 @@ class WDEva02Tagger(TagBackend):
         return out
 
     def _decode_batch(self, part: Sequence) -> tuple[list, int]:
-        """解码 + 预处理一小批，返回 (张量列表, 本批耗时 ms)。
+        """解码（+ PIL 预处理）一小批，返回 (张量列表, 本批耗时 ms)。
 
         耗时在**这一层**量：预取时它跑在后台线程里，主线程去等 future
         只能量到"还要等多久"，把那个当解码耗时会让 `tag_decode` 越跑越小。
+
+        tensor 预处理模式下这里只做到"uint8 CHW 张量"：解码本来就是 CPU
+        活（nvJPEG 逐张比 PIL 还慢），而缩放/归一化挪到 _forward_chunk 里
+        上卡——这样预取仍然能拿 CPU 解码去盖 GPU 前向，不会白丢重叠。
         """
         import time
 
         t0 = time.perf_counter()
-        tensors = [self._transform(self._open_rgb(im)) for im in part]
+        if self._tensor_prep is not None:
+            tensors = [self._pixels_uint8(im) for im in part]
+        else:
+            tensors = [self._transform(self._open_rgb(im)) for im in part]
         return tensors, int((time.perf_counter() - t0) * 1000)
+
+    def _pixels_uint8(self, image):
+        """解码到 uint8 CHW 张量（仍在 CPU），给 tensor 预处理的入口用。
+
+        为什么先转张量再上卡：H2D 一次 3 MB 左右，比在 CPU 上做 bicubic
+        缩放（1024² 约 7 ms）便宜一个数量级。
+        """
+        import numpy as np
+        import torch
+
+        rgb = self._open_rgb(image)
+        # np.array（不是 asarray）：PIL 的数组视图是只读的，torch.from_numpy
+        # 对只读数组会告警，而且我们后面的 permute/切片都要求可写。
+        return torch.from_numpy(np.array(rgb)).permute(2, 0, 1)
+
+    def _prep_on_device(self, pixels):
+        """uint8 CHW（CPU）→ 归一化后的 float CHW（GPU），等价于 timm 的 transform。
+
+        数值口径：缩放与归一化的**算式**与 timm 一致（/255 → (x-mean)/std），
+        但重采样实现换了——PIL 的 Lanczos/bicubic 与 F.interpolate 的
+        bicubic+antialias 不是同一套核，像素会有 ±0.3（归一化后）的差，
+        tag 集合约 1% 会变。所以这是 opt-in，默认仍走 PIL。
+        """
+        import torch
+        import torch.nn.functional as F
+
+        plan = self._tensor_prep
+        x = pixels.to(self.device, non_blocking=True).unsqueeze(0).float()
+        height, width = x.shape[-2:]
+        target = plan.target_size(height, width)
+        if target != (height, width):
+            if plan.mode == "nearest":
+                x = F.interpolate(x, size=target, mode="nearest")
+            else:
+                x = F.interpolate(x, size=target, mode=plan.mode,
+                                  antialias=True, align_corners=False)
+        if plan.crop is not None:
+            crop_h, crop_w = plan.crop
+            cur_h, cur_w = x.shape[-2:]
+            if crop_h < cur_h or crop_w < cur_w:
+                top = int(round((cur_h - crop_h) / 2.0))
+                left = int(round((cur_w - crop_w) / 2.0))
+                x = x[:, :, top:top + crop_h, left:left + crop_w]
+        x = x.div_(255.0)
+        x = x.sub_(plan.mean.to(x.device)).div_(plan.std.to(x.device))
+        return x[0]
 
     def _forward_chunk(self, tensors: Sequence) -> tuple[list[dict[str, float]],
                                                         list[dict[str, float]], int]:
@@ -586,12 +772,19 @@ class WDEva02Tagger(TagBackend):
         import torch
 
         graph = self._graph
-        x = torch.stack(list(tensors))
-        if self.device and self.device != "cpu":
-            x = x.to(self.device)
+        # 计时从前向这一段的入口就开始：tensor 模式下这里包着 H2D + 缩放 +
+        # 归一化，全是 GPU 上的实打实时间（占的也是前向那条流）；PIL 模式下
+        # 包着 stack 与 H2D。两种都属于 forward，算进 decode 会让 tag_decode
+        # 凭空变小、看着像解码变快了。
+        tf0 = time.perf_counter()
+        if self._tensor_prep is not None:
+            x = torch.stack([self._prep_on_device(t) for t in tensors])
+        else:
+            x = torch.stack(list(tensors))
+            if self.device and self.device != "cpu":
+                x = x.to(self.device)
         if self.precision == "bf16":
             x = x.to(torch.bfloat16)
-        tf0 = time.perf_counter()
         with torch.no_grad():
             if graph is not None and x.shape[0] == graph.batch:
                 # CUDA Graph：把这一批的 1480 次 kernel 发射压成一次回放。
@@ -624,6 +817,10 @@ class WDEva02Tagger(TagBackend):
         只要 18~26 ms。串行做是两者相加，重叠之后取 max——省下来的正好是
         较小那一项。像素**逐位不变**：还是同一条 PIL 路径，只是挪了时间位置。
         CPU 上不预取：两边抢同一批核，重叠只会互相拖。
+
+        preprocess="tensor" 时预取照样有效：解码仍在 CPU（这里只做到 uint8
+        张量），缩放/归一化在前向那条流上。代价是像素不再逐位相同——见
+        _prep_on_device 的说明。
         """
         chunk = max(1, self.batch_size)
         parts = [list(images[i:i + chunk]) for i in range(0, len(images), chunk)]
@@ -965,6 +1162,7 @@ def build_backend(
     batch_size: int = 1,
     use_graph: bool = True,
     prefetch: bool = True,
+    preprocess: str = "pil",
 ) -> TagBackend | None:
     """按名字建后端。`none` / 空串返回 None（表示 tag 走 VLM）。"""
     key = (backend or "").strip().lower()
@@ -983,6 +1181,7 @@ def build_backend(
         # 会退化成逐张跑，行为与加参数之前一字不差。
         "precision": precision,
         "batch_size": batch_size,
+        "preprocess": preprocess,
     }
     if model:
         kw["model_id"] = model

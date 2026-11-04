@@ -47,6 +47,19 @@ class Provenance:
     variant: str = ""        # AB 实验变体名，未启用时为空
     tag_backend: str = ""    # tag 由谁出（wd-eva02 / onnx / vlm），只进 tag 产物
     tag_precision: str = ""  # tag 后端的精度，与上面的 precision（VLM 的）分开记
+    # 预处理放在哪（pil / tensor）。重采样实现不同，tag 集合会有差异，
+    # 事后比两批 tag 数量时得能分辨是口径变了还是模型变了。
+    tag_preprocess: str = ""
+    # 描述长度引导（字符区间）。它是产出分布的一部分：400-1024 → 250-500
+    # 会少三成字数、快三成半，事后混批时只能靠它分辨。
+    caption_chars: list[int] | None = None
+    # 推理来源：local（本机/自建 vLLM·llama.cpp）/ openai / anthropic。
+    # 同一个 model_id 在两处是两套输出（量化、版本、上下文都不同），混批之后
+    # 只能靠这一项分辨。给默认值是为了让**旧产物**（没有这个键）仍能读回——
+    # 新增必填键会让历史数据在读回时直接 TypeError。
+    provider: str = "local"
+    # 这条是结果缓存还原的（没经历本次推理）。命中才写，未命中时产物里没有这个键。
+    cache_hit: bool = False
 
 
 @dataclass(slots=True)

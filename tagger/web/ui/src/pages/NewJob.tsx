@@ -24,6 +24,7 @@ import {
   type Defaults,
   type Health,
   type JobSpec,
+  type NlApiProbe,
   type PlanPreview,
   type VllmPlan,
   type VllmProbe,
@@ -34,6 +35,7 @@ import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { OverviewFigure, OverviewFigureRow } from '../components/ui/OverviewFigures'
 import { FolderPicker } from '../components/FolderPicker'
+import { MultiGpuPanel } from '../components/MultiGpuPanel'
 import { QuantizeDialog } from '../components/QuantizeDialog'
 import { ShardAssets } from '../components/ShardAssets'
 
@@ -70,6 +72,13 @@ function looksLikeShard(path: string): boolean {
 }
 const DEVICES = ['auto', 'cuda:0', 'cuda:1', 'cpu'] as const
 const BATCHES = ['1', '2', '4', '8', '16'] as const
+// 预处理位置。解码都在 CPU，区别只在缩放/归一化：pil = CPU（现状），
+// tensor = 上卡。上卡要 CUDA，且只有"解码比前向重"时才有收益。
+const PREPROCESS = ['pil', 'tensor'] as const
+const PREPROCESS_LABELS: Record<(typeof PREPROCESS)[number], string> = {
+  pil: 'CPU（默认）',
+  tensor: 'GPU',
+}
 const LAYOUTS = ['flat', 'mirror'] as const
 // 打标方式（页首三选）。与后端的映射：
 //   tag  → engine=local（只加载 tag 分类头）
@@ -78,6 +87,14 @@ const LAYOUTS = ['flat', 'mirror'] as const
 // 单模式下后端会被强制关掉，否则 run_client 会多写一份没人要的 tag。见 jobs.vlm_backend_for。
 const MODES = ['tag', 'nl', 'both'] as const
 const ARTIFACT_FORMATS = ['parquet', 'json'] as const
+/**
+ * NL 推理来源。local = 本机/自建服务（要起进程、有环境指纹）；
+ * openai / anthropic = 外部 API（不加载权重、不用起服务、没有指纹）。
+ * 文案与默认地址一律由 /api/defaults 的 vlm_providers 给，前端不留第二份
+ * 标签表——两份文案迟早会分叉。
+ */
+const VLM_PROVIDERS = ['local', 'openai', 'anthropic'] as const
+type VlmProvider = (typeof VLM_PROVIDERS)[number]
 
 /**
  * 硬件保护的一个数字阈值。范围与后端 `jobs.GUARD_KNOBS` 一一对应。
@@ -175,6 +192,7 @@ export function NewJob({
   const [device, setDevice] = useState<string>('auto')
   const [precision, setPrecision] = useState<string>('bf16')
   const [batch, setBatch] = useState(4)
+  const [preprocess, setPreprocess] = useState<string>('pil')
   const [threshold, setThreshold] = useState(0.35)
   const [limit, setLimit] = useState(0)
   const [force, setForce] = useState(false)
@@ -192,12 +210,30 @@ export function NewJob({
   // ---- NL 模型（mode = nl / both）
   const [vlmUrl, setVlmUrl] = useState('http://127.0.0.1:8000')
   const [vlmModel, setVlmModel] = useState('tagger')
+  // 推理来源。apiBase/apiKey 只在 openai / anthropic 下用：前者留空按来源
+  // 取默认域名，后者只在提交那一次请求里走一趟（快照里会被抹成 ***）。
+  const [vlmProvider, setVlmProvider] = useState<VlmProvider>('local')
+  const [apiBase, setApiBase] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  // 探测结果与「记住密钥」。存档只回脱敏值：浏览器的内存里永远只有用户
+  // 刚敲进去的那一份明文，后端不会把存过的 key 再发下来。
+  const [apiProbe, setApiProbe] = useState<NlApiProbe | null>(null)
+  const [apiProbeBusy, setApiProbeBusy] = useState(false)
+  const [rememberKey, setRememberKey] = useState(false)
+  // undefined = 还没动过，用 defaults 里的存档；null = 明确没有。
+  const [savedKeyOverride, setSavedKeyOverride] = useState<
+    { base: string; key_masked: string } | null | undefined
+  >(undefined)
   // 0 = 跟服务端 max_num_seqs 走。30M 量级下把这里填成 1 等于让机器闲置着跑，
   // 所以默认交给服务端决定，而不是写一个看起保守的数。
   const [concurrency, setConcurrency] = useState(0)
   const [temperature, setTemperature] = useState(0.2)
   const [topP, setTopP] = useState(0.9)
   const [maxTokens, setMaxTokens] = useState(0)
+  // 描述长度引导（字符）。两个都填才生效；空 = 按 token 区间派生。
+  // 这与 maxTokens 是两件事：maxTokens 是"写不下就截断"的硬上限。
+  const [captionLo, setCaptionLo] = useState(0)
+  const [captionHi, setCaptionHi] = useState(0)
   const [timeoutS, setTimeoutS] = useState(90)
   const [maxPixels, setMaxPixels] = useState(0)
   const [seed, setSeed] = useState('')
@@ -282,6 +318,11 @@ export function NewJob({
   const [vllmMediaRoot, setVllmMediaRoot] = useState('')
   const [vllmBusy, setVllmBusy] = useState(false)
   const [vllmError, setVllmError] = useState<string | null>(null)
+  // 多卡（数据并行）：每张卡一个服务进程。perCardSeqs 同时是"每卡开几个
+  // slot"和"每槽并发多少条"——这两个数必须一致：服务开 8 个 slot 而任务
+  // 只发 2 条，等于把卡闲着一半。
+  const [multiGpu, setMultiGpu] = useState(false)
+  const [perCardSeqs, setPerCardSeqs] = useState(0)
   // 这组参数会解析成什么（分档/权重/max_model_len/警告）。点启动之前就看到，
   // 省掉"选了 8B 才发现掉档 / OOM"那几分钟。
   const [planPreview, setPlanPreview] = useState<VllmPlan | null>(null)
@@ -295,6 +336,20 @@ export function NewJob({
   const [hfAvailable, setHfAvailable] = useState<string[] | null>(null)
   const [hfFiles, setHfFiles] = useState<string[]>([])
   const [hfBusy, setHfBusy] = useState(false)
+  // auto = 有 parquet 就逐行流式（不落盘）；tar 分片要下到本地，打完一片删一片
+  const [hfFormat, setHfFormat] = useState<'auto' | 'parquet' | 'webdataset'>('auto')
+  // 预取：下载与打标并行。0 = 严格串行（每片都要空等下载完）
+  const [hfPrefetch, setHfPrefetch] = useState(1)
+  // 多线程下载（IDM 式分段并发）：国内单条 TCP 常被限速，靠多段并发跑满带宽。
+  // 关掉就等价于 hf_conns=1，服务端不支持 Range 时也会自动退回单连接。
+  const [hfMulti, setHfMulti] = useState(true)
+  const [hfConns, setHfConns] = useState(4)
+  // 给产物留的磁盘余量（GB）。0 = 自动（最大分片的 30%，不少于 2 GB）
+  const [hfReserveGb, setHfReserveGb] = useState(0)
+  // 结果缓存：同图同参复用上次产出。默认关：首轮命中率为 0，而算图哈希有成本
+  const [cacheOn, setCacheOn] = useState(false)
+  // 目标盘剩余空间（字节）。填预取/余量时最想知道的就是这个数。
+  const [diskFree, setDiskFree] = useState<number | null>(null)
 
   // ---- 产物形态（engine="vlm"）
   const [artifactFormat, setArtifactFormat] = useState<(typeof ARTIFACT_FORMATS)[number]>('parquet')
@@ -331,15 +386,42 @@ export function NewJob({
   const isVlm = mode !== 'tag'
   const hasTag = mode !== 'nl'
   const useHf = isVlm && hfRepo.trim() !== ''
+  // API 模式：不加载本地权重、不用起服务、没有环境指纹，也没有 file:// 直传。
+  // 本机服务那一整块面板在 API 模式下不渲染（不是灰掉），因为其中一半字段
+  // 对 API 毫无意义，灰着摆着只会让人以为"配置没生效"。
+  const isApiMode = isVlm && vlmProvider !== 'local'
+  const providerList = defaults?.vlm_providers ?? []
+  // 默认地址与"密钥去哪个环境变量找"一律读后端给的那份，前端不留第二份常量
+  const providerBase = (p: VlmProvider) =>
+    providerList.find((o) => o.value === p)?.base || ''
+  const providerEnvKey = (p: VlmProvider) =>
+    providerList.find((o) => o.value === p)?.env_key || ''
+  // 标签以 /api/defaults 为准；只有 defaults 还没回来时用到这份兜底。
+  const providerLabel = (p: VlmProvider) =>
+    providerList.find((o) => o.value === p)?.label ||
+    (p === 'openai' ? 'OpenAI 兼容 API' : p === 'anthropic' ? 'Anthropic API' : '本机 / 自建服务')
+  // defaults 晚到（或用户先选了 API）时补上该来源的默认地址。空着会让提交
+  // 按钮莫名置灰，而其实后端本来就会按来源取默认域名。
+  useEffect(() => {
+    if (vlmProvider === 'local' || apiBase.trim()) return
+    const fallback = defaults?.vlm_providers?.find((o) => o.value === vlmProvider)?.base
+    if (fallback) setApiBase(fallback)
+  }, [vlmProvider, apiBase, defaults])
+
   // 地址指向本机 = 应该由这个页面来起服务；指向别处就只有「探测」能告诉我们状态。
   const localVlmUrl = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/i.test(
     vlmUrl.trim(),
   )
   // 并发填 0 时的实际生效值。规则与 client.resolve_concurrency 一致：
-  // 指纹里的 max_num_seqs，封顶 32，读不到指纹就是 4。
+  // 本机按指纹里的 max_num_seqs（封顶 32，读不到就是 4），API 模式按该来源
+  // 的建议值（云端限的是每分钟请求数，与显存无关）。
   // 页面上只是显示，真正解析在后端——两处不一致时以后端为准。
+  const providerMeta = (p: VlmProvider) => providerList.find((o) => o.value === p)
+  const savedKey =
+    savedKeyOverride !== undefined ? savedKeyOverride : (providerMeta(vlmProvider)?.saved ?? null)
   const effectiveSeqs = (() => {
     if (concurrency > 0) return Math.max(1, concurrency)
+    if (isApiMode) return Math.max(1, providerMeta(vlmProvider)?.concurrency ?? 4)
     const raw = Number(vllm?.fingerprint?.max_num_seqs ?? 0)
     if (!Number.isFinite(raw) || raw <= 0) return 4
     return Math.max(1, Math.min(32, Math.round(raw)))
@@ -351,9 +433,13 @@ export function NewJob({
   const vllmTiers = defaults?.vllm_tiers ?? []
   // 「打标方式」的副标题跟着配置走：tiers.yaml 的 models 段加一个，这里就多一个。
   // 写死 "Qwen3-VL" 的话，换权重那天页面就开始说谎。
-  const vlmModelHint = vllmModels.length
+  const localModelHint = vllmModels.length
     ? vllmModels.map((m) => m.key).join(' / ')
     : 'Qwen3-VL 4B/8B'
+  // API 模式下列举不出对方的模型清单，就显示"来源 · 已填的模型 id"。
+  const vlmModelHint = isApiMode
+    ? `${providerLabel(vlmProvider)}${vlmModel.trim() ? ` · ${vlmModel.trim()}` : ''}`
+    : localModelHint
   const vllmLocked = vllm?.status === 'starting' || vllm?.status === 'ready'
 
   // 质检的配置默认值。输入框里的 0 = 不覆盖，占位文案必须显示真实数字，
@@ -388,6 +474,37 @@ export function NewJob({
   const changeMode = (next: (typeof MODES)[number]) => {
     setMode(next)
     if (next === 'tag' && backend === 'none') setBackend(defaults?.backend ?? 'wd-eva02')
+  }
+
+  // 切推理来源。换来源必须换默认地址（拿 OpenAI 的地址去打 Anthropic 只会
+  // 404），并且把本机默认的路由名 tagger 清掉——API 侧不认这个名字。
+  const changeProvider = (next: VlmProvider) => {
+    setVlmProvider(next)
+    setProbe(null)
+    setApiProbe(null)
+    setSavedKeyOverride(undefined)
+    const saved = providerList.find((o) => o.value === next)?.saved
+    // 记住过的地址优先：用户当初填的是自建网关，换回来还得是同一个。
+    setApiBase(next === 'local' ? '' : (saved?.base || providerBase(next)))
+    if (next !== 'local' && vlmModel.trim() === 'tagger') setVlmModel('')
+  }
+
+  // 取消勾选 = 忘掉存档。不这么做的话密钥会永远留在盘上，而页面上已经
+  // 看不出它还存着——"我明明取消了"是最难查的一类问题。
+  const toggleRemember = async (checked: boolean) => {
+    setRememberKey(checked)
+    if (checked || !savedKey) return
+    try {
+      const r = await api.saveNlApiKey({
+        provider: vlmProvider,
+        base: '',
+        key: '',
+        remember: false,
+      })
+      setSavedKeyOverride(r.saved)
+    } catch {
+      // 删存档失败不该挡住提交；下次进页面还会显示"已记住"。
+    }
   }
 
   // W4A16 不是运行时开关：没有量化权重时选了也只会回退 BF16。所以先弹窗
@@ -569,6 +686,37 @@ export function NewJob({
     }
   }
 
+  // API 模式的"探测"：发一张 8×8 的图走一次真实请求。这是唯一能同时回答
+  // "地址通不通 / 密钥对不对 / 模型名认不认 / 看不看得见图"的办法——分四次
+  // 试错的话，每次都要等 30 秒超时。
+  async function probeApi() {
+    setApiProbeBusy(true)
+    try {
+      setApiProbe(
+        await api.probeNlApi({
+          provider: vlmProvider,
+          base: apiBase.trim(),
+          model: vlmModel.trim(),
+          key: apiKey,
+        }),
+      )
+    } catch (err) {
+      setApiProbe({
+        ok: false,
+        provider: vlmProvider,
+        base: apiBase,
+        model: vlmModel,
+        latency_ms: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        text: '',
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setApiProbeBusy(false)
+    }
+  }
+
   // 随手看一眼"这个输入里有多少张"：用户在按开始之前最想知道的就是这个，
   // 而它决定了这次要跑几分钟。HF 仓库输入没有本地目录可扫，跳过。
   useEffect(() => {
@@ -641,12 +789,37 @@ export function NewJob({
     )
   }
 
+  // 目标盘剩余空间：决定"能预取几片"的那个数，开跑前就该看得见。
+  useEffect(() => {
+    if (!useHf) {
+      setDiskFree(null)
+      return
+    }
+    let alive = true
+    api
+      .diskFree(outDir.trim() || '.')
+      .then((res) => {
+        if (alive) setDiskFree(res.free_bytes)
+      })
+      .catch(() => {
+        if (alive) setDiskFree(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [useHf, outDir])
+
   async function loadHfFiles() {
     if (!hfRepo.trim()) return
     setHfBusy(true)
     setError(null)
     try {
-      const res = await api.hfFiles(hfRepo.trim(), hfToken, hfRevision || 'main')
+      const res = await api.hfFiles(
+        hfRepo.trim(),
+        hfToken,
+        hfRevision || 'main',
+        hfFormat,
+      )
       setHfAvailable(res.files)
       setHfFiles([]) // 不勾 = 处理全部
     } catch (err) {
@@ -671,6 +844,7 @@ export function NewJob({
         device,
         precision,
         batch,
+        preprocess,
         threshold,
         limit,
         force,
@@ -696,14 +870,32 @@ export function NewJob({
             hf_token: hfToken,
             hf_revision: hfRevision || 'main',
             hf_files: hfFiles,
+            hf_format: hfFormat,
+            hf_prefetch: hfPrefetch,
+            hf_conns: hfMulti ? hfConns : 1,
+            hf_reserve_gb: hfReserveGb,
+            cache: cacheOn,
+            // 推理来源。API 模式不需要本地服务地址，也不吃 file:// 直传
+            // （云端读不到本机路径）；地址留空时后端按来源取默认域名。
+            vlm_provider: vlmProvider,
+            api_base: vlmProvider === 'local' ? '' : apiBase.trim(),
+            api_key: vlmProvider === 'local' ? '' : apiKey,
             url: vlmUrl,
-            vlm_model: vlmModel,
+            vlm_model: vlmModel.trim(),
             output_mode: mode,
             temperature,
             top_p: topP,
             max_tokens: maxTokens,
+            // 两个都填才发，否则走默认派生（400-1024）
+            caption_chars: captionLo > 0 && captionHi > captionLo
+              ? [captionLo, captionHi]
+              : null,
             timeout_s: timeoutS,
             concurrency,
+            // 多卡：地址不从这里来（后端直接取多卡服务组的地址分槽），
+            // 只有每卡并发要传，否则服务开 8 个 slot、任务只发 2 条。
+            multi_gpu: multiGpu,
+            per_card_seqs: multiGpu ? perCardSeqs : 0,
             max_pixels: maxPixels,
             seed: seed === '' ? null : Number(seed),
             max_failures: maxFailures,
@@ -726,7 +918,7 @@ export function NewJob({
             quality_max_repeat_ratio: maxRepeat.trim() === '' ? null : Number(maxRepeat),
             escalate_url: escalateUrl.trim(),
             escalate_model: escalateModel.trim(),
-            use_file_url: useFileUrl,
+            use_file_url: vlmProvider === 'local' && useFileUrl,
             // 画师名来自数据本身（parquet 的 artist 列 / 分片的目录名），
             // 这两个开关决定它写不写进 .nl/.tag 文本。
             artist: vlmArtist,
@@ -750,6 +942,20 @@ export function NewJob({
             layout,
             seq_width: seqWidth,
           }
+      // 勾了「记住」才落盘。失败不挡提交：存不下顶多下次重贴，任务照样跑。
+      if (isApiMode && rememberKey && apiKey.trim()) {
+        try {
+          const saved = await api.saveNlApiKey({
+            provider: vlmProvider,
+            base: apiBase.trim(),
+            key: apiKey,
+            remember: true,
+          })
+          setSavedKeyOverride(saved.saved)
+        } catch {
+          // 密钥存档失败与任务无关，不打断提交。
+        }
+      }
       const snap = await api.createJob(spec)
       onStarted(snap.id)
     } catch (err) {
@@ -770,6 +976,9 @@ export function NewJob({
   // 实测（4070 Ti SUPER / bf16 / batch=4）：800 张 32s 跑完，端到端约 40ms/张。
   const estimateS = !isVlm && preview ? Math.max(1, Math.round((total * 40) / 1000)) : null
   const missingInput = isVlm ? !hfRepo.trim() && !inputDir.trim() : !inputDir.trim()
+  // API 模式的两个必需项。缺了就在按钮上拦住，而不是让后端 400——
+  // 这两项填错的报错信息（"模型不存在" / "401"）都很难和"表单没填全"区分。
+  const apiIncomplete = isApiMode && (!apiBase.trim() || !vlmModel.trim())
   const backendOptions = isVlm ? BACKENDS_VLM : BACKENDS
   const keepOptions = defaults?.keep_categories ?? []
 
@@ -795,7 +1004,8 @@ export function NewJob({
             <button
               type="button"
               className="lx-btn-primary lx-launch-glow inline-flex items-center gap-1.5"
-              disabled={missingInput || busy}
+              disabled={missingInput || apiIncomplete || busy}
+              title={apiIncomplete ? 'API 模式要填地址和模型名' : undefined}
               onClick={() => void submit()}
             >
               <Play size={14} />
@@ -896,6 +1106,101 @@ export function NewJob({
                       />
                     </SettingRow>
 
+                    <SettingRow
+                      label="仓库格式"
+                      help="auto = 有 parquet 就逐行流式（不落盘）；tar 分片要先下到本地，打完一片删一片"
+                    >
+                      <select
+                        className="lx-input"
+                        value={hfFormat}
+                        onChange={(e) =>
+                          setHfFormat(
+                            e.target.value as 'auto' | 'parquet' | 'webdataset',
+                          )
+                        }
+                      >
+                        <option value="auto">自动</option>
+                        <option value="parquet">parquet 流式（不落盘）</option>
+                        <option value="webdataset">tar 分片（落盘，打完即删）</option>
+                      </select>
+                    </SettingRow>
+
+                    {hfFormat !== 'parquet' && (
+                      <>
+                        <SettingRow
+                          label="多线程下载"
+                          help="把一个分片切成多段并发拉取（IDM 式的分段下载）。开着更吃带宽，也更容易跑满国内常见的单连接限速"
+                        >
+                          <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
+                            <input
+                              type="checkbox"
+                              className="accent-lx-accent"
+                              checked={hfMulti}
+                              onChange={(e) => setHfMulti(e.target.checked)}
+                            />
+                            启用（文件小于 16 MB 或服务端不支持 Range 时自动退回单连接）
+                          </label>
+                        </SettingRow>
+                        {hfMulti && (
+                          <SettingRow
+                            label="并发线程数"
+                            help="单个分片同时开几条连接。4~8 条最实用；再多只是在抢同一份带宽，还会让丢包重传的代价变大"
+                          >
+                            <input
+                              type="number"
+                              className="lx-input font-mono tabular-nums"
+                              min={2}
+                              max={16}
+                              value={hfConns}
+                              onChange={(e) =>
+                                setHfConns(
+                                  Math.max(2, Math.min(16, Number(e.target.value) || 2)),
+                                )
+                              }
+                            />
+                          </SettingRow>
+                        )}
+                        <SettingRow
+                          label="预取分片"
+                          help="下载与打标并行，下载时间藏进上一片的处理里；0 = 严格串行。磁盘余量不够时会自动暂停下载"
+                        >
+                          <input
+                            type="number"
+                            className="lx-input font-mono tabular-nums"
+                            min={0}
+                            max={8}
+                            value={hfPrefetch}
+                            onChange={(e) =>
+                              setHfPrefetch(
+                                Math.max(0, Math.min(8, Number(e.target.value) || 0)),
+                              )
+                            }
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          label="磁盘余量（GB）"
+                          help="给产物留的空间；0 = 自动（最大分片的 30%，不少于 2 GB）。空间不够就停下载，不会写爆盘"
+                          description={
+                            diskFree === null
+                              ? undefined
+                              : `目标盘剩余 ${(diskFree / 1024 ** 3).toFixed(1)} GB`
+                          }
+                        >
+                          <input
+                            type="number"
+                            className="lx-input font-mono tabular-nums"
+                            min={0}
+                            step={1}
+                            value={hfReserveGb || ''}
+                            placeholder="0"
+                            onChange={(e) =>
+                              setHfReserveGb(Math.max(0, Number(e.target.value) || 0))
+                            }
+                          />
+                        </SettingRow>
+                      </>
+                    )}
+
                     {hfAvailable !== null && (
                       <SettingRow
                         label="文件"
@@ -906,7 +1211,13 @@ export function NewJob({
                         }
                       >
                         {hfAvailable.length === 0 ? (
-                          <p className="text-xs text-lx-warning">仓库里没有 *.parquet 分片。</p>
+                          <p className="text-xs text-lx-warning">
+                            {hfFormat === 'parquet'
+                              ? '仓库里没有 *.parquet 分片。'
+                              : hfFormat === 'webdataset'
+                                ? '仓库里没有 *.tar 分片。'
+                                : '仓库里没有 *.parquet 也没有 *.tar 分片。'}
+                          </p>
                         ) : (
                           <div className="lx-sheet-inset max-h-44 space-y-1 overflow-y-auto p-2">
                             {hfAvailable.map((f) => (
@@ -1044,21 +1355,55 @@ export function NewJob({
             <SectionPanel
               title="NL 模型"
               trailing={
-                <StatusChip
-                  tone={
-                    vllm?.status === 'ready'
-                      ? 'success'
-                      : vllm?.status === 'failed'
-                        ? 'danger'
-                        : vllm?.status === 'starting' || vllm?.status === 'stopping'
-                          ? 'warning'
-                          : 'neutral'
-                  }
-                >
-                  {vllmStatusLabel(vllm)}
-                </StatusChip>
+                // API 模式没有"本机服务状态"可言：既没有进程也没有指纹，
+                // 如实显示来源，别把本机服务的状态芯片挂在外部 API 上。
+                isApiMode ? (
+                  <StatusChip tone="neutral">{providerLabel(vlmProvider)}</StatusChip>
+                ) : (
+                  <StatusChip
+                    tone={
+                      vllm?.status === 'ready'
+                        ? 'success'
+                        : vllm?.status === 'failed'
+                          ? 'danger'
+                          : vllm?.status === 'starting' || vllm?.status === 'stopping'
+                            ? 'warning'
+                            : 'neutral'
+                    }
+                  >
+                    {vllmStatusLabel(vllm)}
+                  </StatusChip>
+                )
               }
             >
+              {/* 推理来源放在最前面：它决定下面整块长什么样。本机/自建要起服务、
+                  有环境指纹；API 模式只填地址 + 密钥 + 模型名，什么都不用启。 */}
+              <SettingRow
+                label="推理来源"
+                icon={<Cloud size={14} />}
+                help="本机/自建走本地服务（有环境指纹、能重试提分辨率）；API 模式不加载权重、不用起服务，密钥留空时从环境变量读"
+              >
+                <select
+                  className="lx-input"
+                  value={vlmProvider}
+                  onChange={(e) => changeProvider(e.target.value as VlmProvider)}
+                  aria-label="推理来源"
+                >
+                  {providerList.length === 0 && (
+                    <option value="local">本机 / 自建服务</option>
+                  )}
+                  {providerList.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </SettingRow>
+
+              {/* 本机服务整块：API 模式下不渲染，而不是灰着。里面一半字段
+                  （端口、引擎、分档、放行目录）对 API 毫无意义。 */}
+              {!isApiMode && (
+                <>
               <SettingRow
                 label="本机服务"
                 help="第一次用：先点「启动服务」→ 等右上角变成「就绪」→ 再提交任务。首次加载要几分钟"
@@ -1130,6 +1475,17 @@ export function NewJob({
                   <option value="llamacpp">llama.cpp（Windows 原生）</option>
                 </select>
               </SettingRow>
+
+              {/* 多卡：一台机器插了多张卡时，一卡一进程各打各的。
+                  放在「引擎」下面是因为它复用同一个引擎选择——换引擎等于
+                  换一代指纹，不能两块面板各写各的。 */}
+              <MultiGpuPanel
+                engine={vllmEngine}
+                enabled={multiGpu}
+                onEnabledChange={setMultiGpu}
+                perCardSeqs={perCardSeqs}
+                onPerCardSeqsChange={setPerCardSeqs}
+              />
 
               {/* 换权重是最常被问的"在哪儿换模型"。放在这里是因为它只对
                   本机拉起的服务有效——远程服务的模型由那台机器决定。 */}
@@ -1377,6 +1733,88 @@ export function NewJob({
                 </div>
               )}
 
+                </>
+              )}
+
+              {/* API 模式的两个字段只在真的走外部 API 时出现：本机模式下
+                  它们恒为空，摆着只会让人以为哪里填漏了。 */}
+              {isApiMode && (
+                <>
+                  <SettingRow
+                    label="API 地址"
+                    help="留空按来源取默认域名；自建网关（one-api / LM Studio）填自己的地址"
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        className="lx-input font-mono text-xs"
+                        value={apiBase}
+                        onChange={(e) => {
+                          setApiBase(e.target.value)
+                          setApiProbe(null)
+                        }}
+                        placeholder={providerBase(vlmProvider)}
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
+                        disabled={apiProbeBusy || !vlmModel.trim()}
+                        onClick={() => void probeApi()}
+                        title="发一张 8×8 的小图走一次真实请求"
+                      >
+                        <RefreshCw size={12} className={apiProbeBusy ? 'animate-spin' : undefined} />
+                        {apiProbeBusy ? '测试中…' : '测试连接'}
+                      </button>
+                    </div>
+                    {apiProbe && (
+                      <p
+                        className={`mt-1.5 text-[11px] leading-relaxed ${
+                          apiProbe.ok ? 'text-lx-success' : 'text-lx-danger'
+                        }`}
+                      >
+                        {apiProbe.ok
+                          ? `通 · ${apiProbe.latency_ms}ms · 入 ${apiProbe.prompt_tokens} / 出 ${apiProbe.completion_tokens} token${
+                              apiProbe.text ? ` · 回「${apiProbe.text.slice(0, 24)}」` : ''
+                            }`
+                          : apiProbe.error}
+                      </p>
+                    )}
+                  </SettingRow>
+                  <SettingRow
+                    label="API 密钥"
+                    help={
+                      savedKey
+                        ? `已记住 ${savedKey.key_masked}，留空就用它`
+                        : providerEnvKey(vlmProvider)
+                          ? `留空则读环境变量 ${providerEnvKey(vlmProvider)}`
+                          : '留空表示不带鉴权头（免鉴权的自建网关很常见）'
+                    }
+                  >
+                    <input
+                      type="password"
+                      className="lx-input font-mono text-xs"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder={savedKey ? `${savedKey.key_masked}（已记住）` : '粘贴密钥'}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    {/* 默认不存：密钥落盘是明文，勾了才写 configs/nl_api.json。 */}
+                    <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-lx-muted">
+                      <input
+                        type="checkbox"
+                        className="lx-check"
+                        checked={rememberKey}
+                        onChange={(e) => void toggleRemember(e.target.checked)}
+                      />
+                      记住到本机（明文存 configs/nl_api.json）
+                    </label>
+                  </SettingRow>
+                </>
+              )}
+
+              {!isApiMode && (
+                <>
               <SettingRow
                 label="服务地址"
                 help="本机服务就绪后自动填；远程服务直接填 IP"
@@ -1429,26 +1867,49 @@ export function NewJob({
                   </p>
                 )}
               </SettingRow>
+                </>
+              )}
 
               <SettingRow
                 label="模型名"
-                help="对应 --served-model-name，只是路由名，与权重无关"
+                help={
+                  isApiMode
+                    ? 'API 侧的模型 id（如 gpt-4o / claude-sonnet-4-5），不是本地路由名'
+                    : '对应 --served-model-name，只是路由名，与权重无关'
+                }
               >
                 <input
                   className="lx-input font-mono text-xs"
                   value={vlmModel}
-                  onChange={(e) => setVlmModel(e.target.value)}
-                  placeholder="tagger"
+                  onChange={(e) => {
+                    setVlmModel(e.target.value)
+                    setApiProbe(null)
+                  }}
+                  placeholder={isApiMode ? '填 API 提供的模型 id' : 'tagger'}
+                  list={isApiMode ? 'vlm-api-model-hints' : undefined}
                   spellCheck={false}
                 />
+                {/* 常见 id 只是提示：写错了的表现是 404 一张张失败，而
+                    下拉列表不可能穷举账号里能用的模型。 */}
+                {isApiMode && (
+                  <datalist id="vlm-api-model-hints">
+                    {(providerMeta(vlmProvider)?.models ?? []).map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                )}
               </SettingRow>
 
               <SettingRow
                 label="并发请求数"
-                help="0 = 跟服务端 max_num_seqs 走"
+                help={
+                  isApiMode
+                    ? '0 = 用该来源的建议值；云端按每分钟请求数限流，调太高会成片撞 429'
+                    : '0 = 跟服务端 max_num_seqs 走'
+                }
                 description={
                   concurrency === 0
-                    ? `自动：按当前指纹是 ${effectiveSeqs}`
+                    ? `自动：${isApiMode ? `${providerLabel(vlmProvider)} 建议` : '按当前指纹是'} ${effectiveSeqs}`
                     : undefined
                 }
               >
@@ -1513,6 +1974,40 @@ export function NewJob({
                       value={maxTokens}
                       onChange={(e) => setMaxTokens(Math.max(0, Number(e.target.value) || 0))}
                     />
+                  </SettingRow>
+
+                  {/* 描述长度：只决定"往多长写"，不动合格线（nl_min/max_tokens）。
+                      实测 400-1024 → 250-500：字数 −33%、单张 −36%，
+                      六段要素覆盖只掉 2~3pp，所以这是最省机时的一个旋钮。 */}
+                  <SettingRow
+                    label="描述长度"
+                    help="字符数下限-上限。空 = 按 token 区间派生（400-1024）；250-500 实测快 36%、要素覆盖只掉 2~3pp"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        className="lx-input w-20 font-mono tabular-nums"
+                        min={100}
+                        max={2900}
+                        step={50}
+                        placeholder="400"
+                        value={captionLo || ''}
+                        onChange={(e) => setCaptionLo(Number(e.target.value) || 0)}
+                        aria-label="描述长度下限"
+                      />
+                      <span className="text-xs text-lx-dim">-</span>
+                      <input
+                        type="number"
+                        className="lx-input w-20 font-mono tabular-nums"
+                        min={200}
+                        max={3000}
+                        step={50}
+                        placeholder="1024"
+                        value={captionHi || ''}
+                        onChange={(e) => setCaptionHi(Number(e.target.value) || 0)}
+                        aria-label="描述长度上限"
+                      />
+                    </div>
                   </SettingRow>
 
                   <SettingRow label="请求超时（秒）">
@@ -1804,7 +2299,11 @@ export function NewJob({
                   </div>
                   <SettingRow
                     label="升级服务地址"
-                    help="重试用尽仍不合格时，把这张图打到第二个服务（更大的权重）。一个 vLLM 进程只服务一套权重，所以必须是另一个地址"
+                    help={
+                      isApiMode
+                        ? '重试用尽仍不合格时改打第二个地址（更大的模型）。API 模式复用同一把密钥，填目标地址即可'
+                        : '重试用尽仍不合格时，把这张图打到第二个服务（更大的权重）。一个 vLLM 进程只服务一套权重，所以必须是另一个地址'
+                    }
                   >
                     <input
                       className="lx-input font-mono text-xs"
@@ -1841,6 +2340,10 @@ export function NewJob({
                     </p>
                   )}
 
+                  {/* file:// 只有本机引擎认：API 模式必走 base64，这个开关
+                      露出来只会让人以为能省 33% 体积，实际每张都会被拒。 */}
+                  {!isApiMode && (
+                    <>
                   <div className="px-1 pb-1 pt-2 text-[11px] uppercase tracking-wide text-lx-muted">
                     传图方式
                   </div>
@@ -1874,6 +2377,8 @@ export function NewJob({
                       </p>
                     )
                   })()}
+                    </>
+                  )}
                 </div>
               </details>
             </SectionPanel>
@@ -1908,6 +2413,21 @@ export function NewJob({
                   />
                 </SettingRow>
               )}
+
+              <SettingRow
+                label="结果缓存"
+                help="同图同参数直接复用上次产出，不送模型。首轮命中率为 0，重跑 / 换输出目录 / 多机重叠素材才划算"
+              >
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
+                  <input
+                    type="checkbox"
+                    className="accent-lx-accent"
+                    checked={cacheOn}
+                    onChange={(e) => setCacheOn(e.target.checked)}
+                  />
+                  开启（库在 run/ 下跨任务共享，默认上限 8 GB）
+                </label>
+              </SettingRow>
 
               <SettingRow
                 label="画师注入"
@@ -2133,6 +2653,24 @@ export function NewJob({
                 mono
                 ariaLabel="批大小"
                 renderLabel={(v) => `${v}`}
+              />
+            </SettingRow>
+
+            <SettingRow
+              label="预处理"
+              help={
+                '解码都在 CPU，区别只在缩放/归一化放哪；1024² 大 PNG 上卡约 1.5×，' +
+                'JPEG 基本不赚。上卡换了重采样实现，线稿类图约一成 tag 会变'
+              }
+            >
+              <ChoiceGrid
+                options={PREPROCESS}
+                value={preprocess as (typeof PREPROCESS)[number]}
+                onChange={(v) => setPreprocess(v)}
+                className="grid-cols-2"
+                size="sm"
+                ariaLabel="预处理"
+                renderLabel={(v) => PREPROCESS_LABELS[v]}
               />
             </SettingRow>
 

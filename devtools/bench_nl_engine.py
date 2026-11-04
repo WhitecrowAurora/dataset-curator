@@ -120,9 +120,17 @@ def bench_prep(images: list[bytes], max_pixels: int, threads: list[int]) -> list
 # ------------------------------------------------------------------ 推理
 
 
-def build_prompt(mode: str) -> str:
+def build_prompt(mode: str, caption_range: list[int] | None = None) -> str:
     spec = OutputSpec(mode=mode)
-    return _prompt_for(spec)
+    prompt = _prompt_for(spec)
+    if caption_range:
+        import re
+
+        lo, hi = caption_range
+        prompt = re.sub(r"\d+-\d+ characters", f"{lo}-{hi} characters", prompt)
+        if f"{lo}-{hi} characters" not in prompt:
+            raise SystemExit("prompt 里没找到长度引导，--caption-range 无效")
+    return prompt
 
 
 def post_one(client: httpx.Client, url: str, model: str, image_part: dict,
@@ -308,6 +316,8 @@ def main() -> int:
     ap.add_argument("--concurrency", type=int, nargs="+", default=[1, 2, 4, 8])
     ap.add_argument("--prep-threads", type=int, nargs="+", default=[1, 4, 8],
                     dest="prep_threads")
+    ap.add_argument("--caption-range", type=int, nargs=2, default=None,
+                    dest="caption_range", metavar=("LO", "HI"))
     ap.add_argument("--prep-only", action="store_true", dest="prep_only")
     ap.add_argument("--no-warmup", action="store_true", dest="no_warmup")
     ap.add_argument("--json", default="", help="结果写到哪个 json")
@@ -315,7 +325,7 @@ def main() -> int:
 
     files = collect_images(args.images, args.limit)
     blobs = [p.read_bytes() for p in files]
-    prompt = build_prompt(args.mode)
+    prompt = build_prompt(args.mode, args.caption_range)
 
     print("=" * 78)
     print(f" NL 引擎基准   engine={args.engine}  mode={args.mode}")

@@ -21,6 +21,10 @@ export type LiveStore = {
   attach: (id: string) => void
   detach: () => void
   stop: () => Promise<void>
+  /** 暂停：在途的几张打完就挂起，产物留在盘上 */
+  pause: () => Promise<void>
+  /** 原地继续：进程还在，worker 只是挂着 */
+  resume: () => Promise<void>
 }
 
 let socket: WebSocket | null = null
@@ -134,6 +138,29 @@ export const useLive = create<LiveStore>((set, get) => ({
     if (!id) return
     try {
       await stopJob(id)
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
+  async pause() {
+    const id = get().jobId
+    if (!id) return
+    try {
+      // 用返回值直接覆盖快照：WS 那条路还要等下一帧，按钮先变才像"按到了"。
+      const res = await api.pause(id)
+      if (res.snapshot) set({ snap: res.snapshot })
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
+  async resume() {
+    const id = get().jobId
+    if (!id) return
+    try {
+      const res = await api.resume(id)
+      if (res.snapshot) set({ snap: res.snapshot })
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) })
     }

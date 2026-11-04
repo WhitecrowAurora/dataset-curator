@@ -10,6 +10,8 @@ import {
   Loader2,
   PackageOpen,
   PackageCheck,
+  Pause,
+  Play,
   RotateCcw,
   ShieldAlert,
   Square,
@@ -25,6 +27,7 @@ import { ProgressBar } from '../components/ui/ProgressBar'
 const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   pending: { label: '排队中', tone: 'neutral' },
   running: { label: '运行中', tone: 'accent' },
+  paused: { label: '已暂停', tone: 'warning' },
   done: { label: '已完成', tone: 'success' },
   stopped: { label: '已停止', tone: 'warning' },
   failed: { label: '失败', tone: 'danger' },
@@ -48,7 +51,8 @@ export function RunJob({
   onResults: () => void
   onNew: () => void
 }) {
-  const { snap, events, connected, polling, error, attach, detach, stop } = useLive()
+  const { snap, events, connected, polling, error, attach, detach, stop, pause, resume } =
+    useLive()
 
   useEffect(() => {
     attach(jobId)
@@ -106,6 +110,8 @@ export function RunJob({
             ? `${snap.out_dir || '（默认输出目录）'} · ${
                 snap.spec.engine === 'vlm' ? `VLM ${snap.spec.vlm_model} · ` : ''
               }${snap.spec.backend} · ${snap.spec.precision} · batch ${snap.spec.batch}${
+                snap.spec.preprocess === 'tensor' ? ' · GPU 预处理' : ''
+              }${
                 pack?.enabled
                   ? ` · 封包 ${pack.formats.join('/')} q${pack.quality}`
                   : ''
@@ -135,14 +141,39 @@ export function RunJob({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              className="lx-btn-danger inline-flex items-center gap-1.5"
-              onClick={() => void stop()}
-              disabled={!snap}
-            >
-              <Square size={13} /> 停止
-            </button>
+            <>
+              {snap?.status === 'paused' ? (
+                <button
+                  type="button"
+                  className="lx-btn-primary inline-flex items-center gap-1.5"
+                  onClick={() => void resume()}
+                >
+                  <Play size={13} /> 继续
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="lx-btn-ghost inline-flex items-center gap-1.5"
+                  onClick={() => void pause()}
+                  disabled={!snap || snap.phase === 'pack'}
+                  title={
+                    snap?.phase === 'pack'
+                      ? '封包阶段不能暂停：tar/zip 不支持追加，停下只会留下半成品'
+                      : '在途的几张打完就挂起，产物留在盘上'
+                  }
+                >
+                  <Pause size={13} /> 暂停
+                </button>
+              )}
+              <button
+                type="button"
+                className="lx-btn-danger inline-flex items-center gap-1.5"
+                onClick={() => void stop()}
+                disabled={!snap}
+              >
+                <Square size={13} /> 停止
+              </button>
+            </>
           )
         }
       />
@@ -161,6 +192,13 @@ export function RunJob({
           tone={guardEv.level === 'stop' ? 'danger' : 'warning'}
           title="硬件保护介入"
           error={`${guardEv.level === 'stop' ? '已熔断停止' : '降速/暂停中'}：${guardEv.message ?? ''}`}
+        />
+      )}
+      {snap?.status === 'paused' && (
+        <ErrorBox
+          tone="warning"
+          title="已暂停"
+          error="在途的几张打完就停住了，产物都在盘上。可以直接关掉打标器——下次打开会出现「继续上次任务」，从断点接着做，不重打。"
         />
       )}
       {snap?.status === 'stopped' && (
@@ -256,6 +294,29 @@ export function RunJob({
             />
             {(snap?.counts.blacklisted ?? 0) > 0 && (
               <OverviewFigure label="拉黑" value={fmtCount(snap?.counts.blacklisted ?? 0)} tone="warning" />
+            )}
+            {/* token 只在本机模式是 0：本机不计费，整天挂着一行 0 是噪音。 */}
+            {(snap?.usage.prompt_tokens ?? 0) > 0 && (
+              <OverviewFigure
+                label="输入 token"
+                value={fmtCount(snap?.usage.prompt_tokens ?? 0)}
+                note={snap?.usage.cost != null ? '计费大头' : undefined}
+              />
+            )}
+            {(snap?.usage.rate_limited ?? 0) > 0 && (
+              <OverviewFigure
+                label="被限流"
+                value={fmtCount(snap?.usage.rate_limited ?? 0)}
+                note="429"
+                tone="warning"
+              />
+            )}
+            {snap?.usage.cost != null && (
+              <OverviewFigure
+                label="估算费用"
+                value={snap.usage.cost.toFixed(3)}
+                note="按 nl_api.json 价目"
+              />
             )}
             <OverviewFigure label="平均每张" value={perImage} note="秒" />
           </OverviewFigureRow>

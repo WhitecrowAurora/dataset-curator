@@ -51,6 +51,9 @@ def config_fingerprint(backend) -> str:
         "backend": str(getattr(backend, "name", "") or ""),
         "model_id": str(getattr(backend, "model_id", "") or ""),
         "precision": str(getattr(backend, "precision", "") or ""),
+        # preprocess 会改重采样实现，也就是会改 tag；不进指纹的话，
+        # 切到 tensor 再重跑会被"已有产物"全部跳过，用户以为没生效。
+        "preprocess": str(getattr(backend, "preprocess", "") or ""),
         "thresholds": sorted((str(k), float(v))
                              for k, v in (getattr(backend, "thresholds", None) or {}).items()),
         "keep": list(getattr(backend, "keep", None) or ()),
@@ -218,6 +221,9 @@ def _payload(item: TagItem, pred, backend, *, precision: str,
             # 精度必须落盘：fp32/tf32/bf16 出的 tag 集合不一样，事后想回答
             # "这批为什么多出几个 tag"，没有这个字段只能靠猜。
             "tag_precision": precision,
+            # 预处理口径：pil / tensor 的重采样不是同一套核，tag 集合会有差异，
+            # 事后混批时要能分辨是"口径变了"还是"模型变了"。
+            "tag_preprocess": str(getattr(backend, "preprocess", "pil") or "pil"),
             "batch": int(getattr(backend, "batch_size", 1) or 1),
         },
         "ts": time.time(),

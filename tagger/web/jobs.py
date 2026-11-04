@@ -29,6 +29,8 @@ tar/zip 都不支持追加——边打边封意味着改一个参数就要把模
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
 import uuid
@@ -39,6 +41,8 @@ from ..artist import ArtistRule
 from ..cpu_tagger import TaggerUnavailable, build_backend, resolve_device
 from ..guard import ResourceGuard
 from ..local_tag import TagItem, TagStats, read_artifact, tag_items
+from ..nl_api import default_base as api_default_base
+from ..nl_api import normalize_provider
 from ..pack import PackOptions
 from ..pipeline import (MemberReader, PackReport, PackSpaceError, Plan,
                         estimate_job_bytes, existing_ancestor, free_bytes,
@@ -47,6 +51,17 @@ from .vllm_service import FINGERPRINT_PATH
 
 # 环形缓冲上限。超出就丢最老的：UI 只关心最近的，补齐靠产物文件而不是事件。
 MAX_EVENTS = 5000
+
+# 「上次没跑完的任务」落盘位置。暂停或停止时写，正常跑完/失败时删。
+# 为什么只存一条：单卡一次只跑一个任务，存列表只会让页面多一个"该继续哪个"
+# 的选择题。产物目录 + 指纹才是真正的进度，这里只记"用哪份参数去续"。
+#
+# 环境变量是给测试用的：pytest 里的任务也会被 stop，而它们写的是临时目录。
+# 不隔离的话，跑一次测试就会把用户页面上「继续上次任务」的提示顶成一条
+# 指向 pytest 临时目录的假记录。用环境变量而不是 monkeypatch，是因为它
+# 对子进程同样有效。
+_resume_env = os.environ.get("TAGGER_RESUME_PATH", "").strip()
+RESUME_PATH = Path(_resume_env) if _resume_env else Path("run") / "resume.json"
 
 # ---- 质检分桶统计（统计页数据源）----
 # 逐项数据不留存，事后改不了桶宽，所以累加取最细档（每 100 张一桶），
@@ -200,6 +215,24 @@ def describe_guard(policy) -> str:
     return " · ".join(parts)
 
 
+def _hf_proxy(explicit: str) -> str:
+    """任务没填就用设置里的全局代理。
+
+    全局代理与下载页、模型下载是同一份（模型覆盖清单里的 `proxy`）：
+    代理是"这台机器怎么上网"，不该按页面各配一份——三处不一致时，
+    用户会以为"代理坏了"。
+    """
+    text = (explicit or "").strip()
+    if text:
+        return text
+    try:
+        from .models import proxy_url
+
+        return proxy_url()
+    except Exception:                    # noqa: BLE001 - 读不到就按直连
+        return ""
+
+
 def _effective_char_bounds(spec: "JobSpec") -> tuple[float, float]:
     """表单覆盖 + 配置默认 → 实际生效的 (最短, 最长) 字符数。
 
@@ -221,12 +254,53 @@ def _effective_char_bounds(spec: "JobSpec") -> tuple[float, float]:
     return lo, hi
 
 
+def _redact_url(text: str) -> str:
+    """把 `scheme://user:pass@host:port` 里的口令抹掉，其余保留。
+
+    代理地址里带账号密码很常见，而这个快照会随事件流广播给浏览器。
+    """
+    if not text or "@" not in text:
+        return text
+    head, _, tail = text.rpartition("@")
+    scheme, sep, rest = head.partition("://")
+    if not sep:
+        return f"***@{tail}"
+    if ":" in rest:
+        rest = rest.split(":", 1)[0] + ":***"
+    return f"{scheme}{sep}{rest}@{tail}"
+
+
 def _redacted_spec(spec: "JobSpec") -> dict:
-    """spec 快照。hf_token 会随事件流广播给浏览器，绝不能原样出门。"""
+    """spec 快照。密钥类字段会随事件流广播给浏览器，绝不能原样出门。
+
+    `api_key` 与 `hf_token` 同理：这个快照进了 job_started 事件，浏览器
+    历史、日志面板、甚至排查时贴出来的截图都会把它带出去。
+    """
     d = asdict(spec)
     if d.get("hf_token"):
         d["hf_token"] = "***"
+    if d.get("api_key"):
+        d["api_key"] = "***"
+    if d.get("hf_proxy"):
+        d["hf_proxy"] = _redact_url(str(d["hf_proxy"]))
     return d
+
+
+def spec_provider(spec: "JobSpec") -> str:
+    """本次任务走哪个推理来源：""（本机）/ openai / anthropic。
+
+    认不出来的写法直接抛：静默退回本机会让人以为在用 API，产出却带着本机
+    引擎指纹——这是这类配置里代价最高的一种误解。
+    """
+    return normalize_provider(spec.vlm_provider)
+
+
+def spec_api_base(spec: "JobSpec") -> str:
+    """API 地址。留空按来源取默认域名，页面上不必逼用户背地址。"""
+    provider = spec_provider(spec)
+    if not provider:
+        return ""
+    return str(spec.api_base or "").strip() or api_default_base(provider)
 
 
 @dataclass(slots=True)
@@ -241,6 +315,9 @@ class JobSpec:
     device: str = "auto"
     precision: str = "bf16"
     batch: int = 4
+    # pil = CPU 缩放/归一化；tensor = 缩放/归一化上卡（解码仍在 CPU）。
+    # 只有 wd-eva02 认这个参数，其余后端收了也不生效。
+    preprocess: str = "pil"
     # None = 用配置里的阈值（configs/tiers.yaml 的 tagging.thresholds）
     threshold: float | None = None
     limit: int = 0
@@ -281,6 +358,13 @@ class JobSpec:
 
     # ---- VLM 服务（engine="vlm" 时生效）
 
+    # 推理来源：local = 本机/自建服务（有环境指纹）；openai = OpenAI 兼容 API；
+    # anthropic = Anthropic Messages API。API 模式不加载本地权重、不读指纹。
+    vlm_provider: str = "local"
+    # API 模式的服务地址与密钥。地址留空按来源取默认域名；密钥只在本次任务
+    # 内存里走一趟，快照里会被抹成 ***（见 _redacted_spec）。
+    api_base: str = ""
+    api_key: str = ""
     url: str = "http://127.0.0.1:8000"
     vlm_model: str = "tagger"        # 对应 serve 的 --served-model-name
     # both = NL + tag；nl = 只要 NL；tag = 只要 tag（都由 VLM 自己出，后端强制 none）
@@ -292,7 +376,20 @@ class JobSpec:
     # 在途请求数。0 = 跟服务端 max_num_seqs 走（见 client.resolve_concurrency）。
     # 30M 量级下把它填成 1 等于让机器闲置着跑。
     concurrency: int = 0
+    # 多卡（数据并行）。开着的时候每张卡各起一个推理服务，打标侧把它们
+    # 当作 N 个并发槽轮询使用，产物写同一个目录——不需要事后合并。
+    # 关掉时走原来的单服务路径，行为一个字不变。
+    multi_gpu: bool = False
+    # 参与打标的物理卡号（nvidia-smi 的 index）。空 = 用全部卡。
+    multi_gpus: list[int] = field(default_factory=list)
+    # 每张卡开几个 slot（= 该卡服务的 max_num_seqs / -np）。
+    # 0 = 跟分档表与显存推算。填了就按填的来，只影响吞吐不影响产出。
+    per_card_seqs: int = 0
     max_pixels: int = 0              # 0 = 用配置/指纹的默认预算
+    # 描述长度引导（字符区间）。None = 按 token 区间派生（400-1024）。
+    # 与 max_tokens 不同：max_tokens 是生成硬上限（写不下就截断），
+    # 这个只告诉模型"往多长写"，不动合格线。改它会写进 provenance。
+    caption_chars: list[int] | None = None
     seed: int | None = None
     # 同一张图跨运行累计失败多少次后跳过。0 = 不限制。
     # 这个数不复用会出问题：一张必然失败的图每次重跑都要重试 3 次，
@@ -339,6 +436,21 @@ class JobSpec:
     hf_revision: str = "main"
     # 只处理这些文件名（精确匹配）；空 = 仓库里全部分片
     hf_files: list[str] = field(default_factory=list)
+    # auto：仓库里有 parquet 就流式读（一行不落盘），否则按 tar 分片下载。
+    # 两种模式的磁盘行为完全不同，所以让用户能看见并显式选。
+    hf_format: str = "auto"
+    # tar 模式：预取几片（下载与打标并行，0=严格串行）
+    hf_prefetch: int = 1
+    # 单片用几条并发连接（国内单条 TCP 常被限速，多连接才跑得满）
+    hf_conns: int = 4
+    # HF 请求走的代理。空 = 用设置里的全局代理（与下载页共用一份）
+    hf_proxy: str = ""
+    # 给产物留的磁盘余量（GB）；0 = 自动（最大分片的 30%，不少于 2 GB）
+    hf_reserve_gb: float = 0.0
+
+    # 结果缓存：同图同参直接复用上次产出（重跑/换输出目录才划算，默认关）
+    cache: bool = False
+    cache_max_gb: float = 8.0
 
     # ---- 产物形态。vlm 引擎默认 parquet：成员回传的就是它（见回传页）。
 
@@ -453,7 +565,7 @@ class Job:
         self.guard = None
         # vlm 引擎的实时计数（hook 每次都带同一个 ClientStats 实例，存引用即可）
         self.client_stats = None
-        # pending | running | done | stopped | failed
+        # pending | running | paused | done | stopped | failed
         self.status = "pending"
         # "" | tag | pack
         self.phase = ""
@@ -483,6 +595,10 @@ class Job:
         self._fine: list[list[int]] = []
         self._lock = threading.Lock()
         self.stop_flag = threading.Event()
+        # 暂停：与 stop_flag 分开两个标志，因为语义完全不同——stop 是"收工"，
+        # pause 是"原地不动，等我回来"。合成一个的话，恢复时无法区分
+        # "用户想继续"和"用户只是没按停止"。
+        self.pause_flag = threading.Event()
 
     # ---- 事件流
 
@@ -608,11 +724,15 @@ class Job:
             done, skipped, failed, total = cs.done, cs.skipped, cs.failed, cs.total
             blacklisted = cs.blacklisted
             by_reason = dict(cs.by_reason)
+            usage = {"prompt_tokens": cs.prompt_tokens, "completion_tokens": cs.tokens,
+                     "rate_limited": cs.rate_limited, "cost": cs.cost}
         else:
             done, skipped, failed, total = (stats.done, stats.skipped,
                                             stats.failed, stats.total)
             blacklisted = 0
             by_reason = dict(stats.by_reason)
+            usage = {"prompt_tokens": 0, "completion_tokens": 0,
+                     "rate_limited": 0, "cost": None}
         settled = done + skipped + failed + blacklisted
         elapsed = (self.ended or time.time()) - self.started if self.started else 0.0
         # 速率只按"真正打过"的算：跳过的图不花时间，算进去会把 ETA 说得太好听。
@@ -663,6 +783,9 @@ class Job:
             "rate_per_s": round(rate, 2),
             "eta_s": round(eta, 1) if eta is not None else None,
             "timings_ms": {"decode": stats.decode_ms, "forward": stats.forward_ms},
+            # 云端按量计费：token 与撞限流次数要能在运行中看到，不能等日志。
+            # cost 为 None = 没配价目（configs/nl_api.json 的 prices 段）。
+            "usage": usage,
             "by_reason": by_reason,
             "pack": {
                 "enabled": self.options is not None and pack_total > 0,
@@ -789,8 +912,10 @@ class JobManager:
         return sorted(jobs, key=lambda j: j.created, reverse=True)
 
     def running(self) -> Job | None:
+        # paused 也算"占着位子"：它随时可能被唤醒接着往同一个 out_dir 写，
+        # 这时再开一个任务，两边会同时往一批产物里塞行。
         for job in self.all():
-            if job.status in ("pending", "running"):
+            if job.status in ("pending", "running", "paused"):
                 return job
         return None
 
@@ -821,11 +946,33 @@ class JobManager:
                     "要么给本地分片（input_dir：.parquet / .zip / .tar）。")
             if spec.hf_repo and spec.input_dir:
                 raise ValueError("hf_repo 与 input_dir 二选一：一边是仓库拉取，一边是本地分片。")
+            # 格式决定磁盘行为（parquet 流式 vs tar 落盘），非法值不能等到
+            # 跑进 run_client 才被当成"默认 tar"——那样会静默下几个 GB。
+            fmt = str(spec.hf_format or "auto").strip().lower()
+            if fmt not in ("auto", "parquet", "webdataset"):
+                raise ValueError(
+                    f"hf_format 只能是 auto / parquet / webdataset，收到 {spec.hf_format!r}")
+            if int(spec.hf_prefetch or 0) < 0:
+                raise ValueError("hf_prefetch 不能是负数")
             # 模式在这里就校验：跑进线程才在 run_client 里抛 ConfigError 的话，
             # HTTP 已经回了 202，页面上表现为"任务失败"，而实际上是表单填错了。
             mode = str(spec.output_mode or "both").strip().lower()
             if mode not in VLM_MODES:
                 raise ValueError(f"output_mode 只能是 nl / tag / both，收到 {spec.output_mode!r}")
+            # 推理来源同样要在这里校验：写错值等到线程里才抛，页面只会显示
+            # "任务失败"，而真实原因是表单里那个词（"gpt" / "claude" 之类）。
+            provider = spec_provider(spec)
+            if provider:
+                # API 模式没有本地服务来兜底模型名：`tagger` 这种占位名会 404。
+                if not str(spec.vlm_model or "").strip():
+                    raise ValueError(
+                        f"{provider} 模式必须填模型名（vlm_model）："
+                        f"那是 API 侧的模型 id，不是本地服务的路由名。")
+                if spec.use_file_url:
+                    # 云端收不到本机路径。这里直接拒，而不是跑起来每张图 400。
+                    raise ValueError(
+                        "API 模式不能用 file:// 传图（云端读不到本机路径）；"
+                        "请关掉 use_file_url，改走 base64。")
             # 质检的区间关系同理：最短 > 最长时每条都会被判过长，
             # 跑起来只是"通过率 0"，看不出是参数填反了。
             lo, hi = _effective_char_bounds(spec)
@@ -874,12 +1021,141 @@ class JobManager:
 
     def stop(self, job_id: str) -> bool:
         job = self.get(job_id)
-        if job is None or job.status not in ("pending", "running"):
+        if job is None or job.status not in ("pending", "running", "paused"):
             return False
         job.stop_flag.set()
+        # 暂停中按停止：必须先把挂起解除，否则 worker 还卡在等恢复，
+        # 而它等到的条件里 stop 优先——这里显式清一下，收尾更直接。
+        job.pause_flag.clear()
         where = "封包" if job.phase == "pack" else "打标"
         job.push("log", message=f"收到停止请求，等当前这一块{where}完就收尾")
+        self._save_resume(job, "stopped")
         return True
+
+    # ---- 暂停 / 继续
+
+    def pause(self, job_id: str) -> bool:
+        """暂停：在途的几张打完就挂起，不再发新任务。
+
+        只允许打标阶段。封包是纯本地 IO，暂停它除了让 tar 半成品停在盘上
+        没有任何好处——而那正是"半批数据进下游"的入口。
+
+        暂停时顺手写一份 resume.json：用户很可能按了暂停就去关程序，
+        下次打开要能接着做。断点本身在产物里（+ 指纹），这里只记参数。
+        """
+        job = self.get(job_id)
+        if job is None or job.status != "running":
+            return False
+        if job.phase == "pack":
+            raise ValueError("封包阶段不能暂停：tar/zip 不支持追加，停下只会留下半成品")
+        if job.spec.engine != "vlm":
+            # 本地分类头是整批喂进 GPU 的，块内没有"停在两张之间"的位置；
+            # 假装暂停只会让状态卡在 paused 而进度还在涨。
+            raise ValueError(
+                "当前引擎不支持暂停（本地分类头按块推理，停下来等同于重跑）。"
+                "要中断请用停止——已完成的图同样不会重打。")
+        job.pause_flag.set()
+        job.status = "paused"
+        job.push("log", message="已暂停：在途的几张打完就停，产物都在盘上")
+        self._save_resume(job, "paused")
+        return True
+
+    def resume(self, job_id: str) -> bool:
+        """原地继续——进程还在、worker 只是挂着。
+
+        程序已经关掉的情形不归这里管，那条路走 `resume_last()`：
+        进程没了就没有 Job 对象可以"继续"，只能拿参数重建一个。
+        """
+        job = self.get(job_id)
+        if job is None or job.status != "paused":
+            return False
+        job.pause_flag.clear()
+        job.status = "running"
+        job.push("log", message="已继续")
+        return True
+
+    def restart(self, job_id: str) -> Job:
+        """拿旧任务的参数重开一批。用于「已停止 / 失败」的任务。
+
+        为什么不是"原地继续"：这些任务的 worker 线程已经跑完 run_batch 退出了，
+        没有"接着那个循环"的说法。重建一个任务，已打完的图靠产物 + 指纹判定
+        跳过——对用户来说就是续做，只是历史里会多一条记录。
+        """
+        old = self.get(job_id)
+        if old is None:
+            raise ValueError("任务不存在")
+        if old.status in ("pending", "running", "paused"):
+            raise RuntimeError("这个任务还在跑，直接在运行页点「继续」就行，不用重开")
+        job = self.create(replace(old.spec))     # create 内部会再判一次"已有任务在跑"
+        self.start(job)
+        return job
+
+    # ---- 跨重启的续做（resume.json）
+
+    def _save_resume(self, job: Job, why: str) -> None:
+        """记下"用哪份参数、写到哪、做到哪一步"。
+
+        进度不在这里存完整明细——已完成哪些图由产物文件说了算（见
+        client._already_done 的产物 + 指纹双判定）。这里存的是**参数**，
+        因为参数一旦改过，产物就不能复用了，续跑会变成"换口径重打"。
+        """
+        try:
+            RESUME_PATH.parent.mkdir(parents=True, exist_ok=True)
+            RESUME_PATH.write_text(json.dumps({
+                "job_id": job.id,
+                "why": why,
+                "saved_at": time.time(),
+                "out_dir": str(job.out_dir),
+                "spec": asdict(job.spec),
+                "counts": job.snapshot().get("counts") or {},
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (OSError, TypeError, ValueError) as exc:   # 写不了不该影响暂停本身
+            job.push("log", message=f"（续做记录没写成功：{type(exc).__name__}: {exc}）")
+
+    def _clear_resume(self, job_id: str | None = None) -> None:
+        """删掉续做记录。带 job_id 时只在它确实是这条任务时才删——
+        用户可能已经开了新任务，别把别人的记录误删。"""
+        try:
+            if job_id is not None:
+                cur = json.loads(RESUME_PATH.read_text(encoding="utf-8"))
+                if str(cur.get("job_id") or "") != job_id:
+                    return
+            RESUME_PATH.unlink()
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def wanted_resume(self) -> dict | None:
+        """上次被暂停/停止、还没跑完的任务。页面打开时问一次。"""
+        try:
+            data = json.loads(RESUME_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get("spec"), dict):
+            return None
+        out = str(data.get("out_dir") or "")
+        if out and not Path(out).exists():
+            # 产物目录都没了，续跑等于从头来——那就别用"继续"误导人，
+            # 让用户自己新建任务更清楚。
+            return None
+        return data
+
+    def resume_last(self) -> Job:
+        """拿 resume.json 重建任务并立刻开跑。
+
+        没有"接着上次那个线程"这回事——进程重启后线程早没了。重建出来的
+        是新任务，已经打完的图靠产物 + 指纹判定跳过，所以效果仍是续做。
+        """
+        data = self.wanted_resume()
+        if data is None:
+            raise ValueError("没有可继续的任务（run/resume.json 不存在或产物目录已删）")
+        try:
+            spec = JobSpec(**data["spec"])
+        except TypeError as exc:
+            raise ValueError(f"续做记录与当前版本不兼容：{exc}") from exc
+        job = self.create(spec)          # 里面会重扫输入、算 plan、校验空间
+        self._clear_resume(str(data.get("job_id") or ""))
+        self.start(job)
+        return job
 
     # ---- 执行
 
@@ -905,7 +1181,8 @@ class JobManager:
             job.push("phase", phase="tag", message="开始打标")
             backend = _build_backend(spec)
             job.push("log", message=f"加载后端 {backend.name}（{spec.precision}"
-                                     f"，batch={spec.batch}）…")
+                                     f"，batch={spec.batch}"
+                                     f"，{getattr(backend, 'preprocess', 'pil')} 预处理）…")
             backend.load()
             job.model_id = str(getattr(backend, "model_id", "") or "")
             job.push("log", message=f"后端就绪：{len(job.items)} 张待处理")
@@ -944,6 +1221,11 @@ class JobManager:
                      counts=job.snapshot()["counts"])
             # 后端持有几百 MB 权重与 CUDA 上下文，任务结束就放手，
             # 否则连跑三个任务会占着三份显存不放。
+            # 跑完/失败的记录没有"继续"的必要，删掉；暂停与停止的留着。
+            # 失败也删：同一份参数再跑一次大概率还是同样的错，让页面反复
+            # 提示"继续"只会把人往同一个坑里带。
+            if job.status in ("done", "failed"):
+                self._clear_resume(job.id)
             del backend
             job.reader.close()
             if guard is not None:
@@ -988,6 +1270,25 @@ class JobManager:
         spec = job.spec
         job.phase = "tag"
         job.push("phase", phase="tag", message="开始 VLM 打标")
+
+        # 多卡：地址来自"已经就绪的那组服务"。这里不主动起服务——
+        # 加载模型要几分钟，那是服务面板上的独立动作；任务只管用。
+        multi_urls: list[str] = []
+        if spec.multi_gpu:
+            from .multi_gpu import MULTI
+
+            multi_urls = MULTI.urls()
+            if not multi_urls:
+                raise ValueError(
+                    "多卡模式已开启，但没有就绪的多卡服务。"
+                    "先在「推理服务」面板启动多卡，再回来打标。")
+            if len(multi_urls) < 2:
+                raise ValueError(
+                    f"多卡服务只有 {len(multi_urls)} 张卡就绪，"
+                    "至少需要 2 张才能并行；或关掉多卡模式。")
+            job.push("phase", phase="tag",
+                     message=f"多卡并行：{len(multi_urls)} 个推理服务，"
+                             f"每卡并发 {spec.per_card_seqs or '按分档'}")
 
         table = load_tier_table(DEFAULT_TIERS)
         ops = load_ops(table)
@@ -1087,6 +1388,7 @@ class JobManager:
         # 单模式（nl / tag）则连后端一起关掉——具体理由见 vlm_backend_for。
         mode = str(spec.output_mode or "both").strip().lower()
         backend_name = vlm_backend_for(mode, spec.backend)
+        provider = spec_provider(spec)
 
         args = argparse.Namespace(
             # HF 输入与本地分片二选一（create 已校验）；shard=None 时
@@ -1095,21 +1397,33 @@ class JobManager:
             # 报出来的是"分片不存在: D"。
             shard=None if spec.hf_repo else [spec.input_dir],
             out_dir=str(job.out_dir),
-            url=spec.url,
+            # 多卡时 url 是第一个槽，urls 是其余槽；run_client 按轮询分发。
+            url=multi_urls[0] if multi_urls else spec.url,
+            urls=multi_urls[1:],
+            # API 模式：来源 + 地址 + 密钥。地址留空时 run_client 按来源取默认值。
+            api_provider=provider,
+            api_base=spec_api_base(spec),
+            api_key=str(spec.api_key or ""),
             model_name=spec.vlm_model,
             mode=mode,
             temperature=spec.temperature,
             top_p=spec.top_p,
             max_tokens=int(spec.max_tokens or 0) or None,
             timeout=int(spec.timeout_s or 90),
-            concurrency=int(spec.concurrency or 0) or None,
+            # 多卡时这个数是"每卡并发"：run_batch 每个槽各开这么多。
+            concurrency=(int(spec.per_card_seqs or 0)
+                         or int(spec.concurrency or 0)) or None,
             limit=int(spec.limit or 0) or None,
             force=bool(spec.force),
             layout=spec.layout,
             # 与 WebUI 启动的服务写的是同一个文件；cli 的默认值也是这个相对路径。
-            fingerprint=str(FINGERPRINT_PATH),
+            # API 模式传空：没有 serve 写过指纹，传路径只会刷一句误导性的警告。
+            fingerprint="" if provider else str(FINGERPRINT_PATH),
             model_id="",
             max_pixels=int(spec.max_pixels or 0) or None,
+            # None 时不传，run_client 会按 token 区间派生（保持旧行为）
+            caption_chars=(list(spec.caption_chars)
+                           if getattr(spec, "caption_chars", None) else None),
             tier="", variant="", seed=spec.seed,
             quiet=True, use_file_url=bool(spec.use_file_url),
             failures=None, stats_json=None,
@@ -1123,22 +1437,41 @@ class JobManager:
             tag_device=spec.device or "auto",
             tag_precision=spec.precision,
             tag_batch=max(1, int(spec.batch or 1)),
+            tag_preprocess=str(spec.preprocess or "pil"),
             artifact_format=str(spec.artifact_format or "parquet"),
             parquet_rows=int(spec.parquet_rows or 2000),
             hf_repo=spec.hf_repo or "",
             hf_token=spec.hf_token or "",
             hf_revision=spec.hf_revision or "main",
             hf_files=list(spec.hf_files or []),
-            hf_pattern="*.parquet",        # 团队仓流程吃的是 parquet 分片
-            hf_cache=None, hf_shards=0, hf_keep=False, hf_format="auto",
+            # 空串 = 按实际格式挑后缀。写死 "*.parquet" 时，只有 tar 的仓库
+            # 会被过滤成 0 个分片，报出来是"没有可处理的 .tar"，很难对上号。
+            hf_pattern="",
+            hf_cache=None, hf_shards=0, hf_keep=False,
+            hf_format=str(spec.hf_format or "auto"),
+            hf_prefetch=max(0, int(spec.hf_prefetch or 0)),
+            hf_conns=max(1, min(16, int(spec.hf_conns or 1))),
+            hf_proxy=_hf_proxy(spec.hf_proxy),
+            hf_reserve_gb=float(spec.hf_reserve_gb or 0.0),
             hf_image_column="image", hf_path_template="{image_id}.jpg",
+            cache=bool(spec.cache), cache_db="",
+            cache_max_gb=float(spec.cache_max_gb or 8.0),
         )
 
         def hook(kind: str, task, outcome, stats) -> None:
             job.client_stats = stats
             job.current = task.image_id
-            if kind in ("done", "failed") and not job.first_settled:
-                job.first_settled = time.time()
+            if kind in ("done", "failed"):
+                if not job.first_settled:
+                    job.first_settled = time.time()
+                # 多卡时把这一张记到它实际跑的那张卡上，面板上才有"各卡
+                # 分担了多少"。单卡模式不记：MULTI.workers 为空，写了也无处去。
+                if spec.multi_gpu:
+                    slot = int(getattr(outcome, "slot", -1) or -1)
+                    if slot >= 0:
+                        from .multi_gpu import MULTI
+
+                        MULTI.note_item(slot, kind == "done")
             attempts = getattr(outcome, "attempts", 0) or 1
             score = None
             if kind == "done":
@@ -1163,11 +1496,13 @@ class JobManager:
             job.note_item(kind, attempts=attempts, score=score)
 
         job.push("log", message=(
-            f"VLM 服务 {spec.url}  模型 {spec.vlm_model}  "
-            f"产物 {spec.artifact_format}"
+            f"推理来源 {provider or 'local'}"
+            f"  {spec_api_base(spec) if provider else spec.url}"
+            f"  模型 {spec.vlm_model}  产物 {spec.artifact_format}"
             + (f"  HF 仓库 {spec.hf_repo}" if spec.hf_repo else "  本地分片输入")))
         code = run_client(args, ops, table, on_progress=hook,
                           should_stop=job.stop_flag.is_set,
+                          paused=job.pause_flag.is_set,
                           on_log=lambda message: job.push("log", message=message),
                           guard=guard)
         if job.stop_flag.is_set():
@@ -1324,6 +1659,7 @@ def _build_backend(spec: JobSpec):
         device=resolve_device(spec.device or "auto"),
         precision=spec.precision,
         batch_size=max(1, int(spec.batch or 1)),
+        preprocess=spec.preprocess or "pil",
         keep=list(spec.keep_categories) if spec.keep_categories else None,
         thresholds=spec.backend_thresholds(),
         verbose=False,

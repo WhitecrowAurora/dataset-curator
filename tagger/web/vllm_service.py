@@ -29,6 +29,7 @@ import httpx
 from ..config import ConfigError
 from ..model_loader import DEFAULT_PORT
 from ..netutil import trust_env_for
+from ..nl_engine import normalize_engine
 
 # 与 cli `tagger serve` 的默认落点一致。Web 侧拉起的服务写这里，任务的
 # run_client 也读这里——两边必须是同一个路径，否则指纹永远"缺失"。
@@ -112,6 +113,18 @@ class VllmService:
         ok, reason = self._probe_capability(engine)
         self._cap = (now, engine, ok, reason)
         return ok, reason
+
+    def invalidate_capability(self) -> None:
+        """让下一次 local_capability 重新判定。
+
+        刚装完 llama-server 的那一刻，缓存里多半还记着"找不到 llama-server"
+        （TTL 内），页面会继续显示"这机器起不了服务"——装完就看到这句最打击人。
+        只清"判过不能用"的那一格：能用的结论没必要每次轮询都作废，否则
+        会变成每几秒跑一次 nvidia-smi。
+        """
+        cap = self._cap
+        if cap is not None and not cap[2]:
+            self._cap = None
 
     @staticmethod
     def _probe_capability(engine: str) -> tuple[bool, str]:
@@ -235,7 +248,10 @@ class VllmService:
                 pid = handle.process.pid
             except Exception:             # noqa: BLE001 - 进程对象已被回收
                 pid = None
-        engine = overrides.get("engine") or "vllm"
+        # 空 = 跟后端默认（现在是 llama.cpp，见 nl_engine.normalize_engine）。
+        # 这里以前写死 "vllm"，等于在快照里绕开了那个默认值，页面上"引擎"
+        # 一格显示的和实际会起的东西可以是两回事。
+        engine = normalize_engine(overrides.get("engine"))
         local_ok, local_reason = self.local_capability(engine)
         # 盘上有指纹就用盘上的：可能是命令行 `tagger serve` 写的，也可能来自
         # 上一次网页启动。客户端读的是同一个文件，页面上展示的就该是它。
@@ -429,7 +445,7 @@ class VllmService:
                                         start_server, wait_ready)
             from ..nl_engine import check_engine
 
-            engine = overrides.get("engine") or "vllm"
+            engine = normalize_engine(overrides.get("engine"))
             check_engine(engine)
             gpus = query_gpus()
             if not gpus:

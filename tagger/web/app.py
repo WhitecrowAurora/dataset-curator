@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import nl_api
+from .. import llama_runtime, nl_api
 from ..config import ConfigError
 from ..local_tag import EXTS
 from ..pipeline import plan_inputs, plan_stats
@@ -282,6 +282,17 @@ class VllmStartRequest(BaseModel):
     # 非空 = 加 --allowed-local-media-path。客户端才能用 file:// 传图，
     # 省掉 base64 的 33% 体积；放行范围必须覆盖任务的产物目录。
     local_media_root: str | None = None
+
+
+class LlamaInstallRequest(BaseModel):
+    """装 llama.cpp 运行时（llama-server）。
+
+    url 非空 = 直接下这个 zip：离线包、公司内网镜像、或 GitHub 被墙时
+    手动下的那一份。留空才去查 GitHub 的 latest。
+    """
+    url: str = ""
+    # 已经装过也重装：换构建（比如从 CPU 包换成 CUDA 包）要用。
+    force: bool = False
 
 
 class NlApiProbeRequest(BaseModel):
@@ -1585,7 +1596,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         return VLLM.snapshot()
 
     @app.get("/api/vllm/capability")
-    def vllm_capability(engine: str = "vllm") -> dict:
+    def vllm_capability(engine: str = "llamacpp") -> dict:
         """某个引擎在这台机器上能不能用。
 
         单独一个接口是因为"还没启动"时快照里的 local_ok 只能按当前引擎算，
@@ -1665,6 +1676,34 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def vllm_probe(url: str = "") -> dict:
         """远程服务只能探：/health 说明活着，/v1/models 说明模型名对不对。"""
         return VLLM.probe(url)
+
+    # ---- llama.cpp 运行时（默认引擎，llama-server 不在 pip 里）
+    #
+    # 页面上的「启动服务」失败时最常见的原因就是找不到 llama-server，而它
+    # 不是一条 pip install 能解决的：官方只发 GitHub release 的 zip。这三条
+    # 接口把那段折腾收进网页，与 `tagger llama install` 共用实现。
+
+    @app.get("/api/llama")
+    def llama_status() -> dict:
+        """装没装、装在哪、正在装的话到哪一步了。
+
+        刻意不联网：页面每几秒轮询一次，摸 GitHub 会让面板跟着卡。
+        """
+        snap = llama_runtime.status()
+        # 装好了就顺手让能力判定失效：否则那条"找不到 llama-server"的缓存
+        # 还在 TTL 里，「启动服务」会继续按不能用来显示。
+        if snap["installed"]:
+            VLLM.invalidate_capability()
+        return snap
+
+    @app.post("/api/llama/install")
+    def llama_install(req: LlamaInstallRequest) -> dict:
+        return llama_runtime.install(url=req.url.strip(), force=req.force)
+
+    @app.post("/api/llama/install/cancel")
+    def llama_install_cancel() -> dict:
+        """取消。已下到一半的包会留成 .part，下次安装覆盖写。"""
+        return llama_runtime.cancel()
 
     # ---- 外部推理 API（NL 打标的 openai / anthropic 来源）
     #

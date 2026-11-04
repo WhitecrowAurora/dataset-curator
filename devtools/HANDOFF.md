@@ -560,7 +560,10 @@ UI 滑块范围 90-100，低于 92 显示体积/画质提示。若将来真要�
   20 条直接中止整批，预检用「测试连接」（`POST /api/nl-api/probe`，发 8×8 小图）。
   成本看 token：输入才是大头，价目在 `configs/nl_api.json` 的 `prices` 段，
   没填就只报 token 不报钱。详见 §16
-- 测试：`pytest tests -q` → 534 passed
+- NL 推理默认引擎是 **llama.cpp**（`--engine vllm` 才走 vLLM）。没有
+  `llama-server` 时：网页上有「下载并安装 llama.cpp」按钮，命令行是
+  `tagger llama install`（`--zip` 喂离线包），或设 `TAGGER_LLAMA_SERVER`。详见 §18
+- 测试：`pytest tests -q` → 558 passed
 
 ---
 
@@ -1153,7 +1156,71 @@ Linux `/proc/stat`），差值就是两次轮询之间的平均占用；内存�
 
 ### 17.4 校验
 
-`pytest tests` 通过（`tests/test_web_stats.py::test_run_vlm_feeds_stats_buckets` 与
-`tests/test_web_features.py::test_run_vlm_bridges_run_client` 是**既有**失败：
-`_run_vlm` 传了 `paused=`，测试里的 fake 签名还没有这个参数，与本次无关）。
+`pytest tests -q` 全绿（558）。上一版的"既有失败"已收口：`_run_vlm` 传 `paused=`
+之后，`tests/test_web_stats.py` 与 `tests/test_web_features.py` 里的两个 fake
+签名没跟上，补上即成——替身必须照抄完整签名，否则岗位里的 `TypeError` 会被
+当成任务失败，测试报的是 `seen["args"]` KeyError，离真因隔了一层。
 `cd tagger/web/ui; npm run build` 通过（tsc + vite，dist 已更新）。
+
+---
+
+## 18. 2026-11-04：默认引擎改 llama.cpp + 网页一键装 llama-server
+
+原来默认是 vLLM，理由是"引擎决定产出算什么口径，不能按平台偷偷替你选"。
+落地下来这条站不住：主力场景是 Windows + 单卡，而那里 vLLM 连起都起不来
+（官方只有 Linux 版，要 WSL2），默认值等于把"第一次使用必然失败"写进了默认。
+
+### 18.1 默认值只留一处真相源
+
+空值时 `nl_engine.normalize_engine()` 返回 `llamacpp`。原来 `cli.py`、
+`model_loader.serve()`、`vllm_service` 各自写了一份 `"vllm"` 兜底，改默认
+必然漏一处——所以那三处改成调同一个函数，不再抄字面量。
+
+要 vLLM 就显式 `--engine vllm`。引擎进指纹，两种引擎的数据不会混批。
+
+### 18.2 llama-server 不是 pip 包
+
+新增 `tagger/llama_runtime.py`：
+
+- 查找顺序：`TAGGER_LLAMA_SERVER`（显式钉版本）> `runtime/llama.cpp/**`
+  （本程序装的）> `PATH`。装完**不改 PATH**：改进程的 PATH 对已经跑着的
+  解释器无效，写系统环境变量更过分。
+- 安装包从 GitHub `releases/latest` 挑：有 N 卡优先 `-bin-win-cuda-`，其次
+  vulkan（无 CUDA 时唯一还能吃 GPU 的），最后 cpu；CUDA 主包会连带下同版本
+  的 `cudart-*.zip`——缺它 exe 起来只报"缺少 dll"，跟 llama.cpp 看不出关系。
+- 下载走 `.part` 再改名（断掉不留"看着像装好了"的半包），解压逐成员校验
+  落点（挡 `../`），装完删 zip。
+- `status()` 刻意不联网：页面每几秒轮询，摸 GitHub 会让面板跟着卡。
+
+### 18.3 三条路，一份实现
+
+| 入口 | 用法 |
+| --- | --- |
+| 网页 | 引擎选 llama.cpp 且没有 llama-server 时出现「下载并安装 llama.cpp」 |
+| CLI | `tagger llama install`；`--zip <路径>` 喂离线包/镜像，`--force` 换构建 |
+| 环境变量 | `TAGGER_LLAMA_SERVER` 指向现成构建 |
+
+入口不同、落点同一个，不会出现"网页装好了、CLI 仍说没装"。
+
+### 18.4 两个必须记的坑
+
+- **`install()` 不能在持锁时调 `status()`**。两者都要同一把 `threading.Lock`，
+  不可重入 → 点按钮接口永不返回（页面转圈、日志什么都没有），单测里表现是
+  整条命令挂死而不是报错。现在临界区只负责"占位 + 置初值"，返回值在锁外拼。
+- **装完要让能力判定失效**。`local_capability` 有 TTL 缓存，装好那一刻它
+  还记着"找不到 llama-server"，页面会继续显示起不了服务。`/api/llama` 发现
+  已安装就调 `VllmService.invalidate_capability()`（只清"判过不能用"那格，
+  否则每轮询一次就白跑一次 nvidia-smi）。
+
+### 18.5 测试
+
+`tests/test_llama_runtime.py` 10 条：查找三档（env 指向不存在时**不回落**——
+显式指定就该明确失败）、本程序装的优先于 PATH、解压挡路径穿越、解压响应取消、
+`status()` 字段齐、已装不重复下载、资产分类、无官方二进制的平台不给按钮、
+`/api/llama` 结构。
+
+连带改了两处既有断言：`tests/test_nl_engine.py` 的默认值（`vllm` → `llamacpp`）、
+`tests/test_web_vllm.py` 两条用例显式传 `engine="vllm"`（测的是 vLLM 的启停
+与命令行，与默认值无关）。
+
+`pytest tests -q` → 558 passed；`npm run build` 通过。

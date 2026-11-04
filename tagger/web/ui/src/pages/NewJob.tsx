@@ -35,6 +35,7 @@ import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { OverviewFigure, OverviewFigureRow } from '../components/ui/OverviewFigures'
 import { FolderPicker } from '../components/FolderPicker'
+import { LlamaSetup } from '../components/LlamaSetup'
 import { MultiGpuPanel } from '../components/MultiGpuPanel'
 import { QuantizeDialog } from '../components/QuantizeDialog'
 import { ShardAssets } from '../components/ShardAssets'
@@ -277,10 +278,14 @@ export function NewJob({
   // 与下面那个「模型名」（--served-model-name，接口路由名）是两件事。
   // 推理引擎：vllm | llamacpp。Windows 原生只有后者能上 GPU，
   // 且两者指纹不同（换引擎等于换一代数据），所以它跟着服务一起锁。
-  const [vllmEngine, setVllmEngine] = useState('vllm')
+  // 默认与后端 nl_engine.normalize_engine 保持一致：llama.cpp。
+  const [vllmEngine, setVllmEngine] = useState('llamacpp')
   // 这个引擎在本机能不能跑。下拉一改就重新问：快照里的 local_ok 只按
   // "当前引擎"算，而还没启动时它的答案来自默认引擎，切换后必须重查。
   const [engineCap, setEngineCap] = useState<{ ok: boolean; reason: string } | null>(null)
+  // 装完 llama.cpp 要重探一次：能力结果有 TTL 缓存，不重查的话
+  // 「启动服务」按钮会一直按"找不到 llama-server"灰着。
+  const [capTick, setCapTick] = useState(0)
   useEffect(() => {
     let alive = true
     api
@@ -290,7 +295,7 @@ export function NewJob({
     return () => {
       alive = false
     }
-  }, [vllmEngine])
+  }, [vllmEngine, capTick])
   const [vllmModelKey, setVllmModelKey] = useState('')
   // '' = 按显存自动匹配。分档决定 max_model_len / 默认并发 / 精度下限，
   // 与选哪套权重正交（24G 卡上想跑 4B 也可以强行留 low-16g，KV 更省）。
@@ -1475,6 +1480,12 @@ export function NewJob({
                   <option value="llamacpp">llama.cpp（Windows 原生）</option>
                 </select>
               </SettingRow>
+
+              {/* llama-server 不是 pip 包：找不到时直接给安装入口，
+                  否则「启动服务」只会弹一句让人去命令行的报错。 */}
+              {vllmEngine === 'llamacpp' && (
+                <LlamaSetup onInstalled={() => setCapTick((n) => n + 1)} />
+              )}
 
               {/* 多卡：一台机器插了多张卡时，一卡一进程各打各的。
                   放在「引擎」下面是因为它复用同一个引擎选择——换引擎等于

@@ -39,8 +39,6 @@ GGUF 从哪来
 
 from __future__ import annotations
 
-import os
-import shutil
 from pathlib import Path
 
 import httpx
@@ -58,13 +56,16 @@ _PIXELS_PER_VISION_TOKEN = 32 * 32
 
 
 def normalize_engine(value: str | None) -> str:
-    """归一化引擎名。空 = 按当前平台选：Windows 只有 llama.cpp 可选。"""
+    """归一化引擎名。空 = 默认 llama.cpp。"""
     key = str(value or "").strip().lower()
     if not key:
-        # 默认仍是 vLLM：引擎决定"这套参数能不能起、产出算什么口径"，
-        # 按平台偷偷替你选，会让同一条命令在两台机器上做不同的事。
-        # Windows 上要用 llama.cpp 必须显式写 engine=llamacpp。
-        return "vllm"
+        # 默认 llama.cpp：它是唯一在 Windows 原生能上 GPU 的引擎（vLLM 官方
+        # 只有 Linux 版，Windows 要 WSL2），而这个项目的主要使用场景就是
+        # Windows + 单卡。默认选一个"多数机器开箱能跑"的，比默认选一个
+        # "多数机器一上来就报错"的强。
+        # 想用 vLLM 就显式写 engine=vllm——引擎决定产出算什么口径，所以
+        # 指纹里会记下来，两种引擎的数据不会混批。
+        return "llamacpp"
     if key in ("llamacpp", "llama.cpp", "llama-cpp", "llama", "gguf"):
         return "llamacpp"
     if key in ("vllm", "v-llm"):
@@ -84,12 +85,14 @@ def image_tokens_for(profile: RunProfile) -> int:
 
 
 def find_server_binary() -> str | None:
-    """找 llama-server。环境变量优先——预编译包解压出来不一定进 PATH。"""
-    override = os.environ.get("TAGGER_LLAMA_SERVER", "").strip()
-    if override:
-        p = Path(override)
-        return str(p) if p.is_file() else None
-    return shutil.which("llama-server")
+    """找 llama-server。环境变量 > runtime/llama.cpp（本程序装的）> PATH。
+
+    具体查找顺序在 llama_runtime.find_binary 里——那个模块还负责"没有就
+    装一个"，查找与安装共用一套落点，否则装完这里仍找不到。
+    """
+    from .llama_runtime import find_binary
+
+    return find_binary()
 
 
 def missing_weights_hint(model_key: str) -> str:
@@ -138,11 +141,12 @@ def check_engine(engine: str) -> None:
     binary = find_server_binary()
     if binary is None:
         raise ConfigError(
-            "找不到 llama-server。两种装法：\n"
-            "  1) 从 llama.cpp 的 releases 下 Windows CUDA 包（llama-*-bin-win-cuda-*.zip\n"
-            "     与同版本的 cudart-*.zip），解压后把目录加进 PATH；\n"
-            "  2) 设环境变量 TAGGER_LLAMA_SERVER 指向 llama-server.exe 的完整路径。\n"
-            "GitHub 直连不通时可用本地代理或镜像。"
+            "找不到 llama-server。三条路：\n"
+            "  1) 网页上点「下载并安装 llama.cpp」（推荐，装到 runtime/llama.cpp）；\n"
+            "  2) 命令行 `tagger llama install`（可用 --zip 指定本地包或镜像地址）；\n"
+            "  3) 已经有现成构建：设环境变量 TAGGER_LLAMA_SERVER 指向 "
+            "llama-server.exe 的完整路径。\n"
+            "GitHub 直连不通时先设 HTTPS_PROXY。"
         )
 
 

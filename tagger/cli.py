@@ -79,6 +79,55 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_llama(args: argparse.Namespace) -> int:
+    """llama.cpp 运行时的查看与安装。
+
+    命令行这一份是"网页以外的那条路"：没有浏览器、或者 GitHub 要走代理时，
+    用 `--zip` 直接喂一个已经下好的包。安装本身复用 llama_runtime，与网页
+    按钮是同一套逻辑、同一个落点，不会出现"网页装好了 CLI 仍说没装"。
+    """
+    from . import llama_runtime
+
+    if (getattr(args, "llama_cmd", "") or "status") == "install":
+        started = llama_runtime.install(url=args.zip or "", force=args.force)
+        if not started.get("started"):
+            print(f"[llama] {started.get('reason') or '没有开始'}")
+        # 同步等：命令行用户要的是"跑完给结果"，不是"再去看另一个命令"。
+        last_pct = -1
+        while True:
+            st = llama_runtime.status()
+            if st["busy"]:
+                if st["total"]:
+                    pct = int(100 * st["done"] / st["total"])
+                    if pct != last_pct:
+                        mib = 1 << 20
+                        print(f"\r[llama] {st['stage']} {pct}% "
+                              f"({st['done'] // mib}/{st['total'] // mib} MB)",
+                              end="", flush=True)
+                        last_pct = pct
+                time.sleep(0.3)
+                continue
+            print()
+            if st["stage"] == llama_runtime.STAGE_DONE:
+                print(f"[llama] 装好了：{st['binary']}")
+                return 0
+            if st["stage"] == llama_runtime.STAGE_CANCELLED:
+                print("[llama] 已取消")
+                return 1
+            print(f"[llama] 失败：{st['error'] or '未知原因'}")
+            return 1
+
+    st = llama_runtime.status()
+    if st["installed"]:
+        print(f"[llama] 已安装：{st['binary']}"
+              f"（版本 {st['version'] or '未知'}）")
+        return 0
+    print("[llama] 没找到 llama-server。安装：tagger llama install")
+    print(f"[llama] 会装到 {st['install_root']}；"
+          f"已有本地包就 `tagger llama install --zip <路径>`。")
+    return 1
+
+
 # ---------------------------------------------------------------- serve
 
 
@@ -1630,11 +1679,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp_doctor)
     sp_doctor.set_defaults(func=cmd_doctor)
 
+    # llama.cpp 是默认引擎，但 llama-server 不是 pip 包：没有它连服务都起不来。
+    # 单独一条命令，和网页上的安装按钮走同一份实现。
+    sp_llama = sub.add_parser("llama", help="llama.cpp 运行时（查看/安装 llama-server）")
+    sp_llama.add_argument("llama_cmd", nargs="?", default="status",
+                          choices=["status", "install"],
+                          help="status（默认）| install")
+    sp_llama.add_argument("--zip", default="",
+                          help="install 时直接下这个 zip（离线包/镜像/内网）")
+    sp_llama.add_argument("--force", action="store_true",
+                          help="已经装过也重装（换构建时用）")
+    sp_llama.set_defaults(func=cmd_llama)
+
     sp_serve = sub.add_parser("serve", help="启动 NL 推理服务（vLLM / llama.cpp）")
     add_common(sp_serve)
-    sp_serve.add_argument("--engine", choices=["vllm", "llamacpp"], default="vllm",
-                          help="推理引擎。Windows 原生只能用 llamacpp"
-                               "（vLLM 只有 Linux 版，需 WSL2）")
+    sp_serve.add_argument("--engine", choices=["vllm", "llamacpp"], default="llamacpp",
+                          help="推理引擎，默认 llamacpp（Windows 原生唯一能上 GPU 的路）"
+                               "；vLLM 只有 Linux 版，需 WSL2")
     sp_serve.add_argument("--port", type=int, default=8000)
     sp_serve.add_argument("--data-root", default=None, dest="data_root",
                           help="允许 file:// 访问的图片根目录")

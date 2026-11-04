@@ -670,6 +670,28 @@ export type NlApiProbe = {
   status?: number
 }
 
+/**
+ * llama.cpp 运行时状态。默认引擎是 llama.cpp，而 llama-server 不是 pip 包，
+ * 所以页面要能自己把那个 zip 下下来。
+ */
+export type LlamaRuntime = {
+  installed: boolean
+  binary: string
+  version: string
+  install_root: string
+  busy: boolean
+  /** probing | downloading | extracting | verifying | done | error | cancelled */
+  stage: string
+  message: string
+  done: number
+  total: number
+  error: string
+  source: string
+  /** 当前平台有没有官方预编译包（macOS 没有，只能自己编译） */
+  supported: boolean
+  platform: string
+}
+
 export type Health = {
   ok: boolean
   version: string
@@ -1132,6 +1154,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  // ---- llama.cpp 运行时
+  //
+  // 默认引擎是 llama.cpp，而 llama-server 不是 pip 包：没有它连服务都起不来。
+  // 这三条让页面自己把官方 zip 下下来、解开、就地生效。
+  llamaStatus: () => json<LlamaRuntime>('/api/llama'),
+  installLlama: (payload: { url?: string; force?: boolean }) =>
+    json<{ started: boolean; reason: string } & LlamaRuntime>('/api/llama/install', {
+      method: 'POST',
+      body: JSON.stringify({ url: payload.url ?? '', force: payload.force ?? false }),
+    }),
+  cancelLlamaInstall: () =>
+    json<LlamaRuntime>('/api/llama/install/cancel', { method: 'POST' }),
+
   // 存档只回脱敏值：浏览器永远拿不到明文密钥。
   nlApiKeys: () =>
     json<{

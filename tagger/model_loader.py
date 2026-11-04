@@ -300,9 +300,12 @@ def start_server(
     眼里的卡号是 0，slot 规划、显存分配都还在它熟悉的那套假设里。
     多卡并行就是靠这个起 N 份互不相干的单卡服务。
     """
-    engine = engine or "vllm"
     from . import nl_engine
 
+    # 归一化而不是 `engine or "vllm"`：默认引擎只有一处真相源
+    # （nl_engine.normalize_engine，现在是 llama.cpp），这里再写一份字面量
+    # 就会在改默认值时被漏掉，表现是"命令行默认 llama.cpp、网页起的是 vLLM"。
+    engine = nl_engine.normalize_engine(engine)
     nl_engine.check_engine(engine)
 
     if engine == "llamacpp":

@@ -14,8 +14,10 @@ export function Settings({
   progressInterval: number
   onProgressInterval: (ms: number) => void
 }) {
-  // 选项按秒展示，存的是毫秒。0 = 关闭。
-  const options = PROGRESS_INTERVALS.map(String)
+  // 选项和选中值都按**秒**给：底层存毫秒，但这里必须先把 1000 折掉，
+  // 否则 options 是 ['1000','2000',...] 而 value 是 '5'，既显示成 1000s，
+  // 也永远匹配不到任何一档（等于没有选中态）。0 = 暂停。
+  const options = PROGRESS_INTERVALS.map((ms) => String(ms / 1000))
   const value = String(progressInterval / 1000)
 
   return (

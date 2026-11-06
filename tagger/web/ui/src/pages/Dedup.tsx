@@ -5,7 +5,7 @@ import { fmtBytes, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip, type StatusTone } from '../components/ui/launcher'
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { ProgressBar } from '../components/ui/ProgressBar'
-import { useFolderPicker } from '../components/FolderPicker'
+import { FolderPicker } from '../components/FolderPicker'
 
 // 去重页：发分包前的独立步骤。左侧选素材目录 + 参数；右边看扫描进度、
 // 重复组预览和产出路径。与打标并行跑（去重是 IO/CPU 活，不占 GPU），
@@ -28,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function Dedup() {
   const [inputDir, setInputDir] = useState('')
-  const folder = useFolderPicker()
+  const [picker, setPicker] = useState(false)
   const [outDir, setOutDir] = useState('')
   const [mode, setMode] = useState<(typeof MODES)[number]>('similar')
   const [threshold, setThreshold] = useState(8)
@@ -139,7 +139,7 @@ export function Dedup() {
         icon={<Copy size={17} />}
         eyebrow="去重"
         title="发分包前查重复图"
-        description="按字节哈希与感知哈希找重复图；素材不动，只产一份排除清单。"
+        description="扫一遍素材的字节哈希与感知哈希，把精确重复和重压缩的相似图列成组。素材文件一个字节不动——产出一份排除清单，发分包时用 split --exclude 把重复图挡在包外。"
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>
@@ -181,7 +181,7 @@ export function Dedup() {
                 <button
                   type="button"
                   className="lx-btn-ghost shrink-0 px-3"
-                  onClick={() => folder.pick(inputDir, setInputDir)}
+                  onClick={() => setPicker(true)}
                 >
                   <FolderOpen size={14} className="mr-1 inline" />
                   浏览
@@ -436,7 +436,15 @@ export function Dedup() {
         </div>
       </div>
 
-      {folder.dialog}
+      <FolderPicker
+        open={picker}
+        start={inputDir}
+        onClose={() => setPicker(false)}
+        onPick={(path) => {
+          setInputDir(path)
+          setPicker(false)
+        }}
+      />
     </div>
   )
 }

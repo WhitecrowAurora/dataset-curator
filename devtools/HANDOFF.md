@@ -130,6 +130,22 @@ env\python\python.exe -m tagger.cli client --url http://127.0.0.1:8010 ^
 - pip 输出逐行进日志（400 行环形），页面每秒轮询；装 torch 的十几分钟里，
   没有输出是最难熬的。可中途取消（terminate 子进程）。
 
+**重依赖（`heavy`）不能跟着批量装**。vllm 实测会拖进 80+ 个包，并把 numpy
+2.5.4→2.2.6、starlette 1.10→1.7、fastapi 0.162→0.136、transformers 4.x→5.17。
+用户点「安装缺失」时想的是补几个小包，结果整套环境被掀翻，界面的 fastapi
+依赖也不再是清单版本。所以：`install-missing` 会把 heavy 项标成 `skipped`
+（看得见、但不动），单独点它那一行的「安装」才行，点之前有二次确认。
+`vllm` 的判定就在 `_OPTIONAL` 里的 `heavy=True`。
+
+**pip 的冲突要单独捞出来**：`X requires Y, but you have Z` 这类行**不改退出码**，
+pip 照装、返回 0。不捞的话用户只看到一个绿色的"完成"，而 numpy 已经被降级了。
+`_pip` 把这类行收进 `conflicts`，面板上用黄色列出。
+
+**「这不是 tagger 自带的 env」**：`_python_kind()` 比较 `sys.executable` 是否在
+`ROOT/env` 下。系统 Python 里往往还装着 gradio / numba / scipy，在那里装卸依赖
+改的是别人的环境——vllm 那次事故就是在 `C:\Users\...\Programs\Python\Python310`
+里发生的。external 时页面顶部挂一条黄条。
+
 **顶部的三个批量按钮**（`install-missing` / `uninstall-all` / `verify`）都走
 `_start_many` 这一条队列，`batch` 字段里逐项报进度，失败项在面板上单独列出来：
 
@@ -144,6 +160,12 @@ env\python\python.exe -m tagger.cli client --url http://127.0.0.1:8010 ^
   打标才炸。用子进程而不是本进程 importlib，是因为 torch 会往服务进程里塞几百
   MB 的库且再也退不回来；子进程还能超时 kill（`VERIFY_TIMEOUT = 60s`）。
   结果落在 `DepManager.verify`（内存），行上以红字覆盖显示「导入失败 · 原因」。
+- **分发名 ≠ 导入名**：`open_clip_torch` 的真实模块是 `open_clip`，`Pillow` 是
+  `PIL`。少了映射，装好的包会一直红着，用户只会去反复重装。`Item.modules` 会
+  给出候选：手写别名表 → `packages_distributions()` 反查 → 连字符换下划线。
+  **但只在错误是 `No module named '<这个名字>'` 时才换下一个**：模块存在、
+  内部炸了（`_C` 没编译、DLL 缺）是真实故障，换个"兄弟模块"往往能 import
+  成功，把故障掩盖成通过（torch 坏了而 torchgen 好好的，就是这种坑）。
 
 代码：`tagger/web/deps.py`（清单解析、状态判定、pip 子进程）、
 `tagger/web/ui/src/pages/Deps.tsx`。
@@ -1487,6 +1509,245 @@ File System Access API 给的是 handle。可后端 `/api/fs`、`/api/preview`
 如果以后还想接系统对话框，前提是**能同步拿到结果**（比如 WPF 侧直接把选中
 路径写进一个剪贴板/文件，由后端读），而不是走"发消息—等回执"这种天然有延迟
 的异步路径。
+
+## 22. 2026-11-04：「模型量化」独立页（FP8 / W4A16 / Q4_K_M / Q6_K）
+
+### 22.1 为什么要有独立入口
+
+量化原本只藏在「新建任务 → 精度选 W4A16」的弹窗里。结果是：**用户不能主动
+去量化**，只有被精度选择裹挟着才会撞见它。而官方 GGUF 只发 Q4_K_M / Q8_0 /
+F16 三档，Q6_K 和 Q5_K_M 得自己从 F16 压（`devtools/nl-quant-ab.md` 5.1），
+W4A16 更是没人替你发——所以"量化"本身就是一件要单独做的事。
+
+### 22.2 四条路线不是同一件事
+
+| 档位 | 性质 | 输入 | 产物 | 依赖 |
+|---|---|---|---|---|
+| FP8 | **运行时** | bf16 | 无 | CC ≥ 8.9 的卡 |
+| W4A16 | 离线 | safetensors | 目录 | torch + llmcompressor + GPU |
+| Q4_K_M | 离线 | **F16 GGUF** | 单个 .gguf | llama-quantize（纯 CPU） |
+| Q6_K | 同上 | 同上 | 同上 | 同上 |
+
+把它们做成一个「量化」按钮会让人选错。页面上四张卡片各自标出"离线/运行时"
+和"这台机器能不能跑"，能力探测也分开：缺 torch 不影响 Q4，缺 llama-quantize
+也不影响 W4A16。
+
+FP8 那条**没有产物**——vLLM 用 `--quantization fp8` 在加载时转，不落盘。
+页面上如实这么写，不假装能产出文件。
+
+### 22.3 GGUF 为什么不从 safetensors 一键转
+
+`convert_hf_to_gguf.py` 不在 llama.cpp 的 release 包里，还要 torch +
+transformers。与其在页面里做一个"看起来能一键、实际经常卡在依赖上"的转换，
+不如要求用户给一个现成的 F16/BF16 GGUF（Qwen 官方 GGUF 仓库有 F16 档），
+把要求写在输入框的 help 里。**输入必须是 .gguf**，传 safetensors 会明确报错。
+
+### 22.4 实现
+
+新增 `tagger/gguf_quant.py`，形态照抄 QuantManager（单例 / 子进程 / 日志尾 /
+taskkill 取消），但不复用它的类：产物形态、进度来源（llama-quantize 的
+`[ 12/ 291] 4.12`）、注册字段（GGUF 走 config 的 `gguf` 而不是
+`quantized_path`）没有一处相同。硬塞进一个类只会得到两个 `if method ==`。
+
+API：
+
+    GET  /api/quantize             三条链路的统一快照 + 可量化模型清单
+    POST /api/quantize/gguf/start   {source, target, out_file}
+    POST /api/quantize/gguf/cancel
+
+W4A16 继续用原有的 `/api/vllm/quantize/*`，一行没动——弹窗在用，别为了"统一"
+去改一条正在工作的链路。
+
+两处值得记的细节：
+
+- **参数校验放在能力探测之前**。否则路径填错的人会被告知"去装 llama-quantize"，
+  装完再点还是同样的错。
+- **默认产物名带档位**（`<源文件名>-Q4_K_M.gguf`）。两份 GGUF 只差一个后缀位
+  摆在同一目录，换错文件跑一天才发现，成本太高。
+
+### 22.5 前端
+
+`pages/Quantize.tsx`，导航在「模型管理」下面。轮询 1.5s（有任务）/ 5s（空闲），
+点「开始」后立刻 `tick` 一次刷新，不等下一个 5 秒——否则那 5 秒会被当成卡住。
+
+### 22.6 缺 llama-quantize 时糊掉这一块，而不是让按钮灰着
+
+`install.bat` **不装 llama.cpp**（它是 GitHub release 的 200MB zip，不是 pip 包；
+默认装会让"一键安装"多一个可能被墙的失败点）。所以第一次打开量化页，
+GGUF 那两档一定是不可用的——这时把整块表单 `blur-[2px] opacity-40` 并盖一层
+说明卡，比让"开始量化"灰着更直白：不可用的是**整条路线**，不是某个字段填错了。
+
+说明卡里的按钮直接 `location.hash = '/deps'`。为此在依赖中心顶部补了
+「llama.cpp 运行时」一块（复用 `LlamaSetup`）——原来这个安装入口只藏在
+「新建任务 → 引擎选 llama.cpp」下面，从量化页跳过去会扑空。
+
+### 22.7 手填量化类型
+
+预设只放 Q4_K_M / Q6_K（这两个有 A/B 数据支撑），但 llama-quantize 认几十种。
+下拉里加了「自定义…」，选中后出现输入框，可以填 Q5_K_M / Q8_0 / IQ4_XS / F16。
+
+后端 `resolve_flag()` 统一归一：预设走 `TARGETS` 拿 flag，其余过
+`^[A-Za-z0-9_]{2,24}$` 放行并转大写。**这个值会原样进 argv**，虽然不经过
+shell，但让页面能往里塞任意字符串没有任何好处——带空格、分号的一律拒。
+
+页面上同时显示等价命令行（`llama-quantize "src" "out" Q5_K_M`），想自己在终端
+跑的人直接复制。它和按钮发的是同一个值（`ggufFlag`），不是另写一份说明。
+
+### 22.8 GGUF 改成自己实现（22.6 / 22.7 的外部工具路径已废弃）
+
+用户的原话是"我们自己实现量化"。之前的做法是调 llama.cpp 的
+`llama-quantize.exe`——那等于要求用户为了压一个模型先下 200MB 运行时，
+和"外面没有量化好的能下载，所以我们在本机自己算"的初衷是反的。
+
+现在整条链路在 Python 里跑完，不碰任何外部程序：
+
+    tagger/gguf_file.py   GGUF 读写（元数据原样搬运，只重写张量类型和偏移）
+    tagger/kquant.py      Q4_K / Q6_K 的量化与反量化（numpy 向量化）
+    tagger/gguf_quant.py  编排：逐张量量化、进度、取消、写 .part 再改名
+
+**元数据为什么不解析**：GGUF 的元数据有十几种类型（字符串/数组/嵌套数组），
+Qwen 这类模型还塞了 tokenizer 词表和 chat template。解析再编码，任何一个
+类型写错，llama.cpp 就直接拒绝加载；而量化根本不需要理解它们。所以
+`Reader.metadata_bytes()` 原样返回那一段字节，写回时照抄。
+
+**Q4_K_M 的「M」**：不是纯 4 bit。`v_proj`（value 投影）保留成 Q6_K，其余走
+Q4_K——照抄 llama.cpp 的规则。v 投影对 attention 输出影响最大，混成 4 bit
+掉得最明显。
+
+**精度**（正态输入，量化→反量化的相对 RMS）：
+
+    Q4_K  0.078      Q6_K  0.022
+
+4 bit 的理论下限约 0.087（step/√12），所以 Q4 这个数是对的，不是"差不多就行"。
+代价是没做 ggml 的迭代最优 scale（`make_qkx2_quants`），同 bit 下比官方略差。
+
+**速度**：约 0.03 s/MB 输入，8B 模型（16 GB F16）约 8 分钟。比
+llama-quantize 慢一个量级，但只跑一次。
+
+**取消/失败**：写 `.part` 再 `replace()`。中途取消时目录里不会出现一个
+看起来能用、实际半截的 .gguf——那种文件拿去加载，报的错离真正原因很远。
+
+**只实现了三档**：Q4_K_M / Q4_K / Q6_K。`resolve_flag` 不再转发任意类型名
+（以前是原样丢给子进程），不认识的直接拒——自己的代码没写的档位，报错比
+产出坏文件好。下拉里的「自定义…」和手填输入框随之删掉。
+
+**页面**：22.6 那块"缺 llama-quantize 就模糊 + 跳依赖中心"的遮罩已删除，
+GGUF 面板现在总是可用，底部一行显示"引擎：内置 numpy（Q4_K / Q6_K）"。
+依赖中心里的 llama.cpp 区块仍然保留——那是 NL 引擎要用的 llama-server，
+和量化无关了。
+
+**输入仍必须是 GGUF**。safetensors → GGUF 要处理 tokenizer 词表、chat
+template、视觉塔层名映射，那是格式转换，不是量化。两件事分开做，免得把
+一个大坑伪装成一个按钮。要补的话是下一个独立任务。
+
+### 22.9 `d` 的 127/63 倍约定（唯一一处"自洽但不可用"的坑）
+
+第一版把归一化因子乘进了 `scales`，让 `d` 保持原始量级：
+
+    d = max_scale          scales = round(scale/d * 127)     解包 d * sc / 127
+
+自己写的文件自己读，round-trip 全过，误差 0.078，看起来没问题。但拿它去解
+**官方发布的 Q6_K**，RMS 直接 0.99、相关系数 0.0——整体小了 127 倍。Q4_K
+同理，差 63 倍。
+
+ggml 的约定是相反的：
+
+    d = max_scale / 127    scales = round(scale / d) ∈ 0..127   解包 d * sc
+
+`d` 承担缩放，`scales` 只存整数比例，解包时不再有任何除数。Q4_K 的 `dmin`
+也是 `/63`。改过来之后：
+
+| | 解官方文件 | 自压后解回 |
+|---|---|---|
+| Q6_K | rms 0.018 / corr 0.9998 | rms 0.022 / corr 0.9998 |
+| Q4_K | rms 0.072 / corr 0.9974 | rms 0.079 / corr 0.9969 |
+
+左边那一列是**唯一能证明位布局对的东西**——所以 `tests/test_kquant.py` 里加了
+`test_dequantize_matches_official_gguf`，在本机有官方 GGUF 时会真的反解对比
+（没有就 skip，CI 不受影响）。自己造数据 round-trip 永远发现不了这类错误。
+
+**另一个坑：Reader 原来 `fh.read()` 全读进内存。** F16 的 8B 文件 16 GB，
+还没开始算就 OOM。改成 `mmap`，切片和 `struct.unpack_from` 用法不变；
+`quantize_file` 结束时显式 `close()`，否则 Windows 上句柄一直挂着。
+
+### 22.10 真实产物验证：8B F16 → Q6_K，llama.cpp 认不认
+
+跑了一遍完整链路（`Qwen3VL-8B-Instruct-F16.gguf` 16.4 GB → Q6_K）：
+
+    耗时      4.7 分钟（不是估的 15 分钟：大头 token_embd/output 在前面，后面全是小张量）
+    产物      6.26 GB
+    张量      399 个，其中 327 个 Q6_K、72 个保持 F32
+
+那 72 个是 `blk.N.attn_{k,q}_norm.weight`——**每个只有 128 个元素**（per-head 的
+QK norm），128 不能被 256 整除，按设计跳过。
+
+但这一版还有两个偏差，都已修（见 22.12）：1D norm 被误量化、Q4_K_M 的
+`ffn_down` 没做分层升档。
+
+**用 llama.cpp 官方的 `gguf` Python 包验的**（`pip install gguf`，纯 Python）：
+
+    GGUFReader 解析成功，399 个张量
+    gguf.quants.dequantize 反解 blk.0.attn_k.weight
+    corr = 0.9998    rms = 0.0224
+
+这比自己读自己强得多：`GGUFReader` 和 `quants.dequantize` 就是 llama.cpp 仓库里的
+参考实现。它能解析、反量化又对得上，说明这份文件在 llama.cpp 眼里是合法 K-quant。
+
+**规则对齐之后，产物和官方 Q6_K 字节级相同**：
+
+    大小      6725900384 == 6725900384
+    类型分布  {Q6_K: 254, F32: 145} == 官方
+    逐张量    类型差异：无
+    反量化    corr 0.9998 / rms 0.0224
+
+大小分毫不差，说明张量顺序、块数、对齐和偏移全部落在同一套算法上——这比
+"误差够小"强得多，是"同一份文件"级别的吻合。（前两版分别差 0.46 GB 和
+0.95 MB，都在这一步被揪出来：第一次是单位算错，第二次是 1D norm 被误量化。）
+
+**官方 Q6_K 里没有 Q8_0 升级**——`output.weight` 就是 Q6_K，`ffn_down` 全是
+Q6_K。我一度以为 `output` 会被升到 Q8_0，那是凭印象，逐张量查过官方文件后
+推翻了。
+
+产物留在 `models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q6_K-ours.gguf`，不需要可以删。
+
+### 22.12 两条规则对齐官方（1D 不量化、ffn_down 分层）
+
+**1D 张量一律不量化。** 第一版只判 `n_elements % 256 != 0`，于是 4096 元素的
+`attn_norm` / `ffn_norm` 被压成了 Q6_K——它们能被 256 整除。后果比"省几 MB"
+严重：norm 是逐层的缩放因子，误差顺着残差流一路累积到 logits。
+官方 Q6_K 里 145 个 F32 全是 1D 张量，我们只有 72 个，差的就是这 73 个。
+
+现在条件是 `len(dims) == 1` 直接跳过。
+
+**Q4_K_M 的 `ffn_down` 分层升档。** 拿官方 Q4_K_M 数了一遍，36 层里这 18 个是
+Q6_K：
+
+    0,1,2,3 | 6,9,12,15,18,21,24,27,30 | 31,32,33,34,35
+
+规则：`i < n/8 || i >= 7n/8 || i % 3 == 0`。首尾层离输入/输出最近，误差影响最大；
+中间每三层留一个更高精度。`_plan()` 里已实现，`test_q4_k_m_layer_rule_matches_official`
+拿这串数字钉死——期望值是从官方文件里数出来的，不是推导的。
+
+**Q4_K_M 的 `output.weight` 必须留在 Q6_K。** 这条是用户问出来的：`_plan()`
+里只判了 `attn_v` 和 `ffn_down`，`output.weight` 一路走到 `return "q4k"`。
+官方的 Q4_K_M 里 `output` 是 Q6_K、`token_embd` 是 Q4_K——区别在于 embedding
+之后还有几十层在洗，lm_head 之后什么都没有，4 bit 的噪声直接进 logits。
+
+Q6_K 档不受影响：那一档官方就是全部 Q6_K，也没有任何 Q8_0 升级。
+
+### 22.11 顺带发现：`llama install` 现在装不上
+
+跑验证时顺手试了 `python -m tagger.cli llama install`，失败：
+
+    RuntimeError: GitHub 上这个 release（v0.9.0）没有匹配 Windows/AMD64 的安装包
+
+查了一下，`ggml-org/llama.cpp` 的 latest release（v0.9.0）现在**只有一个
+`nightly-tag.txt` 资产**，二进制不在 release 里了（`tags/nightly` 也是 404）。
+所以 `llama_runtime` 里那套"读 latest release 的 assets 找 exe"的逻辑已经失效，
+装不了 llama-server。也用不了 `--zip` 之外的自动路径。
+
+要修的话是独立一件事：要么改指 nightly 构建的实际地址，要么让用户手动下 zip
+再 `--zip`。这条不影响量化（已经不依赖 llama.cpp 了），但影响默认 NL 引擎。
 
 ---
 

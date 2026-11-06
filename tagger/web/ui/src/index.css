@@ -77,14 +77,8 @@ body {
   }
 }
 
-/* fill-mode 必须是 backwards，不能是 both。
-   both 会让动画结束后继续保留 `transform: translateY(0)`，而**任何非 none 的
-   transform 都会把这个元素变成 position:fixed 后代的包含块**——页面里的弹窗
-   于是按整页高度居中，用户得往下滚才看得见（"浏览目录"框就是这么跑到页面
-   中间去的）。backwards 在结束的瞬间退回元素自身样式，而 to 与自身样式完全
-   一致（opacity:1 / 无位移），所以不会有可见跳变。 */
 .lx-page-enter {
-  animation: lx-page-enter-kf 0.26s cubic-bezier(0.25, 1, 0.35, 1) backwards;
+  animation: lx-page-enter-kf 0.26s cubic-bezier(0.25, 1, 0.35, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

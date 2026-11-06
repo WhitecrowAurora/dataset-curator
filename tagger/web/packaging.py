@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import threading
 import time
 import uuid
@@ -61,6 +62,25 @@ class SplitParams:
     limit: int = 0
     verify_pack: bool = True     # 写完回读 manifest 校验
 
+    # 嵌套压缩包：勾上就走流式（边遍历边封包）。代价是 image_id 按"发现
+    # 顺序"编，而不是"按画师排序后编"——顺序稳定，但同画师的图不再连号。
+    nested: bool = False
+    work_dir: str = ""           # 解压临时目录，留空 = 系统临时目录
+    passwords: str = ""          # 密码表，每行一个密码，# 开头是注释
+    workers: int = 0             # 0 = 自动（核数 - cpu_reserve）
+    cpu_reserve: int = 2         # 留几个核给自己用
+    mem_reserve_gb: int = 4      # 留多少内存，不够时自动降并发
+
+    # 入包时顺手缩放分辨率。none = 原样入包（一个字节都不重编码）
+    resize_mode: str = "none"    # none | longest | shortest | pixels
+    resize_value: int = 768      # longest/shortest 是边长；pixels 是百万像素
+    jpeg_quality: int = 92
+
+    # 预扫描表：留空 = <输出目录>/scan.jsonl。表存在就复用，换 per_shard
+    # 重切不用再解压 4 TB。
+    scan_table: str = ""
+    verify_n: int = 20           # 抽样核对条数，0 = 跳过
+
     def resolved_out_dir(self) -> Path:
         return Path(self.out_dir) if self.out_dir else (
             Path(self.input_dir).resolve().parent / f"{_sibling_stem(self.input_dir)}-dist")
@@ -92,6 +112,31 @@ class SplitParams:
                 f"确定要丢弃旧记录就先删掉它。")
         if self.exclude and not Path(self.exclude).is_file():
             raise ValueError(f"去重清单不存在: {self.exclude}")
+        if self.passwords and not Path(self.passwords).is_file():
+            raise ValueError(f"密码表不存在: {self.passwords}")
+        if self.workers < 0:
+            raise ValueError("并发数不能是负数")
+        if self.cpu_reserve < 0:
+            raise ValueError("CPU 保留核数不能是负数")
+        if self.mem_reserve_gb < 0:
+            raise ValueError("内存保留量不能是负数")
+        if self.resize_mode not in ("none", "longest", "shortest", "pixels"):
+            raise ValueError("缩放方式只能是 none / longest / shortest / pixels")
+        if self.resize_mode != "none" and self.resize_value < 1:
+            raise ValueError("缩放目标必须大于 0")
+        if self.resize_mode == "pixels" and self.resize_value > 200:
+            raise ValueError("像素预算按百万像素算，填 1~200 之间（比如 2 表示 2MP）")
+        if not 1 <= self.jpeg_quality <= 100:
+            raise ValueError("JPEG 质量要在 1~100 之间")
+        if self.nested and self.work_dir:
+            # 早点建、早点炸：跑几小时才发现临时盘没有写权限，代价太大
+            try:
+                Path(self.work_dir).mkdir(parents=True, exist_ok=True)
+                probe = Path(self.work_dir) / ".tagger-write-test"
+                probe.write_bytes(b"1")
+                probe.unlink()
+            except OSError as exc:
+                raise ValueError(f"临时解压目录不可写: {self.work_dir}（{exc}）") from None
 
 
 @dataclass(slots=True)
@@ -208,6 +253,12 @@ def make_params(kind: str, fields: dict) -> "SplitParams | MergeParams | PackPar
 
 def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
     params.validate()            # 表已存在等安全线在这里拦，不等到写盘
+    if params.nested:
+        # 两阶段：进度可算、扫描表可复用、解压能并行。
+        # 代价是**多一遍扫描时间**（嵌套包仍要解出来才看得到目录，只是不读字节、
+        # 不缩放、不写包），外加一份 scan.jsonl 落在 out_dir（几百万条约几百 MB）。
+        return run_split_nested(params, on_progress=on_progress,
+                                should_stop=should_stop, on_log=on_log)
     from ..artist import AliasTable, extract_artist
     from ..config import DEFAULT_TIERS, load_ops, load_tier_table
     from ..dedup import load_exclude
@@ -298,6 +349,276 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
         "out_dir": str(out_dir),
         "table_path": str(table_path),
         "verify": verify,
+    }
+
+
+def _worker_count(params: SplitParams) -> int:
+    """并发数 = 核数 - 保留核数；显式给了 workers 就听它的。
+
+    再按可用内存砍一刀：剩得比 mem_reserve_gb 还少时，宁可慢也不要 OOM——
+    跑一半被系统杀掉，前面几小时全白费。
+    """
+    cpu = os.cpu_count() or 4
+    n = params.workers if params.workers > 0 else cpu - max(0, params.cpu_reserve)
+    n = max(1, min(n, 32))
+    if n > 1 and params.mem_reserve_gb:
+        try:
+            import psutil
+            free_gb = psutil.virtual_memory().available / (1024 ** 3)
+            if free_gb < params.mem_reserve_gb:
+                n = 1
+        except Exception:                     # noqa: BLE001 - 没有 psutil 就不设这道闸
+            pass
+    return n
+
+
+def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
+    """两阶段：先扫描造表并抽样核对，再按容器分给多个 worker 并行处理。
+
+    相比单遍流式，多花一遍扫描的时间，换来三件事：
+
+    - **进度是真的**：总数已知，百分比能算；
+    - **表能复用**：换 per_shard 重切不用再解压 4 TB；
+    - **解压能并行**：每个 worker 负责一组容器，容器之间互不相干。
+
+    顺序的正确性靠两处保证：扫描按 `iter_files` 的固定遍历顺序落成 seq；
+    消费阶段按 chunk 顺序取队列，所以写盘顺序就是 seq 递增。
+    """
+    import queue
+
+    from ..artist import AliasTable, extract_artist
+    from ..config import DEFAULT_TIERS, load_ops, load_tier_table
+    from ..containers import PasswordTable, iter_files
+    from ..dedup import load_exclude
+    from ..distribute import StreamingShardWriter, write_table
+    from ..imageops import resize_bytes
+    from ..naming import IMAGE_SUFFIXES, make_image_id
+    from ..scantable import (build_scan, group_by_container, load_table,
+                             save_table, verify)
+
+    rule = load_ops(load_tier_table(DEFAULT_TIERS)).artist_rule()
+    rule.enabled = True
+
+    out_dir = params.resolved_out_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    aliases = AliasTable(rule.aliases_path).as_dict() if rule.aliases_path else {}
+    passwords = PasswordTable.load(params.passwords or None)
+    scan_path = Path(params.scan_table) if params.scan_table else (out_dir / "scan.jsonl")
+
+    # ---------------------------------------------------------- 阶段 1：扫描
+    # 表存在就直接用——换 per_shard 重切同一批素材，不必再解压 4 TB。
+    # 表过期由阶段 2 的核对负责抓，抓不到就整批中止，不留 ID 错位的包。
+    entries: list = []
+    if scan_path.is_file():
+        entries = load_table(scan_path)
+        on_log(f"阶段 1/3：复用扫描表 {scan_path}（{len(entries)} 张，"
+               f"要重扫请先删掉它）")
+    else:
+        on_log(f"阶段 1/3：扫描 {params.input_dir}")
+        entries = build_scan(
+            params.input_dir,
+            work_dir=params.work_dir or None,
+            passwords=passwords,
+            should_stop=should_stop,
+            on_log=on_log,
+            image_suffixes=IMAGE_SUFFIXES,
+            on_progress=lambda done, _total, stage: on_progress(done, 0, stage),
+        )
+        if not entries:
+            raise ValueError("没有发现可用的图片——检查扩展名、嵌套层数或密码表")
+        save_table(entries, scan_path)
+
+    excluded = 0
+    if params.exclude:
+        exclude = load_exclude(params.exclude)
+        before = len(entries)
+        entries = [e for e in entries if e.vpath not in exclude]
+        excluded = before - len(entries)
+        on_log(f"去重清单：排除 {excluded} 张（{params.exclude}）")
+    if params.limit and len(entries) > params.limit:
+        entries = entries[:params.limit]
+        on_log(f"limit={params.limit}：只处理前 {len(entries)} 张")
+    if not entries:
+        raise ValueError("排除后没有剩余图片")
+
+    # 过滤后 seq 会留空洞，所以按 seq 建索引，不能拿列表下标当 seq 用
+    by_seq = {e.seq: e for e in entries}
+    total_bytes = sum(e.size for e in entries)
+    on_log(f"扫描就绪：{len(entries)} 张 / {total_bytes / 2 ** 30:.2f} GiB，表 {scan_path}")
+
+    # ---------------------------------------------------------- 阶段 2：核对
+    verify_info = None
+    if params.verify_n > 0:
+        on_log(f"阶段 2/3：抽样核对 {params.verify_n} 条")
+        verify_info = verify(
+            entries, params.input_dir,
+            sample_n=params.verify_n, per_shard=params.per_shard,
+            work_dir=params.work_dir or None, passwords=passwords, on_log=on_log)
+        on_log(f"核对通过：{verify_info['checked']} 条对得上，"
+               f"{verify_info['hashed']} 条算过 sha256")
+    else:
+        on_log("阶段 2/3：已跳过核对（verify_n=0）")
+
+    # ---------------------------------------------------------- 阶段 3：并行
+    groups = sorted(group_by_container(entries).items(), key=lambda kv: kv[1][0].seq)
+    workers = max(1, min(_worker_count(params), len(groups)))
+    per_worker = max(1, len(entries) / workers)
+
+    chunks: list[list] = []
+    cur: list = []
+    acc = 0
+    for group in groups:
+        if cur and acc + len(group[1]) > per_worker and len(chunks) < workers - 1:
+            chunks.append(cur)
+            cur, acc = [], 0
+        cur.append(group)
+        acc += len(group[1])
+    if cur:
+        chunks.append(cur)
+
+    on_log(f"阶段 3/3：单线程写包（{len(groups)} 个容器）" if len(chunks) == 1 else
+           f"阶段 3/3：{len(chunks)} 个 worker 并行写包"
+           f"（保留 {params.cpu_reserve} 核 / {params.mem_reserve_gb} GB）")
+
+    def produce(chunk: list, box: "queue.Queue") -> None:
+        """一个 worker 负责一组容器：重新打开源，按 vpath 认领自己那几条。
+
+        放进队列用带超时的 put：任务被取消时消费端已经退出，生产者不能死等
+        一个再也没人取的满队列——那样 join 只能靠超时一个个熬过去。
+        """
+        def put(item) -> None:
+            while True:
+                try:
+                    box.put(item, timeout=0.5)
+                    return
+                except queue.Full:
+                    if should_stop():
+                        return
+
+        try:
+            for container, wanted in chunk:
+                source = container.partition("::")[0]
+                # 重新打开 source 时 vpath 已经是"相对 source"的完整虚拟路径；
+                # 只有散图（source 就是那张图）才对不上，退回文件名认一次。
+                exact = {e.vpath: e for e in wanted}
+                by_name: dict[str, list] = {}
+                for e in wanted:
+                    by_name.setdefault(Path(e.vpath).name, []).append(e)
+                found = 0
+                try:
+                    for entry in iter_files(source, work_dir=params.work_dir or None,
+                                            passwords=passwords):
+                        if should_stop():
+                            break
+                        e = exact.get(entry.vpath)
+                        if e is None:
+                            # 同名多条是歧义：认错就等于把图挂到别人的 id 上
+                            cands = by_name.get(entry.name) or []
+                            e = cands[0] if len(cands) == 1 else None
+                        if e is None:
+                            continue
+                        try:
+                            with entry.open() as fh:
+                                data = fh.read()
+                            data, ext = resize_bytes(
+                                data, mode=params.resize_mode, value=params.resize_value,
+                                quality=params.jpeg_quality, name=entry.name)
+                        except Exception as exc:  # noqa: BLE001 - 单张坏了不拖垮整批
+                            put(("skip", e.seq, f"{type(exc).__name__}: {exc}"))
+                            continue
+                        put(("ok", e.seq, (data, ext)))
+                        found += 1
+                except Exception as exc:          # noqa: BLE001 - 整个容器读不出来
+                    for e in wanted:
+                        put(("skip", e.seq, f"容器打不开：{exc}"))
+                    continue
+                if found == 0:
+                    for e in wanted:
+                        put(("skip", e.seq, "重新遍历时没找到"))
+        finally:
+            # 无论如何都要给消费端一个结束标记，否则它会在 get() 上等死
+            put(("end", 0, None))
+
+    # 先建 writer 再起线程：构造失败时不必去收拾一堆卡在队列上的线程
+    writer = StreamingShardWriter(
+        out_dir, layout=params.layout, compress="stored",
+        per_shard=params.per_shard, max_bytes=params.max_bytes, mode=params.mode)
+
+    boxes: list = [queue.Queue(maxsize=8) for _ in chunks]
+    threads = [threading.Thread(target=produce, args=(chunk, box), daemon=True)
+               for chunk, box in zip(chunks, boxes)]
+    for t in threads:
+        t.start()
+
+    written = skipped = no_artist = 0
+    try:
+        # 严格按 chunk 顺序消费：chunk 内 seq 递增、chunk 之间连续，
+        # 所以整体 seq 递增，image_id 与表一一对应。
+        for box in boxes:
+            while True:
+                if should_stop():
+                    raise DataJobStopped()
+                try:
+                    kind, seq, payload = box.get(timeout=1.0)
+                except queue.Empty:
+                    continue            # 只是为了定期回头看取消标记
+                if kind == "end":
+                    break
+                if kind == "skip":
+                    skipped += 1
+                    on_log(f"跳过 seq={seq}：{payload}")
+                    continue
+                data, ext = payload
+                item = by_seq[seq]
+                # 画师必须从**包内路径**提：拿完整 vpath 按 / 切第一段会得到
+                # `inner.zip::alice`，image_id 就成了 `inner.zipalice-000001`。
+                _, _, member = item.vpath.rpartition("::")
+                logical = member or item.vpath
+                artist = extract_artist(logical, rule, aliases)
+                if not artist.tag:
+                    no_artist += 1
+                image_id = make_image_id(artist.tag or "", seq, width=params.seq_width)
+                writer.add(image_id, data, artist=artist.tag or "",
+                           src=item.source, member=member,
+                           rel_path=logical, ext=ext, size=len(data))
+                written += 1
+                if written % 200 == 0:
+                    on_progress(written, len(entries), f"已写入 {written} 张")
+    finally:
+        # 一个共同期限：32 个线程各等 5 秒就要熬两分半，收尾不该这么贵
+        deadline = time.monotonic() + 10
+        for t in threads:
+            t.join(timeout=max(0.0, deadline - time.monotonic()))
+        plans = writer.finish()
+
+    if not plans:
+        raise ValueError("一张也没写出来——检查密码表或源文件是否可读")
+
+    total = sum(p.count for p in plans)
+    table_path = write_table(plans, str(params.resolved_table()), next_seq=1 + total)
+    on_log(f"完成：{total} 张 / {len(plans)} 个包，分包表 {table_path}")
+
+    if passwords.failures:
+        on_log(f"有 {len(passwords.failures)} 个容器打不开（多半是缺密码）")
+        for name, why in list(passwords.failures.items())[:10]:
+            on_log(f"  {name} —— {why}")
+
+    return {
+        "discovered": len(entries) + excluded,
+        "excluded": excluded,
+        "skipped": skipped,
+        "no_artist": no_artist,
+        "packages": [{"name": p.name, "count": p.count, "bytes": p.bytes,
+                      "first_id": p.first_id, "last_id": p.last_id}
+                     for p in plans[:SUMMARY_CAP]],
+        "package_count": len(plans),
+        "total": total,
+        "bytes": sum(p.bytes for p in plans),
+        "out_dir": str(out_dir),
+        "table_path": str(table_path),
+        "scan_table": str(scan_path),
+        "verify": verify_info,
+        "failed_containers": len(passwords.failures),
     }
 
 

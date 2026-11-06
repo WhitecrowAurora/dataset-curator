@@ -4,7 +4,7 @@ import { api, ApiError, type ArtifactInfo, type UploadState } from '../lib/api'
 import { fmtBytes, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip, type StatusTone } from '../components/ui/launcher'
 import { ChoiceGrid, ErrorBox } from '../components/ui/controls'
-import { useFolderPicker } from '../components/FolderPicker'
+import { FolderPicker } from '../components/FolderPicker'
 
 // 回传页：左边选目录、勾分片；右边填 FTP、点上传。
 // 后端每个文件单独记账（成功/失败/续传），这里每秒轮询一次状态——
@@ -23,7 +23,7 @@ const FILE_STATUS_LABEL: Record<string, string> = {
 
 export function Upload() {
   const [dir, setDir] = useState('')
-  const folder = useFolderPicker()
+  const [picker, setPicker] = useState(false)
   const [artifacts, setArtifacts] = useState<ArtifactInfo[] | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -233,7 +233,7 @@ export function Upload() {
               <button
                 type="button"
                 className="lx-btn-ghost shrink-0 px-3"
-                onClick={() => folder.pick(dir, setDir)}
+                onClick={() => setPicker(true)}
               >
                 <FolderOpen size={14} className="mr-1 inline" />
                 浏览
@@ -417,7 +417,15 @@ export function Upload() {
         </div>
       </div>
 
-      {folder.dialog}
+      <FolderPicker
+        open={picker}
+        start={dir}
+        onClose={() => setPicker(false)}
+        onPick={(path) => {
+          setDir(path)
+          setPicker(false)
+        }}
+      />
     </div>
   )
 }

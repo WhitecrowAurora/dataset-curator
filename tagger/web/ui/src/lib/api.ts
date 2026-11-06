@@ -1,168 +1,6 @@
 // 后端契约的唯一定义处。字段名与 tagger/web/app.py 一一对应，
 // 改名要两边一起改——所以这里刻意不写"更漂亮"的别名。
 
-/** 下载队列里的一条（一个分片）。status=cancelling 是"叫停了但还在收尾"。 */
-export type DownloadItem = {
-  id: string
-  repo: string
-  filename: string
-  revision: string
-  size: number
-  done: number
-  status: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'done' | 'error'
-  /** 这一片实际用的连接数；小文件会自动退化成 1 */
-  conns: number
-  message: string
-  created: number
-  started: number
-  finished: number
-  /** 字节/秒（滑动窗口），只在 running 时有意义 */
-  speed: number
-}
-
-export type DownloadsState = {
-  items: DownloadItem[]
-  /** 分片落盘根目录（run/hf-cache），按仓库再分一层 */
-  cache_root: string
-  free_bytes: number
-  /** 给产物留的余量（字节），空间不够时队列就在 queued 里等 */
-  reserve_bytes: number
-  running: number
-  queued: number
-  /** 当前全局代理（与模型下载共用一份）；空 = 直连 */
-  proxy: string
-}
-
-/** 打标管理：扫描到的一个 json 文件 */
-export type TagFileRow = {
-  path: string
-  name: string
-  dir: string
-  size: number
-  /** 空文件多半是下载/写入被截断，页面上要标出来 */
-  empty: boolean
-  /** tag / nl 是本项目的逐图产物；other 是任意 json（数组/JSONL/单对象） */
-  /** parquet = 产物分片（artifacts-*.parquet），不是逐图 json */
-  kind: 'tag' | 'nl' | 'parquet' | 'other'
-}
-
-export type TagScanResult = {
-  root: string
-  files: TagFileRow[]
-  counts: {
-    tag: number
-    nl: number
-    parquet: number
-    other: number
-    empty: number
-    bytes: number
-  }
-}
-
-export type TagMergeReport = {
-  inputs: number
-  bad_files: string[]
-  records_read: number
-  records_out: number
-  duplicates: number
-  conflicts: number
-  skipped: number
-  fields: string[]
-  out_path: string
-  /** 本次用的图片路径前缀（空 = 保留产物原值） */
-  image_root: string
-  /** 走了分桶模式：输出按桶序，不再全局按 image_id 排序 */
-  batched: boolean
-  buckets: number
-  bytes: number
-  elapsed_s: number
-}
-
-export type TagCheckResult = {
-  total: number
-  ok: number
-  missing: number
-  /** hf:// / http:// 之类：本来就不在这台机器上，不算缺图 */
-  remote: number
-  /** 没有 image_path 字段 */
-  empty: number
-  samples: { image_id: string; image_path: string }[]
-}
-
-export type TagMergeTask = {
-  id: string
-  /** merge = 合并；check = 路径自检（共用同一套轮询） */
-  kind: 'merge' | 'check'
-  status: 'running' | 'done' | 'error'
-  /** read = 读入分批，write = 写出单体文件；自检是 read / check */
-  stage: 'read' | 'write' | 'check'
-  done: number
-  total: number
-  error: string
-  /** 合并给 TagMergeReport；自检给 TagCheckResult（同一个 report 字段） */
-  report: TagMergeReport | TagCheckResult | null
-  started: number
-  finished: number
-  elapsed_s: number
-}
-
-export type TagPreview = {
-  rows: Record<string, unknown>[]
-  fields: string[]
-}
-
-/**
- * 底部进度条的一项。后端把所有"正在跑"的活儿归一化成这一种形态：
- * 打标 / 分包 / 拼接 / 封包 / 合并 / 自检。
- */
-export type Activity = {
-  kind: 'tag' | 'data' | 'merge' | 'check'
-  id: string
-  title: string
-  /** 副标题：打标是输入目录，数据任务是当前阶段，合并/自检是 stage */
-  detail: string
-  phase: string
-  done: number
-  total: number
-  /** 后端算好的比例 0~1；null = 总量未知，按计数显示 */
-  progress: number | null
-  rate: number
-  eta_s: number | null
-  /** 点这条进度去哪个页面 */
-  href: string
-}
-
-/** 底栏右侧的硬件数字。null = 这台机器拿不到该项。 */
-export type SysInfo = {
-  cpu_pct: number | null
-  /** 物理内存：底栏放百分比，悬浮提示里给 GB 明细 */
-  mem_pct: number | null
-  mem_used_gb: number | null
-  mem_total_gb: number | null
-  gpu_pct: number | null
-  gpu_temp_c: number | null
-  /** 显存（多卡时只报第一张） */
-  vram_pct: number | null
-  vram_used_gb: number | null
-  vram_total_gb: number | null
-}
-
-export type PlanState = {
-  plan: {
-    enabled: boolean
-    after_images: number
-    action: 'stop' | 'shutdown'
-    fired: boolean
-    fired_at: number
-    note: string
-  }
-  running: boolean
-  done: number
-  total: number
-  /** 还差多少张触发；未启用时是 0 */
-  remaining: number
-}
-
 export type JobSpec = {
   input_dir: string
   out_dir: string
@@ -179,25 +17,14 @@ export type JobSpec = {
   device: string
   precision: string
   batch: number
-  /** pil = CPU 缩放/归一化（现状）；tensor = 缩放/归一化上卡（解码仍在 CPU） */
-  preprocess: string
   threshold: number | null
   keep_categories: string[]
   thresholds: Record<string, number>
   model_repo: string
   guard: boolean
-  /** 阈值覆盖：键名与后端的 GuardPolicy 字段同名（duty_cycle / temp_cutoff_c 等）。
-   *  空 = 用 configs/tiers.yaml 的 limits 段 */
-  guard_policy: Record<string, number>
   /** 按"预计产出 + 20% 冗余"判盘够不够（取代 guard 的固定磁盘阈值） */
   check_space: boolean
   // VLM 服务（engine="vlm"）
-  /** 推理来源：local = 本机/自建服务；openai / anthropic = 外部 API */
-  vlm_provider: 'local' | 'openai' | 'anthropic'
-  /** API 地址（本机模式留空）。留空时后端按来源取默认域名 */
-  api_base: string
-  /** API 密钥。只在提交时走一趟，快照里会被抹成 *** */
-  api_key: string
   url: string
   vlm_model: string
   /** both = NL + tag；nl / tag = 单模式，都由 VLM 出（本地后端会被强制关掉） */
@@ -205,15 +32,8 @@ export type JobSpec = {
   temperature: number
   top_p: number
   max_tokens: number
-  /** 描述长度引导（字符区间，只决定"往多长写"）；null = 按 token 区间派生 */
-  caption_chars: [number, number] | null
   timeout_s: number
   concurrency: number
-  /** 多卡：地址由后端从多卡服务组取，这里只表明"用多卡" */
-  multi_gpu?: boolean
-  /** 每卡并发（0 = 按分档表推算）。多卡时与 concurrency 同义，优先它 */
-  per_card_seqs?: number
-  multi_gpus?: number[]
   max_pixels: number
   seed: number | null
   /** 同一张图跨运行累计失败多少次后跳过；0 = 不限制 */
@@ -223,46 +43,11 @@ export type JobSpec = {
   quality_drop_score: number
   /** 重打次数上限；0 = 用配置（2 次） */
   quality_max_attempts: number
-  /** 重试阶梯：温度每轮上调多少 / 封顶；0 = 用配置 */
-  quality_retry_temp_step: number
-  quality_retry_temp_cap: number
-  /** 重试阶梯：像素预算乘几倍 / 封顶；0 = 用配置 */
-  quality_retry_pixels_scale: number
-  quality_retry_pixels_cap: number
-  /** L2 语义打分（图文 CLIP）：抓"句子通顺但跑题"，代价是并发被摁到 1 */
-  quality_enable_clip: boolean
-  /** CLIP 相似度下限；0 = 用配置（0.22） */
-  quality_clip_min_score: number
-  /** CLIP 权重名（空 = 跟配置 ViT-L-14）；换它等于换打分口径 */
-  quality_clip_model: string
-  /** CLIP 预训练来源（空 = 跟配置 openai） */
-  quality_clip_pretrained: string
-  /** L1 规则层阈值；null = 跟配置。0 是合法值，不能当"没填" */
-  quality_min_chars: number | null
-  quality_max_chars: number | null
-  quality_min_tag_coverage: number | null
-  quality_max_repeat_ratio: number | null
-  /** 重试升级：重试用尽后打到第二个服务（另一套更大的权重） */
-  escalate_url: string
-  escalate_model: string
-  /** 用 file:// 传图：服务端须 --allowed-local-media-path 放行产物目录 */
-  use_file_url: boolean
   // HF 输入（engine="vlm"）
   hf_repo: string
   hf_token: string
   hf_revision: string
   hf_files: string[]
-  /** auto = 有 parquet 就流式读（不落盘），否则按 tar 分片下载 */
-  hf_format: 'auto' | 'parquet' | 'webdataset'
-  /** tar 模式预取几片（下载与打标并行）；0 = 严格串行 */
-  hf_prefetch: number
-  /** 单个分片用几条并发连接（国内单条 TCP 常被限速）；1 = 单连接 */
-  hf_conns: number
-  /** 给产物留的磁盘余量（GB）；0 = 自动 */
-  hf_reserve_gb: number
-  /** 结果缓存：同图同参复用上次产出，不送模型 */
-  cache: boolean
-  cache_max_gb: number
   // 产物形态（vlm 引擎默认 parquet：回传页传的就是它）
   artifact_format: 'parquet' | 'json'
   parquet_rows: number
@@ -284,22 +69,8 @@ export type JobSpec = {
   max_bytes: number
 }
 
-export type JobStatus = 'pending' | 'running' | 'paused' | 'done' | 'stopped' | 'failed'
+export type JobStatus = 'pending' | 'running' | 'done' | 'stopped' | 'failed'
 export type JobPhase = '' | 'tag' | 'pack'
-
-/** 上次没跑完的任务。只含摘要——完整 spec 里有 API 密钥，不下发到页面。 */
-export type ResumeInfo = {
-  job_id: string
-  /** paused = 按了暂停；stopped = 按了停止，两者都可以接着做 */
-  why: 'paused' | 'stopped' | string
-  saved_at: number
-  out_dir: string
-  counts: { total?: number; done?: number; skipped?: number; failed?: number }
-  engine: string
-  input_dir: string
-  vlm_model: string
-  output_mode: string
-}
 
 export type PlanSample = {
   rel: string
@@ -372,16 +143,6 @@ export type Snapshot = {
   rate_per_s: number
   eta_s: number | null
   timings_ms: { decode: number; forward: number }
-  /**
-   * 云端按量计费的账：token 与撞限流次数。
-   * cost 为 null = 没配价目（configs/nl_api.json 的 prices 段），只报 token。
-   */
-  usage: {
-    prompt_tokens: number
-    completion_tokens: number
-    rate_limited: number
-    cost: number | null
-  }
   by_reason: Record<string, number>
   pack: PackProgress
   plan: PlanPreview | null
@@ -483,7 +244,6 @@ export type Defaults = {
   device: string
   precision: string
   batch: number
-  preprocess: string
   threshold: number
   keep_categories: string[]
   /** 各 tag 后端在配置里绑定的 HF 仓库（按后端分组） */
@@ -492,12 +252,6 @@ export type Defaults = {
   vllm_models: VllmModelOption[]
   /** VLM 分档，来自 tiers.yaml 的 tiers 段 */
   vllm_tiers: VllmTierOption[]
-  /** NL 推理来源下拉（local / openai / anthropic）与各自的默认地址 */
-  vlm_providers: VlmProviderOption[]
-  /** 硬件保护的当前阈值（来自 tiers.yaml 的 limits 段），滑条初值 */
-  guard: Record<string, number>
-  /** 质检的配置默认值。页面上的"0 = 用配置的 3.4"里那个数从这里来 */
-  quality: QualityDefaults
   pack: boolean
   formats: string[]
   layout: 'flat' | 'mirror'
@@ -514,25 +268,6 @@ export type Defaults = {
   seq_width: number
 }
 
-/** 质检的配置默认值（来自 tiers.yaml 的 quality 段）。 */
-export type QualityDefaults = {
-  pass_score: number
-  drop_score: number
-  max_attempts: number
-  retry_temp_step: number
-  retry_temp_cap: number
-  retry_pixels_scale: number
-  retry_pixels_cap: number
-  enable_clip: boolean
-  clip_min_score: number
-  clip_model: string
-  clip_pretrained: string
-  min_chars: number
-  max_chars: number
-  min_tag_coverage: number
-  max_repeat_ratio: number
-}
-
 export type VllmModelOption = {
   key: string
   path: string
@@ -540,90 +275,6 @@ export type VllmModelOption = {
   family: string
   /** 分档表里默认用它的档位名（仅提示，实际落档由服务端解析） */
   tier: string
-  /** 模型管理页填的备注 */
-  note: string
-}
-
-// ---- 模型管理（左栏独立页）
-
-/** 权重下载任务的状态（后端后台线程，前端轮询 /api/models 拿） */
-export type DownloadState = {
-  kind: string
-  key: string
-  repo: string
-  dest: string
-  /** queued / running / done / error / canceled */
-  status: string
-  message: string
-  /** 正在下的文件名 */
-  current: string
-  files_total: number
-  files_done: number
-  bytes_total: number
-  bytes_done: number
-  percent: number
-  /** 字节/秒，0.5s 窗口估的 */
-  speed: number
-  elapsed: number
-  eta: number | null
-}
-
-type LocalFiles = {
-  /** 下载目录（相对仓库根显示，绝对路径在 local_abs） */
-  local_dir: string
-  local_abs: string
-  exists: boolean
-  /** 有文件但没下完（取消 / 报错过）；此时点下载会按文件续传 */
-  partial: boolean
-  local_bytes: number
-  /** 能下载的仓库名；空 = 这条没有可下载来源（path 已经是本地目录） */
-  download_repo: string
-  download: DownloadState | null
-}
-
-export type VlmModelEntry = {
-  key: string
-  path: string
-  precision: string
-  family: string
-  revision: string | null
-  quantized_path: string | null
-  note: string
-  /** config = 来自 tiers.yaml；managed = 在这个页面加/改的 */
-  source: 'config' | 'managed'
-  /** 哪些分档在用；非空就删不掉 */
-  tiers: string[]
-} & LocalFiles
-
-export type TagModelEntry = {
-  backend: string
-  repo: string
-  note: string
-  source: 'config' | 'managed'
-} & LocalFiles
-
-export type ModelCatalog = {
-  /** 当前生效的清单（配置 + 覆盖） */
-  vlm: VlmModelEntry[]
-  tag: TagModelEntry[]
-  /** 配置侧的原始条目：用来显示"配置里有、现在被隐藏了" */
-  base_vlm: VlmModelEntry[]
-  base_tag: TagModelEntry[]
-  /** 覆盖清单落在哪个文件 */
-  overlay: string
-  overlay_exists: boolean
-  /** 下载代理，空 = 直连 */
-  proxy: string
-  /** 装了 socksio 才支持 socks5:// */
-  socks_supported: boolean
-}
-
-export type ProxyTest = {
-  ok: boolean
-  via: string
-  endpoint?: string
-  latency_ms: number
-  error?: string
 }
 
 export type VllmTierOption = {
@@ -634,62 +285,6 @@ export type VllmTierOption = {
   max_model_len: number
   max_num_seqs: number
   note: string
-}
-
-/** NL 推理来源。local = 本机/自建服务；其余走外部 API（不加载本地权重）。 */
-export type VlmProviderOption = {
-  /** 'local' | 'openai' | 'anthropic' */
-  value: string
-  label: string
-  /** 该来源的默认地址；本机为空 */
-  base: string
-  /** 密钥没填时去哪个环境变量找（仅提示） */
-  env_key: string
-  requires_key: boolean
-  /** 建议的在途请求数（云端按 RPM 限流，与本机显存无关） */
-  concurrency: number
-  /** 建议的输入像素预算（云端看不到更多细节时，多给的像素只是多付钱） */
-  max_pixels: number
-  /** 模型名建议，只是个 datalist */
-  models: string[]
-  /** 记住过的密钥（脱敏）。null = 没有存档，明文永远不下发 */
-  saved: { base: string; key_masked: string } | null
-}
-
-/** 一次 API 探测的结果。失败也带 error，不抛异常。 */
-export type NlApiProbe = {
-  ok: boolean
-  provider: string
-  base: string
-  model: string
-  latency_ms: number
-  prompt_tokens: number
-  completion_tokens: number
-  text: string
-  error: string
-  status?: number
-}
-
-/**
- * llama.cpp 运行时状态。默认引擎是 llama.cpp，而 llama-server 不是 pip 包，
- * 所以页面要能自己把那个 zip 下下来。
- */
-export type LlamaRuntime = {
-  installed: boolean
-  binary: string
-  version: string
-  install_root: string
-  busy: boolean
-  /** probing | downloading | extracting | verifying | done | error | cancelled */
-  stage: string
-  message: string
-  done: number
-  total: number
-  error: string
-  source: string
-  /** 当前平台有没有官方预编译包（macOS 没有，只能自己编译） */
-  supported: boolean
-  platform: string
 }
 
 export type Health = {
@@ -708,180 +303,6 @@ export type FsListing = {
   images: number
   zips: { name: string; path: string; bytes: number }[]
   dirs: { name: string; path: string; images: number; zips: number }[]
-  /**
-   * 可切换的盘符 + 卷标（只有 Windows 有；其他系统为空，从 / 走就够了）。
-   * `label` 可能为空串——没给盘起名字很常见，前端要能退化。
-   */
-  drives: { path: string; label: string }[]
-}
-
-// ---- 多卡（数据并行）：一张卡一个服务进程
-//
-// 与 VllmState 是两套结构：那边是"一个服务"，这里是"一组服务 + 一张
-// 每卡状态表"。页面两块面板各自轮询各自的接口，不互相推断。
-
-export type MultiGpuWorker = {
-  index: number
-  name: string
-  vram_gb: number
-  port: number
-  url: string
-  status: 'stopped' | 'starting' | 'ready' | 'failed'
-  error: string
-  pid: number | null
-  started: number
-  ready_at: number
-  log_path: string
-  /** 本轮任务里这张卡处理了多少张（打标侧回调累加，不是进程自报） */
-  processed: number
-  failed: number
-  last_ts: number
-  /** nvidia-smi 实时读数；没有 nvidia-smi 时是空对象 */
-  gpu: {
-    util?: number
-    mem_used_mb?: number
-    mem_total_mb?: number
-    mem_pct?: number
-  }
-  /** 只有 failed 时才有内容：启动失败的那张卡卡在哪 */
-  log_tail: string[]
-}
-
-export type MultiGpuState = {
-  status: 'stopped' | 'starting' | 'ready' | 'partial' | 'failed' | 'stopping'
-  error: string
-  engine: string
-  base_port: number
-  started: number
-  ready_at: number
-  overrides: {
-    engine?: string
-    gpus?: number[]
-    base_port?: number
-    model?: string | null
-    tier?: string | null
-    precision?: string | null
-    served_name?: string
-    per_card_seqs?: number | null
-  }
-  workers: MultiGpuWorker[]
-  notes: string[]
-  /** 每卡并发（0 = 按分档表/显存推算） */
-  per_card_seqs: number
-  /** 就绪的卡数 × 每卡并发 */
-  total_seqs: number
-  /** 就绪的地址，任务侧按这个分槽 */
-  urls: string[]
-}
-
-export type MultiGpuCapability = {
-  engine: string
-  ok: boolean
-  reason: string
-  gpus: { index: number; name: string; vram_gb: number }[]
-}
-
-// ---- 依赖检测
-//
-// 清单来自两份 requirements 文件，后端现读现算——页面不存版本表，
-// 否则 pip 装完之后两边会对不上。
-
-export type DepStatus = 'ok' | 'missing' | 'mismatch'
-
-/** 「检查完整性」的结果：真的 import 一次，不是只看 dist-info 在不在 */
-export type DepVerify = {
-  ok: boolean
-  detail: string
-  ms: number
-}
-
-export type DepItem = {
-  name: string
-  spec: string
-  /** 只要版本那一段：==2.5.4 / >=3.10,<4 / 空 */
-  requirement: string
-  module: string
-  group: string
-  note: string
-  torch_index: boolean
-  installed: string | null
-  status: DepStatus
-  detail: string
-  /** 上次检查的结果；没检查过就是 null */
-  verified: DepVerify | null
-}
-
-/** 批量动作里的一项。单包动作也有一条，前端统一按列表画 */
-export type DepBatchItem = {
-  name: string
-  status: 'pending' | 'running' | 'ok' | 'failed' | 'skipped'
-  detail: string
-}
-
-export type DepJob = {
-  status: 'running' | 'done' | 'failed' | 'cancelled'
-  action: string
-  target: string
-  started: number
-  finished: number
-  elapsed: number
-  exit_code: number | null
-  log: string[]
-  batch: DepBatchItem[]
-}
-
-export type DepGroup = {
-  key: string
-  title: string
-  hint: string
-  items: DepItem[]
-  ok: number
-  total: number
-}
-
-export type DepState = {
-  python: string
-  torch_index: string
-  summary: {
-    total: number
-    ok: number
-    missing: number
-    mismatch: number
-    /** 元数据在但 import 失败：包坏了、DLL 缺了 */
-    broken: number
-  }
-  /** 上次完整性检查的时间（0 = 还没查过） */
-  verify_at: number
-  groups: DepGroup[]
-  job: DepJob | null
-}
-
-// ---- 部署自检
-//
-// 与 health 的分工：health 说"服务活着"，自检说"它现在能不能真打出一张图"。
-
-export type SelfCheckStepStatus = 'pending' | 'running' | 'pass' | 'fail' | 'skip'
-
-export type SelfCheckStep = {
-  key: string
-  title: string
-  status: SelfCheckStepStatus
-  /** 通过时也有一句话——只说"通过"不说明看到了什么，用户没法判断可信度 */
-  detail: string
-  ms: number
-}
-
-export type SelfCheckState = {
-  status: 'idle' | 'running' | 'done' | 'stopped'
-  steps: SelfCheckStep[]
-  started: number
-  finished: number
-  elapsed: number
-  input_dir: string
-  recursive: boolean
-  sample: number
-  url: string
-  summary: { pass: number; fail: number; skip: number; total: number }
 }
 
 // ---- vLLM 服务（NL 模式的前置）
@@ -911,15 +332,11 @@ export type VllmState = {
     model: string | null
     /** 强制分档名；null = 按显存匹配 */
     tier: string | null
-    /** 权重精度 bf16 / fp8 / w4a16；null = 用分档表的值 */
-    precision: string | null
     /** 接口路由名（--served-model-name） */
     served_name: string | null
     max_num_seqs: number | null
     max_num_batched_tokens: number | null
     gpu_mem: number | null
-    /** --allowed-local-media-path 的放行根目录；null = 不接受 file:// */
-    local_media_root: string | null
   }
   /** 当前这组参数解析出的分档 / 权重 / 显存；ok=false 时 error 给原因 */
   plan: VllmPlan
@@ -932,10 +349,6 @@ export type VllmPlan =
       model: string
       model_path: string
       precision: string
-      /** 实际传给 vLLM 的 --quantization；null = 按权重 dtype 加载（可能是回退） */
-      quantization: string | null
-      /** 权重本身是否真被压成 4bit（false = W4A16 回退 BF16） */
-      weight_quantized: boolean
       max_pixels: number
       max_model_len: number
       max_num_seqs: number
@@ -947,38 +360,6 @@ export type VllmPlan =
       summary: string
     }
   | { ok: false; error: string }
-
-// ---- 页内量化（W4A16）：把 bf16 权重压成 4bit，产物落在 models/ 下
-
-export type QuantTaskState = {
-  model: string
-  source: string
-  out_dir: string
-  /** gptq / awq；产物格式都是 compressed-tensors */
-  method: string
-  status: 'running' | 'done' | 'error' | 'canceled'
-  percent: number
-  stage: string
-  message: string
-  elapsed: number
-  log_tail: string[]
-}
-
-export type QuantState = {
-  /** 本机能否量化：依赖是否齐、是否 Linux/WSL2 */
-  available: boolean
-  /** 不能量化时的人话原因 */
-  reason: string
-  model: string
-  source: string
-  quantized_path: string | null
-  /** 已经有可用的 4bit 权重：切 W4A16 不需要再量化 */
-  has_quantized: boolean
-  /** 默认产物目录（相对仓库根） */
-  suggested_dir: string
-  methods: string[]
-  task: QuantTaskState | null
-}
 
 export type VllmProbe = {
   url: string
@@ -1219,87 +600,6 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => json<Health>('/api/health'),
   defaults: () => json<Defaults>('/api/defaults'),
-  // ---- 外部推理 API（NL 打标的 openai / anthropic 来源）
-  //
-  // 探测发一张 8×8 的小图走真实请求：本机模式有「就绪」红灯可看，API 模式
-  // 没有进程，只能靠这一次调用回答"地址/密钥/模型/视觉能力"四件事。
-  probeNlApi: (payload: {
-    provider: string
-    base: string
-    model: string
-    key: string
-    timeout_s?: number
-  }) =>
-    json<NlApiProbe>('/api/nl-api/probe', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  // ---- llama.cpp 运行时
-  //
-  // 默认引擎是 llama.cpp，而 llama-server 不是 pip 包：没有它连服务都起不来。
-  // 这三条让页面自己把官方 zip 下下来、解开、就地生效。
-  llamaStatus: () => json<LlamaRuntime>('/api/llama'),
-  installLlama: (payload: { url?: string; force?: boolean }) =>
-    json<{ started: boolean; reason: string } & LlamaRuntime>('/api/llama/install', {
-      method: 'POST',
-      body: JSON.stringify({ url: payload.url ?? '', force: payload.force ?? false }),
-    }),
-  cancelLlamaInstall: () =>
-    json<LlamaRuntime>('/api/llama/install/cancel', { method: 'POST' }),
-
-  // 存档只回脱敏值：浏览器永远拿不到明文密钥。
-  nlApiKeys: () =>
-    json<{
-      providers: Record<string, { base: string; key_masked: string } | null>
-      prices: string[]
-    }>('/api/nl-api/keys'),
-  saveNlApiKey: (payload: {
-    provider: string
-    base: string
-    key: string
-    remember: boolean
-  }) =>
-    json<{
-      provider: string
-      saved: { base: string; key_masked: string } | null
-    }>('/api/nl-api/keys', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  // ---- 模型管理
-  models: () => json<ModelCatalog>('/api/models'),
-  saveModels: (payload: { vlm: VlmModelEntry[]; tag: TagModelEntry[] }) =>
-    json<ModelCatalog>('/api/models', { method: 'PUT', body: JSON.stringify(payload) }),
-  saveProxy: (url: string) =>
-    json<{ proxy: string; catalog: ModelCatalog }>('/api/models/proxy', {
-      method: 'PUT',
-      body: JSON.stringify({ url }),
-    }),
-  testProxy: (url: string) =>
-    json<ProxyTest>('/api/models/proxy/test', {
-      method: 'POST',
-      body: JSON.stringify({ url }),
-    }),
-  startDownload: (kind: string, key: string) =>
-    json<DownloadState>('/api/models/download', {
-      method: 'POST',
-      body: JSON.stringify({ kind, key }),
-    }),
-  cancelDownload: (kind: string, key: string) =>
-    json<DownloadState>('/api/models/download/cancel', {
-      method: 'POST',
-      body: JSON.stringify({ kind, key }),
-    }),
-  deleteLocalFiles: (kind: string, key: string) =>
-    json<ModelCatalog>('/api/models/localfiles/delete', {
-      method: 'POST',
-      body: JSON.stringify({ kind, key }),
-    }),
-  revealLocalDir: (kind: string, key: string) =>
-    json<{ path: string }>('/api/models/reveal', {
-      method: 'POST',
-      body: JSON.stringify({ kind, key }),
-    }),
   fs: (path: string) => json<FsListing>(`/api/fs?path=${encodeURIComponent(path)}`),
   preview: (params: PreviewParams) => {
     const qs = new URLSearchParams()
@@ -1329,25 +629,6 @@ export const api = {
   events: (id: string, after: number) =>
     json<{ events: JobEvent[]; snapshot: Snapshot }>(`/api/jobs/${id}/events?after=${after}`),
   stop: (id: string) => json<{ ok: boolean }>(`/api/jobs/${id}/stop`, { method: 'POST' }),
-  /** 暂停：在途的几张打完就挂起，产物留在盘上 */
-  pause: (id: string) =>
-    json<{ ok: boolean; snapshot: Snapshot | null }>(`/api/jobs/${id}/pause`, {
-      method: 'POST',
-    }),
-  /** 原地继续：进程还在，worker 只是挂着 */
-  resume: (id: string) =>
-    json<{ ok: boolean; snapshot: Snapshot | null }>(`/api/jobs/${id}/resume`, {
-      method: 'POST',
-    }),
-  /** 续跑一个已停下的任务：同参数重开，已打完的图自动跳过（返回新任务） */
-  restart: (id: string) =>
-    json<Snapshot>(`/api/jobs/${id}/restart`, { method: 'POST' }),
-  // ---- 跨重启的续做（暂停/停止后关过程序）
-  resumeState: () => json<{ ok: boolean; resume: ResumeInfo | null }>('/api/resume'),
-  resumeStart: () => json<Snapshot>('/api/resume', { method: 'POST' }),
-  /** 不再提示这次续做（只删记录，产物一张不动） */
-  resumeDismiss: () =>
-    json<{ ok: boolean }>('/api/resume', { method: 'DELETE' }),
   jobStats: (id: string, bucket: number) =>
     json<JobStats>(`/api/jobs/${id}/stats?bucket=${bucket}`),
   // ---- vLLM 服务（NL 模式的前置）
@@ -1356,32 +637,22 @@ export const api = {
     port: number,
     timeout_s = 900,
     opts: {
-      /** vllm | llamacpp。Windows 原生只有 llamacpp 能上 GPU。 */
-      engine?: string
       model?: string
       tier?: string
-      precision?: string
       served_name?: string
       max_num_seqs?: number
       max_num_batched_tokens?: number
       gpu_mem?: number
-      local_media_root?: string
     } = {},
   ) =>
     json<VllmState>('/api/vllm/start', {
       method: 'POST',
       body: JSON.stringify({ port, timeout_s, ...opts }),
     }),
-  /** 某个引擎在这台机器上能不能起。切换引擎时问一次即可。 */
-  vllmCapability: (engine: string) =>
-    json<{ engine: string; ok: boolean; reason: string }>(
-      `/api/vllm/capability?engine=${encodeURIComponent(engine)}`,
-    ),
   vllmPlan: (
     opts: {
       model?: string
       tier?: string
-      precision?: string
       max_num_seqs?: number
       max_num_batched_tokens?: number
       gpu_mem?: number
@@ -1390,7 +661,6 @@ export const api = {
     const qs = new URLSearchParams()
     if (opts.model) qs.set('model', opts.model)
     if (opts.tier) qs.set('tier', opts.tier)
-    if (opts.precision) qs.set('precision', opts.precision)
     if (opts.max_num_seqs) qs.set('max_num_seqs', String(opts.max_num_seqs))
     if (opts.max_num_batched_tokens)
       qs.set('max_num_batched_tokens', String(opts.max_num_batched_tokens))
@@ -1398,67 +668,7 @@ export const api = {
     return json<VllmPlan>(`/api/vllm/plan?${qs.toString()}`)
   },
   vllmStop: () => json<VllmState>('/api/vllm/stop', { method: 'POST' }),
-  // ---- 页内量化（W4A16）
-  quantize: (model?: string) =>
-    json<QuantState>(
-      `/api/vllm/quantize${model ? `?model=${encodeURIComponent(model)}` : ''}`,
-    ),
-  quantizeStart: (opts: { model?: string; out_dir?: string; method?: string }) =>
-    json<QuantTaskState>('/api/vllm/quantize/start', {
-      method: 'POST',
-      body: JSON.stringify(opts),
-    }),
-  quantizeCancel: () =>
-    json<QuantTaskState | Record<string, never>>('/api/vllm/quantize/cancel', {
-      method: 'POST',
-    }),
   vllmProbe: (url: string) => json<VllmProbe>(`/api/vllm/probe?url=${encodeURIComponent(url)}`),
-  // ---- 多卡（数据并行）
-  multi: () => json<MultiGpuState>('/api/multi'),
-  multiCapability: (engine: string) =>
-    json<MultiGpuCapability>(`/api/multi/capability?engine=${encodeURIComponent(engine)}`),
-  multiStart: (opts: {
-    engine?: string
-    gpus?: number[]
-    base_port?: number
-    model?: string
-    tier?: string
-    precision?: string
-    served_name?: string
-    per_card_seqs?: number
-    timeout_s?: number
-  }) =>
-    json<MultiGpuState>('/api/multi/start', {
-      method: 'POST',
-      body: JSON.stringify(opts),
-    }),
-  multiStop: () => json<MultiGpuState>('/api/multi/stop', { method: 'POST' }),
-  // ---- 部署自检
-  selfcheck: () => json<SelfCheckState>('/api/selfcheck'),
-  selfcheckStart: (opts: {
-    input_dir: string
-    recursive?: boolean
-    sample?: number
-    url?: string
-  }) =>
-    json<SelfCheckState>('/api/selfcheck/start', {
-      method: 'POST',
-      body: JSON.stringify(opts),
-    }),
-  selfcheckStop: () => json<SelfCheckState>('/api/selfcheck/stop', { method: 'POST' }),
-  // ---- 依赖检测
-  deps: () => json<DepState>('/api/deps'),
-  depAction: (name: string, action: 'install' | 'uninstall' | 'reinstall') =>
-    json<DepState>(`/api/deps/${encodeURIComponent(name)}/${action}`, {
-      method: 'POST',
-    }),
-  /** 装上所有缺失的包（不动版本不符的，那等于降级） */
-  depInstallMissing: () => json<DepState>('/api/deps/install-missing', { method: 'POST' }),
-  /** 卸掉所有已装的包（只限清单内的） */
-  depUninstallAll: () => json<DepState>('/api/deps/uninstall-all', { method: 'POST' }),
-  /** 逐个真 import 一遍，验证包是真能用的 */
-  depVerify: () => json<DepState>('/api/deps/verify', { method: 'POST' }),
-  depCancel: () => json<DepState>('/api/deps/cancel', { method: 'POST' }),
   results: (id: string, params: { offset?: number; limit?: number; q?: string; only_failed?: boolean }) => {
     const qs = new URLSearchParams()
     if (params.offset) qs.set('offset', String(params.offset))
@@ -1474,118 +684,13 @@ export const api = {
     json<{ path: string; files: ArtifactInfo[] }>(
       `/api/artifacts?path=${encodeURIComponent(path)}`,
     ),
-  diskFree: (path: string) =>
-    json<{ path: string; free_bytes: number }>(
-      `/api/disk?path=${encodeURIComponent(path)}`,
-    ),
-  hfFiles: (
-    repo: string,
-    token: string,
-    revision = 'main',
-    format: 'auto' | 'parquet' | 'webdataset' = 'auto',
-  ) => {
-    const qs = new URLSearchParams({ repo, revision, format })
+  hfFiles: (repo: string, token: string, revision = 'main') => {
+    const qs = new URLSearchParams({ repo, revision })
     if (token) qs.set('token', token)
-    return json<{
-      repo: string
-      revision: string
-      format: string
-      files: string[]
-      /** 文件名 → 字节数（只有 tar 分片有；parquet 侧由下载进度自己报总长） */
-      sizes: Record<string, number>
-    }>(`/api/hf/files?${qs.toString()}`)
+    return json<{ repo: string; revision: string; files: string[] }>(
+      `/api/hf/files?${qs.toString()}`,
+    )
   },
-  // ---- 下载页（分片预下载，与打标任务解耦）
-  downloads: () => json<DownloadsState>('/api/downloads'),
-  downloadsStart: (payload: {
-    repo: string
-    token: string
-    revision: string
-    files: string[]
-    sizes: Record<string, number>
-    reserve_gb: number
-    /** 单片并发连接数；1 = 单连接，上限 16 */
-    conns: number
-  }) =>
-    json<{ created: DownloadItem[] }>('/api/downloads', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  downloadCancel: (id: string) =>
-    json<{ ok: boolean }>(`/api/downloads/${id}/cancel`, { method: 'POST' }),
-  downloadsCancelAll: () =>
-    json<{ ok: boolean }>('/api/downloads/cancel-all', { method: 'POST' }),
-  downloadsClear: () =>
-    json<{ removed: number }>('/api/downloads/clear', { method: 'POST' }),
-  // ---- 打标管理（多个 json → 一个单体 json）
-  tagScan: (dir: string, recursive = true) =>
-    json<TagScanResult>(
-      `/api/tag-manage/scan?dir=${encodeURIComponent(dir)}&recursive=${recursive}`,
-    ),
-  tagPreview: (payload: {
-    files: string[]
-    limit?: number
-    key?: string
-    image_root?: string
-    image_ext?: string
-  }) =>
-    json<TagPreview>('/api/tag-manage/preview', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  /** 提交合并，立刻返回 task_id；用 tagMergeStatus 轮询进度 */
-  tagMerge: (payload: {
-    files: string[]
-    out_path: string
-    format: 'full' | 'train'
-    as_jsonl: boolean
-    key: string
-    on_conflict: 'first' | 'last'
-    require: 'any' | 'both' | 'tag' | 'nl'
-    indent: number
-    image_root: string
-    image_ext: string
-    batch_size: number
-  }) =>
-    json<{ task_id: string }>('/api/tag-manage/merge', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  tagMergeStatus: (taskId: string) =>
-    json<TagMergeTask>(`/api/tag-manage/merge/${taskId}`),
-  /** 合并前自检：提交后立刻返回 task_id，用 tagCheckStatus 轮询 */
-  tagCheck: (payload: {
-    files: string[]
-    key: string
-    image_root: string
-    image_ext: string
-    local_root: string
-  }) =>
-    json<{ task_id: string }>('/api/tag-manage/check', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  tagCheckStatus: (taskId: string) =>
-    json<TagMergeTask>(`/api/tag-manage/check/${taskId}`),
-  /** 底部进度条：所有进行中的任务，一次拉齐 */
-  activities: () => json<{ items: Activity[] }>('/api/activities'),
-  /** 底栏右侧的硬件读数；拿不到的项是 null（显示 --） */
-  sysinfo: () => json<SysInfo>('/api/sysinfo'),
-  planGet: () => json<PlanState>('/api/plan'),
-  planSet: (payload: {
-    after_images: number
-    action: 'stop' | 'shutdown'
-    enabled?: boolean
-  }) =>
-    json<PlanState>('/api/plan', {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
-  planCancel: () => json<PlanState>('/api/plan', { method: 'DELETE' }),
-  downloadsCached: (repo: string) =>
-    json<{ repo: string; files: { filename: string; bytes: number }[] }>(
-      `/api/downloads/cached?repo=${encodeURIComponent(repo)}`,
-    ),
   uploadStart: (dir: string, files: string[], ftp: FtpConfig) =>
     json<UploadState>('/api/upload/start', {
       method: 'POST',
@@ -1619,6 +724,54 @@ export const api = {
     json<DataJobState>('/api/datajob/start', {
       method: 'POST',
       body: JSON.stringify({ kind, params }),
+    }),
+  dataJobs: () => json<{ jobs: DataJobState[] }>('/api/datajob'),
+  dataJob: (id: string) => json<DataJobState>(`/api/datajob/${id}`),
+  dataJobStop: (id: string) =>
+    json<{ ok: boolean; snapshot: DataJobState | null }>(`/api/datajob/${id}/stop`, {
+      method: 'POST',
+    }),
+  dataJobPreview: (input_dir: string, exclude = '', recursive = true) =>
+    json<SplitPreview>('/api/datajob/preview', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'split', input_dir, exclude, recursive }),
+    }),
+}
+
+    mode?: string
+    threshold?: number
+    keep?: string
+    recursive?: boolean
+    workers?: number
+  }) =>
+    json<DedupState>('/api/dedup/start', {
+      method: 'POST',
+      body: JSON.stringify(spec),
+    }),
+  dedup: (id: string) => json<DedupState>(`/api/dedup/${id}`),
+  dedupStop: (id: string) =>
+    json<{ ok: boolean; snapshot: DedupState | null }>(`/api/dedup/${id}/stop`, {
+      method: 'POST',
+    }),
+  // ---- 数据打包页
+  dataJobStart: (kind: DataJobKind, params: Record<string, unknown>) =>
+    json<DataJobState>('/api/datajob/start', {
+      method: 'POST',
+      body: JSON.stringify({ kind, params }),
+    }),
+  dataJobs: () => json<{ jobs: DataJobState[] }>('/api/datajob'),
+  dataJob: (id: string) => json<DataJobState>(`/api/datajob/${id}`),
+  dataJobStop: (id: string) =>
+    json<{ ok: boolean; snapshot: DataJobState | null }>(`/api/datajob/${id}/stop`, {
+      method: 'POST',
+    }),
+  dataJobPreview: (input_dir: string, exclude = '', recursive = true) =>
+    json<SplitPreview>('/api/datajob/preview', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'split', input_dir, exclude, recursive }),
+    }),
+}
+
     }),
   dataJobs: () => json<{ jobs: DataJobState[] }>('/api/datajob'),
   dataJob: (id: string) => json<DataJobState>(`/api/datajob/${id}`),

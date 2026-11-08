@@ -117,20 +117,20 @@ export function PageHeader({
   icon?: ReactNode
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3 px-1">
-      <div className="flex min-w-0 items-center gap-3.5">
+    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 px-1">
+      <div className="flex min-w-0 items-center gap-3">
         {icon && (
           <div
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-lx border border-lx bg-[color-mix(in_srgb,var(--lx-text)_5%,transparent)] text-lx-secondary"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lx border border-lx bg-[color-mix(in_srgb,var(--lx-text)_5%,transparent)] text-lx-secondary"
             aria-hidden="true"
           >
             {icon}
           </div>
         )}
         <div className="min-w-0">
-          {eyebrow && <div className="mb-0.5 text-[11px] text-lx-muted">{eyebrow}</div>}
-          <h1 className="text-2xl font-semibold leading-tight tracking-tight text-lx">{title}</h1>
-          {description && <p className="mt-1 max-w-[62ch] text-[13px] text-lx-secondary">{description}</p>}
+          {eyebrow && <div className="mb-0.5 text-[10.5px] text-lx-muted">{eyebrow}</div>}
+          <h1 className="text-xl font-semibold leading-tight tracking-tight text-lx">{title}</h1>
+          {description && <p className="mt-0.5 max-w-[62ch] text-[12.5px] text-lx-secondary">{description}</p>}
         </div>
       </div>
       {(badges || actions) && (
@@ -158,7 +158,7 @@ export function SheetHead({
   trailing?: ReactNode
 }) {
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-[18px] pb-2.5 pt-[18px] md:px-7">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-3.5 pb-2 pt-3.5 md:px-5">
       <div className="min-w-0">
         <h2 id={id} className="m-0 flex items-baseline gap-2 text-[15px] font-semibold text-lx">
           {title}
@@ -194,7 +194,7 @@ export function SectionPanel({
   return (
     <section className={cx('lx-sheet', className)}>
       {hasHead && <SheetHead title={title ?? ''} hint={description} trailing={trailing} />}
-      <div className={cx('px-[18px] pb-5 md:px-7', hasHead ? 'border-t border-lx pt-4' : 'pt-5')}>
+      <div className={cx('px-3.5 pb-4 md:px-5', hasHead ? 'border-t border-lx pt-3' : 'pt-4')}>
         {children}
       </div>
     </section>
@@ -206,6 +206,7 @@ export function SettingRow({
   description,
   help,
   icon,
+  required = false,
   children,
 }: {
   label: string
@@ -214,6 +215,13 @@ export function SettingRow({
   /** 解释性文字：收进标签旁的 ? 图标，悬浮才显示，不占版面 */
   help?: string
   icon?: ReactNode
+  /**
+   * 必填标记（标签后一个红 *）。
+   *
+   * 只给"不填就提交不了"的项用：满屏星号等于没有星号，用户照样一个个试。
+   * 有默认值能跑起来的项（输出目录、批量、阈值）一律不标。
+   */
+  required?: boolean
   children: ReactNode
 }) {
   return (
@@ -221,7 +229,14 @@ export function SettingRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-sm font-medium text-lx">
           {icon && <span className="text-lx-muted">{icon}</span>}
-          <span>{label}</span>
+          <span>
+            {label}
+            {required && (
+              <span className="ml-0.5 text-lx-danger" aria-label="必填" title="必填">
+                *
+              </span>
+            )}
+          </span>
           {help && (
             /* 用图标而不是"圈里一个 ?"的字符：字符的垂直位置由字体度量决定，
                15px 的圈里会跑到底部；SVG 是替换元素，居中由几何决定。 */

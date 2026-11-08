@@ -38,8 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .artifacts import (is_artifact_parquet, iter_parquet_artifacts,
-                        parse_payload)
+from .artifacts import find_artifacts, iter_artifact_rows, parse_payload
 
 TAG_SUFFIX = "-tag.json"
 NL_SUFFIX = "-nl.json"
@@ -204,13 +203,11 @@ def collect_points(roots: Iterable[str | Path], *,
                 if isinstance(flags, list):
                     p.flags = tuple(str(f) for f in flags)
 
-        # parquet 形态（members 直接交分片）。两种形态可能同时存在：
-        # 换了 --artifact-format 重跑时会这样，报告按"取最大"合并即可。
-        for path in sorted(base.rglob("*.parquet")):
-            if not is_artifact_parquet(path):
-                continue
+        # 分片形态（members 直接交 artifacts-*.parquet / *.jsonl）。几种形态可能
+        # 同时存在：换了 --artifact-format 重跑时会这样，报告按"取最大"合并即可。
+        for path in find_artifacts(base):
             try:
-                for row in iter_parquet_artifacts(path):
+                for row in iter_artifact_rows(path):
                     image_id = str(row.get("image_id") or "")
                     if not image_id:
                         continue

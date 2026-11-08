@@ -26,6 +26,7 @@ import httpx
 
 from .config import ConfigError, RunProfile
 from .netutil import trust_env_for
+from .nl_engine import normalize_engine
 
 
 DEFAULT_PORT = 8000
@@ -156,6 +157,12 @@ def build_command(
     if profile.model.revision:
         cmd += ["--revision", profile.model.revision]
 
+    # 精度三档落到命令行的唯一出口。RunProfile.quantization 是"能力"而不是意图：
+    # 选了 w4a16 但 quantized_path 为空时它返回 None，这里就不传——
+    # 传了反而会让 vLLM 去找不存在的量化配置，报错离真正原因很远。
+    if profile.quantization:
+        cmd += ["--quantization", profile.quantization]
+
     # 视觉 token 预算。这是单卡吞吐最大的杠杆，也是全池口径一致的关键。
     # 注意 vLLM 对 mm-processor-kwargs 的解析随版本变化，若启动报错，
     # 先确认 --help 里这个参数接受的格式。
@@ -250,18 +257,50 @@ def start_server(
     wait: bool = True,
     timeout_s: int = 900,
     served_name: str = "tagger",
+    engine: str = "vllm",
+    device_index: int = 0,
+    slots_override: int | None = None,
 ) -> ServerHandle:
-    """起一个 vLLM 服务并等待就绪。
+    """起一个推理服务并等待就绪（vLLM 或 llama.cpp）。
 
-    served_name 是 OpenAI 接口里的路由名（--served-model-name），必须与
+    served_name 是 OpenAI 接口里的路由名（--served-model-name / -a），必须与
     客户端请求里的 model 字段一字不差。网页端把它一起传进来，就是为了
     让表单里那个"模型名"真的能决定服务端叫什么，而不是两边各写各的。
-    """
-    check_environment()
 
-    cmd = build_command(profile, port=port, data_root=data_root,
-                        served_name=served_name or "tagger")
+    engine 决定拼哪套命令行：两者参数完全不通用，所以命令必须在这里分流，
+    而不是让调用方各自 remember。`check_environment()` 只管 vLLM（Windows
+    原生跑不了、MPS 冲突），llama.cpp 那一支由 `nl_engine.check_engine` 判。
+
+    slots_override 是 llama.cpp 的 `-np`（并发槽位数）。它是**显存开关**：
+    每个 slot 启起来就按 CTX_PER_SLOT 预留 KV，想让出显存给别的程序就把
+    这个数调小——调小任务并发是没用的，那些 slot 照样占着。
+
+    device_index 只对 llama.cpp 有效（CUDA_VISIBLE_DEVICES），多卡时一张卡
+    一份服务；vLLM 走自己的张量并行，不看这个。
+    """
+    resolved = normalize_engine(engine)
     base_url = f"http://127.0.0.1:{port}"
+
+    if resolved == "llamacpp":
+        from . import nl_engine
+
+        nl_engine.check_engine(resolved)
+        gguf, mmproj = nl_engine.resolve_weights(profile)
+        cmd = nl_engine.build_command(
+            profile, port=port, served_name=served_name or "tagger",
+            gguf=gguf, mmproj=mmproj,
+            vram_gb=profile.vram_gb, slots_override=slots_override,
+        )
+        # 只能用一张卡：CUDA_VISIBLE_DEVICES 必须在进程启动前定，-ngl 99
+        # 会把整份权重放到此时唯一可见的那张卡上。
+        child_env = dict(os.environ)
+        if device_index:
+            child_env["CUDA_VISIBLE_DEVICES"] = str(device_index)
+    else:
+        check_environment()
+        cmd = build_command(profile, port=port, data_root=data_root,
+                            served_name=served_name or "tagger")
+        child_env = None
 
     # 日志必须落文件。stdout=PIPE 又从不读的话，管道缓冲（约 64KB）被
     # vLLM 的启动日志写满后子进程会被自己的输出卡死——症状是"服务起着
@@ -282,6 +321,7 @@ def start_server(
         bufsize=1,
         # 独立进程组，便于整组回收
         start_new_session=(platform.system() != "Windows"),
+        env=child_env,
     )
 
     handle = ServerHandle(process=process, base_url=base_url, port=port,
@@ -304,8 +344,11 @@ def start_server(
         # 子进程持有自己那份 dup 出去的句柄，这里关掉父进程的副本不影响它写。
         log_file.close()
 
+    # llama-server 没有 /version，_probe_version 会返回 None；版本号由
+    # 调用方（网页/CLI）用 nl_engine.probe_version 走 /props 补，口径不同。
     handle.vllm_version = _probe_version(base_url)
-    print(f"[tagger] 就绪: {base_url}  vllm={handle.vllm_version or 'unknown'}")
+    print(f"[tagger] 就绪: {base_url}  engine={resolved}  "
+          f"version={handle.vllm_version or 'unknown'}")
     return handle
 
 

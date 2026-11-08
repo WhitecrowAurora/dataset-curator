@@ -63,12 +63,19 @@ public sealed class PythonServer : IAsyncDisposable
                        "或者设置环境变量 TAGGER_ROOT 指向它。");
 
         var python = ResolvePython(root)
-                     ?? throw new ServerStartException(
+                     ?? throw new EnvNotInitializedException(
                          $"在 {root} 下没找到可用的 Python。\n\n" +
-                         "先跑一次 install.bat 建出 env\\python，或用 TAGGER_PYTHON 指定解释器路径。");
+                         "点下面的「初始化环境」装一次就行；也可以自己跑 install.bat，" +
+                         "或用 TAGGER_PYTHON 指定解释器路径。");
 
         return new PythonServer(root, python);
     }
+
+    /// <summary>
+    /// 只找仓库根目录，不要求 Python 已经就绪。
+    /// 装环境的流程要用它——那会儿恰恰还没有可用的解释器。
+    /// </summary>
+    public static string? FindRoot() => ResolveRoot(null);
 
     private static string? ResolveRoot(string? explicitRoot)
     {
@@ -287,3 +294,11 @@ public sealed class PythonServer : IAsyncDisposable
 }
 
 public sealed class ServerStartException(string message) : Exception(message);
+
+/// <summary>
+/// 环境还没初始化：缺 env\python，或者依赖没装全。
+///
+/// 单独一类是为了让界面只在这条分支上给「初始化环境」按钮——端口占用、
+/// 服务崩了那种错误点安装只会白等十分钟。
+/// </summary>
+public sealed class EnvNotInitializedException(string message) : Exception(message);

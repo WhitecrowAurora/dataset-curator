@@ -160,9 +160,14 @@ def list_shards_sized(
             while url:
                 r = c.get(url, headers=headers, params=params)
                 if r.status_code == 401:
+                    # HF 对"不存在"也回 401（不泄露仓库是否存在），所以这条
+                    # 不能只写"要 token"：最常见的其实是名字写错或类型选错。
                     raise HFError(
-                        f"{repo} 需要鉴权（401）。私有仓库请先 `huggingface-cli login`，"
-                        f"或设环境变量 HF_TOKEN。")
+                        f"{repo} 拒绝访问（401）。三种可能，按这个顺序查：\n"
+                        f"  1) 仓库名写错——要形如 org/name，不要带 https:// 前缀；\n"
+                        f"  2) 类型不对——这里是 **dataset** 仓库，model 仓库要换成对应的接口；\n"
+                        f"  3) 确实是私有/门禁仓库——填上读权限的 token"
+                        f"（huggingface-cli login，或用有 repo.content.read 的 token）。")
                 if r.status_code == 404:
                     raise HFError(
                         f"{repo} 不存在（404）。确认是 datasets 仓库，且名字拼写对"
@@ -451,113 +456,124 @@ def download_shard(
     国内单条 TCP 常被压到几百 KB/s，凭这一点开 4~8 条才是真的快。文件太小
     （< 2×8 MB）或服务端忽略 Range 时自动退回单连接。
     """
-    dest_dir = Path(dest_dir)
-    rel = Path(filename)
-    # 仓库里的路径要原样保留层级：parquet 常有 data/part-0.parquet 这种
-    # 带目录的名字，压平就会让两批数据互相覆盖。
-    if rel.is_absolute() or ".." in rel.parts:
-        raise HFError(f"分片名不安全，拒绝落盘：{filename}")
-    final = dest_dir / rel
-    final.parent.mkdir(parents=True, exist_ok=True)
+    from .storage.locking import FileLock
+    # 同一缓存分片的 .part / 分段状态只能由一个下载者改写。
+    cache_lock = FileLock(Path(dest_dir) / (Path(filename).name + ".download.lock"))
+    while not cache_lock.acquire(blocking=False):
+        if should_stop is not None and should_stop():
+            raise HFCancelled(f"{filename} 已取消")
+        time.sleep(0.1)
+    try:
+        dest_dir = Path(dest_dir)
+        rel = Path(filename)
+        # 仓库里的路径要原样保留层级：parquet 常有 data/part-0.parquet 这种
+        # 带目录的名字，压平就会让两批数据互相覆盖。
+        if rel.is_absolute() or ".." in rel.parts:
+            raise HFError(f"分片名不安全，拒绝落盘：{filename}")
+        final = dest_dir / rel
+        final.parent.mkdir(parents=True, exist_ok=True)
 
-    if final.is_file() and final.stat().st_size > 0:
-        size = final.stat().st_size
-        if on_progress is not None:
-            on_progress(size, size)
-        return HFShard(repo=repo, filename=filename, path=final,
-                       bytes=size, temporary=False)
+        if final.is_file() and final.stat().st_size > 0:
+            size = final.stat().st_size
+            if on_progress is not None:
+                on_progress(size, size)
+            return HFShard(repo=repo, filename=filename, path=final,
+                           bytes=size, temporary=False)
 
-    url = resolve_url(repo, filename, revision=revision)
-    part = final.with_name(final.name + ".part")
-    state_path = part.with_name(part.name + ".json")
+        url = resolve_url(repo, filename, revision=revision)
+        part = final.with_name(final.name + ".part")
+        state_path = part.with_name(part.name + ".json")
 
-    conns = max(1, min(int(conns), SEG_MAX_CONNS))
-    # 有分段状态就必须走分段：`.part` 已被预分配成总长，单连接会把它当成
-    # "已经下完了"（offset == total），请求出来是 416 或干脆写花。
-    if conns > 1 or state_path.is_file():
-        seg = _download_segmented(
-            repo=repo, filename=filename, url=url, part=part, final=final,
-            token=token, timeout_s=timeout_s, max_attempts=max_attempts,
-            conns=conns, proxy=proxy, verbose=verbose, on_progress=on_progress,
-            should_stop=should_stop)
-        if seg is not None:
-            return seg
-        # 服务端不认 Range：清掉预分配的半成品，退回单连接从头下
-        for path in (state_path, part):
+        conns = max(1, min(int(conns), SEG_MAX_CONNS))
+        # 有分段状态就必须走分段：`.part` 已被预分配成总长，单连接会把它当成
+        # "已经下完了"（offset == total），请求出来是 416 或干脆写花。
+        if conns > 1 or state_path.is_file():
+            seg = _download_segmented(
+                repo=repo, filename=filename, url=url, part=part, final=final,
+                token=token, timeout_s=timeout_s, max_attempts=max_attempts,
+                conns=conns, proxy=proxy, verbose=verbose, on_progress=on_progress,
+                should_stop=should_stop)
+            if seg is not None:
+                return seg
+            # 服务端不认 Range：清掉预分配的半成品，退回单连接从头下
+            for path in (state_path, part):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+        last_err: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
             try:
-                path.unlink()
+                t0 = time.time()
+                offset = part.stat().st_size if part.is_file() else 0
+                headers = _auth(token)
+                if offset:
+                    headers["Range"] = f"bytes={offset}-"
+                with _client(proxy, timeout=httpx.Timeout(timeout_s, connect=20.0),
+                             follow_redirects=True) as c:
+                    with c.stream("GET", url, headers=headers) as r:
+                        if r.status_code in (401, 403):
+                            raise HFError(
+                                f"{repo}/{filename} 需要鉴权（HTTP {r.status_code}）。"
+                                f"私有仓库要带 HF_TOKEN。")
+                        r.raise_for_status()
+                        if offset and r.status_code == 206:
+                            written = offset
+                            total = offset + int(r.headers.get("content-length") or 0)
+                            mode = "ab"
+                        else:
+                            # 服务端不认 Range（有的镜像会整片返回）：从头写
+                            written = 0
+                            total = int(r.headers.get("content-length") or 0)
+                            mode = "wb"
+                        if on_progress is not None:
+                            on_progress(written, total)
+                        with part.open(mode) as f:
+                            for chunk in r.iter_bytes(1 << 20):
+                                if should_stop is not None and should_stop():
+                                    f.flush()
+                                    raise HFCancelled(f"{filename} 已取消")
+                                f.write(chunk)
+                                written += len(chunk)
+                                if on_progress is not None:
+                                    on_progress(written, total)
+                        f_size = part.stat().st_size
+                if total and f_size != total:
+                    raise HFError(f"下载不完整：{f_size}/{total} 字节")
+                part.replace(final)
+                if verbose:
+                    mb = final.stat().st_size / 1048576
+                    print(f"[hf] {rel.name}  {mb:.1f} MB  {time.time() - t0:.1f}s",
+                          flush=True)
+                return HFShard(repo=repo, filename=filename, path=final,
+                               bytes=final.stat().st_size)
+            except HFCancelled:
+                # 不删 .part：下次点"继续下载"从断点接上
+                raise
+            except HFError:
+                raise
+            except (httpx.HTTPError, OSError) as exc:
+                last_err = exc
+                if attempt >= max_attempts:
+                    break
+                wait = min(5.0 * attempt, 30.0)
+                print(f"[hf][警告] {rel.name} 第 {attempt} 次失败"
+                      f"（{type(exc).__name__}），{wait:.0f}s 后重试", flush=True)
+                time.sleep(wait)
+
+        if part.exists():
+            try:
+                part.unlink()
             except OSError:
                 pass
+        raise HFError(
+            f"{rel.name} 下载失败（已重试 {max_attempts} 次）：{last_err}。"
+            f"检查网络/磁盘空间，或先用浏览器下一份放到 --hf-cache 目录下再跑。")
 
-    last_err: Exception | None = None
-
-    for attempt in range(1, max_attempts + 1):
-        try:
-            t0 = time.time()
-            offset = part.stat().st_size if part.is_file() else 0
-            headers = _auth(token)
-            if offset:
-                headers["Range"] = f"bytes={offset}-"
-            with _client(proxy, timeout=httpx.Timeout(timeout_s, connect=20.0),
-                         follow_redirects=True) as c:
-                with c.stream("GET", url, headers=headers) as r:
-                    if r.status_code in (401, 403):
-                        raise HFError(
-                            f"{repo}/{filename} 需要鉴权（HTTP {r.status_code}）。"
-                            f"私有仓库要带 HF_TOKEN。")
-                    r.raise_for_status()
-                    if offset and r.status_code == 206:
-                        written = offset
-                        total = offset + int(r.headers.get("content-length") or 0)
-                        mode = "ab"
-                    else:
-                        # 服务端不认 Range（有的镜像会整片返回）：从头写
-                        written = 0
-                        total = int(r.headers.get("content-length") or 0)
-                        mode = "wb"
-                    if on_progress is not None:
-                        on_progress(written, total)
-                    with part.open(mode) as f:
-                        for chunk in r.iter_bytes(1 << 20):
-                            if should_stop is not None and should_stop():
-                                f.flush()
-                                raise HFCancelled(f"{filename} 已取消")
-                            f.write(chunk)
-                            written += len(chunk)
-                            if on_progress is not None:
-                                on_progress(written, total)
-                    f_size = part.stat().st_size
-            if total and f_size != total:
-                raise HFError(f"下载不完整：{f_size}/{total} 字节")
-            part.replace(final)
-            if verbose:
-                mb = final.stat().st_size / 1048576
-                print(f"[hf] {rel.name}  {mb:.1f} MB  {time.time() - t0:.1f}s",
-                      flush=True)
-            return HFShard(repo=repo, filename=filename, path=final,
-                           bytes=final.stat().st_size)
-        except HFCancelled:
-            # 不删 .part：下次点"继续下载"从断点接上
-            raise
-        except HFError:
-            raise
-        except (httpx.HTTPError, OSError) as exc:
-            last_err = exc
-            if attempt >= max_attempts:
-                break
-            wait = min(5.0 * attempt, 30.0)
-            print(f"[hf][警告] {rel.name} 第 {attempt} 次失败"
-                  f"（{type(exc).__name__}），{wait:.0f}s 后重试", flush=True)
-            time.sleep(wait)
-
-    if part.exists():
-        try:
-            part.unlink()
-        except OSError:
-            pass
-    raise HFError(
-        f"{rel.name} 下载失败（已重试 {max_attempts} 次）：{last_err}。"
-        f"检查网络/磁盘空间，或先用浏览器下一份放到 --hf-cache 目录下再跑。")
+    finally:
+        cache_lock.close()
 
 
 def _auth(token: str | None) -> dict[str, str]:
@@ -762,6 +778,25 @@ def free_bytes(path: str | Path) -> int:
         return 0
 
 
+def cache_session(cache_dir: Path, should_stop=None):
+    """共享缓存从下载到清理期间保持独占，等待也响应停止。"""
+    from contextlib import contextmanager
+    from .storage.locking import FileLock
+
+    @contextmanager
+    def session():
+        lock = FileLock(Path(cache_dir) / ".processing.lock")
+        while not lock.acquire(blocking=False):
+            if should_stop is not None and should_stop():
+                raise HFCancelled("等待缓存使用权时已取消")
+            time.sleep(0.1)
+        try:
+            yield
+        finally:
+            lock.close()
+    return session()
+
+
 def iter_hf_shards(
     names: Sequence[str],
     *,
@@ -777,6 +812,7 @@ def iter_hf_shards(
     keep: bool = False,
     verbose: bool = True,
     on_log=None,
+    should_stop=None,
 ) -> Iterator[HFShard]:
     """按需下载分片：预取 N 片，调用方处理完（并删掉）再要下一片。
 
@@ -791,87 +827,95 @@ def iter_hf_shards(
 
     预取下来但调用方没用上（--limit 截断 / 抛异常）的分片，在 finally 里删掉。
     """
-    from collections import deque
-    from concurrent.futures import Future, ThreadPoolExecutor
+    # 共享缓存会在消费后删除；持锁覆盖下载、读取、清理整个生命周期。
+    with cache_session(Path(cache_dir), should_stop):
+        from collections import deque
+        from concurrent.futures import Future, ThreadPoolExecutor
 
-    def log(msg: str) -> None:
-        if on_log is not None:
-            on_log(msg)
-        else:
-            print(msg, flush=True)
+        def log(msg: str) -> None:
+            if on_log is not None:
+                on_log(msg)
+            else:
+                print(msg, flush=True)
 
-    cache_dir = Path(cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    sizes = sizes or {}
-    pending = list(names)
-    # 窗口 = 正在处理的 1 片 + 预取的 N 片
-    window = 1 + max(0, int(prefetch))
-    queue: deque[tuple[str, Future]] = deque()
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hf-dl")
+        cache_dir = Path(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        abort = threading.Event()
+        def cancelled():
+            return abort.is_set() or (should_stop is not None and should_stop())
+        sizes = sizes or {}
+        pending = list(names)
+        # 窗口 = 正在处理的 1 片 + 预取的 N 片
+        window = 1 + max(0, int(prefetch))
+        queue: deque[tuple[str, Future]] = deque()
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hf-dl")
 
-    def submit_next() -> bool:
-        if not pending or len(queue) >= window:
-            return False
-        name = pending[0]
-        est = int(sizes.get(name) or 0)
-        local = cache_dir / Path(name)
-        # 上次 --hf-keep 留下的同名片不再占"新增"空间
-        if est and not local.is_file():
-            # 在下载途中的分片还没落成文件，free_bytes 看不到它；不扣掉就会
-            # "同时预取 3 片、每片都通过检查"，然后一起把盘写满。
-            inflight = sum(int(sizes.get(n) or 0)
-                           for n, f in queue if not f.done())
-            free = free_bytes(cache_dir) - inflight
-            if free < est + reserve_bytes:
-                log(f"[hf] 空间不够，暂停下载：剩 {free / 1073741824:.1f} GB，"
-                    f"{local.name} 需 {est / 1073741824:.1f} GB + 余量 "
-                    f"{reserve_bytes / 1073741824:.1f} GB")
+        def submit_next() -> bool:
+            if cancelled():
+                raise HFCancelled("分片处理已取消")
+            if not pending or len(queue) >= window:
                 return False
-        pending.pop(0)
-        queue.append((name, pool.submit(
-            download_shard, repo, name, cache_dir, revision=revision,
-            token=token, verbose=verbose, conns=conns, proxy=proxy)))
-        return True
+            name = pending[0]
+            est = int(sizes.get(name) or 0)
+            local = cache_dir / Path(name)
+            # 上次 --hf-keep 留下的同名片不再占"新增"空间
+            if est and not local.is_file():
+                # 在下载途中的分片还没落成文件，free_bytes 看不到它；不扣掉就会
+                # "同时预取 3 片、每片都通过检查"，然后一起把盘写满。
+                inflight = sum(int(sizes.get(n) or 0)
+                               for n, f in queue if not f.done())
+                free = free_bytes(cache_dir) - inflight
+                if free < est + reserve_bytes:
+                    log(f"[hf] 空间不够，暂停下载：剩 {free / 1073741824:.1f} GB，"
+                        f"{local.name} 需 {est / 1073741824:.1f} GB + 余量 "
+                        f"{reserve_bytes / 1073741824:.1f} GB")
+                    return False
+            pending.pop(0)
+            queue.append((name, pool.submit(
+                download_shard, repo, name, cache_dir, revision=revision,
+                token=token, verbose=verbose, conns=conns, proxy=proxy, should_stop=cancelled)))
+            return True
 
-    try:
-        while submit_next():
-            pass
-        while queue or pending:
-            if not queue:
-                # 上一片刚被删、空间又够：先补提交，别当成"空间不足"报错
-                if submit_next():
-                    continue
-                name = pending[0]
-                est = int(sizes.get(name) or 0)
-                free = free_bytes(cache_dir)
-                raise HFError(
-                    f"磁盘空间不足，下载不了 {name}：剩 {free / 1073741824:.1f} GB，"
-                    f"需要 {est / 1073741824:.1f} GB + 余量 "
-                    f"{reserve_bytes / 1073741824:.1f} GB。\n"
-                    f"清一下 {cache_dir}，或把临时目录换到更大的盘"
-                    f"（--hf-cache），或关掉预取（--hf-prefetch 0）再跑。")
-            name, fut = queue.popleft()
-            shard = fut.result()          # 下载失败在这里抛 HFError
-            # 落在这个缓存目录里的分片一律当临时文件：上一次提前中断可能留下
-            # 一个完整的 tar，download_shard 会以 temporary=False 复用它，
-            # 那样 cleanup 就不删了，缓存目录会越积越大（每片 0.5~2 GB）。
-            shard = replace(shard, temporary=True)
-            submit_next()                 # 当前片处理期间，下一片已经在下载
-            yield shard
-    finally:
         try:
-            pool.shutdown(wait=False, cancel_futures=True)
-        except TypeError:                # Python < 3.9
-            pool.shutdown(wait=False)
-        # 已下载完但没被消费的分片：不删就是"预取把盘吃满"的来源
-        for _, fut in queue:
-            if not fut.done():
-                continue
+            while submit_next():
+                pass
+            while queue or pending:
+                if not queue:
+                    # 上一片刚被删、空间又够：先补提交，别当成"空间不足"报错
+                    if submit_next():
+                        continue
+                    name = pending[0]
+                    est = int(sizes.get(name) or 0)
+                    free = free_bytes(cache_dir)
+                    raise HFError(
+                        f"磁盘空间不足，下载不了 {name}：剩 {free / 1073741824:.1f} GB，"
+                        f"需要 {est / 1073741824:.1f} GB + 余量 "
+                        f"{reserve_bytes / 1073741824:.1f} GB。\n"
+                        f"清一下 {cache_dir}，或把临时目录换到更大的盘"
+                        f"（--hf-cache），或关掉预取（--hf-prefetch 0）再跑。")
+                name, fut = queue.popleft()
+                shard = fut.result()          # 下载失败在这里抛 HFError
+                # 落在这个缓存目录里的分片一律当临时文件：上一次提前中断可能留下
+                # 一个完整的 tar，download_shard 会以 temporary=False 复用它，
+                # 那样 cleanup 就不删了，缓存目录会越积越大（每片 0.5~2 GB）。
+                shard = replace(shard, temporary=True)
+                submit_next()                 # 当前片处理期间，下一片已经在下载
+                yield shard
+        finally:
+            abort.set()
             try:
-                cleanup(fut.result(), keep=keep)
-            except Exception:            # noqa: BLE001 - 下载失败的分片本来就没落盘
-                continue
-        queue.clear()
+                pool.shutdown(wait=True, cancel_futures=True)
+            except TypeError:                # Python < 3.9
+                pool.shutdown(wait=True)
+            # 已下载完但没被消费的分片：不删就是"预取把盘吃满"的来源
+            for _, fut in queue:
+                if not fut.done():
+                    continue
+                try:
+                    cleanup(fut.result(), keep=keep)
+                except Exception:            # noqa: BLE001 - 下载失败的分片本来就没落盘
+                    continue
+            queue.clear()
 
 
 # ------------------------------------------------------------------ 清单

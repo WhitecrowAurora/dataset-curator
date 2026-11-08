@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import threading
 import time
@@ -39,6 +40,11 @@ DOWNLOAD_DIR = INSTALL_ROOT / ".download"
 VERSION_FILE = INSTALL_ROOT / "VERSION"
 
 RELEASE_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+# 为什么要看列表而不是 latest：2026 年起 `latest` 指向的是版本号发布（v0.9.0），
+# 那里可能一个二进制都没有，滚动构建（b12188 这种）才挂资产。只查 latest 的
+# 结果就是"点安装必然报没有匹配的包"，而 GitHub 上明明有。
+RELEASES_API = ("https://api.github.com/repos/ggml-org/llama.cpp/"
+                "releases?per_page=30")
 # Windows 上可执行文件带后缀；判断用 os.name 而不是 platform.system()，
 # 后者在 Windows 上返回 "Windows"，与 exe 是否存在无关。
 BINARY_NAME = "llama-server.exe" if os.name == "nt" else "llama-server"
@@ -322,14 +328,125 @@ def _asset_kind(name: str) -> str:
     return "main"
 
 
-def _resolve_release(cancel_evt: threading.Event) -> tuple[str, list[dict]]:
-    """查 GitHub 的 latest，挑出"主包 + 可能的 cudart 包"。
+def _name_tokens(name: str) -> set[str]:
+    """按分隔符切词。**必须按词比较而不是子串**：`x64` 是子串关系的重灾区
+    （`x86_64`、`arm64` 都含它），一放宽就会给 ARM 机器挑到 x64 的包。"""
+    return {t for t in re.split(r"[-_.\s]+", name.lower()) if t}
+
+
+def _matches_asset(name: str, flavour: str) -> bool:
+    """资产名是否对应"某个平台的某个后端"。
 
     资产名长这样（2026 年的命名）：
-        llama-b7123-bin-win-cuda-12.4-x64.zip
-        llama-b7123-bin-win-cpu-x64.zip
-        cudart-llama-bin-win-cuda-12.4-x64.zip
-    选包顺序：有 N 卡优先 CUDA，其次 Vulkan（AMD/无 CUDA 时仍能加速），
+        llama-b12188-bin-win-cuda-13.5-x64.zip
+        llama-b12188-bin-win-cpu-x64.zip
+        cudart-llama-bin-win-cuda-13.5-x64.zip
+
+    旧实现要求名字里有 `-bin-win-cuda` 这一段连续子串，而官方把架构塞进了
+    后端名中间（`-bin-win-cuda-13.5-x64`），于是永远匹配不上、报"没有适合
+    当前平台的安装包"。这里改成按词集合判断，版本号怎么变都不影响。
+    """
+    low = name.lower()
+    if not (low.startswith("llama-") and low.endswith(".zip")):
+        return False
+    toks = _name_tokens(name)
+    need = set(flavour.split("-"))
+    if not need <= toks:
+        return False
+    # 架构必须显式说清楚：宁可匹配不到，也不要把 arm64 包装到 x64 机器上。
+    if "x64" not in toks or "arm64" in toks:
+        return False
+    return True
+
+
+def _matches_cudart(name: str, flavour: str, version: float) -> bool:
+    """cudart 包要和主包"同平台、同架构、同 CUDA 版本"。
+
+    踩过：只判 `startswith("cudart")` 加版本号，会挑到
+    `cudart-llama-b12189-bin-ubuntu-cuda-13.5-arm64.tar.gz`——名字对得上、
+    平台完全不对，解出来是一堆对 Windows 没用的 .so。
+    """
+    low = name.lower()
+    if not (low.startswith("cudart") and low.endswith(".zip")):
+        return False
+    toks = _name_tokens(name)
+    if not set(flavour.split("-")) <= toks:
+        return False
+    if "x64" not in toks or "arm64" in toks:
+        return False
+    return _cuda_version(name) == version
+
+
+def _cuda_version(name: str) -> float:
+    m = re.search(r"cuda-(\d+)(?:\.(\d+))?", name.lower())
+    if not m:
+        return 0.0
+    return float(f"{m.group(1)}.{m.group(2) or 0}")
+
+
+def _max_cuda_major() -> int:
+    """按驱动版本估"能到哪个 CUDA 大版本"。取不到就按 12 处理（保守）。
+
+    为什么要估：资产里有 cuda-12.4 和 cuda-13.5 两种，随便挑一个的话老驱动
+    会拿到 13.x（起不来），新卡拿到 12.4 又可能缺 kernel。驱动版本与 CUDA
+    大版本不是一一对应，这里用公开的对应关系粗判（CUDA 13 起于 580 系驱动）。
+    """
+    raw = ""
+    try:
+        import subprocess
+
+        from .hardware import _find_nvidia_smi
+
+        smi = _find_nvidia_smi()
+        if smi:
+            out = subprocess.run(
+                [smi, "--query-gpu=driver_version", "--format=csv,noheader"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=10,
+                creationflags=0x08000000 if os.name == "nt" else 0,
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                raw = out.stdout.strip().splitlines()[0]
+    except Exception:                         # noqa: BLE001 - 探测失败按保守值
+        raw = ""
+    m = re.search(r"(\d+)\.(\d+)", raw)
+    if not m:
+        return 12
+    return 13 if int(m.group(1)) >= 580 else 12
+
+
+def _pick_main(assets: list[dict], flavour: str, max_major: int) -> dict | None:
+    """在同一个 release 的资产里挑主包。
+
+    CUDA 多种版本时：挑不超过驱动能力的最高版本；没有兼容包就交给调用方
+    尝试 Vulkan / CPU。
+    """
+    hits = [a for a in assets if _matches_asset(str(a["name"]), flavour)]
+    if not hits:
+        return None
+    if "cuda" in flavour:
+        allowed = [a for a in hits if _cuda_version(str(a["name"])) <= max_major + 0.9]
+        if not allowed:
+            return None
+        hits = allowed
+    best = sorted(hits, key=lambda a: _cuda_version(str(a["name"])), reverse=True)[0]
+    return {"name": str(best["name"]),
+            "url": str(best.get("browser_download_url") or ""),
+            "size": int(best.get("size") or 0),
+            "kind": _asset_kind(str(best["name"]))}
+
+
+def _resolve_release(cancel_evt: threading.Event) -> tuple[str, list[dict]]:
+    """挑出"主包 + 可能的 cudart 包"，返回 (tag, assets)。
+
+    两个坑一起修了：
+    1. **latest 可能没有二进制**：版本号发布（v0.9.0）和滚动构建（b12188）是
+       两条线，latest 打到前者时资产为空。所以看 releases 列表，跳到第一个
+       真有合适资产的发布。
+    2. **资产名匹配不能靠连续子串**：`-bin-win-cuda-13.5-x64` 里后端和架构
+       是分开的词。见 `_matches_asset`。
+
+    选包顺序：有 N 卡优先 CUDA，其次 Vulkan（AMD / CUDA 装不上时还能加速），
     最后 CPU。宁可慢一点也不要"装完起不来"。
     """
     tag = _platform_tag()
@@ -340,62 +457,72 @@ def _resolve_release(cancel_evt: threading.Event) -> tuple[str, list[dict]]:
     if cancel_evt.is_set():
         raise _Cancelled
 
-    headers = {"Accept": "application/vnd.github+json",
-               "User-Agent": "tagger-llama-installer"}
-    with httpx.Client(trust_env=trust_env_for(RELEASE_API), timeout=_TIMEOUT,
-                      follow_redirects=True, headers=headers) as client:
-        resp = client.get(RELEASE_API)
-        resp.raise_for_status()
-        release = resp.json()
-
-    tag_name = str(release.get("tag_name") or "")
-    assets = [a for a in (release.get("assets") or []) if a.get("name")]
-    wanted: list[dict] = []
-
-    def pick(predicate) -> dict | None:
-        for asset in assets:
-            if predicate(str(asset["name"])):
-                return {"name": str(asset["name"]),
-                        "url": str(asset.get("browser_download_url") or ""),
-                        "size": int(asset.get("size") or 0),
-                        "kind": _asset_kind(str(asset["name"]))}
-        return None
-
-    def matches(name: str, flavour: str) -> bool:
-        low = name.lower()
-        return (low.startswith("llama-") and f"-bin-{flavour}" in low
-                and tag in low and low.endswith(".zip"))
-
     if tag.startswith("ubuntu"):
         order = ["ubuntu-x64"]
     else:
-        # 有 N 卡才把 CUDA 放第一；没有的话 Vulkan 是唯一还能吃到 GPU 的包，
-        # 再退到纯 CPU。
         order = (["win-cuda"] if _has_nvidia() else []) + ["win-vulkan", "win-cpu"]
 
-    main = None
-    for flavour in order:
-        if flavour == "ubuntu-x64":
-            main = pick(lambda n: matches(n, "ubuntu-x64"))
-        else:
-            main = pick(lambda n, f=flavour: matches(n, f))
-        if main:
-            break
-    if main is None:
-        raise RuntimeError(
-            f"GitHub 上这个 release（{tag_name}）没有匹配 "
-            f"{platform.system()}/{platform.machine()} 的安装包。"
-            f"可以手动下 zip 后用命令行安装。")
-    wanted.append(main)
+    headers = {"Accept": "application/vnd.github+json",
+               "User-Agent": "tagger-llama-installer"}
+    with httpx.Client(trust_env=trust_env_for(RELEASES_API), timeout=_TIMEOUT,
+                      follow_redirects=True, headers=headers) as client:
+        releases = _list_releases(client, cancel_evt)
 
-    # CUDA 主包要配同版本的 cudart。官方把运行库单独发，缺了它 exe 起不来，
-    # 而报错是 Windows 的"缺少 xxx.dll"，跟 llama.cpp 一点关系都看不出来。
-    if "-win-cuda" in main["name"].lower():
-        cudart = pick(lambda n: n.lower().startswith("cudart")
-                      and "-win-cuda" in n.lower() and n.lower().endswith(".zip"))
-        if cudart is not None:
-            wanted.append(cudart)
-    return tag_name, wanted
+    max_major = _max_cuda_major()
+    seen_tags: list[str] = []
+    for release in releases:
+        if cancel_evt.is_set():
+            raise _Cancelled
+        tag_name = str(release.get("tag_name") or "")
+        if tag_name:
+            seen_tags.append(tag_name)
+        assets = [a for a in (release.get("assets") or []) if a.get("name")]
+        if not assets:
+            continue                       # v0.9.0 这种纯源码发布，直接跳过
+        for flavour in order:
+            main = _pick_main(assets, flavour, max_major)
+            if main is None:
+                continue
+            wanted = [main]
+            # CUDA 主包要配同版本的 cudart。官方把运行库单独发，缺了它 exe
+            # 起不来，而报错是 Windows 的"缺少 xxx.dll"，跟 llama.cpp 一点
+            # 关系都看不出来。
+            if "cuda" in main["name"].lower():
+                ver = _cuda_version(main["name"])
+                cudarts = [a for a in assets
+                           if _matches_cudart(str(a["name"]), flavour, ver)]
+                if cudarts:
+                    wanted.append({
+                        "name": str(cudarts[0]["name"]),
+                        "url": str(cudarts[0].get("browser_download_url") or ""),
+                        "size": int(cudarts[0].get("size") or 0),
+                        "kind": "cudart",
+                    })
+            return tag_name, wanted
+
+    raise RuntimeError(
+        f"翻了最近 {len(seen_tags)} 个 release（{', '.join(seen_tags[:5])}…），"
+        f"都没有匹配 {platform.system()}/{platform.machine()} 的安装包。"
+        f"可以手动下 zip 后用「用现成的 zip」安装。")
+
+
+def _list_releases(client: httpx.Client,
+                   cancel_evt: threading.Event) -> list[dict]:
+    """releases 列表；接口不可用时退回 latest（单条），保证老路径仍能走。"""
+    try:
+        resp = client.get(RELEASES_API)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list) and data:
+            return data
+    except Exception:                         # noqa: BLE001 - 退回 latest
+        pass
+    if cancel_evt.is_set():
+        raise _Cancelled
+    resp = client.get(RELEASE_API)
+    resp.raise_for_status()
+    one = resp.json()
+    return [one] if isinstance(one, dict) else []
 
 
 def _download(url: str, dest: Path, cancel_evt: threading.Event, *,

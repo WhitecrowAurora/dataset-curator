@@ -105,6 +105,9 @@ export function Packaging() {
   const [splitInput, setSplitInput] = useState('')
   const [splitOut, setSplitOut] = useState('')
   const [splitTable, setSplitTable] = useState('')
+  const [previousTable, setPreviousTable] = useState('')
+  const [splitSeqWidth, setSplitSeqWidth] = useState(6)
+  const [startSeq, setStartSeq] = useState(1)
   const [splitMode, setSplitMode] = useState<(typeof SPLIT_MODES)[number]>('count')
   const [perShard, setPerShard] = useState(20000)
   const [maxBytesGB, setMaxBytesGB] = useState(0)
@@ -139,6 +142,8 @@ export function Packaging() {
   const [packMaxBytesGB, setPackMaxBytesGB] = useState(0)
   const [packLayout, setPackLayout] = useState<(typeof LAYOUTS)[number]>('flat')
   const [assignIds, setAssignIds] = useState<(typeof ID_SCHEMES)[number]>('rel')
+  const [packSeqWidth, setPackSeqWidth] = useState(6)
+  const [packStartSeq, setPackStartSeq] = useState(1)
   const [artist, setArtist] = useState(true)
   const [artistDepth, setArtistDepth] = useState(0)
   const [artistInject, setArtistInject] = useState(true)
@@ -247,6 +252,9 @@ export function Packaging() {
         input_dir: splitInput.trim(),
         out_dir: splitOut.trim(),
         table: splitTable.trim(),
+        previous_table: previousTable.trim(),
+        seq_width: previousTable.trim() ? null : splitSeqWidth,
+        start_seq: startSeq,
         mode: splitMode,
         per_shard: Math.max(1, perShard),
         max_bytes: Math.round(maxBytesGB * 1073741824),
@@ -260,7 +268,7 @@ export function Packaging() {
       return {
         roots: roots.map((r) => r.trim()).filter(Boolean),
         shard_dir: shardDir.trim(),
-        table: mergeTable.trim(),
+        tables: mergeTable.split(/\r?\n/).map((p) => p.trim()).filter(Boolean),
         out: mergeOut.trim(),
         fmt: mergeFmt,
         require,
@@ -282,6 +290,8 @@ export function Packaging() {
       max_bytes: Math.round(packMaxBytesGB * 1073741824),
       layout: packLayout,
       assign_ids: assignIds === 'global',
+      seq_width: packSeqWidth,
+      start_seq: packStartSeq,
       artist,
       artist_depth: artistDepth,
       artist_inject: artistInject,
@@ -353,6 +363,8 @@ export function Packaging() {
         artist,
         artist_depth: artistDepth,
         pack: assignIds === 'global',
+        seq_width: packSeqWidth,
+        start_seq: packStartSeq,
         out_dir: packOut.trim() || packOutDefault || undefined,
         formats: formats.join(','),
         jpeg_quality: quality,
@@ -397,7 +409,7 @@ export function Packaging() {
         icon={<Boxes size={17} />}
         eyebrow="数据打包"
         title="分包 · 拼接 · 封包"
-        description="分包 → 成员打标 → 回收拼接 → 封训练分片。纯磁盘活，三条链路一次只跑一个。"
+        description="分包 → 拼接 → 封包；三条链路一次只跑一个。"
         actions={
           <>
             {running ? (
@@ -548,6 +560,26 @@ export function Packaging() {
                   disabled={running}
                 />
               </SettingRow>
+
+              <SettingRow label="上一批分包表" help="首批留空；后续批次填写上一批表路径，自动衔接图片编号、宽度和包编号">
+                <input className="lx-input font-mono text-xs" value={previousTable}
+                  onChange={(e) => setPreviousTable(e.target.value)} disabled={running}
+                  placeholder="上一批的 shards.json" spellCheck={false} />
+              </SettingRow>
+              {!previousTable.trim() && (
+                <>
+                  <SettingRow label="序号宽度" help="总量最多 10 亿张请选择 10 位，从第一批起保持一致；6 位最多 999999 张">
+                    <input type="number" className="lx-input w-28 font-mono" min={1} max={12}
+                      value={splitSeqWidth} disabled={running}
+                      onChange={(e) => setSplitSeqWidth(Math.min(12, Math.max(1, Math.trunc(Number(e.target.value)) || 6)))} />
+                  </SettingRow>
+                  <SettingRow label="起始序号" help="新数据集从 1 开始；已有分包表时优先填写上面的上一批表路径">
+                    <input type="number" className="lx-input font-mono" min={1} max={999999999999}
+                      value={startSeq} disabled={running}
+                      onChange={(e) => setStartSeq(Math.min(999999999999, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))} />
+                  </SettingRow>
+                </>
+              )}
 
               <details className="px-1">
                 <summary className="cursor-pointer text-xs text-lx-muted">高级</summary>
@@ -772,17 +804,18 @@ export function Packaging() {
                       </button>
                     </div>
                   </SettingRow>
-                  <SettingRow label="分包总表" help="可选。分包页产出的 shards.json——配合分发包目录做整包缺失检测">
-                    <input
+                  <SettingRow label="分包总表" help="可选，每行一份分包表路径；多批可一起对账，检查整包缺失">
+                    <textarea
                       className="lx-input font-mono text-xs"
                       value={mergeTable}
                       onChange={(e) => setMergeTable(e.target.value)}
                       placeholder="<素材名>-shards.json"
+                      rows={3}
                       spellCheck={false}
                       disabled={running}
                     />
                   </SettingRow>
-                  <SettingRow label="总表输出" help="默认 work/merged.jsonl；3000 万条也吃得下的是 JSONL">
+                  <SettingRow label="总表输出" help="默认 work/merged.jsonl；大数据建议每批单独合并并使用 JSONL">
                     <input
                       className="lx-input font-mono text-xs"
                       value={mergeOut}
@@ -913,9 +946,9 @@ export function Packaging() {
                   reencode === 'never'
                     ? '保留原字节模式下不重压，此项不生效'
                     : quality < 92
-                      ? '低于 92：细节纹理会出现可见块效应，这批图是要训生成模型的'
+                      ? '低于 92 会出可见块效应'
                       : quality >= 98
-                        ? '高保真：体积最大，收益在肉眼上很有限'
+                        ? '体积最大，肉眼收益有限'
                         : undefined
                 }
                 help="所有图按这个质量重压一遍（含已经是 JPEG 的）；90~100"
@@ -949,10 +982,10 @@ export function Packaging() {
                   reencode === 'never'
                     ? '保留原字节模式下不重压，此项不生效'
                     : subsampling === '0'
-                      ? '4:4:4 保留完整色度，细节与饱和色最稳；体积约为 4:2:0 的两倍'
+                      ? '体积约为 4:2:0 的两倍'
                       : subsampling === '1'
-                        ? '4:2:2 横向砍半：体积居中，文字与细线边缘开始有色晕'
-                        : '4:2:0 色度分辨率砍半：体积最小，饱和色/细线会有可见色晕'
+                        ? '横向砍半，细线边缘有色晕'
+                        : '体积最小，饱和色/细线有色晕'
                 }
                 help="0 = 4:4:4（默认） / 1 = 4:2:2 / 2 = 4:2:0"
               >
@@ -985,6 +1018,19 @@ export function Packaging() {
                   ariaLabel="编号方式"
                 />
               </SettingRow>
+
+              {assignIds === 'global' && (
+                <SettingRow label="本批编号" help="输入完整的本批原始素材，宽度及起点须与本批分包表的 seq_width、start_seq 一致">
+                  <div className="flex gap-2">
+                    <input type="number" className="lx-input w-24 font-mono" min={1} max={12}
+                      aria-label="封包序号宽度" value={packSeqWidth} disabled={running}
+                      onChange={(e) => setPackSeqWidth(Math.min(12, Math.max(1, Math.trunc(Number(e.target.value)) || 6)))} />
+                    <input type="number" className="lx-input font-mono" min={1} max={999999999999}
+                      aria-label="封包起始序号" value={packStartSeq} disabled={running}
+                      onChange={(e) => setPackStartSeq(Math.min(999999999999, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))} />
+                  </div>
+                </SettingRow>
+              )}
 
               <SettingRow
                 label="画师三件套"
@@ -1127,7 +1173,7 @@ export function Packaging() {
                   note={`覆盖 ${fmtCount(packPreview.artists.covered)} 张`}
                   tone={packPreview.artists.missing > 0 ? 'warning' : 'success'}
                 />
-                <OverviewFigure label="来源" value={String(packPreview.sources.length)} note="个" />
+                <OverviewFigure label="来源" value={String(packPreview.source_count ?? packPreview.sources.length)} note="个" />
               </OverviewFigureRow>
             </SectionPanel>
           )}
@@ -1287,6 +1333,11 @@ function SplitResult({ s }: { s: SplitSummary }) {
       )}
 
       <div className="mt-2.5 space-y-1.5 border-t border-lx pt-2.5">
+        {s.next_seq !== undefined && (
+          <p className="text-[11px] text-lx-muted">
+            序号宽度 {s.seq_width} 位 · 下一批起始序号 {s.next_seq}；续批时填写下方分包表路径。
+          </p>
+        )}
         <p className="flex items-start gap-1.5 text-[11px] text-lx-secondary">
           <FileJson size={12} className="mt-0.5 shrink-0 text-lx-accent" />
           <span className="min-w-0 break-all font-mono text-lx-muted" title={s.table_path}>

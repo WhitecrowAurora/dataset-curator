@@ -452,9 +452,9 @@ class JobSpec:
     cache: bool = False
     cache_max_gb: float = 8.0
 
-    # ---- 产物形态。vlm 引擎默认 parquet：成员回传的就是它（见回传页）。
+    # ---- 产物形态。本地默认 jsonl：一包一文件，回传时一人发自己的那份。
 
-    artifact_format: str = "parquet"
+    artifact_format: str = "jsonl"
     parquet_rows: int = 2000
 
     # ---- tag 后端补充（两种引擎通用）
@@ -723,6 +723,7 @@ class Job:
             cs = client_stats
             done, skipped, failed, total = cs.done, cs.skipped, cs.failed, cs.total
             blacklisted = cs.blacklisted
+            busy = cs.busy
             by_reason = dict(cs.by_reason)
             usage = {"prompt_tokens": cs.prompt_tokens, "completion_tokens": cs.tokens,
                      "rate_limited": cs.rate_limited, "cost": cs.cost}
@@ -730,6 +731,7 @@ class Job:
             done, skipped, failed, total = (stats.done, stats.skipped,
                                             stats.failed, stats.total)
             blacklisted = 0
+            busy = stats.busy
             by_reason = dict(stats.by_reason)
             usage = {"prompt_tokens": 0, "completion_tokens": 0,
                      "rate_limited": 0, "cost": None}
@@ -776,6 +778,7 @@ class Job:
                 "skipped": skipped,
                 "failed": failed,
                 "blacklisted": blacklisted,
+                "busy": busy,
                 "settled": settled,
             },
             "progress": progress,
@@ -1011,6 +1014,9 @@ class JobManager:
                 raise ValueError(space_error(need, free, job.out_dir))
         job.out_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
+            if any(j.status in ("pending", "running", "paused")
+                   for j in self._jobs.values()):
+                raise RuntimeError("已有任务在跑。请等它结束或先停止。")
             self._jobs[job.id] = job
         return job
 
@@ -1095,20 +1101,23 @@ class JobManager:
     def _save_resume(self, job: Job, why: str) -> None:
         """记下"用哪份参数、写到哪、做到哪一步"。
 
-        进度不在这里存完整明细——已完成哪些图由产物文件说了算（见
-        client._already_done 的产物 + 指纹双判定）。这里存的是**参数**，
-        因为参数一旦改过，产物就不能复用了，续跑会变成"换口径重打"。
+        已完成哪些图由产物文件判定。凭证只留在内存或用户明确保存的
+        密钥配置中，不复制到续做文件。
         """
         try:
-            RESUME_PATH.parent.mkdir(parents=True, exist_ok=True)
-            RESUME_PATH.write_text(json.dumps({
+            spec = asdict(job.spec)
+            spec["api_key"] = ""
+            spec["hf_token"] = ""
+            from ..storage.resume import save
+            payload = {
                 "job_id": job.id,
                 "why": why,
                 "saved_at": time.time(),
                 "out_dir": str(job.out_dir),
-                "spec": asdict(job.spec),
+                "spec": spec,
                 "counts": job.snapshot().get("counts") or {},
-            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            }
+            save(RESUME_PATH, payload)
         except (OSError, TypeError, ValueError) as exc:   # 写不了不该影响暂停本身
             job.push("log", message=f"（续做记录没写成功：{type(exc).__name__}: {exc}）")
 
@@ -1116,20 +1125,15 @@ class JobManager:
         """删掉续做记录。带 job_id 时只在它确实是这条任务时才删——
         用户可能已经开了新任务，别把别人的记录误删。"""
         try:
-            if job_id is not None:
-                cur = json.loads(RESUME_PATH.read_text(encoding="utf-8"))
-                if str(cur.get("job_id") or "") != job_id:
-                    return
-            RESUME_PATH.unlink()
+            from ..storage.resume import clear
+            clear(RESUME_PATH, job_id)
         except (OSError, ValueError, TypeError):
             pass
 
     def wanted_resume(self) -> dict | None:
         """上次被暂停/停止、还没跑完的任务。页面打开时问一次。"""
-        try:
-            data = json.loads(RESUME_PATH.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
+        from ..storage.resume import load
+        data = load(RESUME_PATH)
         if not isinstance(data, dict) or not isinstance(data.get("spec"), dict):
             return None
         out = str(data.get("out_dir") or "")
@@ -1143,7 +1147,7 @@ class JobManager:
         """拿 resume.json 重建任务并立刻开跑。
 
         没有"接着上次那个线程"这回事——进程重启后线程早没了。重建出来的
-        是新任务，已经打完的图靠产物 + 指纹判定跳过，所以效果仍是续做。
+        是新任务，已经打完的图靠有效产物跳过，所以效果仍是续做。
         """
         data = self.wanted_resume()
         if data is None:
@@ -1152,7 +1156,12 @@ class JobManager:
             spec = JobSpec(**data["spec"])
         except TypeError as exc:
             raise ValueError(f"续做记录与当前版本不兼容：{exc}") from exc
+        previous = self.get(str(data.get("job_id") or ""))
+        if previous is not None:
+            spec = replace(spec, api_key=previous.spec.api_key,
+                           hf_token=previous.spec.hf_token)
         job = self.create(spec)          # 里面会重扫输入、算 plan、校验空间
+        self._save_resume(job, "stopped")
         self._clear_resume(str(data.get("job_id") or ""))
         self.start(job)
         return job
@@ -1161,6 +1170,8 @@ class JobManager:
 
     def _run(self, job: Job) -> None:
         spec = job.spec
+        from ..storage.resume import running_lock
+        active_resume = running_lock(RESUME_PATH, job.id)
         job.status = "running"
         job.started = time.time()
         job.push("job_started",
@@ -1170,6 +1181,8 @@ class JobManager:
         backend = None
         guard = None
         try:
+            active_resume.acquire()
+            self._save_resume(job, "running")
             guard = self._make_guard(job)
             job.guard = guard
             if spec.engine == "vlm":
@@ -1196,9 +1209,10 @@ class JobManager:
                 read_bytes=job.reader.read, guard=guard,
             )
 
-            stopped = job.stats.stopped or job.stop_flag.is_set()
+            stopped = job.stats.stopped or job.stop_flag.is_set() or bool(job.stats.busy)
             if stopped:
                 job.status = "stopped"
+                self._save_resume(job, "stopped")
                 job.push("log", message="打标已中止：不封包（半批数据不该进下游）")
             else:
                 # 先封包再落 "done"：轮询方一看到 done 就该能读到完整分片，
@@ -1226,6 +1240,7 @@ class JobManager:
             # 提示"继续"只会把人往同一个坑里带。
             if job.status in ("done", "failed"):
                 self._clear_resume(job.id)
+            active_resume.close()
             del backend
             job.reader.close()
             if guard is not None:
@@ -1397,12 +1412,12 @@ class JobManager:
             # 报出来的是"分片不存在: D"。
             shard=None if spec.hf_repo else [spec.input_dir],
             out_dir=str(job.out_dir),
-            # 多卡时 url 是第一个槽，urls 是其余槽；run_client 按轮询分发。
+            # 多卡时 url 是第一个槽，urls 是其余槽；按空闲槽补发。
             url=multi_urls[0] if multi_urls else spec.url,
             urls=multi_urls[1:],
-            # API 模式：来源 + 地址 + 密钥。地址留空时 run_client 按来源取默认值。
+            # 留空交给 run_client 解析保存的地址、密钥及默认值。
             api_provider=provider,
-            api_base=spec_api_base(spec),
+            api_base=str(spec.api_base or ""),
             api_key=str(spec.api_key or ""),
             model_name=spec.vlm_model,
             mode=mode,
@@ -1438,7 +1453,7 @@ class JobManager:
             tag_precision=spec.precision,
             tag_batch=max(1, int(spec.batch or 1)),
             tag_preprocess=str(spec.preprocess or "pil"),
-            artifact_format=str(spec.artifact_format or "parquet"),
+            artifact_format=str(spec.artifact_format or "jsonl"),
             parquet_rows=int(spec.parquet_rows or 2000),
             hf_repo=spec.hf_repo or "",
             hf_token=spec.hf_token or "",
@@ -1467,7 +1482,8 @@ class JobManager:
                 # 多卡时把这一张记到它实际跑的那张卡上，面板上才有"各卡
                 # 分担了多少"。单卡模式不记：MULTI.workers 为空，写了也无处去。
                 if spec.multi_gpu:
-                    slot = int(getattr(outcome, "slot", -1) or -1)
+                    value = getattr(outcome, "slot", -1)
+                    slot = int(value) if value is not None else -1
                     if slot >= 0:
                         from .multi_gpu import MULTI
 
@@ -1489,6 +1505,9 @@ class JobManager:
             elif kind == "blacklisted":
                 job.push("item", image_id=task.image_id, ok=False,
                          error="连续失败达到上限，本批拉黑跳过", tags=[])
+            elif kind == "busy":
+                job.push("item", image_id=task.image_id, ok=False,
+                         error="其他进程正在处理，续做时会重新核对", tags=[])
             else:
                 job.push("item", image_id=task.image_id, ok=False,
                          error=str(getattr(outcome, "error", "") or "")[:200],
@@ -1508,6 +1527,10 @@ class JobManager:
         if job.stop_flag.is_set():
             job.status = "stopped"
             job.push("log", message="已停止：产物与断点都在盘上，重跑可续做")
+        elif job.client_stats is not None and job.client_stats.busy:
+            job.status = "stopped"
+            self._save_resume(job, "stopped")
+            job.push("log", message="部分图片由其他进程处理；已保留续做记录，下次继续会重新核对")
         elif code == 0:
             if job.status == "running":
                 job.status = "done"
@@ -1585,6 +1608,9 @@ class JobManager:
         elif kind == "skipped":
             job.push("item", image_id=item.image_id, ok=True, skipped=True,
                      tag_count=0, tags=[])
+        elif kind == "busy":
+            job.push("item", image_id=item.image_id, ok=False,
+                     error="其他进程正在处理，续做时会重新核对", tags=[])
         else:
             job.push("item", image_id=item.image_id, ok=False,
                      error=str(extra)[:200], tags=[])

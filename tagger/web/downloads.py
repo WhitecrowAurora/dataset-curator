@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -129,6 +130,10 @@ class Task:
     repo: str
     dest: Path
     proxy: str = ""                  # 空 = 直连；每任务带一份，改设置不影响在跑的
+    # 只下这些文件（glob）。空 = 整仓库。
+    # GGUF 仓库一个名字底下挂着 6 个量化档（20G+），全量下载纯属浪费；
+    # 具体要哪几份由 tiers.yaml 的 download_files 声明，不在代码里写死。
+    allow: tuple[str, ...] = ()
     status: str = "queued"           # queued / running / done / error / canceled
     message: str = ""
     current: str = ""                # 正在下的文件名
@@ -212,7 +217,8 @@ class DownloadManager:
     # ---- 动作
 
     def start(self, kind: str, key: str, repo: str, dest: Path,
-              proxy: str = "") -> dict[str, Any]:
+              proxy: str = "", allow: list[str] | tuple[str, ...] | None = None,
+              ) -> dict[str, Any]:
         if kind not in _KINDS:
             raise ValueError(f"未知的模型类型：{kind}")
         repo = (repo or "").strip()
@@ -220,12 +226,14 @@ class DownloadManager:
             raise ValueError(
                 "这条没有可下载的仓库名：把「权重」填成 HF 仓库（org/name）再点下载")
         tid = f"{kind}:{key}"
+        # 空字符串/空白项过滤掉：页面传来的空行不该变成"匹配所有文件"。
+        globs = tuple(p.strip() for p in (allow or ()) if p and p.strip())
         with self._lock:
             exist = self._tasks.get(tid)
             if exist and exist.status in ("queued", "running"):
                 return exist.state()
             task = Task(kind=kind, key=key, repo=repo, dest=Path(dest),
-                        proxy=normalize_proxy(proxy))
+                        proxy=normalize_proxy(proxy), allow=globs)
             self._tasks[tid] = task
         threading.Thread(target=self._worker, args=(task,), daemon=True,
                          name=f"dl-{tid}").start()
@@ -286,6 +294,8 @@ class DownloadManager:
         try:
             task.status = "running"
             files = _list_files(task.repo, task.proxy)
+            if task.allow:
+                files = _filter_files(files, task.allow, task.repo)
             task.files_total = len(files)
             task.bytes_total = sum(size for _, size in files)
             done = 0
@@ -308,9 +318,26 @@ class DownloadManager:
         except Exception as exc:                    # noqa: BLE001 - 尽力报告给页面
             task.status = "error"
             task.speed = 0.0
-            task.message = f"{type(exc).__name__}: {exc}"
+            task.message = _explain(exc, task.proxy)
         finally:
             task.finished_at = time.time()
+
+
+def _explain(exc: Exception, proxy: str = "") -> str:
+    """把异常翻成"下一步该干什么"。
+
+    `ConnectError: [WinError 10061]` 这种原文用户看不懂，也搜不到解法；
+    而这个页面上真正能做的动作只有两个（填代理 / 换镜像源），直接说出来。
+    不认识的异常保持原样——瞎翻译会掩盖真正的原因。
+    """
+    name = type(exc).__name__
+    note = (f"当前走代理 {proxy}" if proxy
+            else "当前是直连：设置里的「下载代理」是空的")
+    if any(k in name for k in ("Connect", "Timeout", "ReadTimeout", "Proxy")):
+        return (f"连不上 {_endpoint()}（{name}）。{note}。\n"
+                f"① 在「下载代理」里填本机代理，如 http://127.0.0.1:7890；\n"
+                f"② 或设环境变量 HF_ENDPOINT=https://hf-mirror.com 走镜像后重启服务。")
+    return f"{name}: {exc}"
 
 
 def _endpoint() -> str:
@@ -345,6 +372,24 @@ def _next_link(header: str | None) -> str | None:
         if len(seg) >= 2 and 'rel="next"' in seg[1]:
             return seg[0].strip().strip("<>")
     return None
+
+
+def _filter_files(files: list[tuple[str, int]], patterns: tuple[str, ...],
+                  repo: str) -> list[tuple[str, int]]:
+    """按 glob 只留下要下的那几份。
+
+    GGUF 仓库一个名字底下挂着 6 个量化档（合计 20G+），全量下载纯属浪费。
+    匹配不到时必须报错并把仓库里实际有什么列出来——静默下 0 个文件更糟：
+    页面会显示"已下到 ..."，人以为能跑了，起服务才发现权重不在。
+    """
+    picked = [(name, size) for name, size in files
+              if any(fnmatch.fnmatch(name, p) for p in patterns)]
+    if picked:
+        return picked
+    available = [name for name, _ in files if name.lower().endswith(".gguf")]
+    shown = "、".join(available[:12]) or "（仓库里没有 gguf 文件）"
+    raise ValueError(
+        f"仓库 {repo} 里没有匹配 {' / '.join(patterns)} 的文件。实际有：{shown}")
 
 
 def _list_files(repo: str, proxy: str = "") -> list[tuple[str, int]]:

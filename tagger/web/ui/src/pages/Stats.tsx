@@ -173,7 +173,7 @@ export function Stats() {
         icon={<ChartSpline size={17} />}
         eyebrow="质检趋势"
         title="统计"
-        description="按完成顺序看通过率、失败率与质检分走势。质检分只有 NL 任务才有。"
+        description="按完成顺序看通过率、失败率与质检分走势（质检分仅 NL 任务）。"
         badges={stats && <StatusChip tone={status.tone}>{status.label}</StatusChip>}
         actions={
           <div className="flex items-center gap-2">
@@ -236,7 +236,7 @@ export function Stats() {
 
       <SectionPanel
         title="趋势"
-        description="每条线是该桶内的占比（平均质检分走右轴 1~5）；X 轴是完成顺序，不是时间。悬停看绝对张数，点图例可以隐藏线。"
+        description="每条线是桶内占比（质检分走右轴 1~5）；X 轴是完成顺序，不是时间。"
         trailing={
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">

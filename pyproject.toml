@@ -35,6 +35,14 @@ tag = [
     "huggingface_hub>=0.24",
     "onnxruntime>=1.18",
 ]
+# 本地量化成 GGUF（原始 safetensors → F16 → Q4_K_M/Q6_K）。走 llama.cpp 的
+# 官方 convert_hf_to_gguf.py，它要 transformers 读权重；脚本自己 import torch。
+# 只要 llama-server 能跑、权重也有现成 GGUF 的机器不用装。
+convert = [
+    "torch>=2.2",
+    "transformers>=4.49",
+    "safetensors>=0.4",
+]
 # W4A16 量化（页面点「开始量化」才会用到）。产物是 compressed-tensors 的
 # W4A16，vLLM 能直接加载。量化本身只需要 PyTorch + NVIDIA 显卡，Windows 原生
 # 也能跑；但 vLLM 服务只能在 Linux/WSL2，产物目录要能被那一侧读到。

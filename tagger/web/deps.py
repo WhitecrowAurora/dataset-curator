@@ -30,6 +30,18 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 
 REQ_CORE = ROOT / "requirements-embedded.txt"
 REQ_TAG = ROOT / "requirements-tag.txt"
+PYPROJECT = ROOT / "pyproject.toml"
+
+# 附加依赖的说明（key = pyproject 里 extra 的名字）。
+# 这些包故意**不进** requirements-*.txt：像 llmcompressor 这种几百 MB、又对
+# torch 版本卡得很死的，装了只会拖累每个只想打标的人。所以它们只在真要用
+# 那个功能时（页面上的「量化」/「NL 服务」）按需装。
+EXTRA_NOTES = {
+    "quantize": "4bit 量化（llmcompressor 等），只在页面点「开始量化」时用得上。",
+    "convert": "本地量化成 GGUF（transformers 等），只在「本地量化」时用得上。",
+    "serve": "vLLM 推理服务，仅 Linux / WSL2 可装。",
+    "parquet": "parquet 打包与 HF 分片流式读取。",
+}
 
 # 日志缓冲上限。pip 装 torch 的日志能刷几千行，全留着只是浪费内存。
 MAX_LOG = 400
@@ -115,6 +127,46 @@ def _parse(path: Path, group: str) -> list[Item]:
             group=group,
             torch_index=name.lower() in ("torch", "torchvision"),
         ))
+    return out
+
+
+def load_extras() -> dict[str, list[Item]]:
+    """读 pyproject 的 `[project.optional-dependencies]`。
+
+    ★**不在这里再抄一份清单**：页面上一键装的东西，必须和 `pip install .[extra]`
+      装的是同一串，否则两边迟早在某次升级后对不上，而且是对不上的那一刻才
+      发现（页面说"装好了"，运行时还是 import 不到）。
+
+    读不到 `tomllib`（Python 3.10 没有）或没有 pyproject（打包分发）时返回空表：
+    那不是错误，只是这台机器没有可一键装的附加项，页面退回显示后端给的
+    pip 命令即可。
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:                  # 3.10：requires-python 只保证 >=3.10
+        return {}
+    try:
+        data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    table = (data.get("project") or {}).get("optional-dependencies") or {}
+    out: dict[str, list[Item]] = {}
+    for extra, specs in table.items():
+        items: list[Item] = []
+        for spec in specs or []:
+            m = re.match(r"^([A-Za-z0-9_.\-]+)\s*(.*)$", str(spec))
+            if not m:
+                continue
+            name, rest = m.group(1), m.group(2).strip()
+            if rest.startswith(";"):
+                rest = ""
+            items.append(Item(
+                name=name, spec=name + rest, group="extra",
+                note=EXTRA_NOTES.get(extra, ""),
+                torch_index=name.lower() in ("torch", "torchvision"),
+            ))
+        if items:
+            out[extra] = items
     return out
 
 
@@ -252,6 +304,33 @@ class DepManager:
             "job": job,
         }
 
+    def activity(self) -> dict[str, Any] | None:
+        """给底部进度条 / 完成通知用的最小快照（没跑过任务就返回 None）。
+
+        不复用 snapshot()：那个要 load_items() + 逐个查版本，几秒轮询一次太贵。
+        """
+        with self._lock:
+            if self.status == "idle":
+                return None
+            batch = [dict(b) for b in self.batch]
+            done = sum(1 for b in batch
+                       if b.get("status") in ("ok", "done", "failed", "skipped"))
+            return {
+                "id": f"deps:{self.started:.0f}",
+                "kind": "deps",
+                "title": "依赖安装",
+                "detail": self.target,
+                "status": "done" if self.status == "ok" else self.status,
+                "done": done,
+                "total": len(batch),
+                "elapsed_s": round(((self.finished or time.time()) - self.started)
+                                   if self.started else 0, 1),
+                "finished_at": self.finished,
+                "error": "" if self.status in ("running", "ok") else
+                         "\n".join(self.log[-8:]),
+                "log_tail": list(self.log[-6:]),
+            }
+
     def busy(self) -> bool:
         with self._lock:
             return self.status == "running"
@@ -280,6 +359,22 @@ class DepManager:
         if not items:
             raise ValueError("没有缺失的包，不用装")
         return self._start_many("install-missing", items)
+
+    def install_extra(self, extra: str) -> dict[str, Any]:
+        """装 pyproject 里某个 extra 的**缺失部分**（例如量化用的 llmcompressor）。
+
+        只装 missing，不碰已装的：这个 extra 里也写着 torch / transformers，
+        那是为了 `pip install .[quantize]` 单独能跑通；而在这台机器上它们
+        早就装着打标用的钉死版本了。为了补一个 llmcompressor 把 torch 换一遍，
+        等于把已产出的 tag 数值口径悄悄改掉。
+        """
+        items = load_extras().get(extra)
+        if not items:
+            raise ValueError(f"没有这个附加依赖：{extra}")
+        todo = [it for it in items if describe(it)["status"] == "missing"]
+        if not todo:
+            raise ValueError(f"{extra} 声明的依赖都装着了，不用装")
+        return self._start_many(f"install-{extra}", todo)
 
     def uninstall_all(self) -> dict[str, Any]:
         """把当前装着的包全卸了，环境退回裸解释器。

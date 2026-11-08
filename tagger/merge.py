@@ -29,14 +29,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import random
-from dataclasses import dataclass, field
+import tempfile
+from bisect import bisect_right
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Sequence
 
+from .storage.collections import SpillList, SpillMap
+
 TAG_SUFFIX = "-tag.json"
 NL_SUFFIX = "-nl.json"
+
+
+def _content_digest(value: str) -> str:
+    """内容的短哈希，与 `conflicts.Candidate.digest` 同一算法。
+
+    决策文件里存的就是这个值，两处必须一致：一处改了另一处就对不上，
+    表现成"批过的冲突合并时又报出来"。
+    """
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(slots=True)
@@ -97,6 +112,9 @@ class MergeStats:
     # 内容相同的重复 = 幂等重跑。重跑没清目录、补跑目录叠加都会产生，
     # 不是错误，取一份即可，但值得计数——数量大说明流程在反复做无用功。
     idempotent_repeats: list[str] = field(default_factory=list)
+    # 冲突已按「冲突与决策」页的批准结果定下来（取的是人选的那份）。
+    # 它不该算失败——人已经拍过板了，再报错等于按钮白点。
+    resolved: list[str] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
     # 产物里有、分发表里没有的 id。这**不算错**（可能是补跑后新加的素材），
     # 但说明分配记录与实际对不上，值得单列——之前混进 unreadable，让
@@ -150,6 +168,8 @@ class MergeStats:
             lines.append(f"内容冲突   : {len(self.duplicates)} 个 id（同一 id 两份不同内容）")
         if self.idempotent_repeats:
             lines.append(f"重复提交   : {len(self.idempotent_repeats)} 次（内容一致，已取一份）")
+        if self.resolved:
+            lines.append(f"已裁决     : {len(self.resolved)} 条（按「冲突与决策」批准的那份取）")
         if self.unreadable:
             lines.append(f"读不动     : {len(self.unreadable)}")
         if self.extra_ids:
@@ -237,21 +257,19 @@ def _tuple_from_payload(obj: object, fallback_id: str,
             prov if isinstance(prov, dict) else {})
 
 
-def _iter_parquet_records(root: Path) -> Iterator[tuple[str, str, str, str, dict]]:
-    """读 parquet 形态的产物（artifacts-*.parquet）。
+def _iter_shard_records(root: Path) -> Iterator[tuple[str, str, str, str, dict]]:
+    """读分片形态的产物（artifacts-*.parquet / artifacts-*.jsonl）。
 
-    tag / nl 两列存的是与 json 文件完全相同的 payload 字符串，见 artifacts.py。
+    tag / nl 两个字段存的是与 json 文件完全相同的 payload 字符串，见
+    artifacts.py；两种分片的行结构一致，所以这里只写一份解析。
     """
-    from .artifacts import (is_artifact_parquet, iter_parquet_artifacts,
-                            parse_payload)
+    from .artifacts import find_artifacts, iter_artifact_rows, parse_payload
 
-    for path in sorted(root.rglob("*.parquet")):
-        if not is_artifact_parquet(path):
-            continue
+    for path in find_artifacts(root):
         try:
             # 行号进 source：同一个分片里的两行如果同一个 id，也要能定位到行，
             # 只说"这个文件里重复了"等于没说。
-            for idx, row in enumerate(iter_parquet_artifacts(path)):
+            for idx, row in enumerate(iter_artifact_rows(path)):
                 fallback = str(row.get("image_id") or "")
                 for kind in ("tag", "nl"):
                     obj = parse_payload(kind, str(row.get(kind) or ""))
@@ -267,9 +285,9 @@ def _iter_parquet_records(root: Path) -> Iterator[tuple[str, str, str, str, dict
 def _iter_member_records(
     root: Path, stats: MergeStats,
 ) -> Iterator[tuple[str, str, str, str, dict]]:
-    """把 json 形态与 parquet 形态统一成一个流。
+    """把逐图 json 与分片（parquet / jsonl）统一成一个流。
 
-    同一个目录里两种形态并存时（改了 --artifact-format 重跑），两边的记录
+    同一个目录里几种形态并存时（改了 --artifact-format 重跑），各边的记录
     都会进 records；内容不同就是重复冲突，这正是要报出来的东西。
     """
     for path in _iter_json_files(root):
@@ -284,7 +302,7 @@ def _iter_member_records(
         yield image_id, kind, value, image_path, prov, str(path)
 
     try:
-        yield from _iter_parquet_records(root)
+        yield from _iter_shard_records(root)
     except ValueError as exc:
         stats.unreadable.append(str(exc))
 
@@ -295,28 +313,37 @@ def collect(
     stats: MergeStats | None = None,
     on_progress: "Callable[[int], None] | None" = None,
     should_stop: "Callable[[], bool] | None" = None,
+    decisions: "dict[str, str] | None" = None,
 ) -> dict[str, Record]:
     """扫描若干回收目录，按 image_id 归并。
 
     同一个 id 出现在多个文件里视为重复——不静默覆盖，全部记进 stats 让人处理。
+
+    `decisions` 是"冲突与决策"页批准过的结果：{"image_id|kind": 选中内容的哈希}。
+    命中时按它取那一份、不再记冲突——否则人点了按钮、合并照样报错，那按钮
+    就白点了。哈希而不是下标：重扫一次候选顺序会变，按下标套会把决定安到
+    另一份内容上。
+
     on_progress 每读一个产物文件回调一次（已扫条数）；should_stop 返回 True
     时提前收手，返回已扫到的部分——调用方据此放弃后续写盘（半份对账比
     假的完整对账诚实）。
     """
     stats = stats or MergeStats()
-    records: dict[str, Record] = {}
+    records = SpillMap(encode=asdict, decode=lambda v: Record(**v))
+    picks = decisions or {}
     # 记录每个 (id, kind) 第一次出现在哪个文件。
     # 用完整路径做键而不是文件名——不同人的目录下文件名必然相同
     # (`xxx-tag.json`)，按文件名去重会把真正的重复当成"同一份"跳过，
     # 而重复恰恰是本模块最该抓的东西。
-    filled: dict[str, tuple[str, str]] = {}   # "id:kind" -> (首次路径, 内容)
-    duplicates: dict[str, list[str]] = {}
-    idempotent: list[str] = []
+    filled = SpillMap()
+    duplicates = SpillMap()
+    idempotent = SpillList()
     # 每个回收目录自己出了多少条。整份没交（成员一份没交 / 目录根本没传上来）
     # 只有在这个粒度上才看得见：全局缺失列表会把"某人整包没有"和
     # "十个包各少几张"混成同一个数字。
     per_root: dict[str, int] = {}
     scanned = 0
+    stopped = False
 
     for root in roots:
         base = Path(root)
@@ -327,8 +354,8 @@ def collect(
         per_root.setdefault(str(base), 0)
         for image_id, kind, value, image_path, prov, source in _iter_member_records(base, stats):
             if should_stop is not None and should_stop():
-                stats.found_ids = len(records)
-                return records
+                stopped = True
+                break
             scanned += 1
             if on_progress is not None:
                 on_progress(scanned)
@@ -339,33 +366,57 @@ def collect(
                 rec = Record(image_id=image_id)
                 records[image_id] = rec
 
-            key = f"{image_id}:{kind}"
+            key = (image_id, kind)
             prev = filled.get(key)
             if prev is not None:
-                prev_path, prev_value = prev
+                prev_path, prev_value, _ = prev
                 if prev_value == value:
                     # 内容一模一样：重跑没清目录、补跑目录叠加都会这样。
                     # 取一份即可，不算错——拦下来只会让"重跑一下"没法收尾。
                     idempotent.append(f"{image_id}:{kind}")
-                else:
-                    # 内容不同：可能是不同 prompt / 不同模型 / 一份被截断。
-                    # 这种情况绝不静默取其一，必须人工看看到底该留哪份。
-                    dup = duplicates.setdefault(image_id, [prev_path])
-                    dup.append(source)
-                continue
+                    continue
+                paths = duplicates.get(key, [prev_path])
+                paths.append(source)
+                duplicates[key] = paths
+                pick = picks.get(f"{image_id}|{kind}", "")
+                if not pick or _content_digest(value) != pick:
+                    continue
 
-            filled[key] = (source, value)
-            rec.src_files.append(source)
-            if image_path and not rec.image_path:
-                rec.image_path = image_path
-            if prov and kind not in rec.prov:
+            # 内容和来源一起替换，缺失的溯源也不能沿用被拒绝版本。
+            filled[key] = (source, value, image_path)
+            if prov:
                 rec.prov[kind] = prov
+            else:
+                rec.prov.pop(kind, None)
             if kind == "tag":
                 rec.tag = value
             else:
                 rec.caption = value
+            records[image_id] = rec
+        if stopped:
+            break
 
-    stats.duplicates = duplicates
+    # 扫完才按侧裁决：被批准的版本可能最后才出现，tag 的批准不能消除 nl 冲突。
+    stats.duplicates = SpillMap()
+    stats.resolved = SpillList()
+    for (image_id, kind), paths in duplicates.items():
+        decision_key = f"{image_id}|{kind}"
+        if picks.get(decision_key) == _content_digest(filled[(image_id, kind)][1]):
+            stats.resolved.append(decision_key)
+        else:
+            combined = stats.duplicates.get(image_id, [])
+            combined.extend(paths)
+            stats.duplicates[image_id] = combined
+    for (image_id, _kind), (source, _value, image_path) in filled.items():
+        rec = records[image_id]
+        if source not in rec.src_files:
+            rec.src_files.append(source)
+        # 保留原来的两侧优先顺序，但路径必须来自该侧最终选中的版本。
+        if image_path and not rec.image_path:
+            rec.image_path = image_path
+        records[image_id] = rec
+    filled.close()
+    duplicates.close()
     stats.idempotent_repeats = idempotent
     stats.found_ids = len(records)
     # 一份产出都没有的目录。目录不存在也算——"没传上来"和"传了个空壳"
@@ -400,9 +451,9 @@ def collect_provenance(
     stats = stats or MergeStats()
     out: dict[str, dict[str, int]] = {}
 
-    for dim in PROVENANCE_DIMS:
-        counter: dict[str, int] = {}
-        for rec in records.values():
+    out = {dim: {} for dim in PROVENANCE_DIMS}
+    for rec in records.values():
+        for dim, counter in out.items():
             # tag_backend 只存在于 tag 文件。这里必须查"有没有"，不能直接
             # 去 rec.prov["tag"]：老产物、手改的产物、只回传了 nl 的产物都
             # 没有这个键，直取会让整个 merge 崩在这儿——而缺溯源只是告警
@@ -415,7 +466,6 @@ def collect_provenance(
             values = {str(rec.prov[k].get(dim) or "(缺失)") for k in available}
             for v in values:
                 counter[v] = counter.get(v, 0) + 1
-        out[dim] = counter
 
     stats.provenance = out
     return out
@@ -433,13 +483,29 @@ def provenance_warnings(prov: dict[str, dict[str, int]]) -> list[str]:
     return msgs
 
 
-def load_shard_plans(path: str | Path) -> list[dict]:
+def load_shard_plans(path: str | Path | Sequence[str | Path]) -> list[dict]:
     """读分包总表（`tagger split` 写的 shards.json）。
 
     分表只有区间（first_id / last_id / count），没有逐条 id。这是刻意的：
     3000 万条逐条落表要 2GB，而区间已经够回答"这个包交了没有"。
     逐条对账仍然靠分发包里的 manifest。
     """
+    if not isinstance(path, (str, Path)):
+        paths = list(dict.fromkeys(Path(p).resolve() for p in path))
+        if len(paths) == 1:
+            return load_shard_plans(paths[0])
+        plans = []
+        for p in paths:
+            for row in load_shard_plans(p):
+                plans.append({**row, "name": f"{p}::{row['name']}"})
+        intervals = [(_seq_of(p["first_id"]), _seq_of(p["last_id"]))
+                     for p in plans if p["count"]]
+        if any(lo is None or hi is None or lo > hi for lo, hi in intervals):
+            raise ValueError("多批分包表包含无效序号区间")
+        intervals.sort()
+        if any(intervals[i - 1][1] >= intervals[i][0] for i in range(1, len(intervals))):
+            raise ValueError("多批分包表序号重叠：请使用上一批分包表续号后再合并")
+        return plans
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     rows = data.get("shards") if isinstance(data, dict) else data
     if not isinstance(rows, list):
@@ -464,8 +530,8 @@ def _seq_of(image_id: str) -> int | None:
     所以"落在某个区间内"可以用来判断一条产出属于哪个包，
     不需要把逐条 id 都载入内存。
     """
-    _, dash, tail = image_id.rpartition("-")
-    if dash and tail.isdigit():
+    tail = image_id.rpartition("-")[2]
+    if tail.isascii() and tail.isdigit():
         return int(tail)
     return None
 
@@ -505,17 +571,25 @@ def coverage_by_shard(
         rows.append(cov)
         prepared.append((cov, lo, hi))
 
-    unassigned: list[str] = []
+    unassigned = SpillList()
+    intervals = sorted((lo, hi, index) for index, (_, lo, hi) in enumerate(prepared)
+                       if lo is not None and hi is not None)
+    starts = [lo for lo, _, _ in intervals]
+    disjoint = all(intervals[i - 1][1] < intervals[i][0] for i in range(1, len(intervals)))
     for image_id, rec in records.items():
         seq = _seq_of(image_id)
         target: ShardCoverage | None = None
         if seq is not None:
-            for cov, lo, hi in prepared:
-                if lo is None or hi is None:
-                    continue
-                if lo <= seq <= hi:
-                    target = cov
-                    break
+            if disjoint:
+                index = bisect_right(starts, seq) - 1
+                if index >= 0 and seq <= intervals[index][1]:
+                    target = prepared[intervals[index][2]][0]
+            else:
+                # 旧总表允许重叠时保留“首个匹配包”的既有语义。
+                for cov, lo, hi in prepared:
+                    if lo is not None and hi is not None and lo <= seq <= hi:
+                        target = cov
+                        break
         if target is None:
             unassigned.append(image_id)
             continue
@@ -524,7 +598,8 @@ def coverage_by_shard(
             target.complete += 1
 
     stats.shard_coverage = rows
-    stats.unassigned_ids = sorted(unassigned)
+    unassigned.sort()
+    stats.unassigned_ids = unassigned
     return rows
 
 
@@ -550,12 +625,14 @@ def check(
 
     if expected_ids is not None:
         stats.expected = len(expected_ids)
-        want = set(expected_ids)
-        stats.missing_ids = sorted(want - set(records))
-        extra = sorted(set(records) - want)
-        if extra:
-            # 多出来的不算错，但说明分发表的分配记录不准，值得知道
-            stats.extra_ids = extra
+        want = SpillMap()
+        for image_id in expected_ids:
+            want[image_id] = True
+        stats.missing_ids = SpillList(i for i in want if i not in records)
+        stats.missing_ids.sort()
+        stats.extra_ids = SpillList(i for i in records if i not in want)
+        stats.extra_ids.sort()
+        want.close()
     else:
         # 没有逐条清单时，分包总表的 count 合计才是"应产出"；
         # 拿 len(records) 当应产出等于自己跟自己比，永远是 100%。
@@ -564,6 +641,11 @@ def check(
 
     want_nl = require in ("nl", "both")
     want_tag = require in ("tag", "both")
+
+    stats.missing_nl = SpillList()
+    stats.missing_tag = SpillList()
+    stats.empty_content = SpillList()
+    stats.complete = 0
 
     for image_id, rec in records.items():
         ok = True
@@ -601,7 +683,7 @@ def _stats_by_artist(
         stem, dash, tail = image_id.rpartition("-")
         return stem if dash and tail.isdigit() else "(无画师)"
 
-    ids = list(expected_ids) if expected_ids is not None else list(records)
+    ids = expected_ids if expected_ids is not None else records
     for image_id in ids:
         a = artist_of(image_id)
         row = out.setdefault(a, {"expected": 0, "got": 0, "complete": 0})
@@ -639,8 +721,9 @@ def build_rows(
     if dataset_name:
         prefix = f"{prefix}/{dataset_name.strip('/')}"
 
-    for image_id in sorted(records):
-        rec = records[image_id]
+    ordered = records.sorted_items() if isinstance(records, SpillMap) else (
+        (key, records[key]) for key in sorted(records))
+    for image_id, rec in ordered:
         yield {
             "image_id": image_id,
             # HF 模式下产物自带 image_path（hf://datasets/<repo>/<shard>#<key>），
@@ -680,24 +763,33 @@ def write_merged(
             return bool(row["caption"])
         return bool(row["tag"])
 
-    if fmt == "json":
-        # 单个 JSON 数组要整表物化——3000 万行没有工具吃得下，这条路径
-        # 只适合小批试跑；正式全量请用默认的 jsonl（边生成边写，不物化）。
-        rows = [r for r in build_rows(records, dataset_name=dataset_name,
-                                      image_root=image_root, image_ext=image_ext)
-                if _keep(r)]
-        out.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n",
-                       encoding="utf-8")
-        return out, len(rows)
-
+    rows = (r for r in build_rows(records, dataset_name=dataset_name,
+                                  image_root=image_root, image_ext=image_ext) if _keep(r))
     written = 0
-    with out.open("w", encoding="utf-8") as f:
-        for row in build_rows(records, dataset_name=dataset_name,
-                              image_root=image_root, image_ext=image_ext):
-            if not _keep(row):
-                continue
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            written += 1
+    tmp: Path | None = None
+    try:
+        # 同目录临时文件：写盘失败保留上一版总表，全部写完才原子替换。
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                          dir=out.parent, prefix=f".{out.name}.",
+                                          suffix=".tmp", delete=False) as f:
+            tmp = Path(f.name)
+            if fmt == "json":
+                f.write("[\n")
+            for row in rows:
+                if fmt == "json" and written:
+                    f.write(",\n")
+                f.write(json.dumps(row, ensure_ascii=False))
+                if fmt != "json":
+                    f.write("\n")
+                written += 1
+            if fmt == "json":
+                f.write("\n]\n")
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(out)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
     return out, written
 
 
@@ -716,16 +808,20 @@ def sample_records(
     固定 seed 是刻意的：同一批数据抽出来的样本必须可复现，
     否则"A 说抽检过了"和"B 说没看到那条"会各说各话。
     """
-    pool = [
-        rec for rec in records.values()
-        if not only_complete or (rec.caption and rec.tag)
-    ]
-    pool.sort(key=lambda r: r.image_id)
-    if len(pool) <= n:
-        return pool
-    rng = random.Random(seed)
-    picked = rng.sample(pool, n)
-    return sorted(picked, key=lambda r: r.image_id)
+    def eligible():
+        ordered = records.sorted_items() if isinstance(records, SpillMap) else (
+            (key, records[key]) for key in sorted(records))
+        for _, rec in ordered:
+            if not only_complete or (rec.caption and rec.tag):
+                yield rec
+
+    # 对排序后的位置抽样，保留旧版 random.sample 的相同 seed 结果；
+    # 两次流式遍历只保留样本，不复制整张总表。
+    total = sum(1 for _ in eligible())
+    if total <= n:
+        return list(eligible())
+    positions = set(random.Random(seed).sample(range(total), n))
+    return [rec for index, rec in enumerate(eligible()) if index in positions]
 
 
 def write_sample_sheet(

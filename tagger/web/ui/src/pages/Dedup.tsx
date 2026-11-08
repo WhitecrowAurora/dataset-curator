@@ -138,8 +138,8 @@ export function Dedup() {
       <PageHeader
         icon={<Copy size={17} />}
         eyebrow="去重"
-        title="发分包前查重复图"
-        description="扫一遍素材的字节哈希与感知哈希，把精确重复和重压缩的相似图列成组。素材文件一个字节不动——产出一份排除清单，发分包时用 split --exclude 把重复图挡在包外。"
+        title="素材查重"
+        description="列出精确重复与重压缩的相似图，产出排除清单；素材文件一个字节不动。"
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>

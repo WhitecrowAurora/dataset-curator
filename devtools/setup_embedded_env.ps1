@@ -40,6 +40,12 @@
     跳过打标运行时（torch/transformers/timm/onnxruntime/datasets，约 2.5 GB）。
     只做打包、不跑打标时可以加，能省十分钟。
 
+.PARAMETER NoLlama
+    跳过 llama.cpp（llama-server）的自动安装，约 570MB。
+    想自己控制版本、或内网下不了 GitHub 时用；之后仍可手动：
+      env\python\python.exe -m tagger.cli llama install
+    它只是 NL 引擎，跳过不影响打 tag、打包与回传。
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File devtools\setup_embedded_env.ps1
 
@@ -56,7 +62,8 @@ param(
     [string]$IndexUrl = "",
     [string]$TorchIndex = "",
     [switch]$Force,
-    [switch]$SkipTag
+    [switch]$SkipTag,
+    [switch]$NoLlama
 )
 
 $ErrorActionPreference = 'Stop'
@@ -306,24 +313,57 @@ if ($SkipTag) {
 }
 
 # ---------------------------------------------------------------- 6. NL 引擎
-# 两个引擎的安装方式完全不同，这里只做"能不能用"的判定并给出下一步：
-#   llamacpp —— 不需要任何 Python 包，只要一个 llama-server.exe。
-#               预编译包 565MB（含 cudart），且必须与 CUDA 版本对得上，
-#               所以不在这里自动下；版本选错会得到一堆看不懂的 kernel 报错。
+# 两个引擎的安装方式完全不同：
+#   llamacpp —— 不需要任何 Python 包，只要一个 llama-server.exe。它是
+#               **默认引擎**，没有它连服务都起不来。安装逻辑全在
+#               tagger/llama_runtime.py（与网页「下载并安装」按钮、CLI
+#               `tagger llama install` 是同一份实现、同一个落点），这里只是
+#               在装完依赖后调它一次，免得"装完 install.bat 还要再点一次按钮"。
+#               它自己会去 GitHub releases 挑 win-cuda / win-vulkan / win-cpu
+#               并连带 cudart 一起下（约 570MB）。
 #   vllm     —— 只有 Linux / WSL2 能装，Windows 上这里永远报"不可用"。
+#
+# 为什么失败不 throw：装不上 llama-server 只影响 NL 打标。硬失败会让
+# "只想打 tag / 只想打包"的人连环境都装不完——和上面 tag 运行时同一个道理。
 Write-Host "[env] NL 引擎:"
-$llamaServer = $env:TAGGER_LLAMA_SERVER
-if (-not $llamaServer -or -not (Test-Path $llamaServer)) {
-    $onPath = Get-Command llama-server -ErrorAction SilentlyContinue
-    if ($onPath) { $llamaServer = $onPath.Source } else { $llamaServer = "" }
-}
-if ($llamaServer) {
-    Write-Host "  llamacpp : OK ($llamaServer)"
+$llamaOk = $false
+$llamaReason = ""
+if ($NoLlama) {
+    Write-Host "  llamacpp : 跳过（-NoLlama）"
+    $llamaReason = 'skipped'
 } else {
-    Write-Host "  llamacpp : 未安装（Windows 原生唯一的 GPU 路径）"
-    Write-Host "             从 llama.cpp 的 releases 下 llama-*-bin-win-cuda-*.zip"
-    Write-Host "             与同版本 cudart-*.zip，解压后设："
-    Write-Host "               setx TAGGER_LLAMA_SERVER D:\llama\llama-server.exe"
+    # 先探一次：已经装过（或 PATH 里有）就不重下 570MB。
+    # status() 是纯本地查询（不联网、不跑 nvidia-smi），几十毫秒。
+    $envPy = Join-Path $pyDir 'python.exe'
+    $statusJson = ""
+    try {
+        $statusJson = & $envPy -c "import json,sys;from tagger import llama_runtime as r;print(json.dumps(r.status()))" 2>$null
+    } catch { $statusJson = "" }
+    $st = $null
+    if ($statusJson) { try { $st = $statusJson | ConvertFrom-Json } catch { $st = $null } }
+
+    if ($st -and $st.installed) {
+        Write-Host "  llamacpp : OK ($($st.binary))"
+        if ($st.version) { Write-Host "             构建 $($st.version)" }
+        $llamaOk = $true
+    } elseif ($st -and -not $st.supported) {
+        Write-Host "  llamacpp : 当前平台（$($st.platform)）没有官方预编译包"
+        Write-Host "             需要自己编译，然后设 TAGGER_LLAMA_SERVER 指向 llama-server"
+        $llamaReason = 'unsupported'
+    } else {
+        Write-Host "  llamacpp : 未安装，开始下载（约 570MB，含 cudart）…"
+        # llama install 是同步的：内部起线程并轮询到结束，出错时返回非 0。
+        $code = Invoke-Native $py @('-m', 'tagger.cli', 'llama', 'install')
+        if ($code -eq 0) {
+            Write-Host "  llamacpp : OK"
+            $llamaOk = $true
+        } else {
+            $llamaReason = 'download-failed'
+            Write-Host "  llamacpp : 自动安装失败（退出码 $code）"
+            Write-Host "             GitHub 不通时先设 HTTPS_PROXY，或手动下 zip 后："
+            Write-Host "               env\python\python.exe -m tagger.cli llama install --zip D:\llama.zip"
+        }
+    }
 }
 $vllmCmd = Get-Command vllm -ErrorAction SilentlyContinue
 if ($vllmCmd -and $env:OS -ne 'Windows_NT') {
@@ -346,14 +386,39 @@ if ($webCode -ne 0) {
 $helpCode = Invoke-Native $py @('-m', 'tagger.cli', '--help') -Quiet
 Write-Host "  tagger.cli --help: $(if ($helpCode -eq 0) { 'OK' } else { "失败（退出码 $helpCode）" })"
 
+# 模型权重单独探：装完环境不等于能打标。tiers.yaml 默认指向 abliterated
+# 破限版，而那份 GGUF 是要另外下的（几 GB）。不在这里说清楚，用户点下
+# 「启动服务」拿到的会是"GGUF 权重不存在"，但原因和他刚才跑的 install 无关。
+Write-Host "[env] 模型权重:"
+try {
+    $wJson = & $envPy -c "import json;from tagger.config import load_tier_table, resolve_profile;from tagger.hardware import query_gpus;t=load_tier_table();g=query_gpus();p=resolve_profile(t,g[0]) if g else None;print(json.dumps({'key':p.model.key if p else '','gguf':str(p.model.gguf or '') if p else '','mmproj':str(p.model.mmproj or '') if p else ''}))" 2>$null
+    $w = $null
+    if ($wJson) { try { $w = $wJson | ConvertFrom-Json } catch { $w = $null } }
+    if ($w -and $w.gguf) {
+        $ggufPath = $w.gguf
+        if (-not [System.IO.Path]::IsPathRooted($ggufPath)) { $ggufPath = Join-Path $repo $ggufPath }
+        if (Test-Path $ggufPath) {
+            Write-Host "  $($w.key) : OK"
+        } else {
+            Write-Host "  $($w.key) : 权重未下载"
+            Write-Host "             打开界面 →「模型管理」→ 点该条目的「下载」"
+            Write-Host "             （破限版从 mradermacher 的 GGUF 仓库取，约 3~6GB）"
+        }
+    }
+} catch {
+    Write-Host "  （无法解析分档表，跳过）"
+}
+
 Write-Host ""
 Write-Host "[env] 完成。用法："
 Write-Host "       .\tagger.cmd --help"
 Write-Host "       env\python\python.exe -m pytest"
 Write-Host "  起 NL 服务（Windows 原生）："
 Write-Host "       env\python\python.exe -m tagger.cli serve --engine llamacpp"
-Write-Host "  装 llama-server（网页上也有按钮）："
-Write-Host "       env\python\python.exe -m tagger.cli llama install"
+if (-not $llamaOk) {
+    Write-Host "  装 llama-server（网页上也有按钮）："
+    Write-Host "       env\python\python.exe -m tagger.cli llama install"
+}
 if ($SkipTag) {
     Write-Host "  注意：本次用了 -SkipTag，打标运行时没装，跑打标前重跑 install.bat"
 }

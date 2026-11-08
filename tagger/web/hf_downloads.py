@@ -34,6 +34,20 @@ def _gb(n: float) -> str:
     return f"{n / _TG:.1f} GB"
 
 
+def global_proxy() -> str:
+    """这台机器上网用的代理。空 = 直连。
+
+    单独一个函数而不是在 __init__ 里读一次：用户可能不改配置就换了代理，
+    页面上的"保存"必须立刻反映到下一次快照里。
+    """
+    try:
+        from .models import proxy_url
+
+        return str(proxy_url() or "")
+    except Exception:                    # noqa: BLE001 - 读不到就按直连
+        return ""
+
+
 class HfDownloads:
     """分片下载队列。进程内单例（由 app.py 懒加载）。"""
 
@@ -114,6 +128,10 @@ class HfDownloads:
             "reserve_bytes": self._reserve_bytes,
             "running": sum(1 for i in items if i["status"] == "running"),
             "queued": sum(1 for i in items if i["status"] == "queued"),
+            # 全局代理：下载页要在输入框里回填它。与打标任务的 hf_proxy、
+            # 模型下载共用同一份（models.proxy_url），三处不一致最容易让人
+            # 以为"代理坏了"。
+            "proxy": global_proxy(),
         }
 
     def cancel(self, item_id: str) -> bool:
@@ -157,6 +175,46 @@ class HfDownloads:
         with self._lock:
             self._reserve_bytes = max(0, int(reserve_bytes))
             self._save()
+
+    def packs(self) -> list[dict]:
+        """缓存根下已有的"离线包"（每个仓库一个目录）。
+
+        给打标页面用：下载页把分片备好之后，用户不该再去填一遍 HF 仓库
+        （那会重新走网络），而是直接从"已下载的离线包"里挑一个。
+
+        目录名是 `org--name`（见 hf_source.cache_dir_for），这里反解回来；
+        解不出来的目录（用户手工放的、早期版本留下的）也给出来，用目录名当
+        repo 标识——**能选上比"名字好看"重要**。
+        """
+        root = self.cache_root
+        out: list[dict] = []
+        if not root.is_dir():
+            return out
+        for sub in sorted(root.iterdir()):
+            if not sub.is_dir():
+                continue
+            files: list[dict] = []
+            total = 0
+            for path in sorted(sub.rglob("*")):
+                if not path.is_file() or path.name.endswith(".part"):
+                    continue
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                files.append({"filename": path.relative_to(sub).as_posix(),
+                              "bytes": size})
+                total += size
+            if not files:
+                continue
+            out.append({
+                "repo": sub.name.replace("--", "/"),
+                "dir": str(sub),
+                "files": files,
+                "count": len(files),
+                "bytes": total,
+            })
+        return out
 
     def cached(self, repo: str) -> list[dict]:
         """这个仓库在本地已经下好的分片（不含 .part 半截文件）。"""
@@ -300,3 +358,9 @@ class HfDownloads:
         except OSError:
             # 状态写不下去只是"重启后列表丢了"，不该影响正在下的任务
             pass
+
+
+# app.py 持有的进程级单例。与 MANAGER / DEDUPS / UPLOADS 同一模式。
+# 落一份 state 到 run/ 下：重启后队列里的条目还在（running 的会被重排成
+# queued 并靠 .part 续传），否则用户看不到"上次下到哪了"。
+DOWNLOADS = HfDownloads(state_path=Path("run") / "hf-downloads.json")

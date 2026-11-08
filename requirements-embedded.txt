@@ -38,6 +38,29 @@ PyYAML==6.0.3
 socksio==1.0.0
 typing_extensions==4.16.0
 
+# ---- 素材解包（containers.py）----
+# 这两个是**纯 Python**（各约 1MB），不拉任何重依赖，所以并进主清单。
+# pyzipper：AES-256 加密的 zip。7-Zip / WinRAR 默认就是这种，素材包里极常见。
+#   `_open_zip` 里那条路径是 zipfile 抛 RuntimeError 之后的**兜底**，没有
+#   try 包住——缺了它读到加密包会直接抛 ImportError，而不是提示"不支持"。
+# py7zr：7z 支持。同理，缺了 `_names_7z` 会静默返回空列表，
+#   表现成"这个包里的图一张都没读到"，比报错更难查。
+pyzipper==0.4.0
+py7zr==1.1.4
+# rar 不在清单里：rarfile 只是外壳，真解压要外部 unrar.exe（WinRAR / 7-Zip
+# 自带），装了 Python 包也不能保证能读。describe_backends() 会把它报成
+# "需要外部 unrar"，页面照实显示，不伪装成可用。
+
+# ---- 杂项 ----
+# huggingface_hub：cpu_tagger 的 `_resolve_dir` 按仓库名下模型走
+#   snapshot_download（几个 CLIP 打分模型就是这样加载的）；web/downloads
+#   也用它读 HF token。它只有 ~5MB，依赖的 requests/filelock/fsspec/tqdm
+#   本来就在树里。prune-env.bat 里已从删除名单中摘出来。
+huggingface_hub==2.4.0
+# psutil：拆包时按可用内存砍并发。缺了会被 except 吞掉、并发不降，
+#   表现是"内存不够时整台机器被拖死"而不是报错。纯 C 扩展，很小。
+psutil==7.2.2
+
 # ---- Web UI ----
 # 壳子（Tagger.Shell）唯一的入口就是 `python -m tagger.cli web`，下面这些是它的
 # 硬依赖。它们原先漏在这份清单之外，只有开发机手动装过——别人跑完 install.bat

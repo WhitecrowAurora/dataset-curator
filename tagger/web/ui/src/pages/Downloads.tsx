@@ -240,8 +240,8 @@ export function Downloads() {
       <PageHeader
         icon={<HardDriveDownload size={17} />}
         eyebrow="下载"
-        title="提前把分片备到本地"
-        description="按剩余空间排队下载，一片一片落盘。下好的分片会被打标任务直接命中，处理完自动删除——网络差的机器用硬盘换速度，网络好的不下载就继续流式读。"
+        title="分片下载"
+        description="按剩余空间排队把分片备到本地；打标任务直接命中，处理完自动删除。"
         actions={
           active ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void cancelAll()}>

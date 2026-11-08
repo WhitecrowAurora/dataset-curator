@@ -1,0 +1,518 @@
+diff --git a/tagger/web/app.py b/tagger/web/app.py
+index b3a9f3d..cf46622 100644
+--- a/tagger/web/app.py
++++ b/tagger/web/app.py
+@@ -18,6 +18,7 @@ from __future__ import annotations
+ 
+ import contextlib
+ import io
++import os
+ import platform
+ import sys
+ import threading
+@@ -27,17 +28,19 @@ from pathlib import Path
+ from typing import Any
+ 
+ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+-from fastapi.responses import HTMLResponse, Response
++from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+ from fastapi.staticfiles import StaticFiles
+ from pydantic import BaseModel, Field
+ 
+ from ..config import ConfigError
+ from ..local_tag import EXTS
+ from ..pipeline import plan_inputs, plan_stats
++from ..quantize import QUANT
+ from .jobs import MANAGER, STAT_FINE, Job, JobSpec
+ from .uploads import UPLOADS, parquet_rows
+ from .dedup import DEDUPS
+ from .packaging import DATAJOBS
++from .hf_downloads import DOWNLOADS
+ from .vllm_service import VLLM
+ 
+ UI_DIR = Path(__file__).resolve().parent / "ui"
+@@ -98,6 +101,17 @@ class JobRequest(BaseModel):
+     hf_token: str = ""
+     hf_revision: str = "main"
+     hf_files: list[str] = Field(default_factory=list)
++    # auto = 有 parquet 就流式读，否则按 tar 分片下载。两种模式的磁盘行为
++    # 完全不同，所以表单上能看见并显式选。
++    hf_format: str = "auto"
++    # tar 模式：预取几片（下载与打标并行，0 = 严格串行）
++    hf_prefetch: int = 1
++    # 单片开几条并发连接（国内单条 TCP 常被限速，多连接才跑得满）
++    hf_conns: int = 4
++    # HF 请求走的代理。空 = 用设置里的全局代理
++    hf_proxy: str = ""
++    # 给产物留的磁盘余量（GB）；0 = 自动（最大分片的 30%，不少于 2 GB）
++    hf_reserve_gb: float = 0.0
+ 
+     # ---- 产物形态（vlm 引擎：parquet 回传给汇总机）
+     artifact_format: str = "parquet"
+@@ -164,6 +178,39 @@ class DataPreviewRequest(BaseModel):
+     limit: int = 0
+ 
+ 
++class HfFilesRequest(BaseModel):
++    """列仓库分片。
++
++    token 走请求体而不是 query string：query 会原样进 uvicorn 的 access log，
++    私有仓库的凭证留在日志里比留在内存里危险得多。
++    `format` 为空/auto 时由后端探测（有 parquet 按 parquet，否则按 tar），
++    这样"这个仓库到底是什么形态"不用用户猜。
++    """
++    repo: str
++    token: str = ""
++    revision: str = "main"
++    format: str = "auto"
++    proxy: str = ""
++
++
++class DownloadsStartRequest(BaseModel):
++    """把选中的分片下到本地缓存（不排队等 GPU）。"""
++    repo: str
++    files: list[str] = Field(default_factory=list)
++    # 表单读到的大小表：用它算"这一片放不放得下"，省掉后端再列一次
++    sizes: dict[str, int] = Field(default_factory=dict)
++    token: str = ""
++    revision: str = "main"
++    conns: int = 4
++    proxy: str = ""
++    # 给产物留的余量（GB）。0 = 用管理器当前的设置
++    reserve_gb: float = 0.0
++
++
++class ProxyRequest(BaseModel):
++    url: str = ""
++
++
+ class VllmStartRequest(BaseModel):
+     """本机拉起 vLLM。端口改成非默认值时，任务表单里的服务地址要一起改。
+ 
+@@ -173,12 +220,28 @@ class VllmStartRequest(BaseModel):
+     """
+     port: int = 8000
+     timeout_s: int = 900
++    engine: str | None = None
+     model: str | None = None
+     tier: str | None = None
++    precision: str | None = None
+     served_name: str | None = None
+     max_num_seqs: int | None = None
+     max_num_batched_tokens: int | None = None
+     gpu_mem: float | None = None
++    # file:// 传图要服务端放行的根目录。漏了这一项，页面勾了"直传路径"、
++    # 服务端也没收到参数，症状是每张图 400——比直接报错难查得多。
++    local_media_root: str | None = None
++
++
++class QuantStartRequest(BaseModel):
++    """页内 W4A16 量化。out_dir 留空 = 按模型 key 落 models/nl/<key>-w4a16。
++
++    method 只认 gptq / awq（见 quantize.QUANT_METHODS）；别的由服务层抛
++    ValueError，HTTP 层映射成 400。
++    """
++    model: str | None = None
++    out_dir: str | None = None
++    method: str | None = None
+ 
+ 
+ # ---------------------------------------------------------------- 环境信息
+@@ -355,6 +418,44 @@ def _thumbnail_bytes(data: bytes, width: int) -> bytes:
+ 
+ # ---------------------------------------------------------------- 目录浏览
+ 
++def _list_drives() -> list[dict]:
++    """所有盘符 + 卷标；非 Windows 返回空表。
++
++    前端"选输入"要能一步换盘。没有它，用户想从 H: 跳到 D: 只能靠「上一级」
++    一路翻到根、再靠猜——素材散在几个盘上是常事，这一格省的是真时间。
++
++    卷标只对本地盘/可移动盘去问：映射的网络盘掉线时 GetVolumeInformationW
++    会卡几百毫秒到几秒，而这一步是每次点目录都要走的，不值得。
++    """
++    if os.name != "nt":
++        return []
++    import ctypes
++
++    k32 = ctypes.windll.kernel32
++    mask = k32.GetLogicalDrives()
++    out: list[dict] = []
++    for i in range(26):
++        if not mask & (1 << i):
++            continue
++        letter = chr(ord("A") + i)
++        if letter in ("A", "B"):
++            continue  # 软驱遗留盘符
++        root = f"{letter}:\\"
++        label = ""
++        # 2 = 可移动，3 = 本地固定盘
++        if k32.GetDriveTypeW(ctypes.c_wchar_p(root)) in (2, 3):
++            buf = ctypes.create_unicode_buffer(261)
++            try:
++                if k32.GetVolumeInformationW(
++                    ctypes.c_wchar_p(root), buf, 261, None, None, None, None, 0
++                ):
++                    label = buf.value
++            except OSError:
++                label = ""
++        out.append({"path": root, "label": label})
++    return out
++
++
+ def _list_dirs(path: Path) -> dict:
+     """给"选输入"用的极简浏览器。子目录 + 当前层图片/zip 数量。
+ 
+@@ -403,6 +504,9 @@ def _list_dirs(path: Path) -> dict:
+         "images": own,
+         "zips": zips,
+         "dirs": dirs,
++        # 每次点目录都带上：盘符是常量级开销（不查网络盘卷标），
++        # 比让前端另开一个接口、再自己对齐时序省事。
++        "drives": _list_drives(),
+     }
+ 
+ 
+@@ -771,22 +875,134 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
+         job = DATAJOBS.get(job_id)
+         return {"ok": True, "snapshot": job.snapshot() if job else None}
+ 
+-    @app.get("/api/hf/files")
+-    def hf_files(repo: str = "", token: str = "", revision: str = "main") -> dict:
+-        """仓库里的分片清单，供表单"查看文件列表"。token 只在本次请求内
+-        使用：不落盘、不进日志、不进任何任务状态。"""
++    @app.post("/api/hf/files")
++    def hf_files(req: HfFilesRequest) -> dict:
++        """仓库里的分片清单，带每个分片的大小。
++
++        为什么带大小：下载页要靠它算"这一片放不放得下"、表单要靠它显示
++        "全选会占多少 GB"。只给文件名的话，这两件事都得等下完才知道。
++
++        token 只在本次请求内使用：不落盘、不进日志、不进任何任务状态。
++        走 POST body 而不是 query，正是为了不让它进 access log。
++        """
+         from .. import hf_source
+ 
+-        if not repo.strip():
+-            raise HTTPException(400, "缺少 repo")
++        repo = (req.repo or "").strip()
++        if not repo:
++            raise HTTPException(400, "缺少仓库名（形如 org/name）")
++        token = (req.token or "").strip() or None
++        revision = (req.revision or "main").strip() or "main"
++        # 表单没填代理就用全局那份：代理是"这台机器怎么上网"，不该按页面各配一套
++        proxy = (req.proxy or "").strip() or DOWNLOADS.snapshot().get("proxy", "")
++        want = (req.format or "auto").strip().lower()
++        if want not in ("auto", "parquet", "webdataset"):
++            raise HTTPException(
++                400, f"format 只能是 auto / parquet / webdataset，收到 {req.format!r}")
+         try:
+-            names = hf_source.list_parquet(repo.strip(), revision=revision,
+-                                           token=token or None)
++            if want == "auto":
++                fmt = hf_source.detect_format(repo, revision=revision,
++                                              token=token, proxy=proxy)
++                if not fmt:
++                    raise hf_source.HFError(
++                        f"{repo} 里既没有 *.parquet 也没有 *.tar。确认它是 "
++                        f"**dataset** 仓库（不是 model），且文件已经上传完。")
++            else:
++                fmt = want
++            pattern = "*.parquet" if fmt == "parquet" else "*.tar"
++            sized = hf_source.list_shards_sized(
++                repo, revision=revision, pattern=pattern,
++                token=token, proxy=proxy)
+         except hf_source.HFError as exc:
+             raise HTTPException(400, f"HF 访问失败：{exc}") from exc
+         except Exception as exc:          # noqa: BLE001 - 网络/权限统一翻 400
+             raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+-        return {"repo": repo.strip(), "revision": revision, "files": names}
++        return {
++            "repo": repo,
++            "revision": revision,
++            "format": fmt,
++            "files": [name for name, _ in sized],
++            "sizes": {name: size for name, size in sized},
++            "total_bytes": sum(size for _, size in sized),
++        }
++
++    # ---- HF 分片下载（与打标任务解耦，共用 run/hf-cache/）
++
++    @app.get("/api/downloads")
++    def downloads_state() -> dict:
++        """下载队列快照。页面每秒拉一次，不推 WS：进度是慢变量。"""
++        return DOWNLOADS.snapshot()
++
++    @app.get("/api/downloads/packs")
++    def downloads_packs() -> dict:
++        """本地已下载好的"离线包"清单，供打标页直接选用。
++
++        每个 pack 就是缓存里的一个仓库目录：选了它，任务按**本地分片**跑，
++        不再走网络——这正是"先下好、再开跑"的用法。
++        """
++        packs = DOWNLOADS.packs()
++        return {
++            "cache_root": str(DOWNLOADS.cache_root),
++            "packs": packs,
++            "free_bytes": DOWNLOADS.snapshot().get("free_bytes", 0),
++        }
++
++    @app.get("/api/downloads/cached")
++    def downloads_cached(repo: str = "") -> dict:
++        """这个仓库已经下到本地的分片（不含 .part 半截文件）。"""
++        key = (repo or "").strip()
++        if not key:
++            raise HTTPException(400, "缺少仓库名")
++        return {"repo": key, "files": DOWNLOADS.cached(key)}
++
++    @app.post("/api/downloads/start", status_code=202)
++    def downloads_start(req: DownloadsStartRequest) -> dict:
++        if req.reserve_gb > 0:
++            DOWNLOADS.set_reserve(int(req.reserve_gb * (1 << 30)))
++        try:
++            created = DOWNLOADS.submit(
++                req.repo, req.files, sizes=req.sizes, token=req.token,
++                revision=req.revision, conns=req.conns, proxy=req.proxy)
++        except ValueError as exc:
++            raise HTTPException(400, str(exc)) from exc
++        return {"created": created, "snapshot": DOWNLOADS.snapshot()}
++
++    @app.post("/api/downloads/{item_id}/cancel")
++    def downloads_cancel(item_id: str) -> dict:
++        if not DOWNLOADS.cancel(item_id):
++            raise HTTPException(404, "没有这条下载")
++        return {"ok": True, "snapshot": DOWNLOADS.snapshot()}
++
++    @app.post("/api/downloads/cancel_all")
++    def downloads_cancel_all() -> dict:
++        DOWNLOADS.cancel_all()
++        return {"ok": True, "snapshot": DOWNLOADS.snapshot()}
++
++    @app.post("/api/downloads/clear")
++    def downloads_clear() -> dict:
++        """清掉已结束的条目。**不删磁盘上的分片**——那是打标任务的输入。"""
++        return {"removed": DOWNLOADS.clear_finished(),
++                "snapshot": DOWNLOADS.snapshot()}
++
++    # ---- 全局代理（下载页 / 打标任务 / 模型下载共用同一份）
++
++    @app.get("/api/proxy")
++    def proxy_get() -> dict:
++        from .models import proxy_url
++
++        return {"proxy": proxy_url()}
++
++    @app.post("/api/proxy")
++    def proxy_set(req: ProxyRequest) -> dict:
++        from .models import set_proxy
++
++        res = set_proxy(req.url)
++        return {"proxy": res.get("proxy", "")}
++
++    @app.post("/api/proxy/test")
++    def proxy_test(req: ProxyRequest) -> dict:
++        from .models import test_proxy
++
++        return test_proxy(req.url)
+ 
+     # ---- vLLM 服务（NL 模式的前置）
+ 
+@@ -799,18 +1015,21 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
+     def vllm_start(req: VllmStartRequest) -> dict:
+         try:
+             return VLLM.start(port=req.port, timeout_s=req.timeout_s,
++                              engine=req.engine,
+                               model=req.model, tier=req.tier,
++                              precision=req.precision,
+                               served_name=req.served_name,
+                               max_num_seqs=req.max_num_seqs,
+                               max_num_batched_tokens=req.max_num_batched_tokens,
+-                              gpu_mem=req.gpu_mem)
++                              gpu_mem=req.gpu_mem,
++                              local_media_root=req.local_media_root)
+         except RuntimeError as exc:
+             raise HTTPException(409, str(exc)) from exc
+         except (ValueError, ConfigError) as exc:
+             raise HTTPException(400, str(exc)) from exc
+ 
+     @app.get("/api/vllm/plan")
+-    def vllm_plan(model: str = "", tier: str = "",
++    def vllm_plan(model: str = "", tier: str = "", precision: str = "",
+                   max_num_seqs: int | None = None,
+                   max_num_batched_tokens: int | None = None,
+                   gpu_mem: float | None = None) -> dict:
+@@ -818,8 +1037,12 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
+ 
+         参数与 /start 同名同义，只是不真的起进程。解析失败（模型 key 写错、
+         卡不支持该精度）也在这里变成一句话，而不是几分钟后的一段 traceback。
++
++        `precision` 必须透传：漏了它，页面选 int4 也会得到一份 bf16 的分档与
++        显存预估，而那正是"选了 4bit 却还是 16G 卡 OOM"的来源。
+         """
+         return VLLM.plan(model=model or None, tier=tier or None,
++                         precision=precision or None,
+                          max_num_seqs=max_num_seqs,
+                          max_num_batched_tokens=max_num_batched_tokens,
+                          gpu_mem=gpu_mem)
+@@ -828,11 +1051,74 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
+     def vllm_stop() -> dict:
+         return VLLM.stop()
+ 
++    @app.get("/api/vllm/capability")
++    def vllm_capability(engine: str = "vllm") -> dict:
++        """这台机器现在能不能把指定引擎跑起来。
++
++        新建任务页一进来就查（决定「启动服务」按不按得动）。没有它，前端
++        调用会抛 TypeError，整个 React 树挂掉，用户看到的就是一片黑。
++        """
++        ok, reason = VLLM.local_capability(engine)
++        return {"engine": engine, "ok": ok, "reason": reason}
++
++    @app.get("/api/disk")
++    def disk(path: str = "") -> dict:
++        """目标路径所在卷的剩余空间。
++
++        填预取片数 / 磁盘余量时要看的就是这个数。路径可能还不存在
++        （用户正在敲），所以沿父目录往上找到第一个存在的位置再问。
++        """
++        import shutil
++
++        raw = (path or "").strip() or "."
++        probe = Path(raw).expanduser()
++        try:
++            probe = probe.resolve()
++        except OSError:
++            probe = Path(raw)
++        while not probe.exists() and probe.parent != probe:
++            probe = probe.parent
++        try:
++            usage = shutil.disk_usage(str(probe))
++        except OSError as exc:
++            raise HTTPException(400, f"读不到 {probe} 的磁盘信息：{exc}") from exc
++        return {
++            "path": str(probe),
++            "free_bytes": usage.free,
++            "total_bytes": usage.total,
++        }
++
+     @app.get("/api/vllm/probe")
+     def vllm_probe(url: str = "") -> dict:
+         """远程服务只能探：/health 说明活着，/v1/models 说明模型名对不对。"""
+         return VLLM.probe(url)
+ 
++    # ---- 页内量化（W4A16）
++    #
++    # 这是几十分钟的长任务，HTTP 层只做三件事：透传、把"能不能跑/跑没跑完"
++    # 如实吐出去、把异常翻译成页面能显示的话。真正的状态机在 quantize.py。
++
++    @app.get("/api/vllm/quantize")
++    def quantize_state(model: str = "") -> dict:
++        """弹窗一打开就拉一次：依赖齐不齐、有没有现成 4bit 权重、默认落哪。"""
++        return QUANT.snapshot(model or None)
++
++    @app.post("/api/vllm/quantize/start", status_code=202)
++    def quantize_start(req: QuantStartRequest) -> dict:
++        try:
++            return QUANT.start(model_key=req.model or None,
++                               out_dir=req.out_dir or None,
++                               method=req.method or "gptq")
++        except RuntimeError as exc:          # 已经在跑
++            raise HTTPException(409, str(exc)) from exc
++        except (ValueError, ConfigError) as exc:   # 路径越界 / 缺依赖
++            raise HTTPException(400, str(exc)) from exc
++
++    @app.post("/api/vllm/quantize/cancel")
++    def quantize_cancel() -> dict:
++        """没任务在跑时返回空对象：页面按"没东西可停"处理，不当错误。"""
++        return QUANT.cancel() or {}
++
+     # ---- 图片
+ 
+     @app.get("/api/jobs/{job_id}/thumb/{image_id:path}")
+@@ -923,48 +1209,24 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
+ 
+     # ---- 静态前端
+ 
+-    if (dist / "index.html").is_file():
+-        app.mount("/", StaticFiles(directory=str(dist), html=True), name="ui")
+-    else:
+-        @app.get("/", response_class=HTMLResponse)
+-        def not_built() -> str:
+-            return _NOT_BUILT_HTML
+-
+-    return app
+-
+-
+-async def asyncio_sleep(seconds: float) -> None:
+-    """薄封装：让上面的循环不必 import asyncio（也方便测试里 monkeypatch）。"""
+-    import asyncio
+-
+-    await asyncio.sleep(seconds)
+-
+-
+-_NOT_BUILT_HTML = """<!doctype html><meta charset="utf-8">
+-<title>Tagger UI</title>
+-<style>
+- body{margin:0;height:100vh;display:grid;place-items:center;
+-      background:#111418;color:#e6e9ef;
+-      font:15px/1.7 "Segoe UI",system-ui,sans-serif}
+- code{background:#1b2027;padding:2px 6px;border-radius:4px;color:#ee4c2c}
+- pre{background:#1b2027;padding:16px 20px;border-radius:8px;line-height:1.9}
+- .card{max-width:640px;padding:32px 36px;border:1px solid #252b34;border-radius:12px}
+- h1{margin:0 0 12px;font-size:20px}
+- p{color:#9aa4b2;margin:8px 0}
+-</style>
+-<div class=card>
+-  <h1>前端还没构建</h1>
+-  <p>后端是活的（<code>/api/health</code> 能通），但 <code>tagger/web/ui/dist</code>
+-     里没有 <code>index.html</code>。</p>
+-  <p>构建一次（需要 Node 18+）：</p>
+-  <pre>cd tagger/web/ui
+-npm install
+-npm run build</pre>
+-  <p>开发时更省事：<code>npm run dev</code> 起在 3010，已把 <code>/api</code>
+-     与 <code>/ws</code> 代理到本服务。</p>
+-</div>
+-"""
++    # 前端是客户端路由（/runjob、/downloads 这些路径磁盘上都没有对应文件），
++    # 直接刷新或从外链进来会 404。除 /api 与 /ws 外的 404 一律交还 index.html，
++    # 由前端自己解析路径。
++    from starlette.exceptions import HTTPException as StarletteHTTPException
++
++    @app.exception_handler(StarletteHTTPException)
++    async def _spa_fallback(request, exc):       # noqa: ANN001 - Starlette 签名
++        path = request.url.path
++        if exc.status_code != 404 or path.startswith(("/api", "/ws")):
++            return JSONResponse({"detail": exc.detail},
++                                status_code=exc.status_code)
++        index = dist / "index.html"
++        if index.is_file():
++            return FileResponse(index)
++        return JSONResponse({"detail": "界面还没构建：先跑 npm run build"},
++                            status_code=404)
+ 
++    if (dist / "index.html").is_file():
+         app.mount("/", StaticFiles(directory=str(dist), html=True), name="ui")
+     else:
+         @app.get("/", response_class=HTMLResponse)
+@@ -1005,20 +1267,3 @@ npm run build</pre>
+      与 <code>/ws</code> 代理到本服务。</p>
+ </div>
+ """
+-
+- .card{max-width:640px;padding:32px 36px;border:1px solid #252b34;border-radius:12px}
+- h1{margin:0 0 12px;font-size:20px}
+- p{color:#9aa4b2;margin:8px 0}
+-</style>
+-<div class=card>
+-  <h1>前端还没构建</h1>
+-  <p>后端是活的（<code>/api/health</code> 能通），但 <code>tagger/web/ui/dist</code>
+-     里没有 <code>index.html</code>。</p>
+-  <p>构建一次（需要 Node 18+）：</p>
+-  <pre>cd tagger/web/ui
+-npm install
+-npm run build</pre>
+-  <p>开发时更省事：<code>npm run dev</code> 起在 3010，已把 <code>/api</code>
+-     与 <code>/ws</code> 代理到本服务。</p>
+-</div>
+-"""

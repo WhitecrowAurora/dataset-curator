@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark" data-theme="dark"><head>
+  <meta charset="UTF-8">
+  <title>diag</title>
+  <script>
+    window.__errs = [];
+    window.addEventListener('error', function (e) {
+      window.__errs.push('ERROR: ' + (e.message || e.type) + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''));
+      document.body.setAttribute('data-err', window.__errs.join(' || '));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      window.__errs.push('REJECT: ' + (e.reason && e.reason.stack ? e.reason.stack : e.reason));
+      document.body.setAttribute('data-err', String(e.reason));
+    });
+  </script>
+</head>
+<body data-err="ERROR: Uncaught TypeError: ye.vllmCapability is not a function @ http://127.0.0.1:28080/assets/index-h2sNLyOr.js:387">
+  <div id="root"></div>
+  <script type="module" src="/assets/index-h2sNLyOr.js"></script>
+
+
+</body></html>

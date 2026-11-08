@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from .tag_preprocess import normalize_preprocess, tensor_prep_plan as _tensor_prep_plan
+
 # WD 词表的 category 编号（selected_tags.csv 的 category 列）
 # 9 = rating（general/sensitive/nsfw/explicit）。这个必须单列出来：
 # 不加这一条，rating 会落进 default 分支被当成 general 保留下来，
@@ -120,7 +122,8 @@ class TagBackend(ABC):
                  thresholds: dict[str, float] | None = None,
                  max_tags: int = 160, verbose: bool = True,
                  precision: str = "fp32", batch_size: int = 1,
-                 use_graph: bool = True):
+                 use_graph: bool = True, prefetch: bool = True,
+                 preprocess: str = "pil"):
         self.keep = tuple(keep)
         self.thresholds = dict(thresholds or {})
         self.max_tags = max_tags
@@ -131,6 +134,8 @@ class TagBackend(ABC):
         self.batch_size = max(1, int(batch_size))
         # 基类只收着，不实现：CUDA Graph 目前只有 wd-eva02 有。
         self.use_graph = bool(use_graph)
+        self.preprocess = normalize_preprocess(preprocess)
+        self.prefetch = bool(prefetch)
         # 上一次 predict_batch 的耗时拆分（毫秒）。给 --stats-json 用：
         # "tag" 这一段混着解码和前向，只看合数根本判断不了该优化哪边——
         # 实测 PNG 解码 33 ms、前向 26~63 ms，比例随精度和格式翻来覆去。
@@ -364,6 +369,7 @@ class WDEva02Tagger(TagBackend):
         self.prefetch = prefetch
         self._model = None
         self._transform = None
+        self._tensor_prep = None
         self._graph: _CudaGraph | None = None
         self._names: list[str] = []
         self._categories: list[str] = []
@@ -409,7 +415,11 @@ class WDEva02Tagger(TagBackend):
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         arch = cfg.get("architecture") or "eva02_large_patch14_448"
         num_classes = int(cfg.get("num_classes") or 0)
-        img_size = int((cfg.get("model_args") or {}).get("img_size") or 448)
+        model_args = dict(cfg.get("model_args") or {})
+        img_size = int(model_args.get("img_size") or 448)
+        model_args.update(num_classes=num_classes, img_size=img_size)
+        if cfg.get("global_pool") is not None:
+            model_args.setdefault("global_pool", cfg["global_pool"])
 
         # 先把词表读完并和分类头对账，再加载 1.3 GB 权重：词表坏了要立刻报，
         # 不该等到读盘读了几十秒之后。
@@ -417,8 +427,11 @@ class WDEva02Tagger(TagBackend):
         _check_vocab_against_head(len(self._names), num_classes,
                                   csv_path=csv_path, model_id=self.model_id)
 
+        # 权重对应的 RoPE 尺寸、裁剪和归一化都在本地配置里；只传架构名
+        # 会套用 timm 原始模型的默认值，形状匹配但推理结果不正确。
         model = timm.create_model(arch, pretrained=False,
-                                  num_classes=num_classes, img_size=img_size)
+                                  pretrained_cfg=cfg.get("pretrained_cfg") or None,
+                                  **model_args)
         weights = load_file(str(root / "model.safetensors"))
         missing, unexpected = model.load_state_dict(weights, strict=False)
         # 按键的**位置**判断，不按个数：分类头（head.*）允许缺——那是
@@ -461,6 +474,12 @@ class WDEva02Tagger(TagBackend):
 
         data_cfg = timm.data.resolve_data_config({}, model=model)
         self._transform = timm.data.create_transform(**data_cfg, is_training=False)
+        if self.preprocess == "tensor":
+            self._tensor_prep = _tensor_prep_plan(self._transform)
+            if self._tensor_prep is None:
+                self.preprocess = "pil"
+                if self.verbose:
+                    print("[tagger] 模型预处理含张量路径不支持的变换，回落 PIL", flush=True)
 
         self._maybe_capture_graph(img_size)
         if self.verbose:
@@ -566,6 +585,15 @@ class WDEva02Tagger(TagBackend):
                 out[name] = float(prob)
         return out
 
+    @staticmethod
+    def _pixels_uint8(image):
+        from torchvision.transforms.functional import pil_to_tensor
+
+        return pil_to_tensor(image)
+
+    def _prep_on_device(self, pixels):
+        return self._tensor_prep.apply(pixels, self.device)
+
     def _decode_batch(self, part: Sequence) -> tuple[list, int]:
         """解码 + 预处理一小批，返回 (张量列表, 本批耗时 ms)。
 
@@ -575,7 +603,10 @@ class WDEva02Tagger(TagBackend):
         import time
 
         t0 = time.perf_counter()
-        tensors = [self._transform(self._open_rgb(im)) for im in part]
+        if self.preprocess == "tensor":
+            tensors = [self._pixels_uint8(self._open_rgb(im)) for im in part]
+        else:
+            tensors = [self._transform(self._open_rgb(im)) for im in part]
         return tensors, int((time.perf_counter() - t0) * 1000)
 
     def _forward_chunk(self, tensors: Sequence) -> tuple[list[dict[str, float]],
@@ -586,6 +617,8 @@ class WDEva02Tagger(TagBackend):
         import torch
 
         graph = self._graph
+        if self.preprocess == "tensor":
+            tensors = [self._prep_on_device(t) for t in tensors]
         x = torch.stack(list(tensors))
         if self.device and self.device != "cpu":
             x = x.to(self.device)
@@ -965,6 +998,7 @@ def build_backend(
     batch_size: int = 1,
     use_graph: bool = True,
     prefetch: bool = True,
+    preprocess: str = "pil",
 ) -> TagBackend | None:
     """按名字建后端。`none` / 空串返回 None（表示 tag 走 VLM）。"""
     key = (backend or "").strip().lower()
@@ -983,6 +1017,7 @@ def build_backend(
         # 会退化成逐张跑，行为与加参数之前一字不差。
         "precision": precision,
         "batch_size": batch_size,
+        "preprocess": preprocess,
     }
     if model:
         kw["model_id"] = model
@@ -1000,6 +1035,8 @@ def build_backend(
     kw["prefetch"] = prefetch
 
     obj = BACKENDS[key](**kw)
+    if key != "wd-eva02":
+        obj.preprocess = "pil"
     if verbose:
         print(f"[tagger] tag 后端 {obj.name}（模型 {model or '默认'}，{device}）", flush=True)
     return obj

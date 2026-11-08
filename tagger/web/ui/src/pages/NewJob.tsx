@@ -8,6 +8,7 @@ import {
   FolderSearch,
   Gauge,
   HardDrive,
+  HardDriveDownload,
   Layers,
   Package,
   Play,
@@ -28,12 +29,12 @@ import {
   type PlanPreview,
   type VllmPlan,
   type VllmProbe,
+  type VllmSlotPlan,
   type VllmState,
 } from '../lib/api'
-import { basename, fmtCount } from '../lib/format'
+import { basename, fmtBytes, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/ui/launcher'
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
-import { OverviewFigure, OverviewFigureRow } from '../components/ui/OverviewFigures'
 import { useFolderPicker } from '../components/FolderPicker'
 import { LlamaSetup } from '../components/LlamaSetup'
 import { MultiGpuPanel } from '../components/MultiGpuPanel'
@@ -65,6 +66,23 @@ const VLLM_PRECISION_LABELS: Record<(typeof VLLM_PRECISIONS)[number], string> = 
   w4a16: 'W4A16',
 }
 
+// llama.cpp 走的是权重文件本身的压缩比，与 vLLM 那三档不是一回事：
+// 换档 = 换一个 .gguf 文件（见 tiers.yaml 的 gguf_quants）。
+const GGUF_PRECISIONS = ['q4', 'q6', 'q8'] as const
+const GGUF_PRECISION_LABELS: Record<(typeof GGUF_PRECISIONS)[number], string> = {
+  q4: 'Q4_K_M',
+  q6: 'Q6_K',
+  q8: 'Q8_0',
+}
+
+// 精度一栏把两套都摆出来：换引擎不用去别处找档位，选错时由后端
+// 给一句"这档只用于 llama.cpp"，比藏起来让人猜要清楚。
+const ALL_PRECISIONS = [...VLLM_PRECISIONS, ...GGUF_PRECISIONS] as const
+const ALL_PRECISION_LABELS: Record<string, string> = {
+  ...VLLM_PRECISION_LABELS,
+  ...GGUF_PRECISION_LABELS,
+}
+
 // NL 的本地输入只认分片文件（.parquet / .zip / .tar），或"装着分片的目录"。
 // 平铺的图片目录是新人最容易踩的坑：任务能创建，开跑第一秒就报
 // "里没有 .zip 分发包"，而页面上看起来只是"跑失败了"。
@@ -87,7 +105,12 @@ const LAYOUTS = ['flat', 'mirror'] as const
 //   both → engine=vlm + output_mode=both（tag 分类头与 VLM 并行，backend=none 则 tag 也由 VLM 出）
 // 单模式下后端会被强制关掉，否则 run_client 会多写一份没人要的 tag。见 jobs.vlm_backend_for。
 const MODES = ['tag', 'nl', 'both'] as const
-const ARTIFACT_FORMATS = ['parquet', 'json'] as const
+const ARTIFACT_FORMATS = ['jsonl', 'parquet', 'json'] as const
+const ARTIFACT_LABELS: Record<(typeof ARTIFACT_FORMATS)[number], string> = {
+  parquet: 'parquet 分片',
+  jsonl: 'jsonl 分片',
+  json: '逐图 json',
+}
 /**
  * NL 推理来源。local = 本机/自建服务（要起进程、有环境指纹）；
  * openai / anthropic = 外部 API（不加载权重、不用起服务、没有指纹）。
@@ -304,8 +327,11 @@ export function NewJob({
   // 权重精度覆盖分档表。默认 BF16：它是唯一不需要额外硬件能力、也不依赖
   // 量化权重的档，前几批数据实际也是以 bf16 加载的。换精度等于换一代数据，
   // 会进 provenance（model_id 里带 precision）。
-  const [vllmPrecision, setVllmPrecision] =
-    useState<(typeof VLLM_PRECISIONS)[number]>('bf16')
+  // 精度是引擎相关的：vLLM 是 bf16/fp8/w4a16，llama.cpp 是 q4/q6/q8，
+  // 所以这里留成普通 string，由当前引擎决定可选值。
+  // 默认引擎是 llama.cpp，所以默认精度也得是它认的档（q4），
+  // 写 bf16 会让首屏"精度"与"引擎"互相矛盾。
+  const [vllmPrecision, setVllmPrecision] = useState<string>('q4')
   // 切到 W4A16 时先问一句：它需要预量化权重，直接切只会得到"回退 BF16"。
   const [quantOpen, setQuantOpen] = useState(false)
   // 已打包分片清单（parquet 资产）。打开时以当前输入为起点，
@@ -316,9 +342,16 @@ export function NewJob({
   const [planTick, setPlanTick] = useState(0)
   // 0 = 用分档表的默认值。并发调大而单步 token 预算不跟上时，吞吐根本不会涨
   // （一步塞满后剩下的请求只能等下一步），所以这两个要摆在一起。
+  // 自定义分档：0 = 跟随分档表。上下文是最常被改的一项——分档只给三档粗粒度，
+  // 而"这张卡能开多大窗口"取决于权重精度和显存余量，用户比配置清楚。
+  const [vllmMaxLen, setVllmMaxLen] = useState(0)
   const [vllmSeqs, setVllmSeqs] = useState(0)
   const [vllmBatched, setVllmBatched] = useState(0)
   const [vllmGpuMem, setVllmGpuMem] = useState(0)
+  // llama.cpp 的槽位（-np）。0 = 按显存自动。
+  // ★这是唯一能**让出显存**的旋钮：KV 按槽位数在启动时预留，把「任务并发」
+  //   调小只是让 slot 空着，显存一点不还。想边打标边玩游戏就调这个。
+  const [vllmSlots, setVllmSlots] = useState(0)
   // file:// 放行根目录（--allowed-local-media-path）。留空 = 服务端只收
   // base64。填了之后客户端才能开 --use-file-url 省掉 33% 体积与编码 CPU。
   const [vllmMediaRoot, setVllmMediaRoot] = useState('')
@@ -352,13 +385,27 @@ export function NewJob({
   const [hfConns, setHfConns] = useState(4)
   // 给产物留的磁盘余量（GB）。0 = 自动（最大分片的 30%，不少于 2 GB）
   const [hfReserveGb, setHfReserveGb] = useState(0)
+  // HF 请求走的代理。留空 = 用下载页/模型下载那份全局代理，
+  // 但任务是"这一次怎么出去"，允许单独覆盖（换节点做对照时很有用）。
+  const [hfProxy, setHfProxy] = useState('')
+  // 列表读取失败与创建任务失败要分开提示：以前共用一个 error 且标题取 hfBusy，
+  // 而 finally 已经把 hfBusy 置回 false，于是"读取文件列表失败"永远显示成
+  // "创建任务失败"，误导排查方向。
+  const [errorKind, setErrorKind] = useState<'hf' | 'submit'>('submit')
+  // 本地已下好的离线包（「分片下载」页备好的分片）。
+  // 选它 = 直接按本地分片跑，不再连网——这是"先下好、到点就开算"的入口。
+  const [packs, setPacks] = useState<
+    { repo: string; dir: string; count: number; bytes: number }[]
+  >([])
   // 结果缓存：同图同参复用上次产出。默认关：首轮命中率为 0，而算图哈希有成本
   const [cacheOn, setCacheOn] = useState(false)
   // 目标盘剩余空间（字节）。填预取/余量时最想知道的就是这个数。
   const [diskFree, setDiskFree] = useState<number | null>(null)
 
   // ---- 产物形态（engine="vlm"）
-  const [artifactFormat, setArtifactFormat] = useState<(typeof ARTIFACT_FORMATS)[number]>('parquet')
+  // 默认跟 CLI 一致用 json：每张图一份，断点续跑就看文件在不在，出问题也
+  // 能直接打开一份看。parquet 是给"千万级 / 要回传"的场景攒片用的。
+  const [artifactFormat, setArtifactFormat] = useState<(typeof ARTIFACT_FORMATS)[number]>('jsonl')
   const [parquetRows, setParquetRows] = useState(2000)
 
   // ---- tag 后端补充（两种引擎通用）
@@ -437,6 +484,17 @@ export function NewJob({
   // 配置里加一个（比如换成本地量化版）下拉里就多一项。
   const vllmModels = defaults?.vllm_models ?? []
   const vllmTiers = defaults?.vllm_tiers ?? []
+
+  // 默认停在 8B 破限版：4B 只是"能跑"，出 NL 的质量差距在长尾 tag 上很明显。
+  // 清单里没有 8B 就退到任意一个 abliterated，再没有才保持"按显存自动"。
+  useEffect(() => {
+    if (vllmModelKey || vllmModels.length === 0) return
+    const keys = vllmModels.map((m) => m.key)
+    const pick =
+      keys.find((k) => k === 'qwen3vl-8b-abliterated') ??
+      keys.find((k) => k.includes('abliterated'))
+    if (pick) setVllmModelKey(pick)
+  }, [vllmModels, vllmModelKey])
   // 「打标方式」的副标题跟着配置走：tiers.yaml 的 models 段加一个，这里就多一个。
   // 写死 "Qwen3-VL" 的话，换权重那天页面就开始说谎。
   const localModelHint = vllmModels.length
@@ -515,7 +573,7 @@ export function NewJob({
 
   // W4A16 不是运行时开关：没有量化权重时选了也只会回退 BF16。所以先弹窗
   // 问"现在量化吗"，用户取消就回到默认的 BF16（见 QuantizeDialog 的说明）。
-  const choosePrecision = (v: (typeof VLLM_PRECISIONS)[number]) => {
+  const choosePrecision = (v: string) => {
     if (v === 'w4a16') {
       setQuantOpen(true)
       return
@@ -523,15 +581,51 @@ export function NewJob({
     setVllmPrecision(v)
   }
 
+  // 默认产物目录。**按"你选的这批东西"来起名**，而不是全都堆进 work/out：
+  // 打多个分包时堆在一个目录里，产物按 id 撞车、事后也分不清哪张来自哪一批。
+  //   HF + 只勾了一个分片 → work/<分片名>-tags
+  //   HF + 全部/多个分片  → work/<仓库名>-tags
+  //   离线包 / 本地路径   → <父目录>/<输入名>-tags（沿用原来的口径）
   const effectiveOut = useMemo(() => {
     if (outDir) return outDir
-    if (useHf) return 'work/out'
+    if (useHf) {
+      const repoName = hfRepo.trim().split('/').pop() || 'hf'
+      if (hfFiles.length === 1) {
+        const stem = hfFiles[0].replace(/^.*\//, '').replace(/\.[^.]+$/, '')
+        return `work/${repoName}__${stem}-tags`
+      }
+      return `work/${repoName}-tags`
+    }
     if (!inputDir) return ''
     const parts = inputDir.replace(/[\\/]+$/, '').split(/[\\/]/)
     const name = parts.pop() ?? 'out'
     const stem = name.replace(/\.zip$/i, '')
+    // 离线包目录名的形如 `org--name`，还原成可读的 `org-name-tags`
+    if (!parts.length && stem.includes('--')) {
+      return `work/${stem.replace(/--/g, '-')}-tags`
+    }
     return `${parts.join('/')}/${stem}-tags`
-  }, [inputDir, outDir, useHf])
+  }, [inputDir, outDir, useHf, hfRepo, hfFiles])
+
+  // 当前输入是不是指向某个已下载的离线包（决定下拉框回显哪个选项）
+  const packSelected = packs.some((p) => p.dir === inputDir)
+
+  /**
+   * 输入来源（仅 NL 打标时有意义）。
+   *
+   * 原来两种来源是"上下堆叠"的：先一排 HF 仓库输入框，再一个「本地分片（可选）」，
+   * 用户得读两段 help 才知道它们互斥。改成和「打标方式」一样的二选一，
+   * 一眼就知道现在喂的是本地文件还是在线仓库。
+   *
+   * 切换时必须把另一边的值清掉——后端是"填了 hf_repo 就走仓库"，
+   * 残留的旧值会让人以为选了本地却在偷偷连网。
+   */
+  const [inputMode, setInputMode] = useState<'local' | 'hf'>('local')
+  const changeInputMode = (next: 'local' | 'hf') => {
+    setInputMode(next)
+    if (next === 'hf') setInputDir('')
+    else setHfRepo('')
+  }
 
   // 首次挂载灌配置默认值；之后每次切回本页只刷新"可选清单"（模型可能刚在
   // 模型管理页加过），不动用户已经填好的路径与参数。
@@ -559,6 +653,16 @@ export function NewJob({
         api.health().then(setHealth).catch(() => setHealth(null))
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+  }, [active])
+
+  // 离线包清单：进页面刷一次。下载页可能刚备好一批新分片，切回来就该能选上；
+  // 拉不到就当没有（下载目录还没建过），不打扰用户。
+  useEffect(() => {
+    if (!active) return
+    api
+      .downloadsPacks()
+      .then((r) => setPacks(r.packs))
+      .catch(() => setPacks([]))
   }, [active])
 
   // 本机 vLLM 的状态。只选 VLM 引擎时才轮询：首次加载要几分钟，
@@ -607,12 +711,16 @@ export function NewJob({
     const timer = window.setTimeout(() => {
       api
         .vllmPlan({
+          engine: vllmEngine,
           model: vllmModelKey || undefined,
-          tier: vllmTier || undefined,
+          // custom 不是真实分档名：它等价于"不指定档位、全按下面自填的来"
+          tier: vllmTier === 'custom' ? undefined : vllmTier || undefined,
           precision: vllmPrecision,
+          max_model_len: vllmMaxLen || undefined,
           max_num_seqs: vllmSeqs || undefined,
           max_num_batched_tokens: vllmBatched || undefined,
           gpu_mem: vllmGpuMem || undefined,
+          slots: vllmSlots || undefined,
         })
         .then((p) => alive && setPlanPreview(p))
         .catch(() => alive && setPlanPreview(null))
@@ -621,7 +729,19 @@ export function NewJob({
       alive = false
       window.clearTimeout(timer)
     }
-  }, [isVlm, vllmModelKey, vllmTier, vllmPrecision, planTick, vllmSeqs, vllmBatched, vllmGpuMem])
+  }, [
+    isVlm,
+    vllmEngine,
+    vllmModelKey,
+    vllmTier,
+    vllmPrecision,
+    planTick,
+    vllmMaxLen,
+    vllmSeqs,
+    vllmBatched,
+    vllmGpuMem,
+    vllmSlots,
+  ])
 
   // 服务起着的时候，真正在跑的是服务端那组参数，不是表单里正在编辑的这组。
   // 两者混着显示，就会出现"页面说 4B、实际跑 8B"这种最难查的错。
@@ -629,6 +749,27 @@ export function NewJob({
     vllm && (vllm.status === 'ready' || vllm.status === 'starting' || vllm.status === 'stopping')
       ? vllm.plan
       : planPreview
+
+  // 选中的这套权重在不在本地：配置里有这号模型 ≠ 权重已经下好了。
+  // 判据是后端算的 `ready`（gguf/mmproj 都在盘上），不是目录非空——下错仓库时
+  // 目录里全是 safetensors，看起来"已下载"，启动照样报文件不存在。
+  // 选"自动"时也要检查：那种情况才是默认路径（按显存落档），不检查等于
+  // 大多数用户都看不到这条提示。
+  const pickedKey =
+    vllmModelKey || (activePlan && activePlan.ok ? activePlan.model : '')
+  const picked = vllmModels.find((m) => m.key === pickedKey)
+  const pickedMissingFiles = picked?.missing_files ?? []
+  const pickedMissing = picked ? picked.ready === false : false
+
+  // 槽位方案：只有 llama.cpp 的 plan 里才有。预估失败（比如上下文塞不下）
+  // 时后端会放 {error}，这里一并挡掉，页面退回不显示而不是显示 NaN。
+  const slotPlan: VllmSlotPlan | null = (() => {
+    const raw = activePlan && activePlan.ok ? activePlan.slots : undefined
+    // 用 slots 是否为数字来认成功分支，而不是 'error' in raw——后者在 TS
+    // 里会把整个对象收窄成 { error?: string }，后面每个字段都报不存在。
+    if (!raw || typeof (raw as VllmSlotPlan).slots !== 'number') return null
+    return raw as VllmSlotPlan
+  })()
 
   // 引擎探测优先：快照里的 local_ok 是按"当前引擎"算的，而服务没起时
   // 那个"当前引擎"还是默认值。切换下拉后必须用新查回来的那份。
@@ -643,16 +784,20 @@ export function NewJob({
         engine: vllmEngine,
         // 空/0 不传 = 用分档表；显式传 0 会被后端当成非法值
         model: vllmModelKey || undefined,
-        tier: vllmTier || undefined,
+        tier: vllmTier === 'custom' ? undefined : vllmTier || undefined,
         precision: vllmPrecision,
         // 服务端路由名必须与任务表单里的「模型名」一致，否则请求报"模型不存在"
         served_name: vlmModel.trim() || undefined,
+        max_model_len: vllmMaxLen || undefined,
         max_num_seqs: vllmSeqs || undefined,
         max_num_batched_tokens: vllmBatched || undefined,
         gpu_mem: vllmGpuMem || undefined,
         // 非空才加 --allowed-local-media-path。放行目录必须覆盖产物目录，
         // 否则 file:// 请求每张都被 400 拒掉（报的是"路径不被允许"）。
         local_media_root: vllmMediaRoot.trim() || undefined,
+        // 槽位：0 不传 = 服务端按显存自动。它只对 llama.cpp 有效，
+        // 传了给 vLLM 会被后端直接拒绝（那边该用 max_num_seqs）。
+        slots: vllmEngine === 'llamacpp' ? vllmSlots || undefined : undefined,
       })
       setVllm(s)
       setVlmUrl(s.url)
@@ -819,15 +964,21 @@ export function NewJob({
     if (!hfRepo.trim()) return
     setHfBusy(true)
     setError(null)
+    setErrorKind('hf')
     try {
       const res = await api.hfFiles(
         hfRepo.trim(),
         hfToken,
         hfRevision || 'main',
         hfFormat,
+        hfProxy,
       )
       setHfAvailable(res.files)
       setHfFiles([]) // 不勾 = 处理全部
+      // 探测出的形态回填一次：用户选「自动」时也能看见实际走的是哪条路
+      if (res.format === 'parquet' || res.format === 'webdataset') {
+        setHfFormat(res.format)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -838,6 +989,7 @@ export function NewJob({
   async function submit() {
     setBusy(true)
     setError(null)
+    setErrorKind('submit')
     setConflict(null)
     try {
       const thresholds = Object.fromEntries(
@@ -880,6 +1032,7 @@ export function NewJob({
             hf_prefetch: hfPrefetch,
             hf_conns: hfMulti ? hfConns : 1,
             hf_reserve_gb: hfReserveGb,
+            hf_proxy: hfProxy.trim(),
             cache: cacheOn,
             // 推理来源。API 模式不需要本地服务地址，也不吃 file:// 直传
             // （云端读不到本机路径）；地址留空时后端按来源取默认域名。
@@ -1021,7 +1174,12 @@ export function NewJob({
         }
       />
 
-      {error && <ErrorBox error={error} title={hfBusy ? '读取文件列表失败' : '创建任务失败'} />}
+      {error && (
+        <ErrorBox
+          error={error}
+          title={errorKind === 'hf' ? '读取仓库分片失败' : '创建任务失败'}
+        />
+      )}
       {conflict && (
         <ErrorBox
           tone="warning"
@@ -1062,8 +1220,56 @@ export function NewJob({
             </div>
           </SectionPanel>
 
+          {/* 标了必填的地方就是"不填点不动开始"。星号只给这几处，
+              满屏星号等于没有星号。 */}
           <SectionPanel title="输入">
             {isVlm && (
+              <div className="mb-3">
+                <ChoiceGrid
+                  options={['local', 'hf'] as const}
+                  value={inputMode}
+                  onChange={changeInputMode}
+                  className="grid-cols-2"
+                  renderLabel={(v) => (v === 'local' ? '本地文件' : '在线仓库')}
+                  ariaLabel="输入来源"
+                />
+                <p className="mt-2 text-[11px] leading-relaxed text-lx-dim">
+                  {inputMode === 'local'
+                    ? '从本机读：.parquet / .zip / .tar 分片，或装着分片的目录。'
+                    : '从 Hugging Face 拉：填 org/name，可只下勾选的分片。'}
+                </p>
+              </div>
+            )}
+
+            {packs.length > 0 && (
+              <SettingRow
+                label="已下载的离线包"
+                help="「分片下载」页提前备好的本地分片。选中后这次任务直接读本地，不再连网"
+                description={`本地已有 ${packs.length} 个包（共 ${fmtBytes(
+                  packs.reduce((acc, p) => acc + p.bytes, 0),
+                )}）。选一个就不用等下载`}
+                icon={<HardDriveDownload size={14} />}
+              >
+                <select
+                  className="lx-input"
+                  value={packSelected ? inputDir : ''}
+                  onChange={(e) => {
+                    setInputDir(e.target.value)
+                    // 选了本地包就把 HF 仓库清掉，避免"两个输入同时给"被后端拒
+                    if (e.target.value) setHfRepo('')
+                  }}
+                >
+                  <option value="">不使用（走下面的仓库 / 本地路径）</option>
+                  {packs.map((p) => (
+                    <option key={p.dir} value={p.dir}>
+                      {p.repo} · {p.count} 片 · {fmtBytes(p.bytes)}
+                    </option>
+                  ))}
+                </select>
+              </SettingRow>
+            )}
+
+            {isVlm && inputMode === 'hf' && (
               <>
                 <SettingRow
                   label="HF 团队仓库"
@@ -1109,6 +1315,20 @@ export function NewJob({
                         onChange={(e) => setHfRevision(e.target.value)}
                         placeholder="main"
                         spellCheck={false}
+                      />
+                    </SettingRow>
+
+                    <SettingRow
+                      label="代理"
+                      help="留空 = 用分片下载页那份全局代理；填了只影响这次任务（换节点做对照时有用）。支持 http / https / socks5"
+                    >
+                      <input
+                        className="lx-input font-mono text-xs"
+                        value={hfProxy}
+                        onChange={(e) => setHfProxy(e.target.value)}
+                        placeholder="http://127.0.0.1:7890"
+                        spellCheck={false}
+                        autoComplete="off"
                       />
                     </SettingRow>
 
@@ -1293,6 +1513,7 @@ export function NewJob({
             {!isVlm && (
               <SettingRow
                 label="输入路径"
+                required
                 description={
                   scan
                     ? `这一层 ${fmtCount(scan.images)} 张图${scan.zips ? `，${scan.zips} 个 .zip 包` : ''}${
@@ -1517,7 +1738,11 @@ export function NewJob({
                             activePlan.precision === 'w4a16' && !activePlan.weight_quantized
                               ? ' → BF16（缺量化权重）'
                               : ''
-                          } · 上下文 ${activePlan.max_model_len} · 默认并发 ${activePlan.max_num_seqs}`
+                          } · 上下文 ${activePlan.max_model_len} · 默认并发 ${activePlan.max_num_seqs}${
+                            // 选项里挑的是"配置里有这号模型"，不代表权重已经在盘上。
+                            // 细节（缺哪个文件、跳转按钮）在下面那条提示里。
+                            pickedMissing ? ' · 权重未下载' : ''
+                          }`
                         : undefined
                 }
               >
@@ -1528,7 +1753,13 @@ export function NewJob({
                   onChange={(e) => setVllmModelKey(e.target.value)}
                   aria-label="VLM 权重"
                 >
-                  <option value="">自动（按显存落档）</option>
+                  {/* 把落档结果写进选项里：默认口径就是破限版，但"自动"两个字
+                      看不出会加载哪套权重，用户会以为还得自己挑一次。 */}
+                  <option value="">
+                    {activePlan && activePlan.ok
+                      ? `自动（按显存落档 → ${activePlan.model}）`
+                      : '自动（按显存落档）'}
+                  </option>
                   {vllmModels.map((m) => (
                     <option key={m.key} value={m.key}>
                       {m.key}（{basename(m.path)}
@@ -1538,10 +1769,36 @@ export function NewJob({
                 </select>
               </SettingRow>
 
+              {/* 缺权重时给一个能点的出口。原来只在说明文字里提一句"去模型管理
+                  页"，而这句话埋在灰色小字里，用户点完启动才看到报错。 */}
+              {pickedMissing && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lx-sm border border-lx-warning/40 bg-lx-warning/5 px-3 py-2 text-[11px] text-lx-warning">
+                  <span>
+                    这套权重还没下好
+                    {pickedMissingFiles.length > 0
+                      ? `（缺 ${pickedMissingFiles.slice(0, 2).join('、')}${
+                          pickedMissingFiles.length > 2 ? ' 等' : ''
+                        }）`
+                      : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-0.5 text-[11px]"
+                    onClick={onOpenModels}
+                  >
+                    <Layers size={11} />
+                    去模型管理下载
+                  </button>
+                </div>
+              )}
+
               {/* 分档与权重是两件事：档位定 max_model_len / 默认并发 / 精度，
                   权重定加载哪个仓库。8B 落在 low-16g 上就会上下文偏短——
                   想让它跑得开就跟着改这里。 */}
-              <SettingRow label="分档" help="决定上下文长度、默认并发与精度。留空按显存自动匹配">
+              <SettingRow
+                label="分档"
+                help="决定上下文长度、默认并发与精度。留空按显存自动匹配；选「自定义」则下面填多少用多少"
+              >
 
                 <select
                   className="lx-select"
@@ -1551,6 +1808,8 @@ export function NewJob({
                   aria-label="VLM 分档"
                 >
                   <option value="">自动（按显存）</option>
+                  {/* 三档是粗粒度：卡上留多少给 KV、能开多大窗口，用户自己更清楚 */}
+                  <option value="custom">自定义（下面「高级」里自己填）</option>
                   {vllmTiers.map((t) => (
                     <option key={t.name} value={t.name}>
                       {t.name} · {t.vram_min}–{t.vram_max === 999 ? '∞' : t.vram_max}G ·{' '}
@@ -1566,17 +1825,23 @@ export function NewJob({
               <SettingRow
                 label="权重精度"
                 icon={<Gauge size={14} />}
-                help="这是 VLM 权重（出 NL）。默认 BF16；FP8 需 Ada 及以上；W4A16 需先量化，选它会弹窗问一次"
+                help="前三个给 vLLM（BF16 / FP8 / W4A16），后三个给 llama.cpp（Q4_K_M / Q6_K / Q8_0）。两套不通用，选错下面会直接说"
                 description={
-                  vllmPrecision === 'fp8'
-                    ? 'FP8：vLLM 在线量化，显存约省一半；长尾 tag 与数字可能少量改判'
-                    : vllmPrecision === 'w4a16'
-                      ? 'W4A16：4bit 权重 + 16bit 激活。当前模型没有量化权重时会回退 BF16（见下方警告）'
-                      : 'BF16：不传 --quantization，按权重自带 dtype 加载，精度最稳、显存最贵'
+                  vllmPrecision === 'q4'
+                    ? 'Q4_K_M：8B 约 4.7G，显存与吞吐最划算'
+                    : vllmPrecision === 'q6'
+                      ? 'Q6_K：8B 约 6.4G，长尾 tag 比 Q4 稳；没下载会明确报缺文件'
+                      : vllmPrecision === 'q8'
+                        ? 'Q8_0：几乎等于原精度，8B 约 8.1G；16G 卡上并发要收敛'
+                        : vllmPrecision === 'fp8'
+                          ? 'FP8：vLLM 在线量化，显存约省一半；长尾 tag 与数字可能少量改判'
+                          : vllmPrecision === 'w4a16'
+                            ? 'W4A16：4bit 权重 + 16bit 激活。当前模型没有量化权重时会回退 BF16（见下方警告）'
+                            : 'BF16：不传 --quantization，按权重自带 dtype 加载，精度最稳、显存最贵'
                 }
               >
                 <ChoiceGrid
-                  options={VLLM_PRECISIONS}
+                  options={ALL_PRECISIONS}
                   value={vllmPrecision}
                   onChange={choosePrecision}
                   className="grid-cols-3"
@@ -1584,7 +1849,7 @@ export function NewJob({
                   mono
                   disabled={vllmLocked}
                   ariaLabel="VLM 权重精度"
-                  renderLabel={(v) => VLLM_PRECISION_LABELS[v]}
+                  renderLabel={(v) => ALL_PRECISION_LABELS[v] ?? v}
                 />
               </SettingRow>
 
@@ -1619,6 +1884,26 @@ export function NewJob({
                 </summary>
                 <div className="mt-2 space-y-2">
                   <SettingRow
+                    label="上下文长度"
+                    help="0 = 用分档表的值（16G 档 4096）。调大 KV cache 跟着涨，开太大启动就 OOM"
+                  >
+                    <input
+                      type="number"
+                      className="lx-input w-32 font-mono tabular-nums"
+                      min={0}
+                      max={262144}
+                      step={1024}
+                      value={vllmMaxLen}
+                      disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                      onChange={(e) =>
+                        setVllmMaxLen(
+                          Math.min(262144, Math.max(0, Number(e.target.value) || 0)),
+                        )
+                      }
+                      aria-label="上下文长度"
+                    />
+                  </SettingRow>
+                  <SettingRow
                     label="max_num_seqs"
                     help="服务端同时处理多少条请求。0 = 用分档表的值（16G 卡是 8）"
                   >
@@ -1635,6 +1920,49 @@ export function NewJob({
                       aria-label="服务端并发上限"
                     />
                   </SettingRow>
+                  {/* 只对 llama.cpp 显示：vLLM 的并发由调度器动态分配，
+                      给一个 -np 输入框等于让人以为改了，其实没生效。 */}
+                  {vllmEngine === 'llamacpp' && (
+                    <SettingRow
+                      label="槽位（-np）"
+                      help={
+                        slotPlan
+                          ? `0 = 按显存自动（你这台会给 ${slotPlan.slots_default ?? '?'}）。` +
+                            '想给别的程序让出显存就调小：KV 按槽位数在启动时预留，' +
+                            '把「任务并发」调小一点都不会还回来'
+                          : '0 = 按显存自动。这是唯一能让出显存的旋钮'
+                      }
+                    >
+                      <input
+                        type="number"
+                        className="lx-input w-32 font-mono tabular-nums"
+                        min={0}
+                        max={64}
+                        value={vllmSlots}
+                        disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                        onChange={(e) =>
+                          setVllmSlots(
+                            Math.min(64, Math.max(0, Math.round(Number(e.target.value) || 0))),
+                          )
+                        }
+                        aria-label="llama.cpp 槽位数"
+                      />
+                    </SettingRow>
+                  )}
+                  {slotPlan && (
+                    <p className="text-[11px] leading-relaxed text-lx-dim">
+                      {slotPlan.slots_manual ? '手动' : '自动'} {slotPlan.slots} 槽 × 每槽{' '}
+                      {slotPlan.ctx_per_slot} 上下文 = {slotPlan.ctx_total} 总窗口，
+                      KV 约 {slotPlan.kv_total_gib} GiB
+                      {slotPlan.slots_default != null && slotPlan.slots < slotPlan.slots_default
+                        ? `（比默认省约 ${(
+                            (slotPlan.kv_per_slot_gib ?? 0) *
+                            (slotPlan.slots_default - slotPlan.slots)
+                          ).toFixed(1)} GiB）`
+                        : ''}
+                      。槽位越少越省显存，但每秒出的张数也越低。
+                    </p>
+                  )}
                   <SettingRow
                     label="max_num_batched_tokens"
                     help="单步 token 预算；0 = vLLM 默认，调大才能同时 prefill 多张图"
@@ -1754,6 +2082,7 @@ export function NewJob({
                 <>
                   <SettingRow
                     label="API 地址"
+                    required={isApiMode}
                     help="留空按来源取默认域名；自建网关（one-api / LM Studio）填自己的地址"
                   >
                     <div className="flex gap-2">
@@ -1884,6 +2213,7 @@ export function NewJob({
 
               <SettingRow
                 label="模型名"
+                required={isApiMode}
                 help={
                   isApiMode
                     ? 'API 侧的模型 id（如 gpt-4o / claude-sonnet-4-5），不是本地路由名'
@@ -2397,24 +2727,28 @@ export function NewJob({
           )}
 
           {isVlm && (
-            <SectionPanel title="产物（VLM）">
+            <SectionPanel
+              title="打标产物"
+              description="产物形态在下面选；要「一个总表」不在这一步——跑完到「数据合并」页合。"
+            >
               <SettingRow
-                label="分片格式"
-                help="parquet 回传页直接上传；json 逐张一份"
+                label="产物形态"
+                help="jsonl：默认，一个分包一个文件（artifacts-<包名>.jsonl），续跑接着写同名文件；parquet：攒成片，本地一般不需要（服务器封包才用）；逐图 json：每张两个小文件，单张排查最方便"
                 icon={<Package size={14} />}
               >
                 <ChoiceGrid
                   options={ARTIFACT_FORMATS}
                   value={artifactFormat}
                   onChange={setArtifactFormat}
-                  className="grid-cols-2"
+                  className="grid-cols-3"
                   size="sm"
                   mono
                   ariaLabel="分片格式"
+                  renderLabel={(v) => ARTIFACT_LABELS[v]}
                 />
               </SettingRow>
 
-              {artifactFormat === 'parquet' && (
+              {artifactFormat !== 'json' && (
                 <SettingRow label="每片行数" help="写满就封口；2000 一片对 FTP 回传比较友好">
                   <input
                     type="number"
@@ -2550,7 +2884,7 @@ export function NewJob({
                 />
               </SettingRow>
 
-              <SettingRow label="序号宽度" help="6 位支持 999999 张；素材超过这个量级要提前调大">
+              <SettingRow label="序号宽度" help="6 位最多 999999 张；10 亿总量需从首批使用 10 位，已有数据保持原宽度">
                 <input
                   type="number"
                   className="lx-input font-mono tabular-nums"
@@ -3080,72 +3414,128 @@ export function NewJob({
             </dl>
           </SectionPanel>
 
-          <SectionPanel title="这次会产出">
-            <OverviewFigureRow className="grid-cols-2 border-t-0 pt-0 sm:grid-cols-2">
-              <OverviewFigure
-                label="待处理"
-                value={useHf ? '仓库' : isVlm ? '流式' : preview ? fmtCount(preview.total) : '—'}
-                note={useHf ? 'HF 分片' : isVlm ? '边读边打' : '张'}
-                first
-              />
-              <OverviewFigure
-                label="预计耗时"
-                value={estimateS !== null ? String(estimateS) : '—'}
-                note="秒"
-              />
-            </OverviewFigureRow>
-            {!isVlm && preview && (
-              <div className="mt-3 space-y-1 text-[11px] text-lx-muted">
-                <div className="flex justify-between gap-2">
-                  <span>来源</span>
-                  <span className="truncate text-lx-secondary">{preview.sources.length} 个</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span>素材体积</span>
-                  <span className="tabular-nums text-lx-secondary">
-                    {(preview.bytes / 1073741824).toFixed(2)} GB
-                  </span>
-                </div>
-                {artist && (
-                  <div className="flex justify-between gap-2">
-                    <span>画师名</span>
-                    <span className="truncate text-lx-secondary">
-                      {preview.artists.count} 个 · 覆盖 {fmtCount(preview.artists.covered)} 张
-                    </span>
-                  </div>
-                )}
+          <SectionPanel
+            title="这次会产出"
+            trailing={
+              <StatusChip tone={missingInput ? 'warning' : 'success'}>
+                {missingInput ? '待填输入' : '可以开跑'}
+              </StatusChip>
+            }
+          >
+            {/* 右栏只有 320px 宽，塞不下页头那种带左分隔线的大数字条
+                （那个样式是给整行横排用的，硬塞进来会挤成两列错位）。
+                这里用和「这台机器」一致的键值行，窄栏里才稳。 */}
+            <dl className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted">待处理</dt>
+                <dd className="truncate text-right font-mono tabular-nums text-lx-secondary">
+                  {useHf
+                    ? `${hfFiles.length || hfAvailable?.length || 0} 个分片`
+                    : isVlm
+                      ? '流式读取'
+                      : preview
+                        ? `${fmtCount(preview.total)} 张`
+                        : '—'}
+                </dd>
               </div>
-            )}
-            <p className="mt-3 flex items-center gap-1.5 text-[11px] leading-relaxed text-lx-muted">
-              <Sparkles size={11} className="shrink-0" />
-              <span className="min-w-0 truncate">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted">预计耗时</dt>
+                <dd className="font-mono tabular-nums text-lx-secondary">
+                  {estimateS !== null ? `${estimateS} 秒` : '—'}
+                </dd>
+              </div>
+              {!isVlm && preview && (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="text-lx-muted">素材体积</dt>
+                    <dd className="font-mono tabular-nums text-lx-secondary">
+                      {(preview.bytes / 1073741824).toFixed(2)} GB
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="text-lx-muted">来源</dt>
+                    <dd className="truncate text-right text-lx-secondary">
+                      {preview.source_count ?? preview.sources.length} 个
+                    </dd>
+                  </div>
+                  {artist && (
+                    <div className="flex items-center justify-between gap-2">
+                      <dt className="text-lx-muted">画师名</dt>
+                      <dd className="truncate text-right text-lx-secondary">
+                        {preview.artists.count} 个 · 覆盖 {fmtCount(preview.artists.covered)} 张
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
+            </dl>
+            <p className="mt-3 flex items-start gap-1.5 border-t border-lx pt-2.5 text-[11px] leading-relaxed text-lx-muted">
+              <Sparkles size={11} className="mt-0.5 shrink-0" />
+              <span className="min-w-0 break-all">
                 {useHf
-                  ? `${hfRepo} → ${basename(effectiveOut)}`
+                  ? `${hfRepo || '—'} → ${basename(effectiveOut || '') || '—'}`
                   : inputDir
                     ? `${basename(inputDir)} → ${basename(effectiveOut || '')}`
                     : isVlm
-                      ? '先选分片包，或填 HF 团队仓库'
+                      ? '先选本地分片，或切到「在线仓库」填仓库名'
                       : '先选一个目录或 .zip 素材包'}
               </span>
             </p>
           </SectionPanel>
 
-          <SectionPanel title="产物">
-            <div className="space-y-1.5 font-mono text-[11px] leading-relaxed text-lx-muted">
+          {/* 「产物」改成「统计和状态」：用户在这个页面真正想确认的是
+              "这盘放得下吗 / 后端还活着吗"，而不是产物文件名长得什么样。 */}
+          <SectionPanel title="统计和状态">
+            <dl className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted">目标盘剩余</dt>
+                <dd className="font-mono tabular-nums text-lx-secondary">
+                  {diskFree === null ? '—' : `${(diskFree / 1024 ** 3).toFixed(1)} GB`}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted">输出形态</dt>
+                <dd className="truncate text-right font-mono text-lx-secondary">
+                  {isVlm
+                    ? artifactFormat === 'jsonl'
+                      ? 'jsonl · 一包一文件'
+                      : artifactFormat === 'parquet'
+                        ? `parquet · ${parquetRows} 行/片`
+                        : 'tags/ + json'
+                    : 'tags/*.tag'}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted">标签来源</dt>
+                <dd className="truncate text-right text-lx-secondary">
+                  {mode === 'both' ? 'tag + NL' : mode === 'nl' ? 'NL 描述' : 'tag 分类头'}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted">本机服务</dt>
+                <dd className="flex items-center gap-1.5 text-lx-secondary">
+                  <StatusChip tone={health ? 'success' : 'danger'}>
+                    {health ? (health.running_job ? '打标中' : '空闲') : '未连接'}
+                  </StatusChip>
+                </dd>
+              </div>
+            </dl>
+            <div className="mt-3 space-y-1 border-t border-lx pt-2.5 font-mono text-[10.5px] leading-relaxed text-lx-dim">
               {isVlm ? (
                 <>
                   <div className="truncate text-lx-secondary">
-                    {artifactFormat === 'parquet' ? `pack-*.parquet（每片 ${parquetRows} 行）` : 'tags/ + json 分片'}
+                    {artifactFormat === 'jsonl'
+                      ? 'artifacts-<包名>.jsonl'
+                      : artifactFormat === 'parquet'
+                        ? 'artifacts-*.parquet'
+                        : 'tags/ + json'}
                   </div>
-                  <div className="text-lx-dim">
-                    {mode === 'both' ? 'NL + tag' : '只出 NL'} · 跑完去「回传」页上传
-                  </div>
+                  <div>跑完去「回传」页上传</div>
                 </>
               ) : (
                 <>
                   <div className="truncate text-lx-secondary">tags/&lt;id&gt;-tag.json</div>
-                  <div className="text-lx-dim">逐张 tag / rating / provenance</div>
-                  <div className="pt-1.5 text-lx-dim">封包在「数据打包」页</div>
+                  <div>封包在「数据打包」页</div>
                 </>
               )}
             </div>

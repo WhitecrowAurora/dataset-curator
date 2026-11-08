@@ -164,3 +164,214 @@ env\python\python.exe devtools\nl_ab.py collect --images H:\lulynx-trainer\sucai
 env\python\python.exe devtools\nl_ab.py compare --a run\ab-q4.jsonl --b run\ab-q8.jsonl ^
     --label-a Q4_K_M --label-b Q8_0
 ```
+
+## 8. prompt v2 → v3（2026-11-07，同批 126 张）
+
+### 8.1 为什么改
+
+复盘 v2 的指令时看到四处"写了但没被守住"的地方，其中两处有前文数据支撑：
+
+| 症状 | 证据 | v3 的改法 |
+|---|---|---|
+| 颜色/材质几乎不提 | §5.1：颜色词 17~28%、材质 57~66% | 从顺序句的括号里提成独立条款：`Name the colour of every object you name, and what its surface looks like` |
+| 上限矛盾 | `400-1024 characters. Longer is fine` —— 一边给上限一边鼓励超 | 删掉 `Longer is fine`，改成 `Stop at the upper bound`，并补句数口径 `(roughly 4-9 sentences)`：字符数模型数不准，句数数得准 |
+| both 模式没有收尾句 | tag / nl 单模式都有 `and nothing else` | 补 `Output these two blocks, in this order, and nothing else.` |
+| caption 段没禁身份名 | system prompt 禁了，caption 规则里只剩"只写看得见的"，而"逐字转录"会把签名抄进来 | 补一条：签名/水印是**文字**，照抄但不要解析成名字 |
+| tag 凑数 | `12 to 160 tags` 与"只标看得见的"冲突 | 补 `Never pad the list to reach 12` |
+
+`PROMPT_VERSION` 同步 bump 到 `v3`。
+
+### 8.2 协议
+
+- 模型：Qwen3-VL-8B-Instruct **Q4_K_M**（llama.cpp b12188 / CUDA 13.5，`--mmproj` F16）
+- 参数：`max_pixels 589824`、`max_tokens 800`、`temperature 0.2`、`top_p 0.9`、**并发 1**
+- 样本：`H:\lulynx-trainer\sucai` 127 个文件，按内容哈希配对后 **n=126**
+- v2 指令由 `HEAD` 版本渲染成 `run\ab\prompt-v2.txt`（`nl_ab.py collect --prompt-file`），
+  两臂同一服务、同一参数、同一批图，只有指令不同
+
+### 8.3 结果
+
+| 指标 | v2 | v3 | 差 | d |
+|---|---:|---:|---:|---:|
+| 硬失败率 | 0.0% | 0.0% | 0.0% | — |
+| caption 字符 | 835.7 | 799.0 | −36.7 | −0.27 |
+| completion token | 181.1 | 173.6 | −7.4 | −0.27 |
+| 延迟（s/张） | 2.37 | 2.30 | −0.07 | −0.22 |
+| 字符 3-gram Jaccard | — | — | 0.414 | — |
+| 越过 1024 字符 | 4.8% | **0.8%** | −4.0pp | — |
+| 最长一条 | 1226 | 1073 | −153 | — |
+
+要素覆盖（`devtools/nl_cover.py`，同一套词表、同一批图）：
+
+| 要素 | v2 | v3 | 差 |
+|---|---:|---:|---:|
+| 材质/质地 | 90% | **99%** | +9pp |
+| 具名颜色 | 98% | 98% | −1pp |
+| 光线 | 100% | 100% | 0pp |
+| 构图/机位 | 98% | 94% | −5pp |
+| 背景/环境 | 100% | 99% | −1pp |
+| 画面引文（含弯引号） | 13% | 11% | −2pp |
+| **材质词/张** | 2.75 | **5.31** | +93% |
+| 颜色词/张 | 5.12 | 5.51 | +7.6% |
+
+### 8.4 判定
+
+**成立的两条**
+
+1. **材质条款有效**：密度翻倍（2.75 → 5.31 词/张），覆盖率 90% → 99%。这是本轮
+   最实的一处改进。
+2. **上界被遵守**：越过 1024 的从 4.8% 掉到 0.8%，最长一条 1226 → 1073。
+   `Stop at the upper bound` 这句话确实比 `Longer is fine` 管用。
+
+**不成立的一条**
+
+3. **颜色条款几乎没效果**：只 +7.6% 密度、覆盖持平。原因大概是 v2 已经在写颜色
+   （5.12 词/张不算少），"每个物体都要给颜色"没有给出**新的可执行约束**。
+   下次要换个写法：给一个正例、或要求"按物体逐个点名颜色"，而不是笼统地强调。
+
+**代价与噪声**
+
+4. 产出短了 4.4%（−37 字符 / −7 token），延迟降 3%——`Stop at the upper bound`
+   让模型整体压缩了一点，不是坏事。
+5. 构图 −5pp、画面引文 −2pp 落在压缩的尾巴上（顺序里它们排在后面），尚在噪声附近。
+6. **3-gram Jaccard 0.414 不能读成"变差了"**：0.45 这条线是给"量化档位等价性"定的，
+   不是"同样好"。同模型重复跑的措辞差异本来就有 ~0.44（见 §5.2），所以 0.414 只说明
+   "措辞变了"，与"信息点丢了"是两件事——要素覆盖表才是后者的证据。
+7. 沿用 §5 的告诫：**内容正确性仍需人眼**。抽 20 张核对画风/人物/颜色是否属实，
+   统计指标替代不了这一步。
+
+### 8.5 复现
+
+```powershell
+# v2 基线（指令从文件读，不必 checkout 旧代码）
+env\python\python.exe devtools\nl_ab.py collect --images H:\lulynx-trainer\sucai ^
+    --url http://127.0.0.1:8080 --out run\ab\v2.jsonl --prompt-file run\ab\prompt-v2.txt
+# v3（当前工作区）
+env\python\python.exe devtools\nl_ab.py collect --images H:\lulynx-trainer\sucai ^
+    --url http://127.0.0.1:8080 --out run\ab\v3.jsonl
+# 等价性 + 要素覆盖
+env\python\python.exe devtools\nl_ab.py compare --a run\ab\v2.jsonl --b run\ab\v3.jsonl ^
+    --label-a v2 --label-b v3
+env\python\python.exe devtools\nl_cover.py run\ab\v2.jsonl run\ab\v3.jsonl
+```
+
+单臂 ~5 分钟（0.41 张/秒，并发 1；文档 §4 的 1.27 张/秒是 12 slot 的数字，
+两者不可混用）。
+
+### 8.6 顺带发现的坑
+
+- **`llama_runtime.install()` 对当前 release 形状失效**：`latest` 指向 v0.9.0（只有 1 个
+  资产），而滚动构建挂在 `b12188` 这类 tag 上；资产名也从 `-bin-cuda` 变成
+  `-bin-win-cuda-13.5-x64`，`_resolve_release()` 的 `-bin-{flavour}` 匹配对不上。
+  这一次是手工下包解到 `runtime/llama.cpp` 解决的；网页上的"安装"按钮修好之前会一直报
+  "没有匹配 Windows/AMD64 的安装包"。
+- 国内直连 GitHub 实测 0.4MB/s 级别，走 `gh-proxy.com` 前缀稳定 5.3MB/s（570MB ≈ 2 分钟）。
+
+## 9. Q4_K_M vs Q6_K（2026-11-07，v3 指令，同批 126 张）
+
+§5.1 那轮比较的是 **v2 指令**下的量化差；v3 把材质提成独立条款之后，Q4 的短板被
+补掉一部分，所以这一轮重测"Q4 与 Q6 现在到底差多少"。
+
+### 9.1 16G 卡能不能整卡放下 Q6
+
+能，而且不用分层卸载：
+
+| 项 | 数值 |
+|---|---|
+| Q6_K 权重 | 6408 MiB（6.56 BPW，`llama-quantize` 57 秒） |
+| 加载后显存 | 10555 / 16376 MiB（含桌面等约 1.6 GiB） |
+| 余量 | 约 5.8 GiB |
+| 启动参数 | `-ngl 99 -c 8192 --mmproj mmproj-F16` |
+
+余量够 2~3 个 slot，但**不能照 §4 的 12 slot 配**——那是 Q4 + 更小上下文的数字。
+
+### 9.2 结果（只换量化档位，指令、参数、图全部相同）
+
+| 指标 | Q4_K_M | Q6_K | 差 | d |
+|---|---:|---:|---:|---:|
+| 硬失败率 | 0.0% | 0.0% | — | — |
+| caption 字符 | 799.0 | 831.0 | +32.0 | 0.24 |
+| completion token | 173.6 | 180.1 | +6.5 | 0.24 |
+| 延迟（s/张，并发 1） | 2.30 | 2.84 | +0.54 | **1.51** |
+| 字符 3-gram Jaccard | — | — | 0.447 | — |
+| 越过 1024 字符 | **0.8%** | **5.6%** | +4.8pp | — |
+| 最长一条 | 1073 | 1276 | +203 | — |
+| 材质词/张 | 5.31 | 5.96 | +12% | — |
+| 颜色词/张 | 5.51 | 5.87 | +6.5% | — |
+
+要素覆盖（`devtools/nl_cover.py`）：材质 99% → 100%、构图 94% → 96%、光线 100% → 99%、
+颜色 98% → 97%、背景 99% → 99%、画面引文 11% → 11%。
+
+### 9.3 判定
+
+1. **Q6 的增益是"更细"，不是"更多信息点"**：3-gram Jaccard 0.447 已经压在同模型
+   重跑的噪声水平（≈0.44）上，说明两档的叙述结构基本一致；差别体现在长度 +4%、
+   材质词 +12%、颜色词 +6.5%。换句话说，Q4 不是"漏内容"，是"同样的内容说得更省"。
+2. **代价是确定的**：延迟 d=1.51，+23%，这不是噪声。按单张 0.54 秒差算，300 万张
+   多出约 19 天机时（12 slot 并起来绝对值会缩小，比例不变）。
+3. **上界遵守反而退化，这是本轮最值得记的一条**：同一条
+   `Stop at the upper bound`，Q4 只有 0.8% 越界，Q6 有 5.6%，最长 1276。
+   模型越强越不把"别超"当回事。下游若依赖 ≤1024（例如训练侧按 256 token 截断），
+   Q6 这一档要么单独把上限压到 900，要么在质检里把越界判废，别指望这句话。
+4. **修 prompt 能补一部分量化损失**：§5.1 里 Q4 与 Q6 的材质覆盖差 9pp（57% vs 66%），
+   现在密度只差 12%（5.31 vs 5.96），而且 Q4 的绝对值从 2.75 涨到 5.31。也就是说
+   "Q4 材质差"有一半是**指令没要求**，不是**模型看不见**。
+
+### 9.4 选型建议
+
+| 下游要什么 | 选 | 单张 | 备注 |
+|---|---|---:|---|
+| 粗描述 / 检索 / 打底数据 | Q4_K_M | 2.30s | 越界率最低，机时最省 |
+| 细节密度（材质、配色） | Q6_K | 2.84s | +24% 机时，需额外盯 >1024 越界 |
+| 和 Gold 集对齐 | Q8_0 | 4.30s | §5.1 已示三项指标不如 Q6，不建议 |
+
+### 9.5 复现
+
+```powershell
+# 量化（F16 已有）
+env\python\python.exe runtime\llama.cpp\llama-quantize.exe ^
+    models\nl\qwen3vl-8b\Qwen3VL-8B-Instruct-F16.gguf ^
+    models\nl\qwen3vl-8b\Qwen3VL-8B-Instruct-Q6_K.gguf Q6_K
+# 换 Q6 权重起服务（-ngl 99 即可，无需分层卸载）
+env\python\python.exe devtools\nl_ab.py collect --images H:\lulynx-trainer\sucai ^
+    --url http://127.0.0.1:8080 --out run\ab\q6.jsonl
+env\python\python.exe devtools\nl_ab.py compare --a run\ab\v3.jsonl --b run\ab\q6.jsonl ^
+    --label-a Q4_K_M --label-b Q6_K
+env\python\python.exe devtools\nl_cover.py run\ab\v3.jsonl run\ab\q6.jsonl
+```
+
+单臂约 6.6 分钟（0.32 张/秒，并发 1；Q4 是 0.41 张/秒）。
+
+## 10. 单张延迟 ≠ 吞吐（2026-11-07，Q4_K_M，v3 指令）
+
+"我记得不是 1.2 秒一张吗"这个疑问的答案是口径不同：§4 的 **1.27 张/秒是 4 路
+并发**的吞吐，不是单张墙钟。A/B 一律用 `--concurrency 1`，因为要比的是"同一张图
+两套指令谁更快"，把并发塞进去，延迟里就混进了排队与调度。
+
+实测（同一批图取前 16 张，Q4_K_M，`-c 8192`，服务端 `/props` 报 `total_slots=4`）：
+
+| 并发 | 吞吐 | p50 | 最大 | 单张折算 |
+|---:|---|---:|---:|---:|
+| 1 | 0.41 张/秒 | 2.29s | 2.73s | 2.4s/张 |
+| 2 | 0.69 张/秒 | 2.32s | 9.75s | 1.4s/张 |
+| 4 | **1.27 张/秒** | 2.85s | 3.60s | **0.79s/张** |
+
+三条读法：
+
+1. **4 路时每张仍要 2.85 秒才回来**，但四条同时在飞，合起来 1.27 张/秒。盯着
+   进度条看单条会觉得"怎么这么慢"，那是延迟，不是产能。
+2. **并发不是免费的**：2 路那栏出现一个 9.75s 的离群（16 张里的最大值），说明
+   慢请求会和别人抢槽位。所以"并发调大"只在**批量吞吐**上划算，交互式场景别学。
+3. **生产路径本来就是 4 路**：`concurrency=0` 时客户端跟服务端槽位走
+   （`client.resolve_concurrency`），llama.cpp 的槽位由 `-c` 与 `--parallel` 决定，
+   这台机器上是 4。所以 `§8` 的 2.30s 与实际跑批的 1.27 张/秒并不矛盾。
+
+复现：
+
+```powershell
+env\python\python.exe devtools\nl_ab.py collect --images H:\lulynx-trainer\sucai ^
+    --limit 16 --out run\ab\conc4.jsonl --concurrency 4
+```
+
+⚠ **别拿"延迟之和"折算吞吐**：并发跑的时候多张是重叠的，加起来远大于墙钟
+（第一版汇总脚本就这么算错过：把 45.5s 的墙钟算成了 0.35 张/秒）。

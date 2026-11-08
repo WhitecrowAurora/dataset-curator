@@ -25,3 +25,5 @@ H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\refint\Tagger.
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.genruntimeconfig.cache
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\ref\Tagger.Shell.dll
 H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.sourcelink.json
+H:\tagger\desktop\Tagger.Shell\bin\Release\net8.0-windows\win-x64\Tagger.Shell.pdb
+H:\tagger\desktop\Tagger.Shell\obj\Release\net8.0-windows\win-x64\Tagger.Shell.pdb

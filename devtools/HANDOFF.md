@@ -1,6 +1,6 @@
 # 打标器交接文档
 
-> 最后更新：2026-11-04
+> 最后更新：2026-11-07（§24 jsonl 产物形态）
 > 用途：换会话/换人接手时，先读这一份，不要从零摸索。
 > 目标用户：训练团队内部使用，处理服务器上 4TB 级素材包。
 
@@ -191,6 +191,24 @@ pip 照装、返回 0。不捞的话用户只看到一个绿色的"完成"，而
 代码：`tagger/web/selfcheck.py`（15 项检查与状态机）、
 `tagger/web/ui/src/components/SelfCheckDialog.tsx`（方块墙与动画）。
 
+### 本地量化成 GGUF（模型管理页「本地量化」）
+
+默认引擎 llama.cpp 只吃 GGUF。模型没有现成 GGUF 时（自训 / 微调 / 某些破限版），
+用这条把**原始权重**变成能跑的档位：
+
+1. 模型行下载档位选「原始权重（用于本地量化）」→ 整仓库 safetensors 落到 `models/nl/<key>/`
+2. 点「本地量化」→ 选 Q4_K_M / Q6_K → 开始
+3. 完成后产物自动登记进 `configs/models.json` 的 `gguf_quants`，新建任务页选同名档位即可
+
+- 脚本用的是 llama.cpp 官方 `convert_hf_to_gguf.py`，按运行时 tag 自动取到
+  `runtime/llama.cpp/convert/`（首次约 10 MB 源码包），**不要自己手改**那几份文件
+- 依赖是 `convert` 这个 extra（torch + transformers），页面能一键装
+- 视觉模型会跑两趟：文本塔写 `--outfile`，第二趟加 `--mmproj`（它只是开关，
+  输出名自动加 `mmproj-` 前缀）
+- 中间的 F16 跑完就删：它比成品大两三倍，留着只会让 `models/` 莫名其妙地涨
+- 代价说清楚：比直接下现成 GGUF 慢得多（0.5B 约 25 秒，8B 十几分钟起），
+  磁盘峰值约两倍模型大小
+
 ### 打包分发给别人
 
 一条命令出包（白名单式，不会误带 `models\`）：
@@ -209,7 +227,13 @@ pack-dist.bat -NoTests -Out D:\x.zip :: 不要测试、指定输出路径
 解释器 + pip wheel，约 12MB）、根目录脚本与 `Tagger.Shell.exe`。
 
 **永远不会包含**：`models\`（42GB）、`work\`、`run\`、`.pytest_cache`、`node_modules`、
-`dist\desktop`、`env\python`（除 `-WithEnv`）。
+`dist\desktop`、`env\python`（除 `-WithEnv`）、**`configs\models.json`**。
+
+`configs\models.json` 是**接收方自己的**覆盖文件（加过的模型、改过的下载目录、代理、
+本地量化登记进去的 `gguf_quants`）。它是本机数据，跟着包发出去等于"升级一次就把他们的
+配置清空"（我们这边通常只有 `{}`）。所以 `pack-dist.bat` 拷完 `configs\` 会把它删掉，
+只发 `tiers*.yaml`。同理：**升级只覆盖代码与默认配置，权重与任务断点（`run\resume.json`、
+产物目录）都不在包里，解压不会影响他们跑到一半的活**。
 
 `-WithEnv` 会先看 `env\python` 里还有没有 torch，有就中止——否则会出一个 4GB 的包。要带环境
 就先 `prune-env.bat -Apply -StripBytecode`。
@@ -235,7 +259,7 @@ pack-dist.bat -NoTests -Out D:\x.zip :: 不要测试、指定输出路径
 | `cpu_tagger.py` | tag 后端抽象与加载 | 完整 |
 | `client.py` | **远端** vLLM 打标（tag / nl / both 三种模式） | 完整 |
 | `quality.py` | 标注质量三层评分 + 重试回环（注意：这是**标注质量**，不是 JPEG 质量） | 完整 |
-| `artifacts.py` | 成员产物的 parquet 落盘形态 | 完整 |
+| `artifacts.py` | 成员产物分片：parquet / jsonl 两个 sink + 读侧（见 §24） | 完整 |
 | `distribute.py` / `merge.py` / `verify.py` / `report.py` | 分发包、回收对账、完整性复核、批次报告 | 完整 |
 | `hf_source.py` | 从 HF 拉 tar/parquet 素材 | 完整 |
 | `web/app.py` | FastAPI：任务、预览、目录浏览（含 `.zip`）、缩略图（含 zip 成员）、事件流 | 完整 |
@@ -244,6 +268,8 @@ pack-dist.bat -NoTests -Out D:\x.zip :: 不要测试、指定输出路径
 | `web/packaging.py` | 分包/拼接/封包的后台任务（`/api/datajob*`） | 完整 |
 | `web/models.py` | **模型清单**：`/api/models` 读写 `configs/models.json`（只存与 tiers.yaml 的差异），下拉与 CLI 共用同一份合并结果 | 完整 |
 | `web/downloads.py` | **权重下载**：流式下载 + 进度/网速 + 按文件断点续传 + 取消 + 代理（http/socks5）；删除只允许 `models/` 之内 | 完整 |
+| `gguf_convert.py` | **本地量化成 GGUF**：原始 safetensors → `convert_hf_to_gguf.py`（按运行时 tag 自动取脚本）→ F16 → `gguf_quant` 压成 Q4_K_M/Q6_K → 登记回覆盖文件。视觉模型多跑一趟导出 mmproj | 完整 |
+| `gguf_quant.py` | GGUF 再压（自研 numpy，Q4_K/Q6_K，输入必须是 F16/BF16 的 GGUF） | 完整 |
 | `netutil.py` | 回环地址判定：本机请求一律不吃系统代理（代理软件会拦 127.0.0.1） | 完整 |
 
 ### 前端（`tagger/web/ui/`）
@@ -581,10 +607,20 @@ UI 滑块范围 90-100，低于 92 显示体积/画质提示。若将来真要�
   **只作用于这页的下载**：`vllm serve` 自己拉权重仍走系统 `HTTP_PROXY/HTTPS_PROXY`。
   socks5 依赖 `socksio`（已装并锁进 requirements-embedded.txt）；
   `HF_ENDPOINT` 换镜像仍然有效，两者可以叠加。
-- tiers.yaml 里加了 `qwen3vl-4b-abliterated` / `qwen3vl-8b-abliterated`
-  （prithivMLmods 的 Unredacted-MAX）。打标用无审查版：原版遇到 NSFW 图会拒答，
-  表现是"整张只出几句干话、一个 tag 都没有"，而且不报错。这两个没进 tiers，
-  要用得手动选或 `--model` 覆盖。
+- **默认口径已切到无审查版**（2026-11-07）：`qwen3vl-4b-abliterated` /
+  `qwen3vl-8b-abliterated`（prithivMLmods 的 Unredacted-MAX）进全部三档，
+  官方 `qwen3vl-4b/8b` 降为对照与回退。原因是训练 diffusion 的图集里暴露内容
+  占比不低，原版遇到 NSFW 直接拒答，表现是"整张只出几句干话、一个 tag 都没有"
+  且不报错——静默漏标。
+  同一条目里两套权重各有用途：`path` 是原始 bf16（vLLM / 量化的输入），
+  `gguf` / `mmproj` 是 llama.cpp 的成品（mradermacher 转的 Q4_K_M，作者原仓库
+  只有 BF16/Q8_0，16G 卡放不下 BF16）。新增 `download_repo` / `download_files`：
+  模型管理页的下载按钮按它们走，只拉主权重 + mmproj，不下整个 GGUF 仓库
+  （那个仓库 6 个档合计 20G+）。
+  ★覆盖文件是整体替换：`quantize._register` 写回时必须把 gguf / mmproj /
+  download_repo / download_files 一起抄过去，漏一个就会让默认引擎报"没配 GGUF"。
+  量化默认对象跟着分档走（`_model_source(None)` → resolve_profile），所以三档
+  改了模型，量化默认也就是破限版，不需要改代码。
 - 新建页的「打标方式」是三选：**Tag 打标**（engine=local）/ **NL 打标**（engine=vlm + output_mode=nl）/
   **同时**（engine=vlm + output_mode=both）。页面按选择只显示对应的模型面板；
   模型清单在「模型管理」页改（左栏独立 tab），写 `configs/models.json`，由
@@ -1863,3 +1899,204 @@ safetensors 0.8.0    datasets 5.1.0
 - `pip install --dry-run torch==2.14.1 torchvision==0.29.1 --index-url
   https://download.pytorch.org/whl/cu126` → 可解析
 - `pytest tests -q` 全绿；三个 `.bat` 仍是纯 ASCII
+
+---
+
+## 24. 2026-11-07：jsonl 产物形态（第三种落盘）
+
+`--artifact-format jsonl`（WebUI「打标产物 → 产物形态」第三项）。与 parquet
+**同一个 sink 接口**（`add / flush / close / rows_per_file`），一行一条，
+一片一个 `artifacts-NNNNN.jsonl`。
+
+### 24.1 为什么还要一种
+
+| 形态 | 文件数 | 依赖 | 坏一行的后果 | 体积 |
+|---|---|---|---|---|
+| 逐图 json | 6000 万个小文件 | 无 | 只坏那一张 | 1×（但有簇浪费） |
+| parquet | 降 4 个数量级 | pyarrow | 整片读不出来 | 最小（zstd） |
+| jsonl | 降 4 个数量级 | 无 | 只坏那一行 | ≈ parquet 的 1.5~2 倍 |
+
+嵌入式环境里 pyarrow 是可选依赖，而分片是**不可分割的二进制**：小半截坏掉
+整片都读不了，还得有专门的读取器才能看见里面是什么。jsonl 用标准库写、
+用 less/grep 看，跨机器搬运不挑环境。
+
+### 24.2 三条不许动的口子
+
+1. **行结构逐字段一致**：`image_id / tag / nl / ts`，`tag`/`nl` 仍是
+   `json.dumps(payload)` 的**字符串**，空串表示该侧没产出。合并的对账逻辑
+   全建立在 payload 上，拆成嵌套对象等于把那段逻辑复制两份。构造函数
+   `artifacts._row()` 是唯一出处，两个 sink 都调它。
+2. **写整片再原子替换**（`*.jsonl.tmp` → `replace`）：崩在写一半不会留下
+   半截分片被 merge 当成正常产物。`newline="\n"` 写死，跨平台字节一致。
+3. **编号各形态独立**：`_next_seq(out_dir, suffix)` 只数同后缀的片，
+   parquet 编到 00007 不影响 jsonl 从 00000 起。
+
+### 24.3 读侧（一处改、四处生效）
+
+`artifacts.find_artifacts(root)` + `artifacts.iter_artifact_rows(path)` 按后缀
+分派，下面这些都改成了它，所以新增形态只改这两处：
+
+- `merge._iter_shard_records`（对账）
+- `report.collect_points`（报告）
+- `tag_manage.kind_of / scan / _load_shard`（整理页；`artifacts-*.jsonl`
+  才算分片，`failures.jsonl` / `manifest.jsonl` 不算）
+- `verify.list_shards / _iter_jsonl`（复核；`_row_members` 与 parquet 共用）
+
+`load_done_ids(out_dir, fmt="all")` 默认**两种形态取并集**：续跑只关心
+"这张做过没有"。换了形态重跑时若只认本形态，做过的图会被重做，而重做出来
+的重复行在 merge 里会变成要人工裁决的内容冲突。
+
+### 24.4 坏行口径（和 parquet 不同，故意的）
+
+- 末尾那行没有换行符 → 写到一半被打断的残留，**跳过**（`return`）。
+- 中间的行不是 JSON → **报错并带行号**。静默跳过会让 merge 悄悄少几张图。
+- `load_done_ids` 里又宽一档：坏行一律跳过。那是"提示"不是数据，
+  宁可多打一张，不该让一次启动因为一个残行整个失败。
+
+### 24.5 验证
+
+- `pytest tests/test_artifacts_jsonl.py`（这个文件**不 importorskip pyarrow**，
+  其中一条用 `builtins.__import__` 模拟没装 pyarrow，把"纯标准库也能跑"
+  这条卖点钉住）
+- `tests/test_artifacts.py` 里补了"parquet 与 jsonl 给同一结论"与
+  "done_ids 取并集"
+- `cd tagger\web\ui; npm run build`（tsc --noEmit 一起过）
+
+### 24.6 定名与默认值（同日追加）
+
+**本地统一走 jsonl，一包一文件**：`artifacts-<分包名>.jsonl`。
+
+- 名字取 `TaskRow.shard`（分包 zip 的路径）的 stem，经 `safe_stem()` 清洗
+  （Windows 九个非法字符/空白换 `_`，**中文保留**，首尾点线去掉，截 60 字）。
+- **按包切而不是按 job 切**：成员机常把几十个 zip 丢进一个输入目录、写同一个
+  产物目录，`MultiShardSink` 惰性为每个来源包建一个 `JsonlSink`，换包时先刷
+  上一个（崩了只丢当前这一包）。两个目录里同名的 `dist-01.zip` 会退成
+  `artifacts-dist-01-2.jsonl`，不合并。
+- **续写默认开**：同名文件已存在就往后 append，暂停后继续不多出一片。
+  `--force` 例外——它会重做已完成的图，续写就重复，所以 `append=False`，
+  已存在则退成 `-2`，**绝不覆盖**。
+- 定名模式下 `rows_per_file` 只决定"多久落一次盘"，**不换文件**；编号分片
+  （`artifacts-00000.jsonl`）仍是 `stem=""` 时的行为，脚本与测试用它。
+- 默认值三处一起改成 jsonl：`cli.py --artifact-format`、`jobs.JobSpec`、
+  `app.JobRequest`。**parquet 只留给服务器封包分发**（`pack-*.parquet` /
+  `dist-*.zip`），本地不再默认产它。
+- 回传页（`/api/artifacts`）不再只认 `artifacts-*`：成员的流程是"本地合并成
+  自己的总表 → 发总表 → 服务器再合一次"，所以 `merged.jsonl` 必须能选到；
+  只排除 `failures.jsonl` / `manifest.jsonl` / `state.jsonl` 这三类非产物。
+
+### 24.7 已知边界
+
+- 一个 client 进程传多个 `--shard` 时是**一条任务流**，但按包切文件是按
+  `TaskRow.shard` 分的，所以仍然一包一文件 ✓。
+- 定名模式的落盘是 append，不是原子替换：崩在写盘途中只会在**末尾**留残行，
+  读侧本来就跳过"没有换行符的最后一行"，所以不需要额外清理。
+- 旧的 `artifacts-00000.jsonl` 若与新命名的片同目录，合并会拿到两份同样的图；
+  换新命名时把旧片挪走或换产物目录。
+
+---
+
+## 25. 2026-11-07：冲突与决策（同 id 两份不同内容）
+
+同一个 `image_id` 被打了两遍、内容还不一样（换模型 / 换 prompt / 新旧版本），
+合并会报"内容冲突"并**取第一份**。以前只能靠人去翻 `duplicates` 里的文件名，
+现在有页面可以逐条比、逐条批。
+
+### 25.1 什么算冲突（口径）
+
+只收**内容不同**的组合。内容相同的是幂等重复（重跑没清目录），取一份即可 ——
+把人塞进待办只会让他以为真出了问题。扫描口径与 `merge.collect` 一致：
+`tag` 取 payload 的 `tag`，`nl` 取 `caption`，逐图 json 与两种分片都认。
+
+### 25.2 决策存哪、按什么匹配
+
+`work/conflicts/decisions.json`，键 `image_id|kind`，值是**选中那份内容的
+sha1 前 16 位**，不是下标。理由：重扫一次候选顺序就可能变（多了一个文件、
+路径排序变了），按下标存会把决定悄悄套到另一份内容上；按哈希匹配要么命中
+要么明确失效。
+
+`merge.collect(..., decisions=picks)` 命中时按批的取那一份，记进
+`MergeStats.resolved`，**不再算失败** —— 否则人点了按钮、合并照样报错，
+那按钮就白点了。
+
+### 25.3 三种策略
+
+`manual`（默认，什么都不自动做）/ `newest`（`ts` 最新）/ `longest`（正文字符
+最多）。后两种在页面上只是"一键批量建议"，落进 decisions 文件，合并时才生效 ——
+所以点完还能逐条反悔。
+
+### 25.4 位置
+
+- 后端 `tagger/conflicts.py`：`scan / strategy_pick / decide / auto_decide /
+  picks_for_merge`，索引落 `work/conflicts/conflicts.json`（页面不用重扫）
+- 页面「冲突与决策」（侧栏，紧邻「整理」）：`GET /api/conflicts`、
+  `POST /api/conflicts/scan`、`POST /api/conflicts/decide`、
+  `POST /api/conflicts/auto`
+- 内存里只留冲突项，正常数据不存内容 —— 否则百万条会把内存吃光
+
+---
+
+## 26. 2026-11-07：安装链路补齐（llama.cpp + 依赖清单漏项）
+
+上一轮实测"新机器按 README 走一遍能不能用"时发现的三个洞。都不是新功能的
+问题，是**装完以为能用、其实不能用**的那类。
+
+### 26.1 llama.cpp 进了 install.bat / install.sh
+
+`llama.cpp` 是默认 NL 引擎，但它不是 pip 包：`env\python` 装完仍然没有
+`llama-server.exe`，点「启动服务」直接失败。以前只靠"网页上有个按钮"提醒，
+等于把最后一步留给用户自己发现。
+
+现在两个安装脚本都会在依赖装完后调一次 `tagger.cli llama install`
+（与网页按钮、CLI 共用 `tagger/llama_runtime.py` 同一份实现，同一落点，
+不会出现"网页装好而 CLI 说没装"）：
+
+- 先查 `status()["installed"]`（纯本地、不联网），已装就不重下 570MB
+- 下不了只警告不中断 —— 和 tag 运行时同一个理由：只影响 NL
+- 新增开关 `install.bat -NoLlama` / `install.sh --no-llama`
+- 自检末尾会报**模型权重在不在**，因为 `tiers.yaml` 默认指向 abliterated
+  破限版，那是几 GB 的独立下载，装完环境并不等于能打标
+
+### 26.2 依赖清单补了四个包
+
+以前它们靠"开发机手动装过"活着，干净机器上会炸。`tests/test_requirements_cover.py`
+现在会扫 `tagger/**.py` 里所有 import（含函数体内的延迟 import），
+清单没覆盖就失败 —— 这类漏项靠人眼复查必漏。
+
+| 包 | 为什么必装 | 缺了的表现 |
+|---|---|---|
+| `pyzipper` | AES-256 zip（7-Zip/WinRAR 默认） | `_open_zip` 的兜底路径没有 try，直接 ImportError |
+| `py7zr` | 7z 解包 | `_names_7z` 静默返回空 → "这个包里一张图都没有" |
+| `huggingface_hub` | `cpu_tagger` 按仓库名下模型；HF token | `TaggerUnavailable`，几个 CLIP 打分模型加载不了 |
+| `psutil` | 拆包时按可用内存砍并发 | 被 `except` 吞掉，内存不足时整机被拖死而不是报错 |
+
+`rarfile` 仍然不进清单：它只是外壳，真解压要外部 `unrar.exe`，
+`describe_backends()` 会照实报"需要外部 unrar"，不伪装成可用。
+`llmcompressor` 同理（`pyproject` 的 quantize extra）。
+
+### 26.3 prune-env.bat 不再删掉能用得上的东西
+
+`G_HF` 原来会删 `huggingface_hub` **和它的硬依赖** `filelock/fsspec/tqdm/
+requests` —— 裁完得到一个 `import huggingface_hub` 会抛 ImportError 的树。
+`KEEPNAMES` 是**精确匹配**（`for %%K in (...) if /i "%~1"=="%%K"`），
+所以前缀组里的名字必须逐个确认不会把依赖连坐删掉。
+
+同时把 `pyzipper/py7zr` 及其解压后端、`psutil`、`huggingface_hub` 的依赖
+加进 KEEPNAMES，自检也扩到 `psutil, pyzipper, py7zr, huggingface_hub`。
+
+### 26.4 pack-dist.bat
+
+- 新增 `-WithLlama`：默认**不带** `runtime\llama.cpp`（743MB，且 CUDA dll
+  与接收方驱动绑定），由接收方的 install.bat 自己下；只有离线目标或必须
+  钉死构建时才用。`runtime\llama.cpp\_dl\` 里那 570MB 原始 zip 永远排除。
+- `HANDOFF.md` 从根目录清单里去掉：它实际在 `devtools\`，那条 `if exist`
+  一直是死的（`if exist` 会把"文件挪走了"变成静默跳过）。
+- `pack-readme.txt` 补了第 4 步（下权重）和两条排错（GGUF 缺失、llama 没装）。
+
+### 26.5 验证
+
+- `pytest tests/test_requirements_cover.py`（4 条，新增）
+- 全量：653 通过，4 条失败仍是既有的（`hf_downloads` / `tag_golden` /
+  `web_models` ×2），与本节无关
+- `prune-env.bat` 用脚本复现其匹配逻辑做过 dry-run：55 项待删，关键包全保留
+- `pyzipper==0.4.0` / `py7zr==1.1.4` / `huggingface_hub==2.4.0` /
+  `psutil==7.2.2` 已按本机实测版本钉死，`pip install` 可解析

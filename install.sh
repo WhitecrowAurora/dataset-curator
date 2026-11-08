@@ -19,6 +19,7 @@
 #    ./install.sh --force            删掉 env/linux 重建
 #    ./install.sh --offline          从 env/initialization/wheels 离线安装
 #    ./install.sh --skip-tag         不装打标运行时（只打包 / 跑 NL）
+#    ./install.sh --no-llama         不装 llama.cpp（llama-server，约 570MB）
 #    ./install.sh --no-tests         装完不跑测试
 #    ./install.sh --python python3.12    指定解释器
 # ===========================================================================
@@ -34,6 +35,7 @@ FORCE=0
 OFFLINE=0
 RUN_TESTS=1
 SKIP_TAG=0
+SKIP_LLAMA=0
 PYTHON_BIN="${PYTHON:-}"
 
 die() { printf '\n [错误] %s\n' "$*" >&2; exit 1; }
@@ -50,6 +52,7 @@ while [ $# -gt 0 ]; do
         --force|-f)   FORCE=1 ;;
         --offline)    OFFLINE=1 ;;
         --skip-tag)   SKIP_TAG=1 ;;
+        --no-llama)   SKIP_LLAMA=1 ;;
         --no-tests)   RUN_TESTS=0 ;;
         --python)     shift || die "--python 后面要跟解释器路径"; PYTHON_BIN="${1:-}" ;;
         -h|--help)    usage ;;
@@ -169,6 +172,21 @@ else
     fi
 fi
 
+# --------------------------------------------------------------- NL 引擎
+# llama.cpp 是默认引擎，没有 llama-server 服务起不来。安装逻辑在
+# tagger/llama_runtime.py（与网页按钮、CLI 同一份）。Linux 上官方发
+# ubuntu-x64 包；macOS 没有预编译，status() 会报 unsupported。
+# 失败不算致命：只影响 NL，打 tag / 打包 / 回传照样能用。
+if [ "$SKIP_LLAMA" -eq 1 ]; then
+    note "[3.8/5] 跳过 llama.cpp（--no-llama）"
+elif "$PY" -c 'from tagger import llama_runtime as r; raise SystemExit(0 if r.status()["installed"] else 1)' >/dev/null 2>&1; then
+    note "[3.8/5] llama.cpp 已就绪"
+else
+    note "[3.8/5] 安装 llama.cpp（约 570MB，仅首次）"
+    "$PY" -m tagger.cli llama install \
+        || note "      没装成；NL 打标会失败，打 tag / 打包不受影响。手动重试：$PY -m tagger.cli llama install"
+fi
+
 # --------------------------------------------------------------- 自检
 note "[4/5] 自检"
 "$PY" - <<'PY'
@@ -195,6 +213,9 @@ echo "   ./tagger.sh --help"
 echo "   $PY -m pytest"
 echo
 echo " 打标运行时（torch/transformers/timm/onnxruntime/datasets）默认已装；跳过过就重跑 ./install.sh"
+echo " llama.cpp（NL 引擎）默认已装；跳过过就重跑 ./install.sh 或："
+echo "   $PY -m tagger.cli llama install"
+echo " 模型权重是另一件事：打开界面「模型管理」下载对应条目（默认破限版，几 GB）"
 echo "   # vLLM 只跑 Linux（本机有 NVIDIA 卡时）："
 echo "   $PY -m pip install vllm"
 echo

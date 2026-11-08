@@ -35,7 +35,7 @@ export function AppShell({
       <Sidebar items={items} footer={footer} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-lx bg-lx-surface/70 px-5 backdrop-blur md:px-6">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-lx bg-lx-surface/70 px-4 backdrop-blur md:px-5">
           <div className="flex min-w-0 items-center gap-2 text-[11.5px] text-lx-muted">
             <Server size={13} className="shrink-0" />
             <span className="truncate font-mono">
@@ -72,12 +72,13 @@ export function AppShell({
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="px-4 py-6 md:px-7 md:py-7">{children}</div>
+          <div className="px-4 py-4 md:px-6 md:py-5">{children}</div>
         </main>
 
-        {/* 没有任务时整条不渲染：不留一条空边框占高度 */}
+        {/* 底部状态条常驻：空闲时它就是一行 "-- | -- | --"。
+            以前是有任务才出现，代价是整条高度来回跳，切换页面时会抖。 */}
         {statusBar ? (
-          <footer className="shrink-0 border-t border-lx bg-lx-surface/70 px-4 py-1.5 md:px-6">
+          <footer className="shrink-0 border-t border-lx bg-lx-surface/70 px-4 py-1 md:px-5">
             {statusBar}
           </footer>
         ) : null}

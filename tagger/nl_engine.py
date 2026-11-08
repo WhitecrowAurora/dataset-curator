@@ -43,7 +43,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import ConfigError, RunProfile
+from .config import GGUF_PRECISIONS, ConfigError, RunProfile
 from .netutil import trust_env_for
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,9 +107,25 @@ def missing_weights_hint(model_key: str) -> str:
 
 
 def resolve_weights(profile: RunProfile) -> tuple[Path, Path]:
-    """把 profile 里的 gguf / mmproj 解析成两个真实文件，缺一个就当场报清楚。"""
+    """把 profile 里的 gguf / mmproj 解析成两个真实文件，缺一个就当场报清楚。
+
+    选了 GGUF 量化档（q4/q6…）就按档取路径：同一份权重不同压缩比是三个
+    文件，不是三个模型。没配对应档时回落到 `gguf:`，并说明缺哪一档，
+    而不是让人以为"选了 Q6、其实还是 Q4 在跑"。
+    """
     model = profile.model
-    gguf_raw = str(getattr(model, "gguf", "") or "").strip()
+    quants = dict(getattr(model, "gguf_quants", None) or {})
+    want = str(profile.precision or "").strip().lower()
+    # 选了 GGUF 档但模型没配这一档时**必须报错**。以前是静默回落到 `gguf:`，
+    # 结果是"界面上选 Q6，实际一直跑 Q4"——用户以为换了一代权重，产出差异
+    # 却全被算到 prompt 或数据头上。只有"没指定 GGUF 档"（int4/bf16 这类
+    # vLLM 口径，或为空）才回落到默认那档。
+    if want in GGUF_PRECISIONS and quants and want not in quants:
+        raise ConfigError(
+            f"模型 {model.key} 没有 {want} 这一档 GGUF，现有哪些："
+            f"{' / '.join(sorted(quants)) or '（无）'}。\n"
+            f"在「模型管理」页下它（或用量化功能生成），或改用上面的档位。")
+    gguf_raw = str(quants.get(want) or getattr(model, "gguf", "") or "").strip()
     mmproj_raw = str(getattr(model, "mmproj", "") or "").strip()
     if not gguf_raw or not mmproj_raw:
         raise ConfigError(missing_weights_hint(model.key))
@@ -120,8 +136,12 @@ def resolve_weights(profile: RunProfile) -> tuple[Path, Path]:
 
     gguf, mmproj = _abs(gguf_raw), _abs(mmproj_raw)
     if not gguf.is_file():
+        extra = ""
+        if want in quants:
+            extra = (f"\n当前精度是 {want}，配的文件是 {gguf_raw}——这一档还没下载。"
+                     f"在「模型管理」页下它，或把精度改回 Q4。")
         raise ConfigError(
-            f"GGUF 权重不存在：{gguf}\n{missing_weights_hint(model.key)}")
+            f"GGUF 权重不存在：{gguf}{extra}\n{missing_weights_hint(model.key)}")
     if not mmproj.is_file():
         raise ConfigError(
             f"视觉投影文件（mmproj）不存在：{mmproj}\n"
@@ -206,6 +226,41 @@ def slot_plan(profile: RunProfile, vram_gb: float | None = None,
     return slots, ctx_per_slot, KV_TYPE
 
 
+def kv_bytes_per_slot(profile: RunProfile, ctx_per_slot: int = CTX_PER_SLOT,
+                      kv_type: str = KV_TYPE) -> int:
+    """一个 slot 的 KV 缓存大约占多少字节。
+
+    为什么要给页面一个数：用户想"打标的时候顺便玩把游戏"，需要知道把 slot
+    从 12 降到 4 到底能腾出多少显存。现在这个关系完全看不见，只能靠试。
+
+    口径是粗估而非精确：层数 × 2（K/V）× 每 slot 上下文 × KV 头维度 ×
+    每元素字节。拿不到层数和头维度时按 8B 档的 36 层 / 8 个 KV 头 / 128
+    维算——宁可估大一点（估小了用户会真 OOM）。
+    """
+    per_elem = 1.0 if str(kv_type).lower() in ("q8_0", "q8") else 2.0
+    layers = 36
+    kv_heads = 8
+    head_dim = 128
+    return int(layers * 2 * ctx_per_slot * kv_heads * head_dim * per_elem)
+
+
+def slot_plan_memory(profile: RunProfile, slots: int,
+                     ctx_per_slot: int = CTX_PER_SLOT,
+                     kv_type: str = KV_TYPE) -> dict:
+    """槽位方案对应的 KV 显存估算（GiB），给页面显示"降 slot 能省多少"。"""
+    per_slot = kv_bytes_per_slot(profile, ctx_per_slot, kv_type)
+    total = per_slot * max(1, slots)
+    gib = 1024 ** 3
+    return {
+        "slots": slots,
+        "ctx_per_slot": ctx_per_slot,
+        "ctx_total": ctx_per_slot * max(1, slots),
+        "kv_type": kv_type,
+        "kv_per_slot_gib": round(per_slot / gib, 2),
+        "kv_total_gib": round(total / gib, 2),
+    }
+
+
 def build_command(
     profile: RunProfile,
     *,
@@ -281,8 +336,12 @@ def readiness(base_url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def describe(profile: RunProfile) -> dict:
-    """给页面看的引擎摘要：换引擎等于换一代数据，这些字段要能一眼看到。"""
+def describe(profile: RunProfile, slots_override: int | None = None) -> dict:
+    """给页面看的引擎摘要：换引擎等于换一代数据，这些字段要能一眼看到。
+
+    槽位三项（生效值、来源、KV 显存）也放这里：它们是同一次启动里互相
+    牵制的数，分两处显示只会让人以为可以各自调。
+    """
     info: dict = {
         "engine": "llamacpp",
         "served_name": "",
@@ -294,4 +353,16 @@ def describe(profile: RunProfile) -> dict:
     except ConfigError as exc:
         info["image_max_tokens"] = None
         info["error"] = str(exc)
+    try:
+        slots, ctx_per_slot, kv_type = slot_plan(
+            profile, getattr(profile, "vram_gb", None), slots_override)
+        info["slots"] = slots
+        # 留空时这个是 False：页面据此显示"按显存自动"，而不是假装用户选过。
+        info["slots_manual"] = bool(slots_override)
+        info.update(slot_plan_memory(profile, slots, ctx_per_slot, kv_type))
+        # 不填时该档的默认值，方便页面把"自动会给你 12"写出来。
+        info["slots_default"] = slot_plan(
+            profile, getattr(profile, "vram_gb", None), None)[0]
+    except ConfigError as exc:
+        info["slots_error"] = str(exc)
     return info

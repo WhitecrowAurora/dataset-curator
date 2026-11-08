@@ -54,7 +54,7 @@ import zipfile
 from concurrent.futures import (ALL_COMPLETED, FIRST_COMPLETED, Future,
                                 ThreadPoolExecutor, wait)
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Iterable, Sequence
@@ -76,8 +76,15 @@ from .schema import Annotation, QC
 
 # prompt 一改，版本号必须跟着改。provenance 靠它回答"这批数据是哪套指令产的"，
 # 不清不楚的话，两个 prompt 混出来的数据集永远查不出差异来自哪。
+# 注意：改 caption_chars、tag 数量这类配置，渲染出来的指令也变了，同样算"改了
+# prompt"——只改数字不 bump 版本，会出现两批都叫 v2 但指令不同的情况。
 # v2：长度与 tag 数量改为按配置生成（v1 是写死的 15-40 tag / 480-1000 字符）。
-PROMPT_VERSION = "v2"
+# v3：颜色/材质从顺序句里提成独立条款（v2 实测颜色词只覆盖 17~28%、材质 57~66%，
+#     条款写在长句中间基本没被执行）；删掉 "Longer is fine"（与上限自相矛盾，
+#     且 both 模式下贴着 max_tokens 天花板）；长度补一条句数口径（字符数模型数不准）；
+#     both 模式补 "nothing else"；caption 段补身份名禁令（签名/水印会从"逐字转录"
+#     那条缝里漏进去）。
+PROMPT_VERSION = "v3"
 
 SYSTEM_PROMPT = (
     "You annotate images for diffusion-model training data. "
@@ -89,15 +96,31 @@ _TAG_RULES = """<TAGS> rules:
 - {lo} to {hi} tags, lowercase, words joined by underscores (danbooru style: long_hair, looking_at_viewer, depth_of_field).
 - Order from most to least salient; separate with commas only.
 - Most images land around {anchor_lo}-{anchor_hi} tags; go higher only when the image really is that dense.
+- Never pad the list to reach {lo}: near-duplicates and restatements of the same fact waste slots. On a simple image, spend the slots on framing, lighting and background instead.
 - Only tag what is clearly visible: subject count and type, hair, eyes, clothing, pose, action, setting, props, camera angle, framing, lighting, colour palette, art style.
 - Do not output quality or score words (masterpiece, best quality, 8k, highres, ultra detailed).
 - Do not output the artist name, the character name, or the series name: you cannot know them and guessing poisons the label."""
 
 _CAPTION_RULES = """<CAPTION> rules:
-- One paragraph of {char_lo}-{char_hi} characters. Longer is fine; empty is a failure.
-- Order the content: main subject; its appearance (colour, material, texture); setting and background; composition and camera angle; lighting; any visible text, transcribed verbatim inside double quotes.
+- One paragraph of {char_lo}-{char_hi} characters (roughly {sent_lo}-{sent_hi} sentences), on a single line. Stop at the upper bound: the reply is truncated there, and a caption cut mid-sentence is thrown away.
+- Order the content: main subject; setting and background; composition and camera angle; lighting; any visible text, transcribed verbatim inside double quotes.
+- Name the colour of every object you name, and what its surface looks like (matte, glossy, metal, cloth, skin, glass, hair). A description with no colour and no material words is incomplete.
 - Describe only what is visible. Do not speculate about anything outside the frame.
+- Do not name or guess the artist, character, series or studio. A signature or watermark is static text: quote it like any other visible text, but never resolve it into a name.
 - English only, plain prose: no markdown, no bullet points, no headings, no "Caption:" prefix."""
+
+
+# 英文散文的字符/句经验值。只用于把长度引导从"字符"翻译成"句数"——
+# 模型对字符数没有内感受，对句数是有的（实测 v2 的平均 842 字符 ≈ 7~8 句）。
+# 抽成模块级函数是因为 devtools 的 A/B 脚本要改长度引导（--caption-range），
+# 它们必须和这里用同一个口径，否则会渲染出"250-500 字符（约 4-9 句）"。
+_CHARS_PER_SENTENCE = 110
+
+
+def _sentences_for(char_lo: int, char_hi: int) -> tuple[int, int]:
+    """字符区间 → 句数区间。下限至少 3 句，上限至少比下限多 1 句。"""
+    lo = max(3, round(char_lo / _CHARS_PER_SENTENCE))
+    return lo, max(lo + 1, round(char_hi / _CHARS_PER_SENTENCE))
 
 
 def _prompt_for(output: OutputSpec) -> str:
@@ -117,13 +140,18 @@ def _prompt_for(output: OutputSpec) -> str:
         char_lo = max(400, output.nl_min_tokens * 4)
         char_hi = max(char_lo + 200, min(1200, output.nl_max_tokens * 4))
 
+    # 句数口径：模型数不准字符，但数得准句子。它只是"roughly"，
+    # 验收仍走 token 硬线，所以取整到句就够了。
+    sent_lo, sent_hi = _sentences_for(char_lo, char_hi)
+
     lo, hi = output.tag_min_count, output.tag_max_count
     anchor_lo = min(max(30, lo), hi)
     anchor_hi = min(max(60, anchor_lo), hi)
 
     tag_rules = _TAG_RULES.format(lo=lo, hi=hi,
                                   anchor_lo=anchor_lo, anchor_hi=anchor_hi)
-    cap_rules = _CAPTION_RULES.format(char_lo=char_lo, char_hi=char_hi)
+    cap_rules = _CAPTION_RULES.format(char_lo=char_lo, char_hi=char_hi,
+                                     sent_lo=sent_lo, sent_hi=sent_hi)
 
     mode = output.mode
     if mode == "tag":
@@ -134,10 +162,14 @@ def _prompt_for(output: OutputSpec) -> str:
         return ("Produce one block about the image, in exactly this format:\n\n"
                 "<CAPTION>\none paragraph of description\n</CAPTION>\n\n"
                 f"{cap_rules}\n\nOutput the CAPTION block and nothing else.")
+    # both 模式原来不写"nothing else"：模型加一句 "Here are the tags:" 不致命
+    # （正则能抓），但 max_tokens 是按「NL 全量 + tag 全量 + 标记」抠出来的，
+    # 那段前言是从 caption 的预算里偷的。
     return ("Produce two blocks about the image, in exactly this format:\n\n"
             "<TAGS>\ntag_one, tag_two, tag_three\n</TAGS>\n"
             "<CAPTION>\none paragraph of description\n</CAPTION>\n\n"
-            f"{tag_rules}\n\n{cap_rules}")
+            f"{tag_rules}\n\n{cap_rules}\n\n"
+            "Output these two blocks, in this order, and nothing else.")
 
 
 # 两道正则都写成「闭合标签可有可无」：模型偶尔只写开标记就往下走，
@@ -402,6 +434,7 @@ class ClientStats:
     # 累计失败过多次、这次直接不理的。单列出来，否则"跳过"里混着
     # "已完成"和"永远做不成"，看报告的人会以为进度正常。
     blacklisted: int = 0
+    busy: int = 0  # 其他进程正在处理，不能算已完成或写整片完成标记。
     tokens: int = 0
     # 输入 token。云端按量计费时它才是大头（图片 base64 动辄几千）。
     prompt_tokens: int = 0
@@ -427,6 +460,8 @@ class ClientStats:
         ]
         if self.rate_limited:
             lines.append(f"被限流(429): {self.rate_limited} 次")
+        if self.busy:
+            lines.append(f"其他进程处理中: {self.busy}（中断后重跑会重新核对）")
         if self.cost is not None:
             lines.append(f"估算费用   : {self.cost:.4f}（按 configs/nl_api.json 的价目）")
         if self.done or self.failed:
@@ -502,13 +537,8 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     直接 open(w) 写的话，断电/崩溃会留下一个能被 json.loads 读出一半的文件，
     merge 那边只看"文件在不在"，这条就会被当成有效产出收进总表。
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    from .storage.atomic import write_json
+    write_json(path, payload)
 
 
 def _existing_ok(path: Path, key: str, expect: dict | None = None) -> bool:
@@ -528,6 +558,8 @@ def _existing_ok(path: Path, key: str, expect: dict | None = None) -> bool:
     except (OSError, ValueError, UnicodeDecodeError):
         return False
     if not isinstance(obj, dict):
+        return False
+    if obj.get("ok") is False:
         return False
     if not str(obj.get(key) or "").strip():
         return False
@@ -1459,42 +1491,32 @@ def load_failure_counts(path: Path | None) -> dict[str, int]:
     没有它的话，一张必然失败的图（坏文件、模型对它稳定吐空）会在每次
     重跑时都重试 3 次再失败——3M 规模下这类样本的浪费是小时级的。
     """
-    counts: dict[str, int] = {}
+    from .storage.collections import SpillMap
+    counts = SpillMap()
     if path is None or not path.is_file():
         return counts
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return counts
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        iid = str(obj.get("image_id") or "")
-        if iid:
-            counts[iid] = counts.get(iid, 0) + 1
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                iid = str(obj.get("image_id") or "")
+                if iid:
+                    counts[iid] = counts.get(iid, 0) + 1
+    except OSError:
+        pass
     return counts
 
 
 def _already_done(client: TaggerClient, task: TaskRow,
                   out_dir: Path, layout: str) -> bool:
-    """两个必产文件都在且内容非空 = 这张已经做完。
-
-    只看"文件存在"不够：崩溃留下的半截 json、被手删过的空文件都会骗过它。
-    """
+    """已有有效产物就跳过图片；换模型或产出模式须强制重做才重算。"""
     tag_path, nl_path = _artifact_paths(out_dir, task, layout)
-    need_tag = client.need_tags
-    need_nl = client.output.wants_nl
-    # getattr：测试与基准脚本会塞只实现 process 的假 client，没有指纹可对。
-    expect_of = getattr(client, "artifact_expect", None)
-    expect_tag = expect_of(tag=True) if callable(expect_of) else None
-    expect_nl = expect_of(tag=False) if callable(expect_of) else None
-    return ((not need_tag or _existing_ok(tag_path, "tag", expect_tag))
-            and (not need_nl or _existing_ok(nl_path, "caption", expect_nl)))
+    return (_existing_ok(tag_path, "tag") or _existing_ok(nl_path, "caption"))
 
 
 def run_batch(
@@ -1519,6 +1541,7 @@ def run_batch(
     should_stop: Callable[[], bool] | None = None,
     paused: Callable[[], bool] | None = None,
     clients: Sequence[TaggerClient] | None = None,
+    work=None,
 ) -> ClientStats:
     """跑完一批。单写者：文件只在主线程写，worker 只算。
 
@@ -1547,7 +1570,8 @@ def run_batch(
     """
     # 注意：这里不再 len(tasks)。parquet 模式的任务是流式生成的，
     # 长度事先根本不知道（要先读完分片才能数清），所以 total 在迭代时累加。
-    done_ids = done_ids or set()
+    if done_ids is None:
+        done_ids = set()
 
     # 惰性打开：一次都没失败时不该在产物目录里留一个空的 failures.jsonl，
     # 那看起来像"有失败明细而内容被吞了"。
@@ -1592,6 +1616,8 @@ def run_batch(
         stats.tokens += outcome.tokens
         stats.rate_limited += outcome.rate_limited
         if not outcome.ok:
+            if work is not None:
+                work.release(task.image_id)
             stats.failed += 1
             stats.wall_ms += outcome.wall_ms
             for r in (outcome.error or "未知原因").split("; ")[:3]:
@@ -1612,7 +1638,10 @@ def run_batch(
             }, ensure_ascii=False)
             fh = fail_fh()
             if fh is not None:
-                fh.write(line + "\n")
+                from .storage.locking import FileLock
+                with FileLock(failures.with_suffix(".lock")):
+                    fh.write(line + "\n")
+                    fh.flush()
             print(f"[client][失败] {task.image_id}  {outcome.error}", file=sys.stderr, flush=True)
             emit("failed", task, outcome)
             return
@@ -1630,17 +1659,24 @@ def run_batch(
                 outcome.nl["rel_path"] = rel
 
         tag_path, nl_path = _artifact_paths(out_dir, task, layout)
+        if work is not None and not work.owns(task.image_id):
+            raise RuntimeError(f"图片领取已失效：{task.image_id}")
         try:
             with (stage_timer.track("write") if stage_timer is not None
                   else _null_track()):
                 if sink is not None:
-                    sink.add(task.image_id, outcome.tag, outcome.nl)
+                    # shard 只对 jsonl 的"一包一文件"有意义，其余 sink 忽略。
+                    sink.add(task.image_id, outcome.tag, outcome.nl, task.shard)
                 else:
                     if outcome.tag is not None:
                         _write_json_atomic(tag_path, outcome.tag)
                     if outcome.nl is not None:
                         _write_json_atomic(nl_path, outcome.nl)
+                    if work is not None:
+                        work.release(task.image_id)
         except OSError as exc:
+            if work is not None and sink is None:
+                work.release(task.image_id)
             stats.failed += 1
             print(f"[client][写入失败] {task.image_id}: {exc}", file=sys.stderr, flush=True)
             # 算完成后挂了写盘，结果同样是"这张没有产物"，对订阅方而言就是 failed。
@@ -1671,6 +1707,8 @@ def run_batch(
         逐项吐、逐项做。
         """
         for item in items:
+            if _stopping():
+                return
             if isinstance(item, tuple):
                 task, data = item
             else:
@@ -1700,6 +1738,22 @@ def run_batch(
                     print(f"  [跳过] {task.image_id}（产物已存在）", flush=True)
                 emit("skipped", task, None)
                 continue
+            if work is not None:
+                status = work.claim(task.image_id, force=force)
+                if status != "claimed":
+                    if status == "done":
+                        stats.skipped += 1
+                        emit("skipped", task, None)
+                    else:
+                        stats.busy += 1
+                        emit("busy", task, None)
+                    continue
+                # 另一个进程可能在初次检查之后、领取之前刚刚完成逐图文件。
+                if sink is None and not force and _already_done(client, task, out_dir, layout):
+                    work.release(task.image_id)
+                    stats.skipped += 1
+                    emit("skipped", task, None)
+                    continue
             yield task, data
 
     # 多卡：每个 client 一个槽，槽内再并发。没给 clients 就是单服务、单槽。
@@ -1734,10 +1788,10 @@ def run_batch(
     def _flush_sink() -> None:
         """把攒在内存里的产物推到盘上。
 
-        暂停/停止都是**会话边界**：用户很可能按完就关程序，而 ParquetSink
-        默认攒满 2000 行才写一片。不在这里 flush 的话，界面上「已完成 300 张」
-        会随着关闭凭空消失，下次继续还得重打——这正是"暂停要保存进度"的
-        反面。json 布局是逐张写的，不受影响。
+        暂停/停止都是**会话边界**：用户很可能按完就关程序，而分片 sink
+        （parquet / jsonl）默认攒满 2000 行才写一片。不在这里 flush 的话，界面上
+        「已完成 300 张」会随着关闭凭空消失，下次继续还得重打——这正是"暂停要
+        保存进度"的反面。json 布局是逐张写的，不受影响。
         """
         if sink is None:
             return
@@ -1762,17 +1816,21 @@ def run_batch(
                 commit(task, outcome, 0)
                 if guard is not None:
                     guard.after_unit()
+            if _stopping():
+                _flush_sink()
+                raise Stopped("收到停止请求")
             return stats
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             # 键里带上槽号：结算时要按它记"这张是哪张卡打的"。
             pending: dict[Future, tuple[TaskRow, int]] = {}
             it = pending_items()
-            cursor = 0
             exhausted = False
 
-            def submit_next() -> bool:
-                nonlocal cursor, exhausted
+            def submit_next(slot: int) -> bool:
+                nonlocal exhausted
+                if exhausted:
+                    return False
                 if _stopping():
                     return False      # 停补新任务；在途的等它们自然收尾
                 if paused is not None and paused():
@@ -1784,11 +1842,7 @@ def run_batch(
                     return False
                 if guard is not None:
                     _check_guard(guard)
-                # 轮询而不是"空闲了就给它"：请求耗时方差很大（长 caption
-                # 会多打一次），按空闲分发会让分配逻辑和并发数纠缠在一起，
-                # 而轮询的长期均衡误差不超过 1 张。
-                slot = cursor % len(slots)
-                cursor += 1
+                # 只补回刚空出的槽，保证快卡不会把请求堆到仍在忙的慢卡。
                 fut = pool.submit(slots[slot].process, task, data, reader)
                 pending[fut] = (task, slot)
                 return True
@@ -1806,8 +1860,8 @@ def run_batch(
                             guard.after_unit()
                 _flush_sink()
 
-            for _ in range(workers):
-                if not submit_next():
+            for index in range(workers):
+                if not submit_next(index % len(slots)):
                     break
 
             while True:
@@ -1819,8 +1873,8 @@ def run_batch(
                 if paused is not None and paused() and not _stopping():
                     drain()
                     _wait_resume()          # 期间收到 stop 会抛 Stopped
-                    for _ in range(workers):
-                        if not submit_next():
+                    for index in range(workers):
+                        if not submit_next(index % len(slots)):
                             break
                     continue
 
@@ -1835,7 +1889,10 @@ def run_batch(
                     # 让步按批结算：一个 worker 回来 ≈ 一个批次的边界
                     if guard is not None:
                         guard.after_unit()
-                    submit_next()
+                    submit_next(slot)
+        if _stopping():
+            _flush_sink()
+            raise Stopped("收到停止请求")
         return stats
     finally:
         for fh in fail_holder:
@@ -2053,9 +2110,10 @@ def load_tasks(shards: Sequence[Path], *, hf_repo: str = "") -> list[TaskRow]:
     """
     from . import hf_source
 
-    tasks: list[TaskRow] = []
-    seen: dict[str, str] = {}
-    dups: list[str] = []
+    from .storage.collections import SpillList, SpillMap
+    tasks = SpillList(encode=asdict, decode=lambda v: TaskRow(**v))
+    seen = SpillMap()
+    dups = SpillList()
 
     for shard in shards:
         try:
@@ -2101,6 +2159,7 @@ def load_tasks(shards: Sequence[Path], *, hf_repo: str = "") -> list[TaskRow]:
     # 按 image_id 排序：分包表本身就是这个序，顺序处理好让日志与产出一致，
     # 中断重跑时人的直觉也对得上（"我做到 leilei-003200 了"）。
     tasks.sort(key=lambda t: t.image_id)
+    seen.close()
     return tasks
 
 
@@ -2164,12 +2223,9 @@ def run_client(args, ops: OpsConfig, table: dict,
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
     api_key = str(getattr(args, "api_key", "") or "").strip()
-    if provider and not api_key:
-        # 环境变量是命令行的兜底：密钥不该出现在 shell history 里。
-        api_key = nl_api.env_api_key(provider)
     if provider:
-        base_url = (str(getattr(args, "api_base", "") or "").strip()
-                    or nl_api.default_base(provider))
+        base_url, api_key = nl_api.resolve_credentials(
+            provider, getattr(args, "api_base", ""), api_key)
         if not str(args.model_name or "").strip():
             raise ConfigError(
                 f"{nl_api.LABELS[provider]} 必须给模型名（--model-name / 表单「模型名」）："
@@ -2428,27 +2484,13 @@ def run_client(args, ops: OpsConfig, table: dict,
     remaining = int(args.limit) if args.limit else 0
 
     # 产物形态。json = 每图两文件（默认，完成信号最直接）；
-    # parquet = 攒成片（千万级时文件数降 4 个数量级，见 artifacts.py 的说明）。
+    # parquet = 攒成片（千万级时文件数降 4 个数量级，见 artifacts.py 的说明）；
+    # jsonl = 同样攒成片，但一片是纯文本、不要 pyarrow，坏行能直接看出来。
     artifact_format = str(getattr(args, "artifact_format", "json") or "json").lower()
+    rows_per_file = int(getattr(args, "parquet_rows", 2000) or 2000)
     sink = None
-    done_ids: set[str] = set()
-    if artifact_format == "parquet":
-        from .artifacts import ParquetSink, load_done_ids
-
-        sink = ParquetSink(out_dir, rows_per_file=int(
-            getattr(args, "parquet_rows", 2000) or 2000))
-        if not args.force:
-            try:
-                done_ids = load_done_ids(out_dir)
-            except RuntimeError as exc:
-                raise ConfigError(str(exc)) from exc
-    elif artifact_format != "json":
-        raise ConfigError(
-            f"--artifact-format 只能是 json / parquet，收到 {artifact_format!r}")
-    if sink is not None:
-        extra = f"，已有 {len(done_ids)} 张将自动跳过" if done_ids else ""
-        _log(f"[client] 产物形态 : parquet 分片，每 {sink.rows_per_file} 行一片{extra}")
-
+    work = None
+    done_ids = None
     # 跨运行累计的失败账。同一张图失败到 max_failures 次就不再碰它，
     # 否则每次重跑都要为同一批坏样本重烧 3 次推理。
     max_failures = int(getattr(args, "max_failures", 3) or 0)
@@ -2463,12 +2505,21 @@ def run_client(args, ops: OpsConfig, table: dict,
     done_dir = out_dir / ".hf-done"
 
     def shard_done(name: str) -> bool:
-        return (done_dir / f"{Path(name).name}.done").is_file()
+        # 旧版在中止或 Parquet 未落盘时也会写标记，需逐图核验一次。
+        try:
+            marker = (done_dir / f"{Path(name).name}.done").read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return False
+        return marker.startswith(f"complete-v2\t{name}\t")
 
     def mark_shard_done(name: str) -> None:
+        # 分片 sink 会攒行；必须先成功封盘，再承诺下次可整片跳过。
+        if sink is not None:
+            sink.flush()
         done_dir.mkdir(parents=True, exist_ok=True)
-        (done_dir / f"{Path(name).name}.done").write_text(
-            f"{name}\t{time.time():.0f}\n", encoding="utf-8")
+        from .storage.atomic import write_bytes
+        write_bytes(done_dir / f"{Path(name).name}.done",
+                    f"complete-v2\t{name}\t{time.time():.0f}\n".encode("utf-8"))
 
     # guard 的磁盘检查盯产物目录：满盘时最先坏的是正在写的 json。
     # Web 传入的 guard 优先——它带 on_state 事件接线，自建会出现两个
@@ -2518,6 +2569,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                 stage_timer=stage,
                 sink=sink,
                 done_ids=done_ids,
+                work=work,
                 on_progress=on_progress,
                 should_stop=should_stop,
                 paused=paused,
@@ -2550,13 +2602,19 @@ def run_client(args, ops: OpsConfig, table: dict,
         _log("")
 
         for idx, (name, uri) in enumerate(entries, 1):
+            if should_stop is not None and should_stop():
+                raise Stopped("收到停止请求")
             if remaining == 0 and getattr(args, "limit", None):
                 break
             if shard_mark and not args.force and shard_done(name) and not args.limit:
                 _log(f"[client] [{idx}/{len(entries)}] {name}  已完成，整片跳过")
                 continue
             _log(f"[client] [{idx}/{len(entries)}] {name}")
+            if shard_mark:
+                (done_dir / f"{Path(name).name}.done").unlink(missing_ok=True)
             before_failed = stats.failed
+            before_blacklisted = stats.blacklisted
+            before_busy = stats.busy
             samples = hf_source.iter_parquet_samples(
                 uri,
                 image_column=img_col, token=token, repo="",
@@ -2590,6 +2648,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                 stage_timer=stage,
                 sink=sink,
                 done_ids=done_ids,
+                work=work,
                 on_progress=on_progress,
                 should_stop=should_stop,
                 paused=paused,
@@ -2599,14 +2658,18 @@ def run_client(args, ops: OpsConfig, table: dict,
                 remaining = max(0, remaining - counter["n"])
             # 只有"整片跑完且零失败"才标记。被 --limit 截断的片不标，
             # 否则片尾没跑的样本下次被整片跳过，永远静默丢失。
-            if shard_mark and stats.failed == before_failed and not truncated["v"]:
+            complete = (stats.failed == before_failed
+                        and stats.blacklisted == before_blacklisted
+                        and stats.busy == before_busy
+                        and not truncated["v"])
+            if shard_mark and complete:
                 mark_shard_done(name)
             # 本地缓存下来的片：整片跑完且零失败就删，与 tar 的"打完即删"一致。
             # 失败或截断的留着——下次直接读本地，不必重新下几个 GB。
             # --hf-keep 时一律不删（那是显式要求留档）。
             if (remove_after and uri in remove_after
                     and not getattr(args, "hf_keep", False)
-                    and stats.failed == before_failed and not truncated["v"]):
+                    and complete):
                 try:
                     Path(uri).unlink()
                 except OSError:
@@ -2626,20 +2689,21 @@ def run_client(args, ops: OpsConfig, table: dict,
         # 本地缓存优先：下载页（或 `--hf-cache` 里手动放好的）提前下过的分片
         # 直接读本地文件，不再走网络。网络差的机器用硬盘换速度，网络好的
         # 不下载就还是流式拉——两条路的产物与跳过逻辑完全一样。
-        entries: list[tuple[str, str]] = []
-        remove_after: set[str] = set()
-        hit = 0
-        for name in files:
-            local = hf_cache / Path(name)
-            if local.is_file() and local.stat().st_size > 0:
-                entries.append((name, str(local)))
-                remove_after.add(str(local))
-                hit += 1
-            else:
-                entries.append((name, f"hf://datasets/{repo}/{name}"))
-        if hit:
-            _log(f"[client] 本地缓存 : {hit}/{len(files)} 片命中 {hf_cache}")
-        _run_parquet_entries(entries, token=token, remove_after=remove_after)
+        with hf_source.cache_session(hf_cache, should_stop):
+            entries: list[tuple[str, str]] = []
+            remove_after: set[str] = set()
+            hit = 0
+            for name in files:
+                local = hf_cache / Path(name)
+                if local.is_file() and local.stat().st_size > 0:
+                    entries.append((name, str(local)))
+                    remove_after.add(str(local))
+                    hit += 1
+                else:
+                    entries.append((name, f"hf://datasets/{repo}/{name}"))
+            if hit:
+                _log(f"[client] 本地缓存 : {hit}/{len(files)} 片命中 {hf_cache}")
+            _run_parquet_entries(entries, token=token, remove_after=remove_after)
 
     if len(clients) > 1:
         _log(f"[client] 目标服务 : {len(clients)} 个（多卡并行）  模型名 {args.model_name}")
@@ -2692,6 +2756,39 @@ def run_client(args, ops: OpsConfig, table: dict,
     code = 0
     started = time.time()
     try:
+        from .storage.work import WorkIndex
+        work = WorkIndex(out_dir)
+        work.refresh()
+        done_ids = work
+        if artifact_format in ("parquet", "jsonl"):
+            from . import artifacts as artifacts_mod
+
+            try:
+                artifacts_mod.ensure_available(artifact_format)
+            except RuntimeError as exc:
+                raise ConfigError(str(exc)) from exc
+            if artifact_format == "parquet":
+                sink = artifacts_mod.ParquetSink(out_dir, rows_per_file=rows_per_file,
+                                                 writer=work.owner, on_commit=work.publish)
+            else:
+                # jsonl 按包及进程分片：几十个分包跑同一个产物目录时，回传才能
+                # 一人发自己的。--force 会重做已完成的图，所以不能续写同名文件。
+                sink = artifacts_mod.MultiShardSink(
+                    out_dir, rows_per_file=rows_per_file, append=not args.force,
+                    writer=work.owner, on_commit=work.publish)
+        elif artifact_format != "json":
+            raise ConfigError(
+                f"--artifact-format 只能是 json / parquet / jsonl，收到 {artifact_format!r}")
+        if sink is not None:
+            extra = f"，已有 {len(done_ids)} 张将自动跳过" if done_ids else ""
+            if artifact_format == "jsonl":
+                _log(f"[client] 产物形态 : jsonl 按包分片 "
+                     f"（包名 + 进程编号 + 分片序号，"
+                     f"每 {sink.rows_per_file} 行落一次盘{extra}）")
+            else:
+                _log(f"[client] 产物形态 : {artifact_format} 分片，"
+                     f"每 {sink.rows_per_file} 行一片{extra}")
+
         if guard is not None:
             guard.start()
             # 守护线程的首轮采样是异步的，不等它的话，开跑后前几秒读到的还是
@@ -2770,11 +2867,17 @@ def run_client(args, ops: OpsConfig, table: dict,
                         revision=revision, token=token, prefetch=prefetch,
                         reserve_bytes=reserve_bytes, sizes=size_map,
                         conns=conns, proxy=hf_proxy,
-                        keep=keep, verbose=not args.quiet, on_log=_log):
+                        keep=keep, verbose=not args.quiet, on_log=_log,
+                        should_stop=should_stop):
                     seen += 1
                     name = shard.filename
+                    if should_stop is not None and should_stop():
+                        raise Stopped("收到停止请求")
                     _log(f"[client] [{seen}/{len(names)}] {name}")
+                    (done_dir / f"{Path(name).name}.done").unlink(missing_ok=True)
                     before_failed = stats.failed
+                    before_blacklisted = stats.blacklisted
+                    before_busy = stats.busy
                     try:
                         _, truncated = run_group([shard.path], hf_repo_name=hf_repo)
                     finally:
@@ -2783,7 +2886,9 @@ def run_client(args, ops: OpsConfig, table: dict,
                         hf_source.cleanup(shard, keep=keep)
                     # 只有整片跑完且零失败才标记。有失败别标（坏样本不能被
                     # 藏起来）；被 --limit 截断也别标（片尾还没跑）。
-                    if stats.failed == before_failed and not truncated:
+                    if (stats.failed == before_failed
+                            and stats.blacklisted == before_blacklisted
+                            and stats.busy == before_busy and not truncated):
                         mark_shard_done(name)
                     if remaining == 0 and getattr(args, "limit", None):
                         break
@@ -2812,7 +2917,12 @@ def run_client(args, ops: OpsConfig, table: dict,
                     code = 1
 
     except hf_source.HFError as exc:
-        print(f"\n[client] HF 访问失败：{exc}", file=sys.stderr)
+        # 必须走 _log 而不是裸 print(stderr)：任务页只消费 on_log 发出去的事件，
+        # 401/404 那句"该去填 token / 该检查仓库名"的指引写进 stderr 等于没写，
+        # 用户只会看到一句"打标未完整跑完"。
+        _log(f"[client] HF 访问失败：{exc}")
+        _log("[client] 上面这段就是原因：401/403 缺 token、404 是仓库名或类型不对、"
+             "DNS/连接超时是网络或代理。修好后重跑同一条命令即可续做。")
         code = 1
     except Stopped as exc:
         print(f"\n[client] 已停止：{exc}", file=sys.stderr)
@@ -2836,9 +2946,11 @@ def run_client(args, ops: OpsConfig, table: dict,
             try:
                 sink.close()
             except Exception as exc:      # noqa: BLE001 - 落盘失败要显式报出来
-                print(f"[client][写入失败] 最后一片 parquet 没落成: {exc}",
+                print(f"[client][写入失败] 最后一片产物没落成: {exc}",
                       file=sys.stderr)
                 code = 1
+        if work is not None:
+            work.close()
         for c in clients:
             try:
                 c.close()
@@ -2916,7 +3028,7 @@ def run_client(args, ops: OpsConfig, table: dict,
         print(f"[client] {stats.failed} 张失败，明细在 {failures}")
         print("         失败行不会写产物文件，所以重跑时会被自动重做——"
               "先把原因修掉再跑，别让它们一直循环。")
-    if code == 0 and stats.failed:
+    if code == 0 and (stats.failed or stats.busy):
         code = 1
 
     if code == 0:

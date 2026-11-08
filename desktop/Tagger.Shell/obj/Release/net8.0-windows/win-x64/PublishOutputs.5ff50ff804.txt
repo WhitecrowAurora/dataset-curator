@@ -1,1 +1,2 @@
+H:\tagger\dist\desktop-single\Tagger.Shell.pdb
 H:\tagger\dist\desktop-single\Tagger.Shell.exe

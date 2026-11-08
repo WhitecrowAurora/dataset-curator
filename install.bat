@@ -10,12 +10,18 @@ rem  minutes the first time; it is installed by default because the default
 rem  tag backend needs it - without it the first tagging job fails with
 rem  "tag backend unavailable".
 rem
+rem  Finally it installs llama.cpp (llama-server), ~570MB. That is the default
+rem  NL engine: without it the local service will not start at all. Same
+rem  implementation as the web button and `tagger.cli llama install`, so a
+rem  build installed here also shows up as installed in the UI.
+rem
 rem  All real logic lives in devtools\setup_embedded_env.ps1. This file only
 rem  forwards arguments, so there is exactly one implementation to maintain.
 rem
 rem  Usage:
 rem    install.bat                                        normal (idempotent)
 rem    install.bat -SkipTag                                packing / NL only
+rem    install.bat -NoLlama                                skip llama.cpp
 rem    install.bat -TorchIndex https://.../whl/cu126        pick CUDA build
 rem    install.bat -Force                                 rebuild from scratch
 rem    install.bat -WheelDir env\initialization\wheels     offline install
@@ -70,7 +76,11 @@ echo    installed by default. If this run used -SkipTag, re-run install.bat
 echo    without it before running a tagging job.
 echo.
 echo  NL engine (llama.cpp server):
-echo    env\python\python.exe -m tagger.cli llama install
+echo    installed by default. If this run used -NoLlama, run one of:
+echo      env\python\python.exe -m tagger.cli llama install
+echo      the "download and install" button on the Models page
+echo    Weights are separate: open the Models page and download the model
+echo    entry (default is the abliterated build, a few GB).
 echo.
 endlocal
 exit /b 0

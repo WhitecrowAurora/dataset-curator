@@ -10,6 +10,7 @@
  * 读不动的文件显示 "-"，不挡列表。
  */
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FolderOpen, Loader2, X } from 'lucide-react'
 import { api, type ArtifactInfo } from '../lib/api'
@@ -88,7 +89,13 @@ export function ShardAssets({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  return (
+  // 必须挂到 body 上再定位。
+  //
+  // `fixed` 只相对**最近的带 transform / filter / backdrop-filter 的祖先**定位，
+  // 而页面根节点用了入场动画（transform），于是这个"全屏遮罩"实际是相对
+  // 整张长表单定位的——看着就像弹窗跑到页面中段、要往下拉才能看见。
+  // 挂到 body 之后才是真正的视口居中。
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -238,6 +245,7 @@ export function ShardAssets({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   )
 }

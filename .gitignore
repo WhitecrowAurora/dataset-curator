@@ -9,3 +9,6 @@
 
 # 运维留档：含执行机 IP、HF 账号等信息，不入库
 /devtools/数据集构建进度.md
+/work/test
+/runtime/llama.cpp
+/work/dl

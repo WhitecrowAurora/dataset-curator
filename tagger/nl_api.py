@@ -215,6 +215,19 @@ def auth_headers(provider: str, api_key: str) -> dict[str, str]:
     return {}
 
 
+def resolve_credentials(provider: str, base: str = "", key: str = "") -> tuple[str, str]:
+    """显式值优先；保存的密钥只用于保存时绑定的服务地址。"""
+    name = normalize_provider(provider)
+    saved = saved_for(name)
+    saved_base = str(saved.get("base") or default_base(name)).strip()
+    resolved_base = str(base or "").strip() or saved_base
+    same_base = bool(name) and endpoint(resolved_base, name) == endpoint(saved_base, name)
+    resolved_key = (str(key or "").strip()
+                    or (str(saved.get("key") or "").strip() if same_base else "")
+                    or env_api_key(name))
+    return resolved_base, resolved_key
+
+
 def endpoint(base_url: str, provider: str) -> str:
     """拼出真正要 POST 的地址。
 
@@ -472,9 +485,9 @@ def saved_for(provider: str) -> dict:
 # 地址通不通、模型认不认、图能不能被看见（视觉能力）。
 
 _PROBE_PNG = bytes.fromhex(
-    "89504e470d0a1a0a0000000d49484452000000080000000808020000004b6d29"
-    "dc0000001849444154789c6360f8cf801b18a8c13018460300e2d2ff1bb0e0b5"
-    "3c0000000049454e44ae426082"
+    "89504e470d0a1a0a0000000d49484452000000080000000808020000004b6d29dc"
+    "0000001549444154789c63fcffff3f0336c0845574d04a000056d4030d37eccca3"
+    "0000000049454e44ae426082"
 )
 PROBE_PROMPT = "Reply with the single word: ok"
 

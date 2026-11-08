@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import dataclasses
+from itertools import islice
 import os
 import threading
 import time
@@ -25,6 +26,8 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from ..storage.discovery import InputScanStopped
 
 LOG_CAP = 200          # 页面日志环形缓冲
 RATE_WINDOW = 12.0     # 速率按最近这么多秒的进度估
@@ -56,7 +59,9 @@ class SplitParams:
     per_shard: int = 20000
     max_bytes: int = 0
     layout: str = "flat"
-    seq_width: int = 6
+    seq_width: int | None = None  # 首批默认 6；续批继承上一批
+    start_seq: int = 1
+    previous_table: str = ""
     recursive: bool = True
     exclude: str = ""            # 去重清单（dedup-exclude.txt），可空
     limit: int = 0
@@ -90,6 +95,9 @@ class SplitParams:
             Path(self.input_dir).resolve().parent / f"{_sibling_stem(self.input_dir)}-shards.json")
 
     def validate(self) -> None:
+        from ..distribute import resolve_sequence
+        resolve_sequence(start=self.start_seq, seq_width=self.seq_width,
+                         previous_table=self.previous_table)
         if not self.input_dir:
             raise ValueError("必须给素材目录")
         if not Path(self.input_dir).exists():
@@ -146,6 +154,7 @@ class MergeParams:
     roots: list[str] = field(default_factory=list)   # 回收目录，可多个
     shard_dir: str = ""          # 分发包目录（dist-*.zip），逐条对账用
     table: str = ""              # 分包总表，整包缺失检测用
+    tables: list[str] = field(default_factory=list)  # 多批分包表
     out: str = ""                # 总表输出，默认 work/merged.jsonl
     fmt: str = "jsonl"           # jsonl | json
     require: str = "both"        # nl | tag | both
@@ -188,6 +197,7 @@ class PackParams:
     max_bytes: int = 0
     layout: str = "flat"
     seq_width: int = 6
+    start_seq: int = 1
     # image_id 口径，必须与打标那次一致，否则产物一个都对不上：
     # False = 本机「新建任务」打的标（id 是相对路径，兼容历史产物）；
     # True = 成员按分包表打标回来的产物（画师-序号全局 id，与 split 分配一致）。
@@ -263,7 +273,7 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
     from ..config import DEFAULT_TIERS, load_ops, load_tier_table
     from ..dedup import load_exclude
     from ..distribute import (DistItem, assign_ids, plan_shards, read_shard_manifest,
-                              write_shard, write_table)
+                              resolve_sequence, write_shard, write_table)
     from ..pack import discover_inputs
 
     table = load_tier_table(DEFAULT_TIERS)
@@ -272,9 +282,15 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
     rule.enabled = True          # 分发必须知道画师，否则 image_id 里没有归属
 
     out_dir = params.resolved_out_dir()
+    start, width, shard_start = resolve_sequence(
+        start=params.start_seq, seq_width=params.seq_width,
+        previous_table=params.previous_table)
     on_log(f"扫描输入 {params.input_dir} …")
-    items = discover_inputs(params.input_dir, recursive=params.recursive,
-                            limit=params.limit or None)
+    try:
+        items = discover_inputs(params.input_dir, recursive=params.recursive,
+                                limit=params.limit or None, should_stop=should_stop)
+    except InputScanStopped as exc:
+        raise DataJobStopped() from exc
     if not items:
         raise ValueError(f"{params.input_dir} 下没有发现图片")
     excluded = 0
@@ -291,6 +307,8 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
     dist_items: list[DistItem] = []
     no_artist = 0
     for it in items:
+        if should_stop():
+            raise DataJobStopped()
         a = extract_artist(it.logical_path, rule, aliases)
         if not a.tag:
             no_artist += 1
@@ -298,9 +316,10 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
             source=it.source, member=it.member, rel_path=it.rel_path,
             artist=a.tag or "", size=it.size, ext=""))
 
-    assign_ids(dist_items, seq_width=params.seq_width)
+    assign_ids(dist_items, seq_width=width, start=start)
     plans = plan_shards(dist_items, mode=params.mode,
-                        per_shard=params.per_shard, max_bytes=params.max_bytes)
+                        per_shard=params.per_shard, max_bytes=params.max_bytes,
+                        start_index=shard_start)
     total_bytes = sum(p.bytes for p in plans)
     on_log(f"共 {len(dist_items)} 张，切成 {len(plans)} 个包"
            + (f"，排除 {excluded} 张" if excluded else "")
@@ -317,7 +336,8 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
         on_progress(done, len(plans), plan.name)
 
     table_path = write_table(plans, str(params.resolved_table()),
-                             next_seq=1 + len(dist_items))
+                             next_seq=start + len(dist_items), seq_width=width,
+                             start_seq=start)
     on_log(f"分包表写入 {table_path}（{sum(p.count for p in plans)} 张）")
 
     verify = None
@@ -348,6 +368,8 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
         "bytes": total_bytes,
         "out_dir": str(out_dir),
         "table_path": str(table_path),
+        "next_seq": start + len(dist_items),
+        "seq_width": width,
         "verify": verify,
     }
 
@@ -390,7 +412,8 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
     from ..config import DEFAULT_TIERS, load_ops, load_tier_table
     from ..containers import PasswordTable, iter_files
     from ..dedup import load_exclude
-    from ..distribute import StreamingShardWriter, write_table
+    from ..distribute import (StreamingShardWriter, resolve_sequence,
+                              validate_sequence, write_table)
     from ..imageops import resize_bytes
     from ..naming import IMAGE_SUFFIXES, make_image_id
     from ..scantable import (build_scan, group_by_container, load_table,
@@ -398,6 +421,10 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
 
     rule = load_ops(load_tier_table(DEFAULT_TIERS)).artist_rule()
     rule.enabled = True
+
+    start, width, shard_start = resolve_sequence(
+        start=params.start_seq, seq_width=params.seq_width,
+        previous_table=params.previous_table)
 
     out_dir = params.resolved_out_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -442,6 +469,8 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
         raise ValueError("排除后没有剩余图片")
 
     # 过滤后 seq 会留空洞，所以按 seq 建索引，不能拿列表下标当 seq 用
+    next_seq = start + max(e.seq for e in entries)
+    validate_sequence(start, width, next_seq - start)
     by_seq = {e.seq: e for e in entries}
     total_bytes = sum(e.size for e in entries)
     on_log(f"扫描就绪：{len(entries)} 张 / {total_bytes / 2 ** 30:.2f} GiB，表 {scan_path}")
@@ -542,7 +571,8 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
     # 先建 writer 再起线程：构造失败时不必去收拾一堆卡在队列上的线程
     writer = StreamingShardWriter(
         out_dir, layout=params.layout, compress="stored",
-        per_shard=params.per_shard, max_bytes=params.max_bytes, mode=params.mode)
+        per_shard=params.per_shard, max_bytes=params.max_bytes, mode=params.mode,
+        start_index=shard_start)
 
     boxes: list = [queue.Queue(maxsize=8) for _ in chunks]
     threads = [threading.Thread(target=produce, args=(chunk, box), daemon=True)
@@ -577,7 +607,7 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
                 artist = extract_artist(logical, rule, aliases)
                 if not artist.tag:
                     no_artist += 1
-                image_id = make_image_id(artist.tag or "", seq, width=params.seq_width)
+                image_id = make_image_id(artist.tag or "", start + seq - 1, width=width)
                 writer.add(image_id, data, artist=artist.tag or "",
                            src=item.source, member=member,
                            rel_path=logical, ext=ext, size=len(data))
@@ -595,7 +625,8 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
         raise ValueError("一张也没写出来——检查密码表或源文件是否可读")
 
     total = sum(p.count for p in plans)
-    table_path = write_table(plans, str(params.resolved_table()), next_seq=1 + total)
+    table_path = write_table(plans, str(params.resolved_table()), next_seq=next_seq,
+                             seq_width=width, start_seq=start)
     on_log(f"完成：{total} 张 / {len(plans)} 个包，分包表 {table_path}")
 
     if passwords.failures:
@@ -617,6 +648,8 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
         "out_dir": str(out_dir),
         "table_path": str(table_path),
         "scan_table": str(scan_path),
+        "next_seq": next_seq,
+        "seq_width": width,
         "verify": verify_info,
         "failed_containers": len(passwords.failures),
     }
@@ -624,6 +657,7 @@ def run_split_nested(params: SplitParams, *, on_progress, should_stop, on_log) -
 
 def run_merge(params: MergeParams, *, on_progress, should_stop, on_log) -> dict:
     params.validate()
+    from ..conflicts import picks_for_merge
     from ..config import DEFAULT_TIERS, load_ops, load_tier_table
     from ..distribute import read_shard_manifest
     from ..merge import (MergeStats, check, collect, collect_provenance,
@@ -643,7 +677,8 @@ def run_merge(params: MergeParams, *, on_progress, should_stop, on_log) -> dict:
     # 应产出的 id 从分发包 manifest 汇总；总表负责"整包没交"检测。
     expected: list[str] | None = None
     if params.shard_dir:
-        ids: list[str] = []
+        from ..storage.collections import SpillList
+        ids = SpillList()
         for shard in sorted(Path(params.shard_dir).glob("dist-*.zip")):
             try:
                 ids.extend(r["image_id"] for r in read_shard_manifest(shard))
@@ -653,7 +688,11 @@ def run_merge(params: MergeParams, *, on_progress, should_stop, on_log) -> dict:
         on_log(f"分发包列出 {len(expected)} 个 image_id")
 
     plans: list[dict] | None = None
-    if params.table:
+    if params.tables:
+        paths = ([params.table] if params.table else []) + params.tables
+        plans = load_shard_plans(paths)
+        on_log(f"读取 {len(paths)} 份分包表，共 {len(plans)} 个包")
+    elif params.table:
         p = Path(params.table)
         if not p.is_file():
             on_log(f"警告：分包总表不存在: {p}（整包缺失将无法检测）")
@@ -670,7 +709,7 @@ def run_merge(params: MergeParams, *, on_progress, should_stop, on_log) -> dict:
     on_log(f"回收目录：{', '.join(roots)}")
     stats = MergeStats()
     records = collect(
-        roots, stats=stats,
+        roots, stats=stats, decisions=picks_for_merge(),
         on_progress=lambda n: on_progress(n, 0, f"已扫 {n} 条产物"),
         should_stop=should_stop,
     )
@@ -714,7 +753,7 @@ def run_merge(params: MergeParams, *, on_progress, should_stop, on_log) -> dict:
         "empty_content_n": len(stats.empty_content),
         "duplicates_n": len(stats.duplicates),
         "duplicates": {k: v[:4] for k, v in
-                       list(stats.duplicates.items())[:SUMMARY_CAP]},
+                       islice(stats.duplicates.items(), SUMMARY_CAP)},
         "idempotent_n": len(stats.idempotent_repeats),
         "unreadable_n": len(stats.unreadable),
         "unreadable": stats.unreadable[:SUMMARY_CAP],
@@ -761,18 +800,23 @@ def run_pack(params: PackParams, *, on_progress, should_stop, on_log) -> dict:
     })
 
     aliases = AliasTable(rule.aliases_path).as_dict() if rule.aliases_path else {}
-    plan = plan_inputs(
-        params.input_dir,
-        recursive=params.recursive,
-        include_zips=params.include_zips,
-        include_loose=params.include_loose,
-        limit=params.limit or 0,
-        assign_ids=params.assign_ids,
-        layout=params.layout,
-        seq_width=params.seq_width,
-        artist_rule=rule,
-        aliases=aliases,
-    )
+    try:
+        plan = plan_inputs(
+            params.input_dir,
+            recursive=params.recursive,
+            include_zips=params.include_zips,
+            include_loose=params.include_loose,
+            limit=params.limit or 0,
+            assign_ids=params.assign_ids,
+            layout=params.layout,
+            seq_width=params.seq_width,
+            start_seq=params.start_seq,
+            artist_rule=rule,
+            aliases=aliases,
+            should_stop=should_stop,
+        )
+    except InputScanStopped as exc:
+        raise DataJobStopped() from exc
     if not plan.items:
         raise ValueError(f"{params.input_dir} 下没有发现图片")
     info = plan_stats(plan)
@@ -791,6 +835,8 @@ def run_pack(params: PackParams, *, on_progress, should_stop, on_log) -> dict:
     naming = {"artist": rule.enabled, "artist_depth": rule.depth,
               "seq_width": params.seq_width,
               "artist_inject": bool(rule.enabled and rule.inject_caption)}
+    if params.assign_ids and params.start_seq != 1:
+        naming["start_seq"] = params.start_seq
     try:
         report = pack_items(
             plan.items, out_dir, options,

@@ -26,19 +26,28 @@ from pathlib import Path
 from ..upload import FtpConfig, FtpUploader
 
 
-def parquet_rows(path: str | Path) -> int | None:
-    """从 parquet footer 元数据读行数，O(1)，不扫数据。
+def shard_rows(path: str | Path) -> int | None:
+    """一片里有多少行 = 这一片处理好的图片数。
 
-    ParquetSink 只把成功打标的行写进分片，所以"行数 = 这一片处理好的
-    图片数"——回传页上展示的就是它。pyarrow 缺失或文件损坏返回 None，
-    页面显示 "-"，不让一个读不动的文件挡住整个列表。
+    两个 sink 都只把**成功**打标的行写进分片，所以行数就是成品数。
+
+    parquet 读 footer 元数据，O(1)，不扫数据；jsonl 只能数行，但一片也就
+    2000 行、几毫秒的事，换来的是"没装 pyarrow 也能看"。读不动返回 None，
+    页面显示 "-"，不让一个坏文件挡住整个列表。
     """
+    p = Path(path)
+    if p.suffix == ".jsonl":
+        try:
+            with p.open("rb") as fh:
+                return sum(1 for line in fh if line.strip())
+        except OSError:
+            return None
     try:
         import pyarrow.parquet as pq
     except Exception:                     # noqa: BLE001 - 可选依赖
         return None
     try:
-        return int(pq.ParquetFile(path).metadata.num_rows)
+        return int(pq.ParquetFile(p).metadata.num_rows)
     except Exception:                     # noqa: BLE001 - 半截文件/损坏文件
         return None
 
@@ -67,7 +76,7 @@ class UploadJob:
             self._items[name] = {
                 "name": name,
                 "bytes": p.stat().st_size if p.is_file() else 0,
-                "rows": parquet_rows(p),
+                "rows": shard_rows(p),
                 "status": "pending",
                 "sent": 0,
                 "resumed": False,

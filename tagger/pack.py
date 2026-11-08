@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from .archive import IMAGE_SUFFIXES, sha256_of
+from .storage.discovery import check_stopped, sorted_files
 
 WORKDONE_NAME = ".packstate.jsonl"
 
@@ -108,15 +109,17 @@ class FlatNamer:
 
 
 def _iter_zip_members(path: Path, *, rel_prefix: str,
-                      namer: FlatNamer) -> Iterator[InputItem]:
+                      namer: FlatNamer, should_stop=None) -> Iterator[InputItem]:
     """枚举一个 zip 内的图片成员。
 
     rel_prefix 只用于展示与追溯（`shard-0003.zip::artist/0001.jpg`）；
     取画师名走 InputItem.logical_path，即包内路径。
     """
     try:
+        check_stopped(should_stop)
         with zipfile.ZipFile(path, "r") as zf:
             for info in zf.infolist():
+                check_stopped(should_stop)
                 if info.is_dir() or not _is_image(info.filename):
                     continue
                 if _skip_member(info.filename):
@@ -136,22 +139,21 @@ def _iter_zip_members(path: Path, *, rel_prefix: str,
 
 def _iter_discover(root: Path, *, recursive: bool, include_zips: bool,
                    include_loose: bool, namer: FlatNamer,
-                   limit: int | None) -> Iterator[InputItem]:
+                   limit: int | None, should_stop=None) -> Iterator[InputItem]:
     """discover_inputs 的流式内核。
 
     单独拆出来是因为 build_manifest 只需要按 source 分组计数，不需要把
     几十万条 InputItem 同时攥在手里。公开 API 维持返回 list——cmd_split
     要先全量枚举才能全局分配 id，那是设计使然，不是可以流化的部分。
     """
-    pattern = "**/*" if recursive else "*"
     found = 0
-    for path in sorted(root.glob(pattern)):
-        if not path.is_file():
-            continue
+    for entry in sorted_files(root, recursive=recursive, should_stop=should_stop):
+        path = Path(entry.path)
         rel = str(path.relative_to(root)).replace("\\", "/")
 
         if include_zips and path.suffix.lower() == ".zip":
-            for item in _iter_zip_members(path, rel_prefix=f"{rel}::", namer=namer):
+            for item in _iter_zip_members(path, rel_prefix=f"{rel}::", namer=namer,
+                                          should_stop=should_stop):
                 yield item
                 found += 1
                 if limit and found >= limit:
@@ -164,7 +166,7 @@ def _iter_discover(root: Path, *, recursive: bool, include_zips: bool,
                 source=str(path),
                 rel_path=rel,
                 flat_name=namer.make(rel),
-                size=path.stat().st_size,
+                size=entry.stat().st_size,
             )
             found += 1
             if limit and found >= limit:
@@ -179,12 +181,14 @@ def discover_inputs(
     include_loose: bool = True,
     namer: FlatNamer | None = None,
     limit: int | None = None,
+    should_stop=None,
 ) -> list[InputItem]:
     """递归发现 root 下的所有图片，含 zip 分包内部成员。
 
     root 也可以直接是一个 `.zip` 文件——4TB 级素材经常就是单个大包，
     要求用户先解压再指目录是多余的一步。单图路径同样接受。
     """
+    check_stopped(should_stop)
     root = Path(root)
     if not root.exists():
         raise FileNotFoundError(f"输入路径不存在: {root}")
@@ -192,9 +196,13 @@ def discover_inputs(
     namer = namer or FlatNamer()
     if root.is_file():
         if include_zips and root.suffix.lower() == ".zip":
-            items = list(_iter_zip_members(root, rel_prefix=f"{root.name}::",
-                                          namer=namer))
-            return items[:limit] if limit else items
+            from itertools import islice
+            items = _iter_zip_members(root, rel_prefix=f"{root.name}::",
+                                      namer=namer, should_stop=should_stop)
+            try:
+                return list(islice(items, limit)) if limit and limit > 0 else list(items)
+            finally:
+                items.close()
         if include_loose and _is_image(root.name):
             return [InputItem(
                 kind="loose_file",
@@ -206,7 +214,8 @@ def discover_inputs(
         raise ValueError(f"输入是个文件，但不是 .zip 也不是图片: {root}")
 
     return list(_iter_discover(root, recursive=recursive, include_zips=include_zips,
-                               include_loose=include_loose, namer=namer, limit=limit))
+                               include_loose=include_loose, namer=namer, limit=limit,
+                               should_stop=should_stop))
 
 
 def read_item_bytes(item: InputItem) -> bytes:

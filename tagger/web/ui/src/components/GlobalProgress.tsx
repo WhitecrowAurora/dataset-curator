@@ -77,6 +77,20 @@ export function GlobalProgress({
             </button>
           )
         })}
+        {/* 空闲占位：底栏常驻之后，什么都不显示会让人以为这块坏了。
+            三段写死成 `-- | -- | --`，跟有任务时的列宽对齐。 */}
+        {items.length === 0 && (
+          <div className="flex min-w-[220px] max-w-[420px] flex-1 items-center gap-2">
+            {/* 暂停刷新时不能写"空闲"：任务可能正在跑，只是我们不问了 */}
+            <span className="shrink-0 text-[11px] font-medium text-lx-dim">
+              {paused ? '暂停' : '空闲'}
+            </span>
+            <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-lx-raised" />
+            <span className="shrink-0 whitespace-nowrap font-mono text-[10px] tabular-nums text-lx-dim">
+              -- | -- | --
+            </span>
+          </div>
+        )}
         {items.length > 3 && (
           <span className="shrink-0 text-[10px] text-lx-dim">+{items.length - 3}</span>
         )}
@@ -345,12 +359,13 @@ function describe(item: Activity): { pct: number; parts: string[]; hint: string 
     pct = 0
   }
 
+  // 固定三段（计数 / 速度 / 剩余）。缺项写 `--` 而不是留空：
+  // 变长的数字列每轮都在跳，读起来要把眼睛重新对一遍焦。
   const parts: string[] = []
   if (total > 0) parts.push(`${fmtCount(done)}/${fmtCount(total)}`)
-  else if (done > 0) parts.push(fmtCount(done))
-  else parts.push(stageLabel(item))
-  if (rate > 0) parts.push(`${rate.toFixed(0)}/s`)
-  if (eta_s !== null && eta_s !== undefined && eta_s > 0) parts.push(`剩 ${fmtEta(eta_s)}`)
+  else parts.push(done > 0 ? fmtCount(done) : '--')
+  parts.push(rate > 0 ? `${rate.toFixed(0)}/s` : '--')
+  parts.push(eta_s !== null && eta_s !== undefined && eta_s > 0 ? `剩 ${fmtEta(eta_s)}` : '--')
 
   const hint = [item.detail, stageLabel(item)].filter(Boolean).join(' · ')
   return { pct, parts, hint }

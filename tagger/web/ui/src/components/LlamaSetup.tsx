@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Download, RefreshCw } from 'lucide-react'
+import { Check, Download, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { api, type LlamaRuntime } from '../lib/api'
 import { ProgressBar } from './ui/ProgressBar'
+import { StatusChip } from './ui/launcher'
+import { ErrorBox } from './ui/ErrorBox'
 
 /**
  * llama.cpp 运行时（llama-server）的安装入口。
@@ -120,14 +122,15 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
 
   if (snap.installed) {
     return (
-      <div className="flex items-center justify-between gap-2 border-b border-lx py-2.5 text-[11px] text-lx-muted">
-        <span className="truncate">
-          llama.cpp 已就绪
-          {snap.version ? ` · ${snap.version}` : ''}
-        </span>
+      <div className="flex items-center justify-between gap-2 border-b border-lx py-2">
+        {/* 原来是 11px 灰字挤在行里，等于没说：这一行的作用就是让人一眼
+            确认"引擎能起来"，状态必须比周围的输入项更醒目。 */}
+        <StatusChip tone="success" icon={<Check size={12} />}>
+          llama.cpp 已就绪{snap.version ? ` · ${snap.version}` : ''}
+        </StatusChip>
         <button
           type="button"
-          className="lx-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-1"
+          className="lx-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-1 text-[11px]"
           disabled={acting}
           onClick={() => void run('', true)}
           title={`重装到 ${snap.install_root}`}
@@ -140,8 +143,11 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
   }
 
   return (
-    <div className="border-b border-lx py-2.5">
+    <div className="border-b border-lx py-2">
       <div className="flex flex-wrap items-center gap-2">
+        <StatusChip tone="warning" icon={<TriangleAlert size={12} />}>
+          llama.cpp 未安装
+        </StatusChip>
         <button
           type="button"
           className="lx-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
@@ -156,8 +162,10 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
         </span>
       </div>
 
-      {/* 备用路径：GitHub 不通时用户手上往往已经有一个 zip（镜像/同事传的）。 */}
-      <details className="mt-1.5">
+      {/* 备用路径：GitHub 不通时用户手上往往已经有一个 zip（镜像/同事传的）。
+          安装失败时默认展开——否则用户看到一行红字，唯一能做的动作（贴 zip 链接）
+          还藏在下面这个折叠块里。 */}
+      <details className="mt-1.5" open={Boolean(snap.error || error)}>
         <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
           下载不动？用现成的 zip
         </summary>
@@ -181,9 +189,7 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
       </details>
 
       {(snap.error || error) && (
-        <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-lx-danger">
-          {error || snap.error}
-        </p>
+        <ErrorBox text={error || snap.error} className="mt-1.5" />
       )}
     </div>
   )

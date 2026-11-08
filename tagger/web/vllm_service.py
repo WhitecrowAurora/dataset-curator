@@ -74,7 +74,8 @@ class VllmService:
                                  "max_num_seqs": None,
                                  "max_num_batched_tokens": None,
                                  "gpu_mem": None,
-                                 "local_media_root": None}
+                                 "local_media_root": None,
+                                 "slots": None}
         self._handle = None
         self._thread: threading.Thread | None = None
         # 当前这一轮启动的令牌；stop()/新 start() 会让旧轮次失效（见 start）。
@@ -156,11 +157,14 @@ class VllmService:
                 self.status = "failed"
                 self.error = f"vllm 进程已退出（code={code}）"
 
-    def plan(self, *, model: str | None = None, tier: str | None = None,
+    def plan(self, *, engine: str | None = None,
+             model: str | None = None, tier: str | None = None,
              precision: str | None = None,
+             max_model_len: int | None = None,
              max_num_seqs: int | None = None,
              max_num_batched_tokens: int | None = None,
-             gpu_mem: float | None = None) -> dict:
+             gpu_mem: float | None = None,
+             slots_override: int | None = None) -> dict:
         """当前这组参数会解析成什么（分档 / 权重 / 批调度 / 显存）。
 
         页面在点启动**之前**就要能看见选了 8B 会发生什么：16G 卡上仍落在
@@ -169,8 +173,10 @@ class VllmService:
 
         解析失败（模型 key 写错、卡不支持该精度）也在这里变成一句人话。
         """
-        key = (model or None, tier or None, precision or None, max_num_seqs,
-               max_num_batched_tokens, gpu_mem)
+        key = (normalize_engine(engine), model or None, tier or None,
+               precision or None, max_model_len,
+               max_num_seqs, max_num_batched_tokens, gpu_mem,
+               slots_override)
         now = time.time()
         cached = self._plan_cache
         if cached is not None and cached[1] == key and now - cached[0] < CAP_TTL_S:
@@ -180,11 +186,27 @@ class VllmService:
         return dict(out)
 
     @staticmethod
-    def _resolve_plan(model: str | None, tier: str | None,
+    def _resolve_plan(engine: str, model: str | None, tier: str | None,
                       precision: str | None,
+                      max_model_len: int | None,
                       max_num_seqs: int | None,
                       max_num_batched_tokens: int | None,
-                      gpu_mem: float | None) -> dict:
+                      gpu_mem: float | None,
+                      slots_override: int | None = None) -> dict:
+        # 精度档与引擎是绑死的两套：bf16/fp8/w4a16 给 vLLM，q4/q6/q8 给
+        # llama.cpp。摆在一起选是为了不让人去别处找，但选错要说清是选错，
+        # 而不是等启动几分钟后报一句「未知精度」。
+        from ..config import GGUF_PRECISIONS
+
+        p = (precision or "").strip().lower()
+        if engine == "llamacpp" and p and p not in GGUF_PRECISIONS:
+            return {"ok": False,
+                    "error": f"llama.cpp 只能配 GGUF 档（{' / '.join(GGUF_PRECISIONS)}），"
+                             f"当前选的是 {precision}。BF16/FP8/W4A16 是 vLLM 的加载方式。"}
+        if engine != "llamacpp" and p in GGUF_PRECISIONS:
+            return {"ok": False,
+                    "error": f"{precision} 是 GGUF 的压缩档，只能用于 llama.cpp 引擎。"
+                             f"vLLM 请选 BF16 / FP8 / W4A16。"}
         try:
             from ..config import DEFAULT_TIERS, load_tier_table, resolve_profile
             from ..hardware import query_gpus
@@ -198,11 +220,12 @@ class VllmService:
                 model_override=model or None,
                 tier_override=tier or None,
                 precision_override=precision or None,
+                max_model_len_override=max_model_len,
                 max_num_seqs_override=max_num_seqs,
                 max_num_batched_tokens_override=max_num_batched_tokens,
                 gpu_mem_override=gpu_mem,
             )
-            return {
+            out = {
                 "ok": True,
                 "tier": p.tier,
                 "model": p.model.key,
@@ -225,6 +248,17 @@ class VllmService:
                 "warnings": list(p.warnings),
                 "summary": p.summary(),
             }
+            # 槽位只对 llama.cpp 成立（vLLM 的并发是 max_num_seqs，由调度器管）。
+            # 放在这里是因为它是"点启动前的显存预算"，和 max_model_len 同一类
+            # 信息：等启动完才发现放不下，代价是几分钟。
+            if engine == "llamacpp":
+                from .. import nl_engine
+
+                try:
+                    out["slots"] = nl_engine.describe(p, slots_override)
+                except Exception as exc:      # noqa: BLE001 - 预估失败不拦启动
+                    out["slots"] = {"error": f"{type(exc).__name__}: {exc}"}
+            return out
         except ConfigError as exc:
             # ConfigError 的 message 本来就是给人看的，带个类名只会让它更像 traceback
             return {"ok": False, "error": str(exc)}
@@ -263,7 +297,8 @@ class VllmService:
                          precision=overrides.get("precision"),
                          max_num_seqs=overrides.get("max_num_seqs"),
                          max_num_batched_tokens=overrides.get("max_num_batched_tokens"),
-                         gpu_mem=overrides.get("gpu_mem"))
+                         gpu_mem=overrides.get("gpu_mem"),
+                         slots_override=overrides.get("slots"))
         return {
             "status": status,
             "error": error,
@@ -292,10 +327,12 @@ class VllmService:
               tier: str | None = None,
               precision: str | None = None,
               served_name: str | None = None,
+              max_model_len: int | None = None,
               max_num_seqs: int | None = None,
               max_num_batched_tokens: int | None = None,
               gpu_mem: float | None = None,
-              local_media_root: str | None = None) -> dict:
+              local_media_root: str | None = None,
+              slots: int | None = None) -> dict:
         """起服务。立刻返回快照，等就绪在后台线程里做。
 
         model 选哪套权重（None = 按显存落档）；tier 指定分档（决定
@@ -308,6 +345,10 @@ class VllmService:
         收 file:// 地址；客户端据此用 `--use-file-url` 省掉 base64 的 33%
         体积与 CPU。放行范围必须覆盖客户端的 spool 目录（产物目录下的
         `.spool`），否则请求会因 400 被拒。
+
+        slots 是 llama.cpp 的 `-np`（槽位数），留空 = 按显存自动。**这是唯一
+        能让出显存的旋钮**：KV 在启动时就按槽位数预留，任务并发调小只是让
+        slot 空着，一点显存都不省。想边打标边玩游戏，就是把这个数调小。
         """
         from ..nl_engine import normalize_engine
 
@@ -354,6 +395,35 @@ class VllmService:
         mem = None if gpu_mem is None else float(gpu_mem)
         if mem is not None and not 0.1 <= mem <= 0.98:
             raise ValueError(f"gpu_mem={mem} 不合理：取 0.1~0.98")
+        # 自定义上下文长度：KV cache 随它线性涨，填太大就是启动时 OOM。
+        # 上限按当前最大的 Qwen3-VL 原生窗口留够余量。
+        max_len = None if max_model_len is None else int(max_model_len)
+        if max_len is not None and not 512 <= max_len <= 262144:
+            raise ValueError(f"max_model_len={max_len} 不合理：取 512~262144")
+        # 精度档必须与引擎匹配：带着 q4 起 vLLM、或带着 bf16 起 llama.cpp，
+        # 都会"起得来但加载的不是你说的那份权重"，指纹还会记错。
+        from ..config import GGUF_PRECISIONS
+
+        eng = normalize_engine(engine)
+        p = (precision or "").strip().lower()
+        if eng == "llamacpp" and p and p not in GGUF_PRECISIONS:
+            raise ValueError(
+                f"llama.cpp 只能配 GGUF 档（{' / '.join(GGUF_PRECISIONS)}），当前选的是 {precision}。")
+        if eng != "llamacpp" and p in GGUF_PRECISIONS:
+            raise ValueError(
+                f"{precision} 是 GGUF 的压缩档，只能用于 llama.cpp 引擎。")
+        # 槽位：0 / None = 按显存自动。上限 64 与 slot_plan 一致——再多
+        # 上下文总量就爆了，而且 12 之后吞吐本来就贴着拐点。
+        slots_n = None if slots in (None, 0, "") else int(slots)
+        if slots_n is not None and not 1 <= slots_n <= 64:
+            raise ValueError(f"槽位 slots={slots} 不合理：取 1~64（留空 = 按显存自动）")
+        if slots_n is not None and eng != "llamacpp":
+            # vLLM 的并发是 max_num_seqs，由调度器按批排；硬给它一个 -np
+            # 等于让用户以为改了，其实一个字都没生效。
+            raise ValueError(
+                "槽位（-np）只对 llama.cpp 有效。vLLM 请用「最大序列数」"
+                "（max_num_seqs），它由调度器动态分配。")
+
         media = (local_media_root or "").strip() or None
         if media is not None:
             root = Path(media)
@@ -383,10 +453,12 @@ class VllmService:
                                "tier": tier,
                                "precision": precision,
                                "served_name": served_name,
+                               "max_model_len": max_len,
                                "max_num_seqs": seqs,
                                "max_num_batched_tokens": batched,
                                "gpu_mem": mem,
-                               "local_media_root": media}
+                               "local_media_root": media,
+                               "slots": slots_n}
             self.log_path = str(FINGERPRINT_PATH.parent / f"vllm-{port}.log")
             self._notes.clear()
             self._stop_flag.clear()
@@ -455,6 +527,7 @@ class VllmService:
                 model_override=overrides.get("model"),
                 tier_override=overrides.get("tier"),
                 precision_override=overrides.get("precision"),
+                max_model_len_override=overrides.get("max_model_len"),
                 max_num_seqs_override=overrides.get("max_num_seqs"),
                 max_num_batched_tokens_override=overrides.get("max_num_batched_tokens"),
                 gpu_mem_override=overrides.get("gpu_mem"),
@@ -469,7 +542,8 @@ class VllmService:
             handle = start_server(profile, port=port, log_path=log_path, wait=False,
                                   served_name=overrides.get("served_name") or "tagger",
                                   data_root=overrides.get("local_media_root"),
-                                  engine=engine)
+                                  engine=engine,
+                                  slots_override=overrides.get("slots"))
             if not current():
                 # 起进程的这几秒里已经被叫停：status 已是 stopped，但进程刚建出来。
                 raise _Cancelled()

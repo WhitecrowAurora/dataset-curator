@@ -94,7 +94,7 @@ export function History({
         icon={<HistoryIcon size={17} />}
         eyebrow="本进程内最近 20 条"
         title="历史任务"
-        description="刷新页面或切走都不影响这里。点「进度」回到实时视图，「结果」翻产物；停下或失败的任务点「继续」接着做。"
+        description="停下或失败的任务点「继续」接着做。"
         actions={
           <button
             type="button"

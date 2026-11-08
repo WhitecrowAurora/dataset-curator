@@ -166,8 +166,8 @@ def _payload_text(raw: str, field: str) -> str:
 
     两种产物形态都要能复核：
     - `tagger pack` 的 `tag` / `caption` 列是纯文本；
-    - VLM 客户端写的成员产物（`artifacts.ParquetSink`）把整个 payload
-      json.dumps 进 `tag` / `nl` 列，正文在 `{"tag": ...}` / `{"caption": ...}` 里。
+    - VLM 客户端写的成员产物（`artifacts.ParquetSink` / `JsonlSink`）把整个
+      payload json.dumps 进 `tag` / `nl`，正文在 `{"tag": ...}` / `{"caption": ...}` 里。
 
     不区分的话，直接拿 JSON 那段当正文：只有 NL 的批次会被判成"缺 NL"——
     数据好着，是复核口径读错了。
@@ -182,6 +182,29 @@ def _payload_text(raw: str, field: str) -> str:
     if not isinstance(obj, dict):
         return text
     return str(obj.get(field) or "").strip()
+
+
+def _row_members(row: dict) -> tuple[str, dict[str, bytes]] | None:
+    """一行产物 → 与 tar/zip 一致的成员视图，下游不必区分格式。
+
+    parquet 与 jsonl 分片的行结构逐字段相同，所以这一份转换两边共用。
+    """
+    image_id = str(row.get("image_id") or "").strip()
+    if not image_id:
+        return None
+    members: dict[str, bytes] = {
+        ".json": json.dumps({"name": f"{image_id}.jpg", "key": image_id},
+                            ensure_ascii=False).encode("utf-8"),
+    }
+    caption = _payload_text(str(row.get("caption") or ""), "caption")
+    if not caption:
+        caption = _payload_text(str(row.get("nl") or ""), "caption")
+    tag = _payload_text(str(row.get("tag") or ""), "tag")
+    if caption:
+        members[".nl"] = caption.encode("utf-8")
+    if tag:
+        members[".tag"] = tag.encode("utf-8")
+    return image_id, members
 
 
 def _iter_parquet(path: Path) -> Iterator[tuple[str, dict[str, bytes]]]:
@@ -205,34 +228,35 @@ def _iter_parquet(path: Path) -> Iterator[tuple[str, dict[str, bytes]]]:
         return
     for batch in pf.iter_batches(batch_size=512, columns=cols):
         for row in batch.to_pylist():
-            image_id = str(row.get("image_id") or "").strip()
-            if not image_id:
-                continue
-            # 还原成与 tar/zip 一致的成员视图，下游不必区分三种格式。
-            members: dict[str, bytes] = {
-                ".json": json.dumps({"name": f"{image_id}.jpg", "key": image_id},
-                                    ensure_ascii=False).encode("utf-8"),
-            }
-            caption = _payload_text(str(row.get("caption") or ""), "caption")
-            if not caption:
-                caption = _payload_text(str(row.get("nl") or ""), "caption")
-            tag = _payload_text(str(row.get("tag") or ""), "tag")
-            if caption:
-                members[".nl"] = caption.encode("utf-8")
-            if tag:
-                members[".tag"] = tag.encode("utf-8")
-            yield image_id, members
+            got = _row_members(row)
+            if got is not None:
+                yield got
+
+
+def _iter_jsonl(path: Path) -> Iterator[tuple[str, dict[str, bytes]]]:
+    """成员产物分片（`artifacts-*.jsonl`）。复核要认它，否则这个格式没人验。"""
+    from .artifacts import iter_jsonl_artifacts
+
+    for row in iter_jsonl_artifacts(path):
+        got = _row_members(row)
+        if got is not None:
+            yield got
 
 
 SHARD_SUFFIXES = (".tar", ".zip", ".parquet")
 
 
 def list_shards(out_dir: str | Path) -> list[Path]:
-    """归档目录下所有可复核的分片。三种格式一视同仁。"""
+    """归档目录下所有可复核的分片。四种格式一视同仁。"""
+    from .artifacts import is_artifact_jsonl
+
     root = Path(out_dir)
     found: list[Path] = []
     for suffix in SHARD_SUFFIXES:
         found.extend(root.glob(f"*{suffix}"))
+    # jsonl 只认产物前缀：同一个目录里还有 failures.jsonl / manifest.jsonl，
+    # 它们不是样本，收进来会变成一堆"缺 tag 也缺 nl"的假缺陷。
+    found.extend(p for p in root.glob("*.jsonl") if is_artifact_jsonl(p))
     return sorted(found)
 
 
@@ -243,6 +267,8 @@ def iter_samples(out_dir: str | Path) -> Iterator[tuple[str, dict[str, bytes]]]:
             yield from _iter_tar(path)
         elif path.suffix == ".zip":
             yield from _iter_zip(path)
+        elif path.suffix == ".jsonl":
+            yield from _iter_jsonl(path)
         else:
             yield from _iter_parquet(path)
 
@@ -348,6 +374,8 @@ def verify_dir(
             it = _iter_tar(path)
         elif path.suffix == ".zip":
             it = _iter_zip(path)
+        elif path.suffix == ".jsonl":
+            it = _iter_jsonl(path)
         else:
             it = _iter_parquet(path)
         for stem, members in it:

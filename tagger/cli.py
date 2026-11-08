@@ -790,7 +790,7 @@ def cmd_split(args: argparse.Namespace) -> int:
     """
     from .artist import AliasTable, extract_artist
     from .distribute import (DistItem, assign_ids, plan_shards, read_shard_manifest,
-                             write_shard, write_table)
+                             resolve_sequence, write_shard, write_table)
     from .pack import discover_inputs
 
     table = load_tier_table(args.tiers)
@@ -805,7 +805,13 @@ def cmd_split(args: argparse.Namespace) -> int:
     mode = str(args.mode or cfg.get("mode", "count")).lower()
     per_shard = int(args.per_shard or cfg.get("per_shard", 20000))
     max_bytes = int(args.max_bytes or cfg.get("max_bytes_per_shard", 0))
-    seq_width = int(cfg.get("seq_width", 6))
+    previous_table = getattr(args, "previous_table", None) or ""
+    width = getattr(args, "seq_width", None)
+    if width is None and not previous_table:
+        width = int(cfg.get("seq_width", 6))
+    start, seq_width, shard_start = resolve_sequence(
+        start=getattr(args, "start", 1), seq_width=width,
+        previous_table=previous_table)
 
     # 分包表是"哪个序号给了哪张图"的唯一凭证。对同一张表再跑一次 split
     # 会从 1 开始重新分配，把旧批次已发出的 image_id 静默指给另一批图——
@@ -851,9 +857,9 @@ def cmd_split(args: argparse.Namespace) -> int:
             ext="",
         ))
 
-    assign_ids(dist_items, seq_width=seq_width)
+    assign_ids(dist_items, seq_width=seq_width, start=start)
     plans = plan_shards(dist_items, mode=mode, per_shard=per_shard,
-                        max_bytes=max_bytes)
+                        max_bytes=max_bytes, start_index=shard_start)
 
     print(f"[tagger] 共 {len(dist_items)} 张，切成 {len(plans)} 个包")
     print(f"[tagger] 布局 {layout}，模式 {mode}"
@@ -866,9 +872,11 @@ def cmd_split(args: argparse.Namespace) -> int:
     for plan in plans:
         write_shard(plan, args.out_dir, layout=layout, compress="stored")
 
-    table_path = write_table(plans, args.table, next_seq=1 + len(dist_items))
+    table_path = write_table(plans, args.table, next_seq=start + len(dist_items),
+                             seq_width=seq_width, start_seq=start)
     print()
     print(f"[tagger] 分包表写入 {table_path}")
+    print(f"         下一批起始序号 {start + len(dist_items)}；可用 --previous-table 续接此表")
     print(f"         总计 {sum(p.count for p in plans)} 张，"
           f"{sum(p.bytes for p in plans) / 1073741824:.2f} GB")
 
@@ -958,6 +966,40 @@ def cmd_client(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------- 合并
 
 
+def cmd_conflicts(args: argparse.Namespace) -> int:
+    """扫出「同 id 不同内容」的冲突，可选按策略批量裁决。
+
+    与 WebUI 的「冲突与决策」页共用 `conflicts.py`：命令行扫出来的结果
+    同样落 `work/conflicts/`，之后合并会自己读到。
+    """
+    from . import conflicts as cf
+
+    decided = cf.picks_for_merge()
+    print(f"[conflicts] 扫 {', '.join(args.roots)} …")
+    result = cf.scan(args.roots, decisions=decided)
+    cf.save_index(result)
+
+    print(f"[conflicts] 比较 {result.scanned} 条，"
+          f"冲突 {len(result.items)} 条，重复（内容一致）{result.idempotent} 次，"
+          f"{result.elapsed_s:.1f}s")
+    if result.items:
+        for item in result.items[:max(1, args.top)]:
+            print(f"  {item.image_id} [{item.kind}] {len(item.candidates)} 份")
+            for cand in item.candidates:
+                mark = "*" if cand.digest == item.decided else " "
+                body = cand.value.replace("\n", " ")[:60]
+                print(f"   {mark} {cand.digest} {cand.chars:>5}字 "
+                      f"{cand.source[-40:]:<40} {body}")
+    if args.strategy != "manual":
+        out = cf.auto_decide(result, args.strategy, overwrite=args.overwrite)
+        print(f"[conflicts] 按 {args.strategy} 批准 {out['applied']} 条，"
+              f"跳过 {out['skipped']} 条")
+    if args.json_out:
+        result.export(Path(args.json_out))
+        print(f"[conflicts] 结果写入 {args.json_out}")
+    return 0
+
+
 def cmd_merge(args: argparse.Namespace) -> int:
     """回收成员产出，对账后写总表，并生成抽检清单。"""
     from .distribute import read_shard_manifest
@@ -976,7 +1018,8 @@ def cmd_merge(args: argparse.Namespace) -> int:
     sample_n = int(args.sample_n or cfg.get("sample_n", 20))
     sample_seed = int(cfg.get("sample_seed", 42))
 
-    require = args.require or spec.mode
+    # getattr 兜底：参数表在并发改动里丢过一次，别让一个缺参数把合并整个打挂。
+    require = getattr(args, "require", None) or spec.mode
     if require not in ("nl", "tag", "both"):
         raise ConfigError(f"--require 只能是 nl / tag / both，收到 {require!r}")
 
@@ -984,7 +1027,8 @@ def cmd_merge(args: argparse.Namespace) -> int:
     # 发现不了"整条没交"。
     expected: list[str] | None = None
     if args.shard_dir:
-        ids: list[str] = []
+        from .storage.collections import SpillList
+        ids = SpillList()
         for shard in sorted(Path(args.shard_dir).glob("dist-*.zip")):
             try:
                 ids.extend(r["image_id"] for r in read_shard_manifest(shard))
@@ -999,7 +1043,13 @@ def cmd_merge(args: argparse.Namespace) -> int:
     plans: list[dict] | None = None
     explicit_table = bool(args.table)
     table_path = args.table or str((ops.merge or {}).get("shard_table") or "")
-    if table_path:
+    extra_tables = getattr(args, "tables", None)
+    if extra_tables:
+        paths = ([args.table] if args.table else []) + extra_tables
+        plans = load_shard_plans(paths)
+        print(f"[merge] {len(paths)} 份分包表：{len(plans)} 个包、"
+              f"{sum(p['count'] for p in plans)} 条")
+    elif table_path:
         p = Path(table_path)
         if not p.is_file():
             # 配置里的默认路径不存在是常态（还没跑过 split），只在显式指定时报。
@@ -1021,8 +1071,28 @@ def cmd_merge(args: argparse.Namespace) -> int:
                           f"可能整包没拿到或没上传）")
 
     print(f"[merge] 回收目录：{', '.join(args.roots)}")
+
+    # 冲突裁决：默认读 work/conflicts/decisions.json（「冲突与决策」页写的）。
+    # 没有就什么都不带——那与旧行为一致（冲突照样报、照样算失败）。
+    from .conflicts import picks_for_merge
+
+    picks: dict[str, str] = {}
+    if args.decisions:
+        # 显式给了文件就用它（"手上有一份拷过来的决策表"这种情形），
+        # 格式与 decisions.json 一致：{id|kind: {"pick": 哈希}}。
+        try:
+            data = json.loads(Path(args.decisions).read_text(encoding="utf-8"))
+            picks = {k: str(v.get("pick") or "") for k, v in data.items()
+                     if isinstance(v, dict) and str(v.get("pick") or "")}
+        except (OSError, ValueError) as exc:
+            print(f"[merge][警告] 决策文件读不动：{exc}")
+    else:
+        picks = picks_for_merge()
+    if picks:
+        print(f"[merge] 已裁决 : {len(picks)} 条（按「冲突与决策」批准的那份取）")
+
     stats = MergeStats()
-    records = collect(args.roots, stats=stats)
+    records = collect(args.roots, stats=stats, decisions=picks)
     check(records, expected_ids=expected, require=require, stats=stats,
           shard_plans=plans)
 
@@ -1109,7 +1179,8 @@ def cmd_merge(args: argparse.Namespace) -> int:
     if stats.duplicates:
         print()
         print(f"  内容冲突 {len(stats.duplicates)} 个 id（同一 id 两份不同内容，必须人工裁决）：")
-        for iid, files in list(stats.duplicates.items())[: args.top]:
+        from itertools import islice
+        for iid, files in islice(stats.duplicates.items(), args.top):
             print(f"    {iid}")
             for f in files[:4]:
                 print(f"      {f}")
@@ -1525,6 +1596,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
         assign_ids=True,
         layout=layout,
         seq_width=int(args.seq_width or 6),
+        start_seq=getattr(args, "start", 1),
         artist_rule=rule,
         aliases=aliases,
     )
@@ -1608,6 +1680,8 @@ def cmd_pack(args: argparse.Namespace) -> int:
     naming = {"artist": rule.enabled, "artist_depth": rule.depth,
               "seq_width": int(args.seq_width or 6),
               "artist_inject": bool(rule.enabled and rule.inject_caption)}
+    if getattr(args, "start", 1) != 1:
+        naming["start_seq"] = args.start
 
     try:
         report: PackReport = pack_items(
@@ -1846,6 +1920,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp_split.add_argument("--input-dir", required=True, dest="input_dir")
     sp_split.add_argument("--out-dir", default="work/dist", dest="out_dir")
     sp_split.add_argument("--table", default="work/shards.json")
+    sp_split.add_argument("--seq-width", type=int, default=None,
+                          help="首批序号宽度；10 亿张选 10，续批默认继承上一批")
+    sp_split.add_argument("--start", type=int, default=1,
+                          help="首批起始序号，默认 1；指定上一批表时自动续接")
+    sp_split.add_argument("--previous-table", default=None,
+                          help="上一批分包表；自动续接图片序号、宽度及包序号")
     sp_split.add_argument("--mode", default=None, choices=["count", "bytes"])
     sp_split.add_argument("--per-shard", type=int, default=None, dest="per_shard",
                           help="count 模式：每包多少张")
@@ -2016,13 +2096,14 @@ def build_parser() -> argparse.ArgumentParser:
                            help="把分段计时写到这个文件：read / tag / tag_decode / "
                                 "tag_fwd / b64 / http / parse / gate / write 各自的"
                                 "耗时与次数（tag_decode+tag_fwd ⊂ tag）")
-    sp_client.add_argument("--artifact-format", default="json", dest="artifact_format",
-                           choices=["json", "parquet"],
-                           help="产物形态：json=每图两个小文件（默认）；"
-                                "parquet=攒成片，千万级时文件数降 4 个数量级")
-    sp_client.add_argument("--parquet-rows", type=int, default=2000,
+    sp_client.add_argument("--artifact-format", default="jsonl", dest="artifact_format",
+                           choices=["json", "parquet", "jsonl"],
+                           help="产物形态：jsonl=按分包落一片纯文本（默认，回传方便）；"
+                                "json=每图两个小文件；"
+                                "parquet=攒成片（要 pyarrow，本地一般不需要）")
+    sp_client.add_argument("--artifact-rows", "--parquet-rows", type=int, default=2000,
                            dest="parquet_rows",
-                           help="每个 parquet 分片的行数（默认 2000）")
+                           help="每个产物分片的行数（parquet / jsonl 共用，默认 2000）")
     sp_client.add_argument("--quiet", action="store_true")
     sp_client.set_defaults(func=cmd_client)
 
@@ -2036,16 +2117,35 @@ def build_parser() -> argparse.ArgumentParser:
                           help="分包总表 shards.json，用区间检测「整包没交」"
                                "（分发包已不在时也能查）")
     sp_merge.add_argument("--out", default="work/merged.jsonl")
+    sp_merge.add_argument("--tables", nargs="+", default=None,
+                          help="多批分包表路径，一起对账；可与 --table 合用")
     sp_merge.add_argument("--format", default="jsonl", choices=["jsonl", "json"])
     sp_merge.add_argument("--dataset", default=None,
                           help="数据集类型名，拼进 image_path（如 fanbox）")
-    sp_merge.add_argument("--require", default=None, choices=["nl", "tag", "both"])
     sp_merge.add_argument("--sample-n", type=int, default=None, dest="sample_n")
     sp_merge.add_argument("--sample-out", default="work/sample.md", dest="sample_out")
     sp_merge.add_argument("--keep-empty", action="store_true", dest="keep_empty",
                           help="空内容也写进总表（默认丢弃并计入统计）")
     sp_merge.add_argument("--top", type=int, default=20)
+    sp_merge.add_argument("--require", default=None, choices=["nl", "tag", "both"],
+                          help="完整率口径：两边都要 / 只要一侧；不给则用配置的产出模式")
+    sp_merge.add_argument("--decisions", default=None,
+                          help="冲突决策文件（默认读 work/conflicts/decisions.json）；"
+                               "批过的那条按批的取，不再算失败")
     sp_merge.set_defaults(func=cmd_merge)
+
+    sp_cf = sub.add_parser("conflicts", help="找「同 id 不同内容」的冲突，批或自动裁决")
+    sp_cf.add_argument("--roots", nargs="+", required=True,
+                       help="产物目录，可给多个（父目录会递归扫）")
+    sp_cf.add_argument("--strategy", default="manual",
+                       choices=["manual", "newest", "longest"],
+                       help="manual=只看不批（默认）；newest=留最新；longest=留最长")
+    sp_cf.add_argument("--overwrite", action="store_true",
+                       help="auto 时连人工批过的也重批（默认不动人工决定）")
+    sp_cf.add_argument("--top", type=int, default=20, help="明细显示条数")
+    sp_cf.add_argument("--json-out", default=None, dest="json_out",
+                       help="把扫描结果写成 json")
+    sp_cf.set_defaults(func=cmd_conflicts)
 
     sp_verify = sub.add_parser("verify", help="复核产物完整性：有无丢标、空 json")
     sp_verify.add_argument("--tiers", default=DEFAULT_TIERS)
@@ -2134,6 +2234,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="flat=画师-000123.jpg 平铺；mirror=保留原目录结构")
     sp_pack.add_argument("--seq-width", type=int, default=None, dest="seq_width",
                          help="序号宽度，默认 6（支持 999999 张）")
+    sp_pack.add_argument("--start", type=int, default=1,
+                         help="全局编号起点，必须与这批分包时的 start_seq 一致")
     sp_pack.add_argument("--quality", type=int, default=None,
                          help="JPEG 重编码质量 90~100，默认取配置")
     sp_pack.add_argument("--subsampling", type=int, default=None,

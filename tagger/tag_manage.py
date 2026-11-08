@@ -106,19 +106,24 @@ class MergeReport:
 
 
 def kind_of(path: Path) -> str:
-    """按文件名判断这是哪种产物：tag / nl / parquet / other。
+    """按文件名判断这是哪种产物：tag / nl / parquet / jsonl / other。
 
     只认后缀不读内容：扫描一个几万文件的目录时不值得为分类把每个文件读一遍。
-    parquet 只认 `artifacts-*.parquet`——那是本项目的产物分片；别的 parquet
-    没有 `image_id` 列，读进来只会报错。
+    分片只认 `artifacts-*.parquet` / `artifacts-*.jsonl`——那是本项目的产物；
+    别的 parquet 没有 `image_id` 列，读进来只会报错，而 failures.jsonl /
+    manifest.jsonl 这类文件混进来同样读不出记录。
     """
     name = path.name
     if name.endswith(TAG_SUFFIX):
         return "tag"
     if name.endswith(NL_SUFFIX):
         return "nl"
-    if name.startswith("artifacts-") and name.endswith(".parquet"):
+    if not name.startswith("artifacts-"):
+        return "other"
+    if name.endswith(".parquet"):
         return "parquet"
+    if name.endswith(".jsonl"):
+        return "jsonl"
     return "other"
 
 
@@ -134,13 +139,13 @@ def scan(root: str | Path, *, recursive: bool = True) -> list[dict]:
         pats = [base]
     else:
         walk = base.rglob if recursive else base.glob
-        # parquet 产物必须一起收：`--artifact-format parquet` 的用户根本没有
-        # 任何 json 文件，只扫 *.json 会让这个页面看起来"什么都找不到"。
-        # 但只收 `artifacts-*.parquet`：数据集本身的 parquet 分片没有 image_id
+        # 分片产物必须一起收：`--artifact-format parquet / jsonl` 的用户根本
+        # 没有任何 json 文件，只扫 *.json 会让这个页面看起来"什么都找不到"。
+        # 但只收 `artifacts-*.<后缀>`：数据集本身的 parquet 分片没有 image_id
         # 列，收进来只会把列表塞满一堆读不了的文件。
         pats = sorted([p for p in walk("*") if p.is_file()
                        and (p.suffix.lower() == ".json"
-                            or kind_of(p) == "parquet")])
+                            or kind_of(p) in ("parquet", "jsonl"))])
     out: list[dict] = []
     for p in pats:
         try:
@@ -159,17 +164,17 @@ def scan(root: str | Path, *, recursive: bool = True) -> list[dict]:
     return out
 
 
-def _load_parquet(path: Path) -> list[dict]:
-    """读产物分片，展开成逐条 payload。
+def _load_shard(path: Path) -> list[dict]:
+    """读产物分片（parquet / jsonl 同一套行结构），展开成逐条 payload。
 
-    parquet 的 tag / nl 两列存的就是**和 json 文件完全相同的 JSON 字符串**
+    分片里的 tag / nl 存的就是**和 json 文件完全相同的 JSON 字符串**
     （见 `artifacts.py`），所以这里原样解析成两条记录、再交给同一套按 key
     合并的逻辑——换成拆开的列等于把配对规则复制一份，两份一定会分叉。
     """
     from . import artifacts
 
     rows: list[dict] = []
-    for record in artifacts.iter_parquet_artifacts(path):
+    for record in artifacts.iter_artifact_rows(path):
         for name in ("tag", "nl"):
             blob = record.get(name)
             if not blob:
@@ -184,7 +189,7 @@ def _load_parquet(path: Path) -> list[dict]:
 
 
 def load_records(path: str | Path) -> list[dict]:
-    """读一个文件，返回记录列表。JSON 三种形态 + 产物 parquet 都认。
+    """读一个文件，返回记录列表。JSON 三种形态 + 产物分片都认。
 
     解析失败抛 ValueError 而不是静默跳过：一个坏文件被跳过，用户看到的是
     "合并成功、条数少了"，这比报错难查得多。
@@ -192,9 +197,13 @@ def load_records(path: str | Path) -> list[dict]:
     p = Path(path)
     if p.suffix.lower() == ".parquet":
         try:
-            return _load_parquet(p)
+            return _load_shard(p)
         except RuntimeError as exc:      # pyarrow 缺失，artifacts 会给出安装提示
             raise ValueError(str(exc)) from exc
+    if kind_of(p) == "jsonl":
+        # 用户自己的 jsonl（每行一条完整记录）不走这里：那种文件下面那段
+        # 逐行解析才对。只有本项目产的分片是「一行一条，tag/nl 还包着 JSON」。
+        return _load_shard(p)
     text = p.read_text(encoding="utf-8", errors="replace").strip()
     if not text:
         return []

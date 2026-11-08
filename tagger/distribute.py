@@ -40,6 +40,51 @@ MANIFEST_NAME = "manifest.jsonl"
 TABLE_NAME = "shards.json"
 
 
+def validate_sequence(start: int, seq_width: int, count: int = 1) -> None:
+    """序号在分配前检查，保持固定宽度及字典序。"""
+    if type(start) is not int or start < 1:
+        raise ConfigError("起始序号必须是正整数")
+    if type(seq_width) is not int or not 1 <= seq_width <= 12:
+        raise ConfigError("序号宽度必须是 1~12 的整数；10 亿张请从第一批使用 10 位")
+    last = start + max(0, count - 1)
+    if last >= 10 ** seq_width:
+        raise ConfigError(f"序号溢出：本次要编到 {last}，seq_width={seq_width} "
+                          f"只能表示到 {10 ** seq_width - 1}；10 亿张需要至少 10 位")
+
+
+def resolve_sequence(*, start: int = 1, seq_width: int | None = None,
+                     previous_table: str | Path = "") -> tuple[int, int, int]:
+    """返回本批起始序号、宽度和包序号；续批继承上一张表的分配范围。"""
+    shard_start = 0
+    if previous_table:
+        try:
+            data = load_table(previous_table)
+        except (OSError, ValueError) as exc:
+            raise ConfigError(f"上一批分包表无法读取: {previous_table}（{exc}）") from exc
+        rows = data.get("shards") if isinstance(data, dict) else data
+        if not isinstance(rows, list) or not rows:
+            raise ConfigError("上一批分包表缺少 shards，无法续号")
+        if any(not isinstance(row, dict) for row in rows):
+            raise ConfigError("上一批分包表的分包记录无效")
+        ends = [str(row.get(key) or "").rpartition("-")[2]
+                for row in rows for key in ("first_id", "last_id")]
+        if any(not end.isascii() or not end.isdigit() for end in ends):
+            raise ConfigError("上一批分包表的序号无效，无法续号")
+        meta = data if isinstance(data, dict) else {}
+        try:
+            start = max(int(meta.get("next_seq") or 0), max(map(int, ends)) + 1)
+            inherited_width = int(meta.get("seq_width") or max(map(len, ends)))
+            shard_start = max(int(row.get("shard", i)) for i, row in enumerate(rows)) + 1
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("上一批分包表的续号信息无效") from exc
+        if seq_width is not None and seq_width != inherited_width:
+            raise ConfigError(f"续批须沿用上一批的 {inherited_width} 位序号")
+        seq_width = inherited_width
+    width = 6 if seq_width is None else seq_width
+    validate_sequence(start, width)
+    return start, width, shard_start
+
+
 @dataclass(slots=True)
 class DistItem:
     """待分发的一张图。image_id 由本模块分配。"""
@@ -96,15 +141,7 @@ def assign_ids(
     """
     ordered = sorted(items, key=lambda i: (i.artist, i.rel_path))
     count = len(ordered)
-    # 序号宽度是硬上限：6 位装不下第 100 万张时 f"{n:06d}" 会静默变成
-    # 7 位字符串，字典序被打乱——merge 按首尾序号对账的分包区间全部失真，
-    # 而且产出的 id 已经发出去了，事后改不回来。必须在分配前拦住。
-    last_seq = start + count - 1
-    if count and last_seq > 10 ** seq_width - 1:
-        raise ConfigError(
-            f"序号溢出：本次要编到 {last_seq}，seq_width={seq_width} 只能表示到 "
-            f"{10 ** seq_width - 1}。请在 configs/tiers.yaml 的 distribute 段"
-            f"把 seq_width 调大（每加 1 位多一个数量级），重新 split。")
+    validate_sequence(start, seq_width, count)
     for n, it in enumerate(ordered, start=start):
         it.image_id = make_image_id(it.artist, n, width=seq_width)
         it.ext = normalize_ext(it.rel_path or it.member)
@@ -118,6 +155,7 @@ def plan_shards(
     per_shard: int = 20000,
     max_bytes: int = 0,
     prefix: str = "dist",
+    start_index: int = 0,
 ) -> list[ShardPlan]:
     """按数量或大小切分。返回的每个包都是一个连续 id 区间。
 
@@ -140,7 +178,7 @@ def plan_shards(
         nonlocal cur, cur_bytes
         if not cur:
             return
-        idx = len(plans)
+        idx = start_index + len(plans)
         plans.append(ShardPlan(
             index=idx,
             name=f"{prefix}-{idx:04d}.zip",
@@ -297,8 +335,89 @@ def write_shard(
     return final
 
 
+class StreamingShardWriter:
+    """边读边写分发包，只保留当前包的清单，不在内存攒图片。"""
+
+    def __init__(self, out_dir: str | Path, *, layout: str = "flat",
+                 compress: str = "stored", per_shard: int = 20000,
+                 max_bytes: int = 0, mode: str = "count", start_index: int = 0):
+        plan_shards([], mode=mode, per_shard=per_shard, max_bytes=max_bytes)
+        if layout not in ("flat", "mirror"):
+            raise ValueError(f"分发布局只能是 flat / mirror，收到 {layout!r}")
+        self.out_dir = Path(out_dir)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.layout, self.mode = layout, mode
+        self.start_index = start_index
+        self.per_shard, self.max_bytes = per_shard, max_bytes
+        self.compression = (zipfile.ZIP_STORED if compress == "stored"
+                            else zipfile.ZIP_DEFLATED)
+        self.plans: list[ShardPlan] = []
+        self._zip = None
+        self._rows: list[str] = []
+        self._used: set[str] = set()
+        self._plan: ShardPlan | None = None
+
+    def add(self, image_id: str, data: bytes, *, artist: str = "", src: str = "",
+            member: str = "", rel_path: str = "", ext: str = ".jpg",
+            size: int | None = None) -> None:
+        count = self._plan.count if self._plan else 0
+        if count and ((self.mode == "count" and count >= self.per_shard)
+                      or (self.mode == "bytes"
+                          and self._plan.bytes + len(data) > self.max_bytes)):
+            self._seal()
+        if self._zip is None:
+            index = self.start_index + len(self.plans)
+            self._plan = ShardPlan(index=index, name=f"dist-{index:04d}.zip")
+            self._tmp = (self.out_dir / self._plan.name).with_suffix(".zip.tmp")
+            self._zip = zipfile.ZipFile(self._tmp, "w", compression=self.compression,
+                                        allowZip64=True)
+            self._used = {MANIFEST_NAME.lower()}
+        if self.layout == "mirror":
+            name = str(Path(_mirror_member(rel_path, image_id, ext)).with_suffix(ext))
+            name = name.replace("\\", "/")
+        else:
+            name = f"{image_id}{ext}"
+        original = Path(name)
+        suffix = 0
+        while name.lower() in self._used:
+            tail = f"-{suffix}" if suffix else ""
+            name = str(original.with_name(
+                f"{original.stem}-{image_id}{tail}{original.suffix}")).replace("\\", "/")
+            suffix += 1
+        self._zip.writestr(name, data)
+        self._used.add(name.lower())
+        self._rows.append(json.dumps({
+            "image_id": image_id, "file": name, "artist": artist,
+            "src": src, "member": member, "rel_path": rel_path, "bytes": len(data),
+        }, ensure_ascii=False))
+        if not self._plan.count:
+            self._plan.first_id = image_id
+        self._plan.last_id = image_id
+        self._plan.count += 1
+        self._plan.bytes += len(data)
+
+    def _seal(self) -> None:
+        if self._zip is None:
+            return
+        try:
+            self._zip.writestr(MANIFEST_NAME, "\n".join(self._rows) + "\n")
+        finally:
+            self._zip.close()
+            self._zip = None
+        self._tmp.replace(self.out_dir / self._plan.name)
+        self.plans.append(self._plan)
+        self._plan = None
+        self._rows = []
+        self._used.clear()
+
+    def finish(self) -> list[ShardPlan]:
+        self._seal()
+        return list(self.plans)
+
+
 def write_table(plans: Sequence[ShardPlan], out_path: str | Path, *,
-                next_seq: int | None = None) -> Path:
+                next_seq: int | None = None, seq_width: int | None = None,
+                start_seq: int | None = None) -> Path:
     """写出分包总表。总机留一份，用来回答"这批图在谁手上"。
 
     next_seq 记录下一批分发该从哪个序号开始——image_id 只保证同一张表内
@@ -314,8 +433,12 @@ def write_table(plans: Sequence[ShardPlan], out_path: str | Path, *,
     }
     if next_seq is not None:
         payload["next_seq"] = int(next_seq)
-    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                   encoding="utf-8")
+    if seq_width is not None:
+        payload["seq_width"] = seq_width
+    if start_seq is not None:
+        payload["start_seq"] = start_seq
+    from .storage.atomic import write_json
+    write_json(out, payload)
     return out
 
 
@@ -342,12 +465,12 @@ def read_shard_manifest(shard_path: str | Path) -> list[dict]:
     with zipfile.ZipFile(shard_path, "r") as zf:
         if MANIFEST_NAME not in zf.namelist():
             raise KeyError(f"{Path(shard_path).name} 里没有 {MANIFEST_NAME}")
-        raw = zf.read(MANIFEST_NAME).decode("utf-8")
-    out: list[dict] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if line:
-            out.append(json.loads(line))
+        from .storage.collections import SpillList
+        out = SpillList()
+        with zf.open(MANIFEST_NAME) as fh:
+            for line in fh:
+                if line.strip():
+                    out.append(json.loads(line))
     return out
 
 

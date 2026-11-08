@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Boxes, ChartSpline, Copy, History, ListChecks, PlayCircle, PlusCircle, UploadCloud } from 'lucide-react'
+import {
+  Boxes,
+  ChartSpline,
+  Copy,
+  Download,
+  GitCompareArrows,
+  History,
+  Layers,
+  ListChecks,
+  Merge,
+  Package,
+  PlayCircle,
+  PlusCircle,
+  Settings2,
+  ShieldCheck,
+  UploadCloud,
+} from 'lucide-react'
 import { api, type Health } from './lib/api'
 import { applyTheme, readTheme, type Theme } from './lib/theme'
+import { readProgressInterval, writeProgressInterval } from './lib/prefs'
 import { AppShell } from './layout/AppShell'
 import type { NavItem } from './layout/Sidebar'
 import { NewJob } from './pages/NewJob'
@@ -12,6 +29,16 @@ import { Stats } from './pages/Stats'
 import { Packaging } from './pages/Packaging'
 import { Upload } from './pages/Upload'
 import { Dedup } from './pages/Dedup'
+import { Models } from './pages/Models'
+import { Downloads } from './pages/Downloads'
+import { TagManage } from './pages/TagManage'
+import { Conflicts } from './pages/Conflicts'
+import { Deps } from './pages/Deps'
+import { Settings } from './pages/Settings'
+import { GlobalProgress } from './components/GlobalProgress'
+import { SelfCheckDialog } from './components/SelfCheckDialog'
+import { ResumeBanner } from './components/ResumeBanner'
+import { ActivityNotice } from './components/ActivityNotice'
 
 // 手写 hash 路由：七个页面、零依赖，比引 react-router 更省事也更不容易踩版本。
 // 用 hash 而不是 history 还有一个实际好处——右键"在新标签打开"不会 404。
@@ -23,8 +50,14 @@ type Route =
   | { name: 'upload' }
   | { name: 'dedup' }
   | { name: 'packaging' }
+  | { name: 'conflicts' }
+  | { name: 'models' }
+  | { name: 'downloads' }
+  | { name: 'tag-manage' }
   | { name: 'stats' }
   | { name: 'history' }
+  | { name: 'deps' }
+  | { name: 'settings' }
 
 const LAST_KEY = 'tagger-last-job'
 
@@ -36,7 +69,13 @@ function parseRoute(hash: string): Route {
   if (path === '/upload') return { name: 'upload' }
   if (path === '/dedup') return { name: 'dedup' }
   if (path === '/packaging') return { name: 'packaging' }
+  if (path === '/conflicts') return { name: 'conflicts' }
+  if (path === '/models') return { name: 'models' }
+  if (path === '/downloads') return { name: 'downloads' }
+  if (path === '/tag-manage') return { name: 'tag-manage' }
   if (path === '/stats') return { name: 'stats' }
+  if (path === '/deps') return { name: 'deps' }
+  if (path === '/settings') return { name: 'settings' }
   return { name: 'new' }
 }
 
@@ -48,6 +87,12 @@ export default function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
   const [health, setHealth] = useState<Health | null>(null)
   const [theme, setTheme] = useState<Theme>(() => readTheme())
+  // 自检是弹窗不是页面：它只回答"这台机器现在能不能干活"，
+  // 没有需要反复回来看的状态，占一个路由位不值得。
+  const [selfCheckOpen, setSelfCheckOpen] = useState(false)
+  // 底部进度条的轮询间隔，存 localStorage：这是"看着舒服"的本机偏好，
+  // 不该跟服务端配置漂移。默认 5s。
+  const [progressInterval, setProgressInterval] = useState(() => readProgressInterval())
   const [lastJobId, setLastJobId] = useState<string>(() => {
     try {
       return localStorage.getItem(LAST_KEY) ?? ''
@@ -86,6 +131,11 @@ export default function App() {
 
   const openJob = useCallback((id: string) => go(`/run/${id}`), [])
 
+  const changeProgressInterval = useCallback((ms: number) => {
+    setProgressInterval(ms)
+    writeProgressInterval(ms)
+  }, [])
+
   const runningId = health?.running_job ?? (route.name === 'run' ? route.id : '') ?? ''
   const resultsId = route.name === 'results' ? route.id : lastJobId
 
@@ -96,6 +146,54 @@ export default function App() {
       icon: <PlusCircle size={15} />,
       active: route.name === 'new',
       onClick: () => go('/'),
+    },
+    {
+      key: 'selfcheck',
+      label: '部署自检',
+      icon: <ShieldCheck size={15} />,
+      active: selfCheckOpen,
+      hint: '装完点一下：逐项验证环境、目录与服务，并真跑一张图',
+      onClick: () => setSelfCheckOpen(true),
+    },
+    {
+      key: 'deps',
+      label: '依赖检测',
+      icon: <Package size={15} />,
+      active: route.name === 'deps',
+      hint: '逐个查看依赖装没装、版本对不对，可单独装卸',
+      onClick: () => go('/deps'),
+    },
+    {
+      key: 'models',
+      label: '模型管理',
+      icon: <Layers size={15} />,
+      active: route.name === 'models',
+      hint: '增删可选模型（NL 的 Qwen-VL / tag 分类头）',
+      onClick: () => go('/models'),
+    },
+    {
+      key: 'downloads',
+      label: '分片下载',
+      icon: <Download size={15} />,
+      active: route.name === 'downloads',
+      hint: '提前把 HF 仓库的分片备到本地，打标时直接命中',
+      onClick: () => go('/downloads'),
+    },
+    {
+      key: 'tag-manage',
+      label: '打标管理',
+      icon: <Merge size={15} />,
+      active: route.name === 'tag-manage',
+      hint: '把多个 json 合成一个单体 json（tag/nl 按图配对、字段取并集）',
+      onClick: () => go('/tag-manage'),
+    },
+    {
+      key: 'conflicts',
+      label: '冲突与决策',
+      icon: <GitCompareArrows size={15} />,
+      active: route.name === 'conflicts',
+      hint: '同一张图两份不同内容（换模型 / 新旧版本）：逐条对比后决定留哪份',
+      onClick: () => go('/conflicts'),
     },
     {
       key: 'run',
@@ -154,6 +252,14 @@ export default function App() {
       hint: resultsId ? '浏览最近一次任务的产物' : '还没有跑过任务',
       onClick: () => resultsId && go(`/results/${resultsId}`),
     },
+    {
+      key: 'settings',
+      label: '设置',
+      icon: <Settings2 size={15} />,
+      active: route.name === 'settings',
+      hint: '界面偏好：底栏刷新频率等',
+      onClick: () => go('/settings'),
+    },
   ]
 
   return (
@@ -167,8 +273,30 @@ export default function App() {
           本机服务 · 只监听 127.0.0.1
         </p>
       }
+      statusBar={
+        <GlobalProgress interval={progressInterval} onOpen={go} />
+      }
     >
-      {route.name === 'new' && <NewJob onStarted={openJob} />}
+      {/* 放在所有页面之前：用户下次打开往往就是来接着昨天那个活儿的，
+          不该先去某个页面里找一圈。 */}
+      <ResumeBanner onOpen={openJob} />
+
+      {/* 任务收尾弹窗：长任务跑完/失败时，用户多半不在那个页面上。 */}
+      <ActivityNotice interval={progressInterval} onOpen={go} />
+
+      {/* 新建页常驻挂载，只是藏起来。卸载再挂载会把所有 useState 清零，
+          用户去「模型管理」看一眼回来就得重填一遍路径和参数。 */}
+      <div className={route.name === 'new' ? undefined : 'hidden'}>
+        <NewJob
+          active={route.name === 'new'}
+          onStarted={openJob}
+          onOpenModels={() => go('/models')}
+        />
+      </div>
+      {route.name === 'models' && <Models />}
+      {route.name === 'downloads' && <Downloads />}
+      {route.name === 'tag-manage' && <TagManage />}
+      {route.name === 'conflicts' && <Conflicts />}
       {route.name === 'run' && (
         <RunJob
           jobId={route.id}
@@ -190,6 +318,15 @@ export default function App() {
       {route.name === 'dedup' && <Dedup />}
       {route.name === 'packaging' && <Packaging />}
       {route.name === 'stats' && <Stats />}
+      {route.name === 'deps' && <Deps />}
+      {route.name === 'settings' && (
+        <Settings
+          progressInterval={progressInterval}
+          onProgressInterval={changeProgressInterval}
+        />
+      )}
+
+      <SelfCheckDialog open={selfCheckOpen} onClose={() => setSelfCheckOpen(false)} />
     </AppShell>
   )
 }

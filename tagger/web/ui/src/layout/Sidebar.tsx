@@ -26,20 +26,20 @@ export function Sidebar({
   footer?: ReactNode
 }) {
   return (
-    <aside className="flex w-[212px] shrink-0 flex-col border-r border-lx bg-lx-sidebar-bg">
-      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-lx px-[18px]">
-        <span className="grid h-7 w-7 place-items-center rounded-lx-sm bg-lx-accent-subtle text-lx-accent">
-          <Wand2 size={15} />
+    <aside className="flex w-[196px] shrink-0 flex-col border-r border-lx bg-lx-sidebar-bg">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-lx px-3">
+        <span className="grid h-6 w-6 place-items-center rounded-lx-sm bg-lx-accent-subtle text-lx-accent">
+          <Wand2 size={14} />
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold leading-tight text-lx">Tagger</div>
+          <div className="truncate text-[12.5px] font-semibold leading-tight text-lx">Tagger</div>
           {/* 副标题只描述这个应用是什么，不写具体后端：本地 tag 后端随配置变，
               VLM 模式下根本不用它——写死 wd-eva02 会让人以为当前就是那个后端。 */}
-          <div className="truncate text-[10px] leading-tight text-lx-muted">NL + tag 打标工作台</div>
+          <div className="truncate text-[9.5px] leading-tight text-lx-muted">NL + tag 打标工作台</div>
         </div>
       </div>
 
-      <nav className="flex flex-col gap-0.5 px-2.5 py-3" aria-label="主导航">
+      <nav className="flex flex-col gap-px px-2 py-2" aria-label="主导航">
         {items.map((item) => (
           <button
             key={item.key}
@@ -49,7 +49,7 @@ export function Sidebar({
             aria-current={item.active ? 'page' : undefined}
             title={item.hint}
             className={cn(
-              'group relative flex items-center gap-2.5 rounded-lx-sm px-2.5 py-[7px] text-left text-[13px] transition-colors',
+              'group relative flex items-center gap-2 rounded-lx-sm px-2 py-[6px] text-left text-[12.5px] transition-colors',
               item.active ? 'text-lx' : 'text-lx-secondary',
               item.disabled
                 ? 'cursor-not-allowed opacity-40'
@@ -64,9 +64,12 @@ export function Sidebar({
               />
             )}
             {item.active && (
+              // 强调条要贴满整行高度：原来写的是 h-4 + 垂直居中，行高约 30px，
+              // 上下各空出 7px，看起来就是"只画了一半"。留 4px 是因为按钮本身
+              // 有圆角，顶满会让竖条的直角戳出圆角外。
               <motion.span
                 layoutId="nav-active-bar"
-                className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-lx-accent"
+                className="absolute inset-y-1 left-0 w-[2px] rounded-full bg-lx-accent"
                 transition={springSnappy}
               />
             )}

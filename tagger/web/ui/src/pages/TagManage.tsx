@@ -264,8 +264,8 @@ export function TagManage() {
       <PageHeader
         icon={<Merge size={17} />}
         eyebrow="打标管理"
-        title="把多个 json 合成一个单体 json"
-        description="扫描目录里的打标产物（每图两个 json：tag 与 nl），按 image_id 合成一条记录，字段取并集。也可以合并任意 json 数组 / JSONL。写出是流式的，几百万条也不会把内存打满。"
+        title="数据合并"
+        description="按 image_id 合成一条记录，字段取并集；支持 json 数组 / JSONL。"
         actions={
           <button
             type="button"

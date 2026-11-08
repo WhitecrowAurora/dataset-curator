@@ -10,13 +10,44 @@
  * 会顺带把子进程收掉（半成品目录保留，下次覆盖写）。
  */
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, Loader2, TriangleAlert, X } from 'lucide-react'
-import { api, type QuantState, type QuantTaskState } from '../lib/api'
+import { CheckCircle2, Download, Loader2, TriangleAlert, X } from 'lucide-react'
+import { api, type DepState, type QuantState, type QuantTaskState } from '../lib/api'
 import { StatusChip } from './ui/launcher'
+import { ErrorBox } from './ui/ErrorBox'
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+function fmtBytes(n: number): string {
+  const gb = n / (1 << 30)
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(n / (1 << 20))} MB`
+}
+
+/**
+ * 显存档位的经验结论。
+ *
+ * 口径纠正过两次，这里记下来免得再错：
+ * 1. 一开始写"16G 只能 Q4"——错的。16G 上 Q6_K（6.3G）+ mmproj（1.1G）+ KV
+ *    完全放得下，实测加载后 10.5/16 G。
+ * 2. 后来写"并发降到 2~3"——也是错的。**KV 按槽位数在启动时预留**，把任务
+ *    并发调小只是让 slot 空着，显存一点不还。真要腾显存是调 llama.cpp 的
+ *    「槽位（-np）」，在新建任务页的服务设置里。
+ *
+ * 所以这里只回答"这张卡该选哪一档精度"，腾显存的动作指向槽位。
+ */
+function vramHint(gb: number | null): string {
+  if (gb === null) {
+    return '16G 档可整卡跑 Q6/FP8；只有 12G 才需要 Q4。要让出显存调「槽位（-np）」。'
+  }
+  const v = Math.round(gb)
+  if (v >= 24) return `本机 ${v}G：F16 / FP8 都能整卡装下，不必量化。`
+  if (v >= 13) {
+    return `本机 ${v}G：Q6 / FP8 能整卡装下。要让显存给别的程序，去调「槽位（-np）」。`
+  }
+  return `本机 ${v}G：建议量化到 Q4（W4A16）。`
 }
 
 function fmtElapsed(seconds: number): string {
@@ -48,9 +79,32 @@ export function QuantizeDialog({
   const [error, setError] = useState<string | null>(null)
   // 已有权重时默认只显示"直接用"，点「重新量化」才展开目录/方法
   const [showForm, setShowForm] = useState(false)
+  // 缺依赖时的"一键安装"：状态直接复用依赖检测页那份（同一条 pip 队列、
+  // 同一个日志），不另起一套安装器。
+  const [deps, setDeps] = useState<DepState | null>(null)
+  const [installing, setInstalling] = useState(false)
+  // 只为了在选择量化档位时给一句"你这张卡该选哪个"，用完即弃。
+  const [vramGb, setVramGb] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    api
+      .sysinfo()
+      .then((s) => {
+        if (alive) setVramGb(s.vram_total_gb ?? null)
+      })
+      .catch(() => {
+        /* 拿不到就按保守文案提示，不影响主流程 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [open])
 
   const running = task?.status === 'running'
   const canUse = Boolean(info?.has_quantized) || task?.status === 'done'
+  const installLog = deps?.job?.log ?? []
 
   // 打开时拉一次：能不能量化、有没有现成权重、默认落哪
   useEffect(() => {
@@ -112,6 +166,62 @@ export function QuantizeDialog({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, running, onCancel])
 
+  // 安装期间轮询同一条 pip 队列：几百 MB 的下载没有输出是最难熬的，
+  // 而且用户需要看到"装的是哪个包、走到哪一步"。
+  useEffect(() => {
+    if (!installing) return
+    let alive = true
+    const timer = window.setInterval(() => {
+      api
+        .deps()
+        .then((s) => {
+          if (!alive) return
+          setDeps(s)
+          const st = s.job?.status
+          if (st && st !== 'running') setInstalling(false)
+        })
+        .catch(() => {
+          /* 轮询失败不该把弹窗变成报错页 */
+        })
+    }, 1500)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [installing])
+
+  // 装完立刻重查可用性（refresh=1 清掉后端 60 秒的缓存）。不这么做的话，
+  // 用户装完回来看到的仍是"这台机器现在不能量化"，只会认为白装了。
+  const installDone = deps?.job != null && deps.job.status !== 'running'
+  useEffect(() => {
+    if (!installDone) return
+    let alive = true
+    api
+      .quantize(modelKey || undefined, true)
+      .then((s) => {
+        if (!alive) return
+        setInfo(s)
+        setShowForm(!s.has_quantized)
+      })
+      .catch(() => {
+        /* 刷新失败就保持原样，用户可以关掉重开 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [installDone, modelKey])
+
+  async function installDeps() {
+    setError(null)
+    setInstalling(true)
+    try {
+      setDeps(await api.depInstallExtra('quantize'))
+    } catch (err) {
+      setError(msg(err))
+      setInstalling(false)
+    }
+  }
+
   async function start() {
     setBusy(true)
     setError(null)
@@ -141,7 +251,11 @@ export function QuantizeDialog({
     onCancel()
   }
 
-  return (
+  // 挂到 body 上，而不是留在页面 DOM 里：页面根节点带 .lx-page-enter（入场
+  // 动画结束后仍残留 transform），会让 position:fixed 相对那个"整页高"的容器
+  // 定位，弹窗于是出现在整页的中间——用户在顶部时要往下滚才看得见。
+  // FolderPicker / ShardAssets 踩过同一个坑，处理方式一致。
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -204,6 +318,40 @@ export function QuantizeDialog({
                     <TriangleAlert size={13} /> 这台机器现在不能量化
                   </div>
                   <p className="leading-relaxed text-lx-muted">{info.reason}</p>
+
+                  {/* 缺依赖时给按钮：后端原来只会说"pip install ..."，
+                      要求用户离开页面去命令行找解释器，等于这个功能不存在。 */}
+                  {(info.missing_deps ?? []).length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      <button
+                        type="button"
+                        className="lx-btn-ghost inline-flex items-center gap-1.5 text-[11px]"
+                        disabled={busy || installing}
+                        onClick={() => void installDeps()}
+                      >
+                        {installing ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <Download size={12} />
+                        )}
+                        {installing
+                          ? '正在安装依赖…'
+                          : `一键安装（${(info.missing_deps ?? []).join('、')}）`}
+                      </button>
+                      {installing && (
+                        <pre className="max-h-28 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
+                          {installLog.slice(-6).join('\n') || '正在启动 pip…'}
+                        </pre>
+                      )}
+                      {!installing && deps?.job?.status === 'failed' && (
+                        <p className="text-[11px] text-lx-danger">
+                          安装失败，上面日志的最后几行就是原因。也可以命令行
+                          <code className="mx-1 font-mono">pip install &quot;tagger[quantize]&quot;</code>
+                          再试。
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -217,7 +365,15 @@ export function QuantizeDialog({
 
               {info?.has_quantized && !running && !showForm && (
                 <div className="rounded-lx-sm border border-lx px-3 py-2.5">
-                  <div className="mb-1 text-lx">已有量化权重</div>
+                  <div className="mb-1 flex items-baseline justify-between gap-2">
+                    <span className="text-lx">已有量化权重</span>
+                    {/* 有了体积才敢决定"要不要留着原权重" */}
+                    {info.quantized_bytes ? (
+                      <span className="text-[11px] tabular-nums text-lx-muted">
+                        {fmtBytes(info.quantized_bytes)}
+                      </span>
+                    ) : null}
+                  </div>
                   <code className="break-all font-mono text-[11px] text-lx-secondary">
                     {info.quantized_path}
                   </code>
@@ -249,6 +405,11 @@ export function QuantizeDialog({
                       ))}
                     </select>
                   </label>
+                  {/* 显存档位的经验结论。写在选算法的位置，因为这里才是真正
+                      要做取舍的地方；写进文档没人会去翻。 */}
+                  <p className="text-[11px] leading-relaxed text-lx-muted">
+                    {vramHint(vramGb)}
+                  </p>
                 </div>
               )}
 
@@ -292,7 +453,7 @@ export function QuantizeDialog({
                 </div>
               )}
 
-              {error && <p className="text-[11px] text-lx-danger">{error}</p>}
+              {error && <ErrorBox text={error} />}
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-lx px-[18px] py-3">
@@ -339,6 +500,7 @@ export function QuantizeDialog({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   )
 }

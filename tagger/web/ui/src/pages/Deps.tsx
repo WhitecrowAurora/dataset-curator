@@ -270,7 +270,7 @@ export function Deps() {
         icon={<PackageCheck size={17} />}
         eyebrow={state?.python ? `装到 ${state.python}` : '读清单中'}
         title="依赖检测"
-        description="清单来自 requirements-embedded.txt 与 requirements-tag.txt。可以单独装、卸、重装任意一个包。"
+        description="可对任意包单独装、卸、重装。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button

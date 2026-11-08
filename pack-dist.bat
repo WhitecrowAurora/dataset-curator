@@ -10,8 +10,15 @@ rem
 rem  Usage:
 rem    pack-dist.bat                    zip without env\python (~60MB)
 rem    pack-dist.bat -WithEnv           zip with a pruned env\python
+rem    pack-dist.bat -WithLlama         include runtime\llama.cpp (~743MB)
 rem    pack-dist.bat -NoTests           skip tests\ (smaller, no self-check)
 rem    pack-dist.bat -Out D:\x.zip      explicit output path
+rem
+rem  Why llama.cpp is NOT included by default: it is downloaded by install.bat
+rem  (same code as the web button) and it is 743MB, of which 570MB would be
+rem  wasted -- the CUDA build is tied to the receiver's driver. Ship it only
+rem  when the target machine has no internet, or when you must pin the exact
+rem  build. runtime\llama.cpp\.download\ (the raw zips) is never copied.
 rem
 rem  -WithEnv refuses to run while env\python still holds torch: that would
 rem  produce a 4GB zip. Run prune-env.bat -Apply first, or drop -WithEnv.
@@ -26,6 +33,7 @@ cd /d "%~dp0"
 set "ROOT=%CD%"
 
 set "WITHENV=0"
+set "WITHLLAMA=0"
 set "TESTS=1"
 set "OUT="
 
@@ -36,26 +44,37 @@ if /i "%~1"=="-WithEnv" (
     shift
     goto parse
 )
+if /i "%~1"=="-WithLlama" (
+    set "WITHLLAMA=1"
+    shift
+    goto parse
+)
 if /i "%~1"=="-NoTests" (
     set "TESTS=0"
     shift
     goto parse
 )
-if /i "%~1"=="-Out" (
-    shift
-    if "%~1"=="" (
-        echo [ERROR] -Out needs a path.
-        exit /b 1
-    )
-    set "OUT=%~1"
-    shift
-    goto parse
-)
+if /i "%~1"=="-Out" goto parse_out
 if /i "%~1"=="-h" goto usage
 if /i "%~1"=="--help" goto usage
 echo [ERROR] unknown argument: %~1
 echo         Run "pack-dist.bat -h" for usage.
 exit /b 1
+
+rem -Out is handled at a label, NOT inside an "if (...)" block: inside a block
+rem `%~1` is expanded once when the block is parsed, so the `shift` above has
+rem no effect and OUT ends up being the literal string "-Out". Symptom: the
+rem zip is named "-Out" and tar fails with "Can't specify both -u and -c".
+:parse_out
+shift
+if "%~1"=="" (
+    echo [ERROR] -Out needs a path.
+    exit /b 1
+)
+set "OUT=%~1"
+shift
+goto parse
+
 :parsed
 
 rem ---------------------------------------------------------------- preflight
@@ -125,6 +144,11 @@ if errorlevel 8 goto copy_failed
 if exist "%ROOT%\configs" (
     robocopy "%ROOT%\configs" "%STAGE%\configs" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
     if errorlevel 8 goto copy_failed
+    rem models.json is the receiver's OWN overlay: models they added, custom
+    rem download dirs, proxy, notes, and the gguf_quants entries written by
+    rem local quantization. Shipping ours means "upgrade once, lose all of it"
+    rem (ours is usually just {}). Ship tiers.yaml, never this file.
+    if exist "%STAGE%\configs\models.json" del /q "%STAGE%\configs\models.json"
 )
 
 rem desktop\ is source only: bin\ and obj\ hold last build's intermediate
@@ -155,10 +179,27 @@ if "%WITHENV%"=="1" (
     if errorlevel 8 goto copy_failed
 )
 
+rem Optional: the llama.cpp build. Off by default because install.bat normally
+rem fetches it and because the CUDA DLLs are driver-specific. .download\ holds
+rem the raw zips (~570MB of pure waste) so it is always excluded.
+if "%WITHLLAMA%"=="1" (
+    if exist "%ROOT%\runtime\llama.cpp" (
+        echo  [pack] including runtime\llama.cpp
+        robocopy "%ROOT%\runtime\llama.cpp" "%STAGE%\runtime\llama.cpp" /E /XD .download /NFL /NDL /NJH /NJS /NP >nul
+        if errorlevel 8 goto copy_failed
+    ) else (
+        echo  [pack] WARNING: -WithLlama given but runtime\llama.cpp is missing.
+        echo         Install it first:  tagger llama install
+    )
+)
+
 for %%F in (install.bat install.sh tagger.cmd tagger.sh run-web.cmd run-web.sh) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
 )
-for %%F in (requirements-embedded.txt requirements-tag.txt pyproject.toml HANDOFF.md prune-env.bat pack-dist.bat) do (
+rem HANDOFF.md lives in devtools\ (it is shipped there by the devtools copy
+rem above). It used to be listed here as a root file, which silently did
+rem nothing -- "if exist" hides a moved file, so that entry was dead.
+for %%F in (requirements-embedded.txt requirements-tag.txt pyproject.toml prune-env.bat pack-dist.bat pack-readme.txt) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
 )
 
@@ -244,11 +285,16 @@ echo  Build a .zip for another machine.
 echo.
 echo    pack-dist.bat                    zip without env\python (~60MB)
 echo    pack-dist.bat -WithEnv           zip with a pruned env\python
+echo    pack-dist.bat -WithLlama         include runtime\llama.cpp (~743MB)
 echo    pack-dist.bat -NoTests           skip tests\
 echo    pack-dist.bat -Out D:\x.zip      explicit output path
 echo.
 echo  Always excluded: models\ work\ run\ .pytest_cache node_modules
 echo                   env\python\Lib\site-packages (unless pruned and -WithEnv)
+echo                   runtime\llama.cpp\.download (raw zips, 570MB)
+echo.
+echo  llama.cpp is normally fetched by install.bat on the receiver.
+echo  Use -WithLlama only for offline targets or to pin an exact build.
 echo.
 endlocal
 exit /b 0

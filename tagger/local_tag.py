@@ -40,19 +40,12 @@ EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff")
 
 
 def config_fingerprint(backend) -> str:
-    """影响 tag 输出的全部配置折成一个指纹，写进产物。
-
-    产物一旦带上指纹，"跳过已有"就从"文件在就跳"变成"**同一套配置下**
-    产出过才跳"：改了阈值、换了后端、调了 max_tags 之后重跑，旧产物不再
-    冒充已完成，会真正重算。没有这个字段的老产物视为旧配置的产出，
-    同样重算——宁可多付一次推理，也不留一批"不知道按什么阈值出的"tag。
-    """
+    """记录影响 tag 输出的配置，供追溯；默认续做仍按图片跳过。"""
     raw = json.dumps({
         "backend": str(getattr(backend, "name", "") or ""),
         "model_id": str(getattr(backend, "model_id", "") or ""),
         "precision": str(getattr(backend, "precision", "") or ""),
-        # preprocess 会改重采样实现，也就是会改 tag；不进指纹的话，
-        # 切到 tensor 再重跑会被"已有产物"全部跳过，用户以为没生效。
+        # 重采样实现影响 tag，需记录实际使用的口径。
         "preprocess": str(getattr(backend, "preprocess", "") or ""),
         "thresholds": sorted((str(k), float(v))
                              for k, v in (getattr(backend, "thresholds", None) or {}).items()),
@@ -113,6 +106,7 @@ class TagStats:
     total: int = 0
     done: int = 0
     skipped: int = 0
+    busy: int = 0
     failed: int = 0
     stopped: bool = False
     wall_ms: int = 0
@@ -190,15 +184,11 @@ def read_artifact(out_dir: str | Path, item: TagItem) -> dict | None:
 
 
 def _done_ok(out_dir: str | Path, item: TagItem, fingerprint: str) -> bool:
-    """已完成的判定：ok 为 True，且配置指纹一致。
-
-    没有指纹字段的老产物按"配置对不上"处理，同样重算——产物说不清
-    自己是按哪套阈值出的，就不能冒充已完成。
-    """
+    """有效产物默认复用；配置变化只有在强制重做时才重新计算。"""
     obj = read_artifact(out_dir, item)
     if not obj or obj.get("ok") is not True:
         return False
-    return str(obj.get("config_fingerprint") or "") == fingerprint
+    return isinstance(obj.get("tag"), str)
 
 
 # ------------------------------------------------------------------ 产物
@@ -228,8 +218,7 @@ def _payload(item: TagItem, pred, backend, *, precision: str,
         },
         "ts": time.time(),
     }
-    # 配置指纹（见 config_fingerprint）。重跑时用它判断"已有产物是不是
-    # 这套配置出的"，改过阈值之后旧产物不再冒充已完成。
+    # 配置指纹保留用于追溯，不改变默认跳过已有图片的行为。
     if fingerprint:
         payload["config_fingerprint"] = fingerprint
     # 分级分数单列，不并进 tag 串（描述审核等级，不是画面内容）。
@@ -241,13 +230,8 @@ def _payload(item: TagItem, pred, backend, *, precision: str,
 
 def _write_json(path: Path, payload: dict) -> None:
     """tmp + fsync + replace：半截 json 会被当成"已完成"，这是最贵的错。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    from .storage.atomic import write_json
+    write_json(path, payload)
 
 
 # ------------------------------------------------------------------ 执行
@@ -273,6 +257,16 @@ def tag_items(backend, items: Sequence[TagItem], *, out_dir: str | Path,
               stats: TagStats | None = None,
               read_bytes: Callable[[TagItem], bytes] | None = None,
               guard=None) -> TagStats:
+    from .storage.work import WorkIndex
+    with WorkIndex(Path(out_dir)) as work:
+        work.refresh()
+        return _tag_items(backend, items, out_dir=out_dir, force=force,
+                          on_progress=on_progress, should_stop=should_stop, stats=stats,
+                          read_bytes=read_bytes, guard=guard, work=work)
+
+
+def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
+               stats, read_bytes, guard, work):
     """按批打标并落盘。返回结账过的 TagStats。
 
     `should_stop` 是**协作式**中止：只在块边界检查，正在算的那一块会算完
@@ -326,20 +320,37 @@ def tag_items(backend, items: Sequence[TagItem], *, out_dir: str | Path,
             pass
 
     def fail(item: TagItem, reason: str) -> None:
+        work.release(item.image_id)
         stats.failed += 1
         key = reason.split(":")[0].strip()[:60]
         stats.by_reason[key] = stats.by_reason.get(key, 0) + 1
         emit("failed", item, reason)
 
-    pending: list[TagItem] = []
-    for item in items:
-        if not force and _done_ok(out_dir, item, fingerprint):
-            stats.skipped += 1
-            emit("skipped", item, None)
-        else:
-            pending.append(item)
+    def pending_items():
+        for item in items:
+            if not force and _done_ok(out_dir, item, fingerprint):
+                stats.skipped += 1
+                emit("skipped", item, None)
+                continue
+            status = work.claim(item.image_id, force=force)
+            if status != "claimed":
+                if status == "done":
+                    stats.skipped += 1
+                    emit("skipped", item, None)
+                else:
+                    stats.busy += 1
+                    emit("busy", item, None)
+                continue
+            if not force and _done_ok(out_dir, item, fingerprint):
+                work.release(item.image_id)
+                stats.skipped += 1
+                emit("skipped", item, None)
+                continue
+            yield item
 
     def commit(item: TagItem, pred) -> None:
+        if not work.owns(item.image_id):
+            raise RuntimeError(f"图片领取已失效：{item.image_id}")
         payload = _payload(item, pred, backend, precision=precision,
                            fingerprint=fingerprint)
         try:
@@ -348,6 +359,7 @@ def tag_items(backend, items: Sequence[TagItem], *, out_dir: str | Path,
             fail(item, f"写盘失败: {exc}")
             return
         stats.done += 1
+        work.release(item.image_id)
         emit("done", item, payload)
 
     def account_timings() -> None:
@@ -357,14 +369,18 @@ def tag_items(backend, items: Sequence[TagItem], *, out_dir: str | Path,
         stats.forward_ms += int(split.get("forward") or 0)
 
     step = _chunk_size(backend)
-    for start in range(0, len(pending), step):
+    from itertools import islice
+    pending = pending_items()
+    while True:
         if should_stop is not None and should_stop():
             stats.stopped = True
             break
         if guard is not None and not wait_for_guard():
             stats.stopped = True
             break
-        chunk = pending[start:start + step]
+        chunk = list(islice(pending, step))
+        if not chunk:
+            break
         try:
             preds = backend.predict_batch(inputs_of(chunk))
         except Exception as exc:      # noqa: BLE001 - 一块坏了不能连坐

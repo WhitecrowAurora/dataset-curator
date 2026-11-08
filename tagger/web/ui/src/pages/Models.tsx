@@ -11,8 +11,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   Boxes,
+  ChevronDown,
+  ChevronUp,
+  Cpu,
   Download,
   FolderOpen,
+  Gauge,
   Plus,
   RotateCcw,
   Save,
@@ -28,6 +32,8 @@ import {
   type VlmModelEntry,
 } from '../lib/api'
 import { PageHeader, SectionPanel, StatusChip } from '../components/ui/launcher'
+import { QuantizeDialog } from '../components/QuantizeDialog'
+import { GgufConvertDialog } from '../components/GgufConvertDialog'
 import { ErrorBox } from '../components/ui/controls'
 
 const PRECISIONS = ['int4', 'int8', 'bf16', 'fp16', 'fp32']
@@ -85,13 +91,20 @@ function LocalFilesBar({
   onError: (msg: string) => void
 }) {
   const [pending, setPending] = useState('')
+  // 要下哪一档 GGUF。空 = 按配置清单下（一般是好几档一起）；选了就只下这一档；
+  // 'raw' = 整仓库原始权重（safetensors），专供"本地量化"用。
+  const [tier, setTier] = useState('')
+  const [convertOpen, setConvertOpen] = useState(false)
   const key = 'key' in entry ? entry.key : entry.backend
   const download = entry.download
   const running = isRunning(download)
   // NL 的"权重"既可能是仓库名也可能是本地目录；tag 的权重目录在新建任务页另填
   const path = 'key' in entry ? entry.path : entry.repo
+  const tiers = 'download_tiers' in entry ? entry.download_tiers ?? [] : []
   // 有文件 ≠ 下完了：取消/报错会留下半截。只有非 partial 才算"本地已有"。
-  const ready = entry.exists && !entry.partial
+  // 也不等于跑得起来：下错仓库时目录里全是 safetensors，缺 gguf 照样起不来。
+  const missing = entry.missing_files ?? []
+  const ready = entry.exists && !entry.partial && entry.ready !== false
   const canUseLocal =
     kind === 'vlm' && !!onUseLocalDir && ready && path !== entry.local_abs
 
@@ -148,14 +161,16 @@ function LocalFilesBar({
           </>
         ) : (
           <>
-            <span className="text-lx-dim">
+            <span className={missing.length ? 'text-lx-warning' : 'text-lx-dim'}>
               {entry.partial
                 ? '上次没下完，点下载会接着下'
-                : download?.status === 'error'
-                  ? download.message
-                  : entry.download_repo
-                    ? '未下载'
-                    : '这条没有可下载的仓库（权重是本地目录）'}
+                : missing.length
+                  ? `已下载，但缺 ${missing.join('、')}——启动会报权重不存在`
+                  : download?.status === 'error'
+                    ? download.message
+                    : entry.download_repo
+                      ? '未下载'
+                      : '这条没有可下载的仓库（权重是本地目录）'}
             </span>
             <span className="truncate font-mono text-[10px] text-lx-dim" title={entry.local_abs}>
               {entry.local_dir}
@@ -247,6 +262,30 @@ function LocalFilesBar({
                 删除
               </button>
             )}
+            {/* 档位下拉：一个 GGUF 仓库里挂着十来个档（20G+），默认只下配置
+                清单里那几份。想只要 Q6 就选它，省一半流量和磁盘。 */}
+            {tiers.length > 0 && (
+              <select
+                className="lx-input px-1.5 py-1 text-[11px]"
+                value={tier}
+                disabled={!!pending}
+                onChange={(e) => setTier(e.target.value)}
+                aria-label="要下载的量化档"
+                title="只下这一档 + 配套 mmproj；不选则按配置清单下"
+              >
+                <option value="">全部档位</option>
+                {tiers.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+                {/* 原始权重：给「本地量化」当输入。体积大得多，所以不放进
+                    "全部档位"里顺手带上。 */}
+                {kind === 'vlm' && (
+                  <option value="raw">原始权重（用于本地量化）</option>
+                )}
+              </select>
+            )}
             <button
               type="button"
               className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
@@ -255,16 +294,37 @@ function LocalFilesBar({
               onClick={() =>
                 void act('download', async () => {
                   await onPrepare?.()
-                  await api.startDownload(kind, key)
+                  await api.startDownload(kind, key, tier)
                 })
               }
             >
               <Download size={12} />
               {pending === 'download' ? '启动中…' : entry.partial ? '继续下载' : '下载'}
             </button>
+            {/* 本地量化：原始权重 → GGUF。放在下载旁边，因为它是"下完原始
+                权重之后"的下一步，用户不会想到去别的页面找。 */}
+            {kind === 'vlm' && (
+              <button
+                type="button"
+                className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                disabled={!!pending}
+                title="用原始权重在本地压出 GGUF（Q4_K_M / Q6_K）"
+                onClick={() => setConvertOpen(true)}
+              >
+                <Cpu size={12} />
+                本地量化
+              </button>
+            )}
           </>
         )}
       </div>
+      {kind === 'vlm' && (
+        <GgufConvertDialog
+          open={convertOpen}
+          modelKey={key}
+          onClose={() => setConvertOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -282,6 +342,10 @@ export function Models() {
   const [proxyMsg, setProxyMsg] = useState('')
   const [proxyOk, setProxyOk] = useState<boolean | null>(null)
   const [proxyBusy, setProxyBusy] = useState('')
+  // 折叠：每行默认只露"这是什么 + 下载/量化"，六七个字段全铺开时一屏看不到两个模型。
+  const [openVlm, setOpenVlm] = useState<number | null>(null)
+  // 量化弹窗：与新建任务页共用同一套 W4A16 流程，不另写一份。
+  const [quantFor, setQuantFor] = useState<string | null>(null)
 
   const apply = (d: ModelCatalog, syncProxy = false) => {
     setCatalog(d)
@@ -475,7 +539,7 @@ export function Models() {
         icon={<Boxes size={17} />}
         eyebrow="可选清单"
         title="模型管理"
-        description="改这里决定新建任务里能选到哪些模型；权重可以在这里直接下载。"
+        description="决定新建任务能选到哪些模型；破限版默认排最前——原版遇 NSFW 图会整批漏标且不报错。"
         badges={
           catalog && (
             <StatusChip tone={catalog.overlay_exists ? 'accent' : 'neutral'}>
@@ -515,7 +579,7 @@ export function Models() {
 
       <SectionPanel
         title="NL 模型"
-        description="Qwen-VL 这类出自然语言的权重。名字（key）就是起服务时用的 --model。"
+        description="出自然语言的权重（Qwen-VL 类）；名字就是起服务时的 --model。"
         trailing={
           <button
             type="button"
@@ -529,7 +593,81 @@ export function Models() {
       >
         <div>
           {vlm.map((m, i) => (
-            <div key={`${m.key}-${i}`} className="grid gap-2 border-b border-lx py-3 last:border-b-0 md:grid-cols-2">
+            <div key={`${m.key}-${i}`} className="border-b border-lx py-2 last:border-b-0">
+              {/* 行头只回答两个问题：这是什么、本地有没有。其余六七个字段
+                  收进展开里——它们改一次就够，却每次都占满一屏。 */}
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 cursor-pointer text-left"
+                  onClick={() => setOpenVlm(openVlm === i ? null : i)}
+                >
+                  <div className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-lx">
+                    <span className="truncate">{m.note || m.key}</span>
+                    {m.tiers.length > 0 && (
+                      <span className="shrink-0 rounded-lx-sm border border-lx px-1 py-px text-[9.5px] font-normal text-lx-muted">
+                        分档在用
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate font-mono text-[10.5px] text-lx-dim">
+                    {m.key} · {m.path}
+                  </div>
+                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                    title="在本机把权重量化成 4bit（W4A16），跑起来省显存"
+                    onClick={() => setQuantFor(m.key)}
+                  >
+                    <Gauge size={12} />
+                    量化
+                  </button>
+                  <button
+                    type="button"
+                    className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                    onClick={() => setOpenVlm(openVlm === i ? null : i)}
+                  >
+                    {openVlm === i ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    {openVlm === i ? '收起' : '编辑'}
+                  </button>
+                  <button
+                    type="button"
+                    className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                    disabled={m.tiers.length > 0 || vlm.length <= 1}
+                    title={
+                      m.tiers.length > 0
+                        ? `分档 ${m.tiers.join('/')} 还在用它，先改 tiers.yaml`
+                        : vlm.length <= 1
+                          ? '至少保留一个 NL 模型'
+                          : '从清单里移除'
+                    }
+                    onClick={() => {
+                      setVlm((prev) => prev.filter((_, k) => k !== i))
+                      setDirty(true)
+                      setSaved('')
+                    }}
+                  >
+                    <Trash2 size={12} />
+                    移除
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-1.5">
+                <LocalFilesBar
+                  kind="vlm"
+                  entry={m}
+                  onError={setError}
+                  onRefresh={mergeLocal}
+                  onPrepare={prepareDownload}
+                  onUseLocalDir={() => patchVlm(i, { path: m.local_abs })}
+                />
+              </div>
+
+              {openVlm === i && (
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
               <Field label="名字（key）">
                 <input
                   className="lx-input font-mono text-xs"
@@ -587,49 +725,20 @@ export function Models() {
                   onChange={(e) => patchVlm(i, { local_dir: e.target.value })}
                 />
               </Field>
+                </div>
+              )}
 
-              <LocalFilesBar
-                kind="vlm"
-                entry={m}
-                onError={setError}
-                onRefresh={mergeLocal}
-                onPrepare={prepareDownload}
-                onUseLocalDir={() => patchVlm(i, { path: m.local_abs })}
-              />
-
-              <div className="md:col-span-2 flex items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-lx-dim">
-                  <span
-                    className={`rounded-lx-sm border px-1.5 py-0.5 ${
-                      m.source === 'managed'
-                        ? 'border-lx-accent text-lx-accent'
-                        : 'border-lx text-lx-muted'
-                    }`}
-                  >
-                    {m.source === 'managed' ? '本机改过' : '来自配置'}
-                  </span>
-                  {m.tiers.length > 0 && <span>分档在用：{m.tiers.join(' / ')}</span>}
-                </span>
-                <button
-                  type="button"
-                  className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
-                  disabled={m.tiers.length > 0 || vlm.length <= 1}
-                  title={
-                    m.tiers.length > 0
-                      ? `分档 ${m.tiers.join('/')} 还在用它，先改 tiers.yaml`
-                      : vlm.length <= 1
-                        ? '至少保留一个 NL 模型'
-                        : '从清单里移除'
-                  }
-                  onClick={() => {
-                    setVlm((prev) => prev.filter((_, k) => k !== i))
-                    setDirty(true)
-                    setSaved('')
-                  }}
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10.5px] text-lx-dim">
+                <span
+                  className={`rounded-lx-sm border px-1.5 py-px ${
+                    m.source === 'managed'
+                      ? 'border-lx-accent text-lx-accent'
+                      : 'border-lx text-lx-muted'
+                  }`}
                 >
-                  <Trash2 size={12} />
-                  移除
-                </button>
+                  {m.source === 'managed' ? '本机改过' : '来自配置'}
+                </span>
+                {m.tiers.length > 0 && <span>分档：{m.tiers.join(' / ')}</span>}
               </div>
             </div>
           ))}
@@ -657,7 +766,7 @@ export function Models() {
 
       <SectionPanel
         title="Tag 模型"
-        description="下完的目录可以填进新建任务的「权重目录」（wd-eva02 / cl-tagger-v2 / onnx 认这个字段；pixai 走 HF 缓存，下载只是留副本）。"
+        description="下完的目录可填进新建任务的「权重目录」（pixai 走 HF 缓存，下载仅留副本）。"
         trailing={
           <button
             type="button"
@@ -832,6 +941,19 @@ export function Models() {
         <Tags size={12} className="mr-1 inline align-[-2px]" />
         只存与配置不同的条目 → {catalog?.overlay ?? 'configs/models.json'}
       </p>
+
+      {quantFor && (
+        <QuantizeDialog
+          open
+          modelKey={quantFor}
+          onCancel={() => setQuantFor(null)}
+          onUse={() => {
+            // 量化完成后重拉清单：quantized_path 变了，下面"权重精度"才有得选。
+            setQuantFor(null)
+            api.models().then((d) => apply(d)).catch(fail)
+          }}
+        />
+      )}
     </div>
   )
 }

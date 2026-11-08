@@ -40,6 +40,60 @@ defaults:
   request_timeout_s: 90
 
 models:
+  # ===========================================================================
+  # 默认口径：无审查版（abliterated / unredacted）
+  #
+  # 打标必须用它：原版遇到 NSFW 图会拒答，表现是"这张图只出几句干巴巴的话、
+  # tag 一个都没有"——也就是漏标，而且不报错。训练 diffusion 的图集里暴露内容
+  # 占比不低，漏标会直接变成脏数据，所以这两条排在前面并进了全部三档。
+  #
+  # 两套权重各有用途，别混：
+  #   path      原始 bf16（prithivMLmods 原仓库）→ vLLM 加载 / 量化的输入
+  #   gguf      成品量化（mradermacher 转的 Q4_K_M）→ 默认引擎 llama.cpp
+  # 两个仓库是同一份 abliteration 权重，只是格式不同；作者原仓库只有 BF16/Q8_0，
+  # 16G 卡放不下 BF16，Q8_0 又要吃掉一半吞吐，所以主权重取 mradermacher 的 Q4_K_M。
+  # ★换量化档位（Q4_K_M → Q8_0）等于换一代数据，必须同步改指纹。
+  # ===========================================================================
+  qwen3vl-4b-abliterated:
+    path: prithivMLmods/Qwen3-VL-4B-Instruct-Unredacted-MAX
+    revision: null
+    family: qwen3vl
+    quantized_path: null
+    precision: int4
+    gguf: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.mmproj-Q8_0.gguf
+    gguf_quants:
+      q4: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q4_K_M.gguf
+      q6: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q6_K.gguf
+      q8: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q8_0.gguf
+    # 「模型管理」页的下载按钮按这两行走。那个仓库有 6 个量化档（合计 20G+），
+    # 全下纯属浪费，只拉实际要跑的主权重 + 视觉投影。
+    download_repo: mradermacher/Qwen3-VL-4B-Instruct-Unredacted-MAX-GGUF
+    download_files: ["*Q4_K_M.gguf", "*Q6_K.gguf", "*mmproj-Q8_0.gguf"]
+
+  qwen3vl-8b-abliterated:
+    path: prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX
+    revision: null
+    family: qwen3vl
+    quantized_path: null
+    precision: int4
+    gguf: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.mmproj-Q8_0.gguf
+    # 同一份权重的三个压缩比：Q4 4.7G / Q6 6.4G / Q8 8.1G。
+    # 页面上「权重精度」选哪个就加载哪个文件（见 nl_engine.resolve_weights）。
+    # ★ 换档等于换一代数据：run 指纹里带 precision，别把两档的产物混在一批。
+    gguf_quants:
+      q4: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q4_K_M.gguf
+      q6: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q6_K.gguf
+      q8: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q8_0.gguf
+    download_repo: mradermacher/Qwen3-VL-8B-Instruct-Unredacted-MAX-GGUF
+    download_files: ["*Q4_K_M.gguf", "*Q6_K.gguf", "*mmproj-Q8_0.gguf"]
+
+  # ---------------------------------------------------------------------------
+  # 官方版（有审查）。保留是为了对照与回退：换了破限版权重后如果发现
+  # 某批图的 tag 风格漂了，用 --model qwen3vl-8b 切回原版就能判断是权重还是
+  # prompt 的问题。默认档位已经不用它们了。
+  # ---------------------------------------------------------------------------
   qwen3vl-4b:
     path: Qwen/Qwen3-VL-4B-Instruct
     # [TODO] 锁定 commit hash，禁止用 main —— 换版本等于换一代数据
@@ -48,6 +102,23 @@ models:
     # int4 权重需自行生成一次（llm-compressor，约 20-30 分钟）；为空会退回 bf16
     quantized_path: null
     precision: int4
+    # ---- engine=llamacpp 用的成品权重 ----
+    # 官方仓库只给了 F16 / Q4_K_M / Q8_0 三档，**没有 Q6_K 和 Q5**。不写
+    # q6，是因为选了也下不到；要 q6 就在量化页用 F16 自己压一份。
+    gguf: models/nl/qwen3vl-4b/Qwen3VL-4B-Instruct-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-4b/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf
+    gguf_quants:
+      q4: models/nl/qwen3vl-4b/Qwen3VL-4B-Instruct-Q4_K_M.gguf
+      q8: models/nl/qwen3vl-4b/Qwen3VL-4B-Instruct-Q8_0.gguf
+    # 下载源必须是 **-GGUF 仓库**。path 指向的是 safetensors 仓库，那里一个
+    # gguf 都没有；照它下会拖 8G 原始权重，然后启动报"GGUF 权重不存在"。
+    download_repo: Qwen/Qwen3-VL-4B-Instruct-GGUF
+    # 写全名而不是 `*Q8_0.gguf`：仓库里 mmproj 也有 Q8_0 版本，通配会把
+    # 主权重和 mmproj 一起拖下来（多几百 MB），而这里只要那一个。
+    download_files:
+      - Qwen3VL-4B-Instruct-Q4_K_M.gguf
+      - Qwen3VL-4B-Instruct-Q8_0.gguf
+      - mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf
 
   qwen3vl-8b:
     path: Qwen/Qwen3-VL-8B-Instruct
@@ -56,61 +127,56 @@ models:
     quantized_path: null
     precision: int4
     # ---- engine=llamacpp 用的成品权重（Windows 原生唯一能上 GPU 的路）----
-    # 官方仓库：Qwen/Qwen3-VL-8B-Instruct-GGUF（含 mmproj）。
     # 2026-11-04 实测（4070 Ti SUPER 16G）：Q4_K_M + mmproj-F16，
     # 并发 4 时 1.27 张/秒、p95 3.4s、解码 206 tok/s；并发 8 不再涨。
-    # ★换量化档位（Q4_K_M → Q8_0）等于换一代数据，必须同步改指纹。
+    # 本地实际放的是 F16 主权重（15.3G），Q4_K_M 那份没下——16G 卡上跑不动 F16。
     # 国内直连 huggingface.co 常不通，走 modelscope.cn 同名仓库更快。
     gguf: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q4_K_M.gguf
     mmproj: models/nl/qwen3vl-8b/mmproj-Qwen3VL-8B-Instruct-F16.gguf
-
-  # 无审查版（abliterated / unredacted）。打标必须用它：原版遇到 NSFW 图会拒答，
-  # 表现是"这张图只出几句干巴巴的话、tag 一个都没有"——也就是漏标，而且不报错。
-  # 体积：4B ≈ 8.9G、8B ≈ 17.6G（bf16）。precision 仍写 int4，quantized_path
-  # 为空时会退回 bf16（与上面两个同一条路）。
-  # 这两个没有进 tiers：显存落档仍按默认模型，要用手动在页面上选，或用
-  # --model qwen3vl-8b-abliterated 覆盖。
-  qwen3vl-4b-abliterated:
-    path: prithivMLmods/Qwen3-VL-4B-Instruct-Unredacted-MAX
-    revision: null
-    family: qwen3vl
-    quantized_path: null
-    precision: int4
-
-  qwen3vl-8b-abliterated:
-    path: prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX
-    revision: null
-    family: qwen3vl
-    quantized_path: null
-    precision: int4
+    gguf_quants:
+      q4: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q4_K_M.gguf
+      # q6 不在官方仓库里（只有 F16/Q4_K_M/Q8_0），得用量化页从 F16 压一份，
+      # 所以下面 download_files 不列它：下载页下不到，量化页能生成。
+      q6: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q6_K.gguf
+      q8: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q8_0.gguf
+    # 同 4B：默认引擎要的是 GGUF，而 path 是 safetensors 仓库，下载源必须分开写。
+    download_repo: Qwen/Qwen3-VL-8B-Instruct-GGUF
+    # mmproj 用 F16：与上面 mmproj 字段一致，否则下完文件名对不上，启动时
+    # 仍报"视觉投影文件不存在"。
+    download_files:
+      - Qwen3VL-8B-Instruct-Q4_K_M.gguf
+      - Qwen3VL-8B-Instruct-Q8_0.gguf
+      - mmproj-Qwen3VL-8B-Instruct-F16.gguf
 
 tiers:
+  # 全部三档都指向无审查版：默认落哪档都用能打 NSFW 的权重。
+  # 想临时切回官方版对照，用 --model qwen3vl-4b / qwen3vl-8b 覆盖即可。
   - name: low-16g
     vram_min: 0
     vram_max: 18
-    model: qwen3vl-4b
+    model: qwen3vl-4b-abliterated
     precision: int4
     max_model_len: 4096
     max_num_seqs: 8
-    note: "12G/16G：4B int4，768² 视觉输入。保全员参与的最小配置。"
+    note: "12G/16G：4B 破限版，768² 视觉输入。保全员参与的最小配置。"
 
   - name: mid-24g
     vram_min: 18
     vram_max: 28
-    model: qwen3vl-4b
+    model: qwen3vl-4b-abliterated
     precision: int4
     max_model_len: 8192
     max_num_seqs: 16
-    note: "24G：先用 4B 打满吞吐；要质量可 --model qwen3vl-8b 覆盖。"
+    note: "24G：先用 4B 打满吞吐；要质量可 --model qwen3vl-8b-abliterated 覆盖。"
 
   - name: high-32g
     vram_min: 28
     vram_max: 999
-    model: qwen3vl-8b
+    model: qwen3vl-8b-abliterated
     precision: int4
     max_model_len: 16384
     max_num_seqs: 24
-    note: "32G+：8B，承担黄金集与难样本。"
+    note: "32G+：8B 破限版，承担黄金集与难样本。"
 
 # ---------------------------------------------------------------------------
 # 硬件保护

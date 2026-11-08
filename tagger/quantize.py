@@ -80,6 +80,8 @@ class QuantTask:
             "stage": self.stage,
             "message": self.message,
             "elapsed": round(elapsed, 1),
+            # 结束时间：页面拿它判断"这条是不是已经收尾了"，以及做完成通知的去重。
+            "finished_at": self.finished_at,
             "log_tail": list(self.log),
         }
 
@@ -140,6 +142,22 @@ def suggested_dir(key: str) -> Path:
     return MODELS_ROOT / "nl" / f"{key}-w4a16"
 
 
+def _file_bytes(path: str | None) -> int:
+    """产物大小（字节）。目录形态（safetensors 分片）就把里面的文件加起来。"""
+    text = (path or "").strip()
+    if not text:
+        return 0
+    target = Path(text)
+    try:
+        if target.is_file():
+            return target.stat().st_size
+        if target.is_dir():
+            return sum(f.stat().st_size for f in target.rglob("*") if f.is_file())
+    except OSError:
+        return 0
+    return 0
+
+
 def _exists(path: str | None) -> bool:
     """量化路径存不存在。HF 仓库名（org/name）没法在这台机器上判，按存在算。"""
     text = (path or "").strip()
@@ -177,7 +195,7 @@ class QuantManager:
         now = time.time()
         if self._cap is not None and now - self._cap[0] < _CAP_TTL_S:
             return self._cap[1], self._cap[2]
-        missing = [m for m in _REQUIRED if not _module_ready(m)]
+        missing = self.missing_modules()
         if missing:
             ok, reason = False, (
                 f"缺少量化依赖：{', '.join(missing)}。"
@@ -196,6 +214,24 @@ class QuantManager:
                 ok, reason = True, ""
         self._cap = (now, ok, reason)
         return ok, reason
+
+    def missing_modules(self) -> list[str]:
+        """还没装上的量化依赖（导入名）。
+
+        单列一个方法是因为页面要**按这个名字**决定显示"一键安装"还是别的
+        建议：只靠 reason 里那句中文去猜是不行的，改一个字就失灵。
+        """
+        return [m for m in _REQUIRED if not _module_ready(m)]
+
+    def refresh_capability(self) -> None:
+        """清掉可用性缓存。
+
+        装完依赖回来必须立刻能看到"现在可以量化了"：缓存 TTL 是 60 秒，
+        不主动清的话用户点完安装、回到弹窗仍是一片"这台机器不能量化"，
+        只会以为装失败了，然后再点一次。
+        """
+        with self._lock:
+            self._cap = None
 
     # ---------------------------------------------------------------- 查询
 
@@ -225,6 +261,9 @@ class QuantManager:
         out: dict[str, Any] = {
             "available": ok,
             "reason": reason,
+            # 页面据此决定要不要出"一键安装"按钮；只靠 reason 的中文文案
+            # 去判断，改一个字按钮就没了。
+            "missing_deps": self.missing_modules(),
             "model": "",
             "source": "",
             "quantized_path": None,
@@ -250,6 +289,8 @@ class QuantManager:
             "source": str(spec.get("path") or ""),
             "quantized_path": quantized or None,
             "has_quantized": _exists(quantized),
+            # 完成摘要里要显示"产物多大"，不然用户不知道该不该留着原权重。
+            "quantized_bytes": _file_bytes(quantized),
             "suggested_dir": shown_dir,
         })
         with self._lock:
@@ -257,6 +298,30 @@ class QuantManager:
         if task is not None and task.model_key == key:
             out["task"] = task.state()
         return out
+
+    def activity(self) -> dict[str, Any] | None:
+        """给底部进度条 / 完成通知用的最小快照（没有任务时返回 None）。
+
+        为什么不复用 snapshot()：那个要解析模型路径、算量化目录、还要查依赖，
+        几秒轮询一次太贵；底栏只需要"跑到哪、还剩多久、成没成"。
+        """
+        with self._lock:
+            task = self._task
+        if task is None:
+            return None
+        return {
+            "id": f"quantize:{task.model_key}",
+            "kind": "quantize",
+            "title": "量化",
+            "detail": task.model_key,
+            "status": task.status,
+            "percent": round(task.percent, 1),
+            "stage": task.stage,
+            "message": task.message,
+            "elapsed_s": round((task.finished_at or time.time()) - task.started_at, 1),
+            "finished_at": task.finished_at,
+            "log_tail": list(task.log)[-6:],
+        }
 
     # ---------------------------------------------------------------- 启停
 
@@ -421,7 +486,7 @@ class QuantManager:
         except ValueError:
             out_ref = str(task.out_dir)
         vlm = dict(doc.get("vlm") or {})
-        vlm[task.model_key] = {
+        entry: dict[str, Any] = {
             "path": path,
             "revision": spec.get("revision"),
             "family": str(spec.get("family") or "qwen3vl"),
@@ -429,6 +494,20 @@ class QuantManager:
             "precision": task.method,
             "quantized_path": out_ref,
         }
+        # 覆盖是整体替换，少抄一个字段就等于把它抹掉：gguf / mmproj 一丢，
+        # 默认引擎（llama.cpp）下次启动会直接报"没有配 GGUF 权重"。
+        # gguf_quants 同理——抹掉它，精度的 q6/q8 就找不到文件，静默回落 Q4。
+        for field in ("gguf", "mmproj", "download_repo"):
+            value = str(spec.get(field) or "").strip()
+            if value:
+                entry[field] = value
+        quants = spec.get("gguf_quants")
+        if isinstance(quants, dict) and quants:
+            entry["gguf_quants"] = {str(k): str(v) for k, v in quants.items()}
+        files = spec.get("download_files")
+        if files:
+            entry["download_files"] = list(files)
+        vlm[task.model_key] = entry
         doc["vlm"] = vlm
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(p.suffix + ".tmp")

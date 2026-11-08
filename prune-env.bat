@@ -80,7 +80,17 @@ rem stayed in the package (wasting ~150 MB) while the tag backend was still
 rem broken because torch was gone.
 set "G_TAG=torch functorch timm safetensors transformers tokenizers regex"
 set "G_MATH=sympy mpmath networkx"
-set "G_HF=huggingface_hub hf_xet datasets truststore opentelemetry dill multiprocess _multiprocess xxhash fsspec filelock tqdm"
+rem huggingface_hub must NOT be pruned: cpu_tagger._resolve_dir uses
+rem snapshot_download by repo name (hashing backend), and web/downloads._token
+rem reads the saved HF token through it. It is ~5MB and pulls only requests/
+rem filelock/fsspec/tqdm -- all of which are also used elsewhere. hf_xet
+rem (the xet transfer backend), xxhash and datasets/truststore/opentelemetry
+rem stay prunable: without hf_xet HF just falls back to plain HTTP (slower
+rem but correct), and the rest are only reachable through datasets.
+rem filelock / fsspec / tqdm are NOT listed here -- they are hard imports of
+rem huggingface_hub, and :is_kept matches names exactly, so removing them
+rem would leave an "import huggingface_hub" that raises ModuleNotFoundError.
+set "G_HF=hf_xet datasets truststore opentelemetry dill multiprocess _multiprocess xxhash"
 set "G_PD=pandas dateutil python_dateutil tzdata"
 set "G_AIO=aiohttp aiosignal frozenlist yarl multidict propcache aiohappyeyeballs attr"
 
@@ -90,7 +100,7 @@ set "PREFIXES=%PREFIXES% %G_HF% %G_PD% %G_AIO%"
 
 rem Belt and braces: the real main-chain deps are never removed, even if a name
 rem above is ever mistyped.
-set "KEEPNAMES=anyio certifi click colorama h11 httpcore httpx idna socksio typing_extensions yaml _yaml PIL pyarrow pyarrow.libs numpy numpy.libs fastapi starlette uvicorn websockets pydantic pydantic_core annotated_types annotated_doc typing_inspection pip setuptools pkg_resources _distutils_hack pytest _pytest pluggy iniconfig packaging pygments jinja2 markupsafe"
+set "KEEPNAMES=anyio certifi click colorama h11 httpcore httpx idna socksio typing_extensions yaml _yaml PIL pyarrow pyarrow.libs numpy numpy.libs fastapi starlette uvicorn websockets pydantic pydantic_core annotated_types annotated_doc typing_inspection pip setuptools pkg_resources _distutils_hack pytest _pytest pluggy iniconfig packaging pygments pyzipper py7zr pycryptodomex inflate64 pybcj pyppmd multivolumefile texttable brotli backports.zstd psutil huggingface_hub requests urllib3 charset_normalizer filelock fsspec"
 
 echo.
 echo  [prune] repo: %ROOT%
@@ -170,7 +180,10 @@ echo  [prune] _tagger_repo.pth -> %ROOT%
 rem ---------------------------------------------------------------- self-check
 echo.
 echo  [prune] self-check:
-"%PY%" -c "import fastapi, uvicorn, websockets, httpx, yaml, PIL, pyarrow, numpy; print('   web + pack deps OK')"
+rem The extra names cover paths that fail silently rather than loudly:
+rem psutil only tunes split concurrency, pyzipper/py7zr only report "no images
+rem found" when missing, huggingface_hub only breaks model-by-repo downloads.
+"%PY%" -c "import fastapi, uvicorn, websockets, httpx, yaml, PIL, pyarrow, numpy, psutil, pyzipper, py7zr, huggingface_hub; print('   web + pack deps OK')"
 set "RC1=%ERRORLEVEL%"
 "%PY%" -m tagger.cli --help >nul 2>&1
 set "RC2=%ERRORLEVEL%"

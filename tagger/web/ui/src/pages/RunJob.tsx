@@ -287,6 +287,9 @@ export function RunJob({
           <OverviewFigureRow>
             <OverviewFigure label="完成" value={fmtCount(snap?.counts.done ?? 0)} tone="success" first />
             <OverviewFigure label="跳过（已有）" value={fmtCount(snap?.counts.skipped ?? 0)} />
+            {(snap?.counts.busy ?? 0) > 0 && (
+              <OverviewFigure label="其他进程处理中" value={fmtCount(snap?.counts.busy ?? 0)} tone="warning" />
+            )}
             <OverviewFigure
               label="失败"
               value={fmtCount(snap?.counts.failed ?? 0)}

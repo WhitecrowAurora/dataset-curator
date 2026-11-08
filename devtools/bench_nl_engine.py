@@ -55,7 +55,8 @@ if str(REPO) not in sys.path:
 
 import httpx                          # noqa: E402
 
-from tagger.client import SYSTEM_PROMPT, _prompt_for, _resize_to_budget  # noqa: E402
+from tagger.client import (SYSTEM_PROMPT, _prompt_for,  # noqa: E402
+                           _resize_to_budget, _sentences_for)
 from tagger.config import OutputSpec  # noqa: E402
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -130,6 +131,10 @@ def build_prompt(mode: str, caption_range: list[int] | None = None) -> str:
         prompt = re.sub(r"\d+-\d+ characters", f"{lo}-{hi} characters", prompt)
         if f"{lo}-{hi} characters" not in prompt:
             raise SystemExit("prompt 里没找到长度引导，--caption-range 无效")
+        # 与 nl_ab 同口径：字符区间一换，句数区间必须跟着换。
+        s_lo, s_hi = _sentences_for(lo, hi)
+        prompt = re.sub(r"roughly \d+-\d+ sentences",
+                        f"roughly {s_lo}-{s_hi} sentences", prompt)
     return prompt
 
 

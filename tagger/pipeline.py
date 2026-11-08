@@ -43,6 +43,7 @@ from typing import Callable, Iterable, Iterator, Mapping, Sequence
 from .artist import ArtistRule, extract_artist, prepend_tag
 from .local_tag import TagItem, artifact_path, read_artifact
 from .naming import archive_name, make_image_id, normalize_ext, sanitize
+from .storage.discovery import check_stopped
 from .pack import (InputItem, PackOptions, PackState, Packer, discover_inputs,
                    sha256_of_file)
 
@@ -211,8 +212,10 @@ def plan_inputs(
     assign_ids: bool = True,
     layout: str = "flat",
     seq_width: int = 6,
+    start_seq: int = 1,
     artist_rule: ArtistRule | None = None,
     aliases: dict[str, str] | None = None,
+    should_stop=None,
 ) -> Plan:
     """发现输入并决定每张图的 id / 归档名。
 
@@ -225,6 +228,9 @@ def plan_inputs(
     layout = (layout or "flat").lower()
     if layout not in ("flat", "mirror"):
         raise ConfigError(f"layout 只能是 flat / mirror，收到 {layout!r}")
+    if assign_ids:
+        from .distribute import validate_sequence
+        validate_sequence(start_seq, seq_width)
 
     found = discover_inputs(
         input_path,
@@ -232,6 +238,7 @@ def plan_inputs(
         include_zips=include_zips,
         include_loose=include_loose,
         limit=limit or None,
+        should_stop=should_stop,
     )
     plan = Plan(input_path=str(input_path), layout=layout)
     if not found:
@@ -243,18 +250,19 @@ def plan_inputs(
     # 第一遍：取画师、算排序键。zip 成员的画师看包内路径（见 InputItem.logical_path）。
     records: list[tuple[InputItem, str]] = []
     for it in found:
+        check_stopped(should_stop)
         artist = extract_artist(it.logical_path, rule, aliases).tag if rule.enabled else ""
         records.append((it, artist))
 
+    check_stopped(should_stop)
     if assign_ids:
+        validate_sequence(start_seq, seq_width, len(records))
         records.sort(key=lambda pair: (pair[1], pair[0].rel_path))
 
     used_names: set[str] = set()
-    seq_overflow = False
-    for n, (it, artist) in enumerate(records, start=1):
+    for n, (it, artist) in enumerate(records, start=start_seq):
+        check_stopped(should_stop)
         if assign_ids:
-            if n > 10 ** seq_width - 1 and not seq_overflow:
-                seq_overflow = True
             image_id = make_image_id(artist, n, width=seq_width)
         else:
             image_id = _legacy_id(it)
@@ -280,14 +288,10 @@ def plan_inputs(
         plan.items.append(item)
         plan.total_bytes += it.size
 
-    if seq_overflow:
-        raise ConfigError(
-            f"序号溢出：本次要编到 {len(plan.items)}，seq_width={seq_width} 只能"
-            f"表示到 {10 ** seq_width - 1}。把序号宽度调大（每加 1 位多一个数量级）。")
-
     # 来源统计：至少让人看到"图是从哪几个包来的"
     by_source: dict[str, dict] = {}
     for (it, _), item in zip(records, plan.items):
+        check_stopped(should_stop)
         row = by_source.setdefault(it.source, {
             "source": it.source, "name": Path(it.source).name,
             "kind": it.kind, "count": 0,
@@ -298,6 +302,7 @@ def plan_inputs(
     if rule.enabled:
         seen: set[str] = set()
         for it in plan.items:
+            check_stopped(should_stop)
             if it.artist:
                 plan.artist_covered += 1
                 seen.add(it.artist)
@@ -309,8 +314,9 @@ def plan_inputs(
                 f"{plan.no_artist} 张取不到画师名（路径层级不足或第一层不是画师目录），"
                 f"这些图的 id 只有序号")
 
-    plan.id_prefix = make_image_id(plan.items[0].artist, 1, width=seq_width) \
+    plan.id_prefix = make_image_id(plan.items[0].artist, start_seq, width=seq_width) \
         if plan.items and assign_ids else (plan.items[0].image_id if plan.items else "")
+    check_stopped(should_stop)
     return plan
 
 
@@ -771,7 +777,8 @@ def plan_stats(plan: Plan, *, options: PackOptions | None = None,
         "layout": plan.layout,
         "total": len(plan.items),
         "bytes": plan.total_bytes,
-        "sources": plan.sources,
+        "sources": plan.sources[:50],
+        "source_count": len(plan.sources),
         "artists": {
             "count": plan.artist_count,
             "covered": plan.artist_covered,

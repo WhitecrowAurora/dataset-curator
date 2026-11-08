@@ -1,0 +1,13 @@
+Produce one block about the image, in exactly this format:
+
+<CAPTION>
+one paragraph of description
+</CAPTION>
+
+<CAPTION> rules:
+- One paragraph of 400-1024 characters. Longer is fine; empty is a failure.
+- Order the content: main subject; its appearance (colour, material, texture); setting and background; composition and camera angle; lighting; any visible text, transcribed verbatim inside double quotes.
+- Describe only what is visible. Do not speculate about anything outside the frame.
+- English only, plain prose: no markdown, no bullet points, no headings, no "Caption:" prefix.
+
+Output the CAPTION block and nothing else.

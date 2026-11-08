@@ -186,8 +186,8 @@ export function Upload() {
       <PageHeader
         icon={<CloudUpload size={17} />}
         eyebrow="回传"
-        title="上传处理好的分片"
-        description="勾选本地处理好的 parquet 分片，用 FTP 传到汇总机。传的是 .part 改名，中途断线重传会自动续。"
+        title="FTP 回传"
+        description="勾选分包产物或 merged.jsonl 传到汇总机；断线自动续传。"
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>
@@ -221,7 +221,7 @@ export function Upload() {
             ) : undefined
           }
         >
-          <SettingRow label="产物目录" help="VLM 任务的输出目录（里面的 pack-*.parquet）">
+          <SettingRow label="产物目录" help="打标输出目录，或放着 merged.jsonl 的目录">
             <div className="flex gap-2">
               <input
                 className="lx-input font-mono text-xs"
@@ -300,7 +300,7 @@ export function Upload() {
           )}
 
           {artifacts !== null && artifacts.length === 0 && (
-            <p className="px-1 text-xs text-lx-muted">这个目录里没有 .parquet 文件。</p>
+            <p className="px-1 text-xs text-lx-muted">这个目录里没有 .parquet / .jsonl 产物。</p>
           )}
           {artifacts === null && !dir && (
             <p className="px-1 text-xs text-lx-muted">先选一个产物目录。</p>

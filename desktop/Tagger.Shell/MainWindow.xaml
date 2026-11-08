@@ -3,10 +3,158 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Tagger.Shell"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
+        Title="Tagger"
+        Height="860" Width="1320"
+        MinHeight="520" MinWidth="760"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgBrush}"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
 
+    <Grid>
+        <!-- 网页本体。启动期间藏着，等 NavigationCompleted 成功才显示：
+             否则 WebView2 会先糊一块白底再跳变，看着像闪屏。 -->
+        <wv2:WebView2 x:Name="Web" Visibility="Collapsed" />
+
+        <!-- 启动遮罩：加载 -> 出错 两个面板二选一。整个盖在网页上方。 -->
+        <Grid x:Name="Overlay" Background="{StaticResource BgBrush}">
+
+            <!-- ===== 加载中 ===== -->
+            <Border x:Name="LoadingPanel" Background="{StaticResource BgBrush}">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                            MaxWidth="560" Margin="32">
+                    <TextBlock Text="TAGGER"
+                               FontSize="11" FontWeight="SemiBold"
+                               Foreground="{StaticResource AccentBrush}"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="本地打标工作台"
+                               FontSize="24" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               HorizontalAlignment="Center" Margin="0,10,0,0"/>
+
+                    <TextBlock x:Name="StatusText"
+                               Text="正在启动本地服务…"
+                               FontSize="13"
+                               Foreground="{StaticResource MutedBrush}"
+                               HorizontalAlignment="Center" Margin="0,28,0,0"
+                               TextTrimming="CharacterEllipsis"/>
+
+                    <TextBlock x:Name="StatusDetail"
+                               Text=""
+                               FontSize="11.5" FontFamily="Consolas, Microsoft YaHei UI"
+                               Foreground="{StaticResource DimBrush}"
+                               HorizontalAlignment="Center" Margin="0,8,0,0"
+                               TextTrimming="CharacterEllipsis"/>
+
+                    <ProgressBar IsIndeterminate="True"
+                                 Height="3" BorderThickness="0"
+                                 Foreground="{StaticResource AccentBrush}"
+                                 Background="{StaticResource BorderBrush}"
+                                 Margin="0,22,0,0" Width="240"/>
+
+                    <TextBlock x:Name="HintText"
+                               Text=""
+                               FontSize="11.5" TextWrapping="Wrap" TextAlignment="Center"
+                               Foreground="{StaticResource DimBrush}"
+                               HorizontalAlignment="Center" Margin="0,18,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== 出错 ===== -->
+            <Border x:Name="ErrorPanel" Background="{StaticResource BgBrush}"
+                    Visibility="Collapsed">
+                <Grid Margin="44,40,44,32" MaxWidth="820">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="启动失败"
+                               FontSize="20" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"/>
+
+                    <TextBlock Grid.Row="1" x:Name="ErrorText"
+                               Text=""
+                               FontSize="12.5" TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}"
+                               Margin="0,12,0,0" LineHeight="20"/>
+
+                    <!-- 首次运行才出现：装环境是唯一有解的动作，别的错误不给这个按钮 -->
+                    <Border Grid.Row="2" x:Name="InstallPanel"
+                            Visibility="Collapsed"
+                            Background="{StaticResource RaisedBrush}"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="8"
+                            Padding="16,14" Margin="0,18,0,0">
+                        <StackPanel>
+                            <TextBlock x:Name="InstallStage"
+                                       Text="准备中…"
+                                       FontSize="12.5"
+                                       Foreground="{StaticResource TextBrush}"/>
+                            <ProgressBar x:Name="InstallProgress"
+                                         IsIndeterminate="True"
+                                         Height="3" BorderThickness="0"
+                                         Foreground="{StaticResource AccentBrush}"
+                                         Background="{StaticResource BorderBrush}"
+                                         Margin="0,12,0,0"
+                                         Visibility="Collapsed"/>
+                            <Button x:Name="InstallButton"
+                                    Content="初始化环境"
+                                    Style="{StaticResource PrimaryButton}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,14,0,0"
+                                    Click="OnInstallClick"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 日志：pip / Python 的原始输出都在这里，能直接复制走 -->
+                    <Border Grid.Row="3"
+                            Background="{StaticResource SurfaceBrush}"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="8"
+                            Margin="0,18,0,0" Padding="2">
+                        <ScrollViewer x:Name="LogScroll"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="12,10">
+                            <TextBox x:Name="LogText"
+                                     Text=""
+                                     IsReadOnly="True"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     Foreground="{StaticResource DimBrush}"
+                                     FontFamily="Consolas, Microsoft YaHei UI"
+                                     FontSize="11.5"
+                                     TextWrapping="Wrap"
+                                     IsTabStop="False"/>
+                        </ScrollViewer>
+                    </Border>
+
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,18,0,0">
+                        <Button x:Name="RetryButton"
+                                Content="重试"
+                                Style="{StaticResource PrimaryButton}"
+                                Click="OnRetryClick"/>
+                        <Button Content="复制日志"
+                                Style="{StaticResource BaseButton}"
+                                Margin="10,0,0,0"
+                                Click="OnCopyClick"/>
+                        <Button Content="用浏览器打开"
+                                Style="{StaticResource GhostButton}"
+                                Margin="10,0,0,0"
+                                Click="OnOpenBrowserClick"/>
+                        <Button Content="退出"
+                                Style="{StaticResource GhostButton}"
+                                Margin="10,0,0,0"
+                                Click="OnExitClick"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

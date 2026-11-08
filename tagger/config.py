@@ -46,6 +46,10 @@ class ModelSpec:
     # 后者是给 vLLM 的 compressed-tensors 目录，互相不能替代。
     gguf: str = ""
     mmproj: str = ""
+    # 同一份权重的多个 GGUF 量化档：{"q4": path, "q6": path}。选哪个档
+    # 由 precision 决定（q4/q6...），缺省回落到上面的 gguf。这是"同一模型
+    # 换压缩比"，与换模型是两回事：显存差一倍，输出质量差一点。
+    gguf_quants: dict[str, str] | None = None
 
     @property
     def resolved_path(self) -> str:
@@ -84,6 +88,10 @@ class TierSpec:
 #   w4a16 —— 权重以 4bit 存、激活仍 16bit；必须已有 AWQ/GPTQ 量化权重
 QUANT_PRECISIONS = ("bf16", "fp8", "w4a16")
 
+# llama.cpp 的 GGUF 量化档。Q4_K_M 是吞吐/质量的分水岭，Q6_K 显存约 1.4×
+# Q4 但长尾 tag 更稳，Q8_0 基本等于原精度（16G 卡放不下 8B 的 Q8）。
+GGUF_PRECISIONS = ("q4", "q5", "q6", "q8")
+
 
 def normalize_quant_precision(value: str | None) -> str | None:
     """把各种写法归一成 bf16 / fp8 / w4a16。None 或空串表示"没指定"。"""
@@ -98,7 +106,14 @@ def normalize_quant_precision(value: str | None) -> str | None:
         return "fp8"
     if key in ("w4a16", "int4", "awq", "gptq"):
         return "w4a16"
-    raise ConfigError(f"未知精度档位: {value!r}。可选：bf16 / fp8 / w4a16。")
+    # GGUF 的量化档（llama.cpp 专用）：q4/q5/q6/q8 原样保留。它与上面三档
+    # 不是一回事——那是"vLLM 怎么加载"，这是"权重文件本身压到几位"。
+    # 保留原值是因为它还要用来挑文件（见 nl_engine.resolve_weights）。
+    if key in GGUF_PRECISIONS:
+        return key
+    raise ConfigError(
+        f"未知精度档位: {value!r}。可选：bf16 / fp8 / w4a16，"
+        f"或 GGUF 档 {' / '.join(GGUF_PRECISIONS)}（仅 llama.cpp）。")
 
 
 def detect_quant_method(model: "ModelSpec") -> str | None:
@@ -245,6 +260,10 @@ def _check_precision_supported(precision: str, gpu: GPUInfo,
     elif p in ("int4", "awq", "gptq", "w4a16"):
         if not gpu.supports_int4:
             raise ConfigError(f"{gpu.name} 太旧，不支持 int4 反量化推理。")
+    elif p in GGUF_PRECISIONS:
+        # GGUF 档由 llama.cpp 反量化，显存与算力门槛比 vLLM 低得多；
+        # 装不装得下由文件大小决定，警告交给 _estimate_vram_headroom_check。
+        return
     elif p in ("bf16", "bfloat16", "fp16"):
         # 只检查装得下，不检查算力。装不装得下由**模型**决定（8B 的 bf16
         # 权重就要 16GB），之前错查显卡型号里有没有 "8b"——显卡名里永远
@@ -609,6 +628,7 @@ def resolve_profile(
     tier_override: str | None = None,
     precision_override: str | None = None,
     max_pixels_override: int | None = None,
+    max_model_len_override: int | None = None,
     max_num_seqs_override: int | None = None,
     max_num_batched_tokens_override: int | None = None,
     gpu_mem_override: float | None = None,
@@ -637,6 +657,10 @@ def resolve_profile(
             # 带下载指引的人话，而不是在这里静默用 vLLM 的路径去启动。
             gguf=str(m.get("gguf") or ""),
             mmproj=str(m.get("mmproj") or ""),
+            gguf_quants={
+                str(k).lower(): str(v)
+                for k, v in (m.get("gguf_quants") or {}).items()
+            } or None,
         )
 
     # 选分档
@@ -702,7 +726,9 @@ def resolve_profile(
         model=model,
         precision=precision,
         max_pixels=max_pixels,
-        max_model_len=tier.max_model_len,
+        # 上下文长度可以自己填：分档表只有三档粗粒度，而"这张卡到底能开多大"
+        # 取决于权重精度和预留显存，用户比配置更清楚。
+        max_model_len=int(max_model_len_override or tier.max_model_len),
         max_num_seqs=int(max_num_seqs_override or tier.max_num_seqs),
         max_num_batched_tokens=int(max_num_batched_tokens_override
                                    or tier.max_num_batched_tokens),

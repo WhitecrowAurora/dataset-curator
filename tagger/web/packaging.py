@@ -66,6 +66,10 @@ class SplitParams:
     exclude: str = ""            # 去重清单（dedup-exclude.txt），可空
     limit: int = 0
     verify_pack: bool = True     # 写完回读 manifest 校验
+    # 画师对照表（空 = 跟配置）。分包阶段会用它查画师，而画师名是 id 分配的
+    # 排序键之一——换表就会换一批 image_id，所以它属于"必须与下游对齐"的口径，
+    # 不能只在打标页配。
+    artist_table: str = ""
 
     # 嵌套压缩包：勾上就走流式（边遍历边封包）。代价是 image_id 按"发现
     # 顺序"编，而不是"按画师排序后编"——顺序稳定，但同画师的图不再连号。
@@ -205,6 +209,8 @@ class PackParams:
     artist: bool = True
     artist_depth: int = 0
     artist_inject: bool = True
+    # 画师对照表（空 = 跟配置）。封包时查表 = 让画师跟着图一起封进去。
+    artist_table: str = ""
     include_zips: bool = True
     include_loose: bool = True
     recursive: bool = True
@@ -280,6 +286,8 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
     ops = load_ops(table)
     rule = ops.artist_rule()
     rule.enabled = True          # 分发必须知道画师，否则 image_id 里没有归属
+    # 表单给了表就用它：画师是 id 的排序键，换表等于换一批 image_id。
+    rule.table = (params.artist_table or "").strip() or rule.table
 
     out_dir = params.resolved_out_dir()
     start, width, shard_start = resolve_sequence(
@@ -304,17 +312,35 @@ def run_split(params: SplitParams, *, on_progress, should_stop, on_log) -> dict:
             raise ValueError("排除后没有剩余图片")
 
     aliases = AliasTable(rule.aliases_path).as_dict() if rule.aliases_path else {}
+    from ..artist import ArtistTable
+
+    reader = ArtistTable(rule.table)
+    if reader.active and reader.path is not None and reader.path.is_dir():
+        # 分包时还没有"分片"这个概念（在分包结束后才知道谁在哪片），
+        # 所以分片画师表在这里查不了。说清楚比静默退回目录名强。
+        on_log("画师表是分片目录：分包阶段没有分片名可配对，本次退回目录名。"
+               "要用画师表请在封包/打标阶段使用，或给全表 parquet。")
+
     dist_items: list[DistItem] = []
     no_artist = 0
     for it in items:
         if should_stop():
             raise DataJobStopped()
-        a = extract_artist(it.logical_path, rule, aliases)
-        if not a.tag:
+        artist, origin, names = "", "", ()
+        if reader.active:
+            got = reader.lookup(it.logical_path)
+            if got:
+                names = tuple(got)
+                artist, origin = got[0], "table"
+        if not artist:
+            a = extract_artist(it.logical_path, rule, aliases)
+            artist, origin = a.tag or "", ("path" if a.tag else "")
+        if not artist:
             no_artist += 1
         dist_items.append(DistItem(
             source=it.source, member=it.member, rel_path=it.rel_path,
-            artist=a.tag or "", size=it.size, ext=""))
+            artist=artist, artist_source=origin, artists=names,
+            size=it.size, ext=""))
 
     assign_ids(dist_items, seq_width=width, start=start)
     plans = plan_shards(dist_items, mode=params.mode,
@@ -785,6 +811,7 @@ def run_pack(params: PackParams, *, on_progress, should_stop, on_log) -> dict:
     rule = ops.artist_rule()
     rule.enabled = params.artist
     rule.depth = max(0, params.artist_depth)
+    rule.table = (params.artist_table or "").strip() or rule.table
     if not params.artist_inject:
         rule.inject_caption = False
 
@@ -800,6 +827,11 @@ def run_pack(params: PackParams, *, on_progress, should_stop, on_log) -> dict:
     })
 
     aliases = AliasTable(rule.aliases_path).as_dict() if rule.aliases_path else {}
+    # 画师表跟配置走（tiers.yaml 的 artist.table，可写本地路径或 hf://）。
+    # 封包时查表 = 让画师跟着图走：产物里直接带逐图确认的值，下游不必再按
+    # 分片名去找索引表——那一步正是"数据一重新切片就全错"的来源。
+    from ..artist import ArtistTable
+
     try:
         plan = plan_inputs(
             params.input_dir,
@@ -813,6 +845,7 @@ def run_pack(params: PackParams, *, on_progress, should_stop, on_log) -> dict:
             start_seq=params.start_seq,
             artist_rule=rule,
             aliases=aliases,
+            artist_table=ArtistTable(rule.table),
             should_stop=should_stop,
         )
     except InputScanStopped as exc:

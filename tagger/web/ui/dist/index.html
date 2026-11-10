@@ -1,12 +1,30 @@
 <!doctype html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
     <title>Tagger · NL + tag 打标工作台</title>
-    <script type="module" crossorigin src="/assets/index-BH7CTai0.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-0Xmtkrc5.css">
+    <!--
+      首屏先把主题挂上：:root 默认深色，若等 React 挂载后再改 data-theme，
+      浅色用户每次打开都会先闪一下深色。口径必须与 src/lib/theme.ts 一致：
+      ?theme= 覆盖 > localStorage('tagger-theme') > 深色。
+      （这里读不到偏好时什么都不做，正好落回 :root 的深色。）
+    -->
+    <script>
+      (function () {
+        try {
+          var q = new URLSearchParams(location.search).get('theme')
+          var theme = q === 'light' || q === 'dark' ? q : localStorage.getItem('tagger-theme')
+          if (theme === 'light' || theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', theme)
+          }
+        } catch (e) {
+          /* 隐私模式 / 禁用存储：保持默认深色即可 */
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-1eJnksKA.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Da8d8e_o.css">
   </head>
   <body>
     <div id="root"></div>

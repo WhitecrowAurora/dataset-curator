@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, Download, Loader2, TriangleAlert, X } from 'lucide-react'
+import { CheckCircle2, Download, ExternalLink, Loader2, TriangleAlert, X } from 'lucide-react'
 import { api, type DepState, type GgufConvertState, type GgufConvertTask } from '../lib/api'
 import { StatusChip } from './ui/launcher'
 import { ErrorBox } from './ui/ErrorBox'
@@ -36,15 +36,18 @@ function fmtElapsed(seconds: number): string {
 export function GgufConvertDialog({
   open,
   modelKey,
+  initialTarget,
   onClose,
 }: {
   open: boolean
   modelKey: string
+  /** 从「量化」菜单点进来的档位；没跑任务时以它为准 */
+  initialTarget?: string
   onClose: () => void
 }) {
   const [state, setState] = useState<GgufConvertState | null>(null)
   const [task, setTask] = useState<GgufConvertTask | null>(null)
-  const [target, setTarget] = useState('q6_k')
+  const [target, setTarget] = useState(initialTarget ?? 'q6_k')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deps, setDeps] = useState<DepState | null>(null)
@@ -52,6 +55,22 @@ export function GgufConvertDialog({
 
   const running = task?.status === 'running'
   const done = task?.status === 'done'
+
+  // 清单里登记的 GGUF 档里，文件真的在盘上的那些。
+  // ★ 用"文件在不在"而不是"配置里有没有"，否则删过文件的档也会被说成"已有"。
+  const TIER_LABEL: Record<string, string> = {
+    f16: 'F16', q8: 'Q8_0', q6: 'Q6_K', q5: 'Q5_K_M', q4: 'Q4_K_M',
+  }
+  // 弹窗里的档位（q4_k_m / q6_k / f16）→ 清单里的档键（q4 / q6 / f16）。
+  // 必须列出来对齐，不能靠削后缀：q6_k 削不出 q6。
+  const TIER_OF_TARGET: Record<string, string> = {
+    f16: 'f16', q4_k_m: 'q4', q6_k: 'q6',
+  }
+  const tierOf = (targetKey: string) => TIER_OF_TARGET[targetKey] ?? targetKey
+  const localTiers = Object.entries(state?.quants ?? {})
+    .filter(([, q]) => q.bytes > 0)
+    .map(([name, q]) => ({ name, label: TIER_LABEL[name] ?? name.toUpperCase(), bytes: q.bytes }))
+  const pickedTier = localTiers.find((t) => t.name === tierOf(target))
 
   useEffect(() => {
     if (!open) return
@@ -64,14 +83,16 @@ export function GgufConvertDialog({
         if (!alive) return
         setState(s)
         setTask(s.task)
-        // 已有任务在跑时跟随它的目标，别让下拉框显示一个不相干的档位
+        // 已有任务在跑时跟随它的目标，别让下拉框显示一个不相干的档位；
+        // 没有在跑的任务就用菜单点进来的那一档。
         if (s.task && s.task.status === 'running') setTarget(s.task.target)
+        else if (initialTarget) setTarget(initialTarget)
       })
       .catch((err) => alive && setError(msg(err)))
     return () => {
       alive = false
     }
-  }, [open, modelKey])
+  }, [open, modelKey, initialTarget])
 
   // 转换要十几分钟，轮询不能太密：进度是按输出文件大小估的，1.5s 足够。
   useEffect(() => {
@@ -111,6 +132,14 @@ export function GgufConvertDialog({
       setError(msg(err))
       setInstalling(false)
     }
+  }
+
+  /** 转到依赖检测页：那边能看这一组到底装了什么、也能顺手把别的组配上。
+   *
+   * 切路由就够了——依赖检测是独立页面，「模型管理」连同这个弹窗一起卸载，
+   * 回来时是干净的。 */
+  function goDeps() {
+    location.hash = '/deps'
   }
 
   async function start() {
@@ -201,19 +230,30 @@ export function GgufConvertDialog({
                   </div>
                   <p className="leading-relaxed text-lx-muted">{state.reason}</p>
                   <div className="mt-2 space-y-1.5">
-                    <button
-                      type="button"
-                      className="lx-btn-ghost inline-flex items-center gap-1.5 text-[11px]"
-                      disabled={busy || installing}
-                      onClick={() => void installDeps()}
-                    >
-                      {installing ? (
-                        <Loader2 size={12} className="animate-spin" />
-                      ) : (
-                        <Download size={12} />
-                      )}
-                      {installing ? '正在安装依赖…' : '一键安装（convert 依赖组）'}
-                    </button>
+                    {/* 两条路都给：赶时间就地点（只装缺的，不动已装的），想
+                        看清这一组装了什么、或者顺手把别的组也配上，就去依赖检测。 */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      <button
+                        type="button"
+                        className="lx-btn-ghost inline-flex items-center gap-1.5 text-[11px]"
+                        disabled={busy || installing}
+                        onClick={() => void installDeps()}
+                      >
+                        {installing ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <Download size={12} />
+                        )}
+                        {installing ? '正在安装依赖…' : '一键安装（convert 依赖组）'}
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-[11px] text-lx-muted underline-offset-2 hover:text-lx hover:underline"
+                        onClick={goDeps}
+                      >
+                        <ExternalLink size={11} /> 去「依赖检测」里装
+                      </button>
+                    </div>
                     {installing && (
                       <pre className="max-h-28 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
                         {(deps?.job?.log ?? []).slice(-6).join('\n') || '正在启动 pip…'}
@@ -225,13 +265,26 @@ export function GgufConvertDialog({
 
               {state?.available && !state.source.ready && (
                 <div className="rounded-lx-sm border border-lx px-3 py-2.5">
-                  <div className="mb-1 text-lx">还缺原始权重</div>
-                  <p className="text-[11px] leading-relaxed">
-                    本地量化要用 transformers 格式的原始权重（safetensors）。
-                    回到这一行的下载档位，选「原始权重（用于本地量化）」下完再来。
+                  <div className="mb-1 text-lx">
+                    {localTiers.length > 0 ? '本地已经有压好的 GGUF' : '还缺原始权重'}
+                  </div>
+                  {/* 目录里躺着几份 .gguf 时，只说"缺原始权重"会让人以为程序
+                      没看见文件——先把"已经有哪几档"摆出来。 */}
+                  {localTiers.length > 0 && (
+                    <p className="text-[11px] leading-relaxed">
+                      已经有{' '}
+                      {localTiers
+                        .map((t) => `${t.label}（${fmtBytes(t.bytes)}）`)
+                        .join('、')}
+                      。直接就能跑：回「模型管理」把这条的精度切成对应档。
+                    </p>
+                  )}
+                  <p className="mt-1 text-[11px] leading-relaxed">
+                    {localTiers.length > 0 ? '要重新压一份才需要原始权重' : '本地量化要用 transformers 格式的原始权重（safetensors）'}
+                    ——点这一行的「下载原始权重」下完再来。
                   </p>
                   {state.source.hint && (
-                    <p className="mt-1 break-all font-mono text-[10px] text-lx-dim">
+                    <p className="mt-1 whitespace-pre-line break-all font-mono text-[10px] text-lx-dim">
                       {state.source.hint}
                     </p>
                   )}
@@ -256,6 +309,7 @@ export function GgufConvertDialog({
                       {state.targets.map((t) => (
                         <option key={t.key} value={t.key}>
                           {t.label}
+                          {localTiers.some((x) => x.name === tierOf(t.key)) ? ' · 本地已有' : ''}
                         </option>
                       ))}
                     </select>
@@ -263,6 +317,11 @@ export function GgufConvertDialog({
                   <p className="text-[11px] leading-relaxed text-lx-muted">
                     {state.targets.find((t) => t.key === target)?.note ?? ''}
                   </p>
+                  {pickedTier && (
+                    <p className="text-[11px] leading-relaxed text-lx-warning">
+                      这一档本地已经有了（{fmtBytes(pickedTier.bytes)}），再压会重新生成一份，同名会覆盖。
+                    </p>
+                  )}
                   <p className="text-[11px] leading-relaxed text-lx-dim">
                     这条路比直接下现成的 GGUF 慢很多（十几分钟起）。只有这个模型
                     没有现成 GGUF、或者你不想依赖别人压好的文件时才值得走。
@@ -285,6 +344,13 @@ export function GgufConvertDialog({
                     />
                   </div>
                   <p className="break-all font-mono text-[10px] text-lx-dim">{task.source}</p>
+                  {/* 跑的时候也要能看见日志：0% 停住的时候，日志里往往写着
+                      "下载源码 8/37 MB" / "Loading checkpoint"——不给看就只能干等。 */}
+                  {task.log_tail.length > 0 && (
+                    <pre className="mt-0.5 max-h-24 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2 py-1.5 font-mono text-[10px] leading-relaxed text-lx-muted">
+                      {task.log_tail.slice(-4).join('\n')}
+                    </pre>
+                  )}
                 </div>
               )}
 
@@ -322,6 +388,18 @@ export function GgufConvertDialog({
               )}
 
               {error && <ErrorBox text={error} />}
+              {/* 跑挂了才发现缺包（例如 tokenizer 那步要 sentencepiece）：
+                  后端已经把包装进报错里了，这里再给一个能直接点过去的入口，
+                  不用照着报错去命令行敲。 */}
+              {error && /依赖|pip install|没装|ModuleNotFoundError/.test(error) && (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-[11px] text-lx-muted underline-offset-2 hover:text-lx hover:underline"
+                  onClick={goDeps}
+                >
+                  <ExternalLink size={11} /> 去「依赖检测」里补装
+                </button>
+              )}
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-lx px-[18px] py-3">

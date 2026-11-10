@@ -439,6 +439,7 @@ def download_shard(
     should_stop: "Callable[[], bool] | None" = None,
     conns: int = 4,
     proxy: str = "",
+    url: str | None = None,
 ) -> HFShard:
     """下载一个分片到 dest_dir，原子落盘。
 
@@ -455,6 +456,10 @@ def download_shard(
     `conns > 1` 且服务端支持 Range 时走多连接分段（`_download_segmented`）：
     国内单条 TCP 常被压到几百 KB/s，凭这一点开 4~8 条才是真的快。文件太小
     （< 2×8 MB）或服务端忽略 Range 时自动退回单连接。
+
+    `url` 给了就用它，而不是按数据集拼直链：模型的下载页（`web/downloads.py`）
+    走的是 `/models/.../resolve/`，跟这里的 `/datasets/...` 不是同一条路径。
+    复用这一份实现的是"分段 + 预分配 + 段级续传 + 重试"，URL 只是入参。
     """
     from .storage.locking import FileLock
     # 同一缓存分片的 .part / 分段状态只能由一个下载者改写。
@@ -480,7 +485,7 @@ def download_shard(
             return HFShard(repo=repo, filename=filename, path=final,
                            bytes=size, temporary=False)
 
-        url = resolve_url(repo, filename, revision=revision)
+        url = url or resolve_url(repo, filename, revision=revision)
         part = final.with_name(final.name + ".part")
         state_path = part.with_name(part.name + ".json")
 

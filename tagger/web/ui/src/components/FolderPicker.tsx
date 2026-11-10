@@ -6,7 +6,7 @@ import { api, type FsListing } from '../lib/api'
 import { StatusChip } from './ui/launcher'
 import { ErrorBox } from './ui/controls'
 
-/** 极简输入浏览器。目录 + 当层的 .zip 素材包：
+/** 极简输入浏览器。目录 + 当层的素材包（.zip / .tar / .tar.gz）：
  *  用户的真实动作是"找那个装着图的文件夹，或者直接指那个大包"。 */
 export function FolderPicker({
   open,

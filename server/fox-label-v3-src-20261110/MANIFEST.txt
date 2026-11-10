@@ -1,0 +1,54 @@
+fox-label v3 源码包（纯净版：不含数据库、密钥、审计日志、缓存、产物）
+打包时间: 2026-11-10 14:13:08 +0800
+文件数: 18    代码行数合计: 8437
+运行环境: Python 3.9+（纯标准库，无第三方依赖）；下载分片需要 curl
+已验证: Python 3.14 / Linux x86_64，9 套 314 项测试全部通过
+
+组成:
+  服务端   server.py     管理 CLI + HTTP API（v2 认领制 / v3 派工制并存）
+           dispatch.py   v3 调度层：派工、租约、心跳续约、回收、归档
+  客户端   worker.py     v3 客户端：握手 → 领派工 → 下载 → 打标 → 心跳 → 交付
+           client.py     v2 客户端：自行认领/提交（旧流程，仍可用）
+           bridge.py     与 tagger 打标客户端的联动桥
+  测试     tests/       9 套 314 项（服务端 / 客户端 / 联动 / 对抗 / 舰队）
+  文档     README.md                 部署与使用说明（含 v3 章节）
+           INTEGRATION-REPORT.md    与 tagger 的两轮联动验收
+           LINKAGE-REPORT-v3.md     v3 客户端↔服务端四轮联动审计
+
+快速开始（服务端）:
+  python3 server.py repo add --repo org/name --repo-type dataset
+  python3 server.py serve --host 0.0.0.0 --port 31831
+  python3 server.py enroll --name alice
+
+快速开始（v3 客户端）:
+  python3 worker.py login --server http://IP:31831 --user-id alice
+  python3 worker.py run --cmd 'tagger ... {shard}'
+
+自检:
+  python3 tests/test_v3.py            # 派工主流程，36 项
+  python3 tests/test_v3_linkage.py    # 客户端↔服务端契约与异常，23 项
+  python3 tests/test_v3_fleet.py      # 真实下载 + 并发舰队，18 项
+  python3 tests/test_worker.py        # 客户端自身，37 项
+
+重要: 首次运行 server.py 会在 state/ 下生成管理员密钥 admin.key 与数据库；
+      本包不含这些文件，请勿把 state/ 外传。
+
+文件校验（sha256）:
+  da0794122a52fa1730f11186582199886af986b39f5eb661d1832a8426e97519  INTEGRATION-REPORT.md
+  21bf1ea47ebc2b8aae373e2757bacf80222021c76225faf9e1de099e5e1ee8ca  LINKAGE-REPORT-v3.md
+  3014f8b7679fe7878f18d6288a8a4539b1b3cdb416e4e67ba7a36b49a05ad28d  README.md
+  379c83ef9594d0f1b9179f54186c5286b9118ed09730df6593112eaee0e35f4a  bridge.py
+  4ed39831db6076aa3adeb36488bd9537bc01e0e90d1c47180197ea83a5409d4b  client.py
+  b2a85cd8e3c65231dabc44f98677daa205c02150a0472d1c1d8441d2b2612e0a  dispatch.py
+  5ca6f5c0ce736c62959594c41daca61138d4a35ec03ec093a5c33fd33fed0b53  server.py
+  09903b7f04628175fb96e809d1db17ef63e745b49a784de0edc5320386ef172b  tests/fake_task.py
+  cb715bfe9bf920bf9517f72a1b4a03a20b80e094d718b1a4c0ddb5e0cea9cf17  tests/test_bridge.py
+  56f82c2c1fabd1efd1a798bd8455f8ee5e1dc867e2e3109abc0b8e05f1b9e7bc  tests/test_flow.py
+  cc0d74e224e7e6bb09cbf36096fd8ff02ab1b348607ca85de7efe299f2f93265  tests/test_v3.py
+  80c20ed9ddcedf0389364e7ecfc651d2df974ee6b4fce3817a5e68ffe9201e23  tests/test_v3_adversarial.py
+  a4b8384691b9a816c6d58f22e8d85922b524a733ef8df09306f99702647525b6  tests/test_v3_fleet.py
+  2776112226d6a4062333881056c7566f2d4baac32dc069cb61f6e439e45fb57c  tests/test_v3_hardening.py
+  d078903a7f088de5c3aa513ab4dc3aa495defa8904ae1dfbd83714011b9d4d56  tests/test_v3_harsh.py
+  65a4dc781a91394616188092bca76836b9cd3075f8734d5ea506790b82e506ba  tests/test_v3_linkage.py
+  525df8d7c8f0e09d2d8401327eecc050ac58414dfdee08d00e931504829d2d9d  tests/test_worker.py
+  adb277e4933276bd51c68832a33a0eecc199c9199aaa9fe70ac607d3dca30385  worker.py

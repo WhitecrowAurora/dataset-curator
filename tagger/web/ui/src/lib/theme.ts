@@ -2,7 +2,12 @@ export type Theme = 'dark' | 'light'
 
 const KEY = 'tagger-theme'
 
-/** 默认深色（与 tokens.css 的 :root 一致）。URL 上的 ?theme= 优先，方便对比与截图。 */
+/**
+ * 默认深色（与 tokens.css 的 :root 一致）。URL 上的 ?theme= 优先，方便对比与截图。
+ *
+ * 注意：index.html 里有一段内联脚本按同一口径在首屏挂 data-theme（避免浅色用户
+ * 每次打开先闪一下深色）。改这里的读取顺序时，那段脚本要一起改。
+ */
 export function readTheme(): Theme {
   const q = new URLSearchParams(location.search).get('theme')
   if (q === 'light' || q === 'dark') return q

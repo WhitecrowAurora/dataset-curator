@@ -496,17 +496,14 @@ class QuantManager:
         }
         # 覆盖是整体替换，少抄一个字段就等于把它抹掉：gguf / mmproj 一丢，
         # 默认引擎（llama.cpp）下次启动会直接报"没有配 GGUF 权重"。
-        # gguf_quants 同理——抹掉它，精度的 q6/q8 就找不到文件，静默回落 Q4。
-        for field in ("gguf", "mmproj", "download_repo"):
+        # gguf_quants 同理——抹掉它，精度的 q6/q8 就找不到文件。
+        for field in ("gguf", "mmproj"):
             value = str(spec.get(field) or "").strip()
             if value:
                 entry[field] = value
         quants = spec.get("gguf_quants")
         if isinstance(quants, dict) and quants:
             entry["gguf_quants"] = {str(k): str(v) for k, v in quants.items()}
-        files = spec.get("download_files")
-        if files:
-            entry["download_files"] = list(files)
         vlm[task.model_key] = entry
         doc["vlm"] = vlm
         p.parent.mkdir(parents=True, exist_ok=True)

@@ -101,10 +101,14 @@ def _iter_payloads(roots: Iterable[str | Path], *,
             continue
         for path in _iter_json_files(base):
             try:
-                image_id, kind, value, _image_path, prov = _read_one(path)
+                got = _read_one(path)
             except ValueError:
                 stats.unreadable += 1
                 continue
+            # 解包在 try 外：`_read_one` 多返回一项时，这里必须当场炸。
+            # 放进 try 会被上面吞掉，结果是"扫描成功、候选 0 条"——看起来
+            # 像成员没交数据，实际是代码结构变了。
+            image_id, kind, value, _image_path, _prov, _meta = got
             if not image_id or not value:
                 continue
             ts, model = _meta_of(path)
@@ -118,7 +122,8 @@ def _iter_payloads(roots: Iterable[str | Path], *,
                         obj = parse_payload(kind, str(row.get(kind) or ""))
                         if obj is None:
                             continue
-                        image_id, _, value, _, _ = _tuple_from_payload(obj, fallback, kind)
+                        image_id, _, value, _, _, _ = _tuple_from_payload(
+                            obj, fallback, kind)
                         if not image_id or not value:
                             continue
                         yield (image_id, kind, value, float(obj.get("ts") or 0.0),

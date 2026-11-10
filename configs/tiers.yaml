@@ -47,12 +47,16 @@ models:
   # tag 一个都没有"——也就是漏标，而且不报错。训练 diffusion 的图集里暴露内容
   # 占比不低，漏标会直接变成脏数据，所以这两条排在前面并进了全部三档。
   #
-  # 两套权重各有用途，别混：
-  #   path      原始 bf16（prithivMLmods 原仓库）→ vLLM 加载 / 量化的输入
-  #   gguf      成品量化（mradermacher 转的 Q4_K_M）→ 默认引擎 llama.cpp
-  # 两个仓库是同一份 abliteration 权重，只是格式不同；作者原仓库只有 BF16/Q8_0，
-  # 16G 卡放不下 BF16，Q8_0 又要吃掉一半吞吐，所以主权重取 mradermacher 的 Q4_K_M。
-  # ★换量化档位（Q4_K_M → Q8_0）等于换一代数据，必须同步改指纹。
+  # ★权重来路只有两条，别混：
+  #   下载    一律下 `path` 指的**原始权重**（safetensors）。网上现成的 GGUF
+  #           一份都不下——同一份权重两种来路，产出漂了根本查不出是哪来的。
+  #   GGUF    由「模型管理」页的「本地量化」从原始权重现压（F16 / Q4_K_M / Q6_K）。
+  #           所以 gguf / mmproj / gguf_quants 指的都是 `models/nl/<key>/` 下的
+  #           本地产物，不是别人的仓库路径。没压之前这几份不存在，启动会报缺。
+  #           命名跟 gguf_convert.default_outputs 对齐，压完 _register 写回同处。
+  # ★默认档是 f16（完整权重）。只有 qwen3vl-8b-abliterated 备了 f16 这一档；
+  #   其余模型仍以各自 gguf: 那份为准，切过去时精度要跟着换成有的档。
+  # ★换量化档位等于换一代数据，必须同步改指纹。
   # ===========================================================================
   qwen3vl-4b-abliterated:
     path: prithivMLmods/Qwen3-VL-4B-Instruct-Unredacted-MAX
@@ -60,34 +64,31 @@ models:
     family: qwen3vl
     quantized_path: null
     precision: int4
-    gguf: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q4_K_M.gguf
-    mmproj: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.mmproj-Q8_0.gguf
+    # 下载不写 download_repo / download_files：整仓库都要（config.json +
+    # tokenizer + 8.27G 单文件 safetensors），少一个文件本地就转不出 GGUF。
+    # GGUF 只认本地产物，路径与 gguf_convert.default_outputs 的命名一致。
+    gguf: models/nl/qwen3vl-4b-abliterated/qwen3vl-4b-abliterated-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-4b-abliterated/mmproj-qwen3vl-4b-abliterated-F16.gguf
     gguf_quants:
-      q4: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q4_K_M.gguf
-      q6: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q6_K.gguf
-      q8: models/nl/qwen3vl-4b-abliterated/Qwen3-VL-4B-Instruct-Unredacted-MAX.Q8_0.gguf
-    # 「模型管理」页的下载按钮按这两行走。那个仓库有 6 个量化档（合计 20G+），
-    # 全下纯属浪费，只拉实际要跑的主权重 + 视觉投影。
-    download_repo: mradermacher/Qwen3-VL-4B-Instruct-Unredacted-MAX-GGUF
-    download_files: ["*Q4_K_M.gguf", "*Q6_K.gguf", "*mmproj-Q8_0.gguf"]
+      q4: models/nl/qwen3vl-4b-abliterated/qwen3vl-4b-abliterated-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-4b-abliterated/qwen3vl-4b-abliterated-Q6_K.gguf
 
   qwen3vl-8b-abliterated:
     path: prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX
     revision: null
     family: qwen3vl
     quantized_path: null
-    precision: int4
-    gguf: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q4_K_M.gguf
-    mmproj: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.mmproj-Q8_0.gguf
-    # 同一份权重的三个压缩比：Q4 4.7G / Q6 6.4G / Q8 8.1G。
-    # 页面上「权重精度」选哪个就加载哪个文件（见 nl_engine.resolve_weights）。
+    # ★ 默认档 = **完整权重，不量化**（GGUF F16，8B 约 15.6 GB + mmproj 1.1 GB）。
+    #   口径优先：先保证产出质量，占不下显存的人自己压成 q4/q6 再用
+    #   （「模型管理 → 本地量化」；压出来的文件就是下面 gguf_quants 这几行）。
     # ★ 换档等于换一代数据：run 指纹里带 precision，别把两档的产物混在一批。
+    precision: f16
+    gguf: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf
+    mmproj: models/nl/qwen3vl-8b-abliterated/mmproj-qwen3vl-8b-abliterated-F16.gguf
     gguf_quants:
-      q4: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q4_K_M.gguf
-      q6: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q6_K.gguf
-      q8: models/nl/qwen3vl-8b-abliterated/Qwen3-VL-8B-Instruct-Unredacted-MAX.Q8_0.gguf
-    download_repo: mradermacher/Qwen3-VL-8B-Instruct-Unredacted-MAX-GGUF
-    download_files: ["*Q4_K_M.gguf", "*Q6_K.gguf", "*mmproj-Q8_0.gguf"]
+      f16: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf
+      q4: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q6_K.gguf
 
   # ---------------------------------------------------------------------------
   # 官方版（有审查）。保留是为了对照与回退：换了破限版权重后如果发现
@@ -102,23 +103,12 @@ models:
     # int4 权重需自行生成一次（llm-compressor，约 20-30 分钟）；为空会退回 bf16
     quantized_path: null
     precision: int4
-    # ---- engine=llamacpp 用的成品权重 ----
-    # 官方仓库只给了 F16 / Q4_K_M / Q8_0 三档，**没有 Q6_K 和 Q5**。不写
-    # q6，是因为选了也下不到；要 q6 就在量化页用 F16 自己压一份。
-    gguf: models/nl/qwen3vl-4b/Qwen3VL-4B-Instruct-Q4_K_M.gguf
-    mmproj: models/nl/qwen3vl-4b/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf
+    # 下载原始权重（官方 transformers 仓库），GGUF 由本地量化产出。
+    gguf: models/nl/qwen3vl-4b/qwen3vl-4b-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-4b/mmproj-qwen3vl-4b-F16.gguf
     gguf_quants:
-      q4: models/nl/qwen3vl-4b/Qwen3VL-4B-Instruct-Q4_K_M.gguf
-      q8: models/nl/qwen3vl-4b/Qwen3VL-4B-Instruct-Q8_0.gguf
-    # 下载源必须是 **-GGUF 仓库**。path 指向的是 safetensors 仓库，那里一个
-    # gguf 都没有；照它下会拖 8G 原始权重，然后启动报"GGUF 权重不存在"。
-    download_repo: Qwen/Qwen3-VL-4B-Instruct-GGUF
-    # 写全名而不是 `*Q8_0.gguf`：仓库里 mmproj 也有 Q8_0 版本，通配会把
-    # 主权重和 mmproj 一起拖下来（多几百 MB），而这里只要那一个。
-    download_files:
-      - Qwen3VL-4B-Instruct-Q4_K_M.gguf
-      - Qwen3VL-4B-Instruct-Q8_0.gguf
-      - mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf
+      q4: models/nl/qwen3vl-4b/qwen3vl-4b-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-4b/qwen3vl-4b-Q6_K.gguf
 
   qwen3vl-8b:
     path: Qwen/Qwen3-VL-8B-Instruct
@@ -126,57 +116,46 @@ models:
     family: qwen3vl
     quantized_path: null
     precision: int4
-    # ---- engine=llamacpp 用的成品权重（Windows 原生唯一能上 GPU 的路）----
     # 2026-11-04 实测（4070 Ti SUPER 16G）：Q4_K_M + mmproj-F16，
     # 并发 4 时 1.27 张/秒、p95 3.4s、解码 206 tok/s；并发 8 不再涨。
-    # 本地实际放的是 F16 主权重（15.3G），Q4_K_M 那份没下——16G 卡上跑不动 F16。
-    # 国内直连 huggingface.co 常不通，走 modelscope.cn 同名仓库更快。
-    gguf: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q4_K_M.gguf
-    mmproj: models/nl/qwen3vl-8b/mmproj-Qwen3VL-8B-Instruct-F16.gguf
+    # 下载原始权重（16.33G 单文件 safetensors）；F16 只是转换中间产物，
+    # 跑完就删——16G 卡上也放不下它（含 mmproj 约 16.1G）。
+    gguf: models/nl/qwen3vl-8b/qwen3vl-8b-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-8b/mmproj-qwen3vl-8b-F16.gguf
     gguf_quants:
-      q4: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q4_K_M.gguf
-      # q6 不在官方仓库里（只有 F16/Q4_K_M/Q8_0），得用量化页从 F16 压一份，
-      # 所以下面 download_files 不列它：下载页下不到，量化页能生成。
-      q6: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q6_K.gguf
-      q8: models/nl/qwen3vl-8b/Qwen3VL-8B-Instruct-Q8_0.gguf
-    # 同 4B：默认引擎要的是 GGUF，而 path 是 safetensors 仓库，下载源必须分开写。
-    download_repo: Qwen/Qwen3-VL-8B-Instruct-GGUF
-    # mmproj 用 F16：与上面 mmproj 字段一致，否则下完文件名对不上，启动时
-    # 仍报"视觉投影文件不存在"。
-    download_files:
-      - Qwen3VL-8B-Instruct-Q4_K_M.gguf
-      - Qwen3VL-8B-Instruct-Q8_0.gguf
-      - mmproj-Qwen3VL-8B-Instruct-F16.gguf
+      q4: models/nl/qwen3vl-8b/qwen3vl-8b-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-8b/qwen3vl-8b-Q6_K.gguf
 
 tiers:
-  # 全部三档都指向无审查版：默认落哪档都用能打 NSFW 的权重。
-  # 想临时切回官方版对照，用 --model qwen3vl-4b / qwen3vl-8b 覆盖即可。
+  # 三档都指向**同一个** 8B 破限版的完整权重（f16，不量化）：默认只保留一种口径，
+  # 档位只决定上下文与并发。想省显存/省时间的人自己在「模型管理」页压 q4/q6，
+  # 再在新建页的精度里切过去——那是明确的一次选择，不是默认替人做的决定。
   - name: low-16g
     vram_min: 0
     vram_max: 18
-    model: qwen3vl-4b-abliterated
-    precision: int4
+    model: qwen3vl-8b-abliterated
+    precision: f16
     max_model_len: 4096
-    max_num_seqs: 8
-    note: "12G/16G：4B 破限版，768² 视觉输入。保全员参与的最小配置。"
+    max_num_seqs: 4
+    note: "12G/16G：8B 完整权重需要约 17G，装不下就自己压 q4；并发压到 4。"
 
   - name: mid-24g
     vram_min: 18
     vram_max: 28
-    model: qwen3vl-4b-abliterated
-    precision: int4
+    model: qwen3vl-8b-abliterated
+    precision: f16
     max_model_len: 8192
-    max_num_seqs: 16
-    note: "24G：先用 4B 打满吞吐；要质量可 --model qwen3vl-8b-abliterated 覆盖。"
+    max_num_seqs: 8
+    note: "24G：8B 完整权重 + 8K 上下文，可跑 8 路并发。"
 
   - name: high-32g
     vram_min: 28
     vram_max: 999
     model: qwen3vl-8b-abliterated
-    precision: int4
+    precision: f16
     max_model_len: 16384
-    max_num_seqs: 24
-    note: "32G+：8B 破限版，承担黄金集与难样本。"
+    max_num_seqs: 16
+    note: "32G+：8B 完整权重全开，承担黄金集与难样本。"
 
 # ---------------------------------------------------------------------------
 # 硬件保护
@@ -207,6 +186,57 @@ limits:
   rest_minutes: 5
   sample_interval_s: 5
   auto_tune_laptop: true  # 检测到笔记本自动再收紧一档
+
+# ---------------------------------------------------------------------------
+# 抽样配额（标注规范 v0.2 §1–§3）
+#
+# 只做"从候选 manifest 里按配额挑 id"：不下载、不解码、不打标。输入是每个
+# 来源已经导出的候选清单（jsonl / parquet），输出是选中的那些行 + 一份记账。
+#
+# 用法：
+#   tagger sample --profile monet \
+#       --input monet/laion=work/cand/laion.parquet \
+#       --input monet/coyo=work/cand/coyo.parquet \
+#       --out work/sampled/monet.jsonl --report-out work/sampled/monet.json
+#
+# 配额是**筛选/去重前的计划上限**：实际数量受可用、质量线、近重复影响，
+# 报告里 selected 与 quota_original 的差额才是该补的地方。
+# ---------------------------------------------------------------------------
+sample:
+  active: monet              # 不给 --profile 时用这一组
+  seed: 42                   # 随机段与长尾段的排序种子；换它 = 换一批
+  min_score: 0.0             # 质量线：低于它的候选不参与选样（§2 的最低质量过滤）
+  dedupe: true               # 同 cluster 只留分数最高的一条（§2）
+  allow_borrow: true         # 缺额允许跨来源补齐，但 quota_original 不改（§2）
+  mix: {quality: 0.60, tail: 0.25, random: 0.15}   # §2 的初始策略，审计后可调
+  # 候选清单的列名。换数据集只改这里，不用改代码；空串 = 这份清单没有该列。
+  columns:
+    id: id
+    source: source
+    score: aesthetic_jasperai     # MONET 的美学分；别的来源按 profile 覆盖
+    cluster: sscd_cluster_id      # 近重复簇；没有就留空，等于不去重
+    stratum: ""                   # 可选的稀有题材/内容类别列
+  profiles:
+    monet:
+      quota_total: 30000000
+      quotas:
+        monet/laion: 10300000
+        monet/coyo: 6600000
+        monet/commoncatalog-cc-by: 5000000
+        monet/megalith10m: 4300000
+        monet/cc12m: 3787200
+        monet/diffusion-aesthetic-4k: 12800
+    fine-t2i:
+      quota_total: 1000000
+      quotas:
+        fine-t2i/curated: 168424
+        fine-t2i/synthetic_enhanced_prompt_random_resolution: 230000
+        fine-t2i/synthetic_enhanced_prompt_square_resolution: 190000
+        fine-t2i/synthetic_original_prompt_random_resolution: 230000
+        fine-t2i/synthetic_original_prompt_square_resolution: 181576
+      columns:
+        score: ""              # 这份清单没有美学分：不设质量线
+        cluster: ""
 
 # ---------------------------------------------------------------------------
 # 分包读写
@@ -279,6 +309,18 @@ output:
   nl_max_tokens: 256
   tag_min_count: 12
   tag_max_count: 160
+  # 中文 NL 的比例（0~1）。按 hash(source + image_id + seed) 抽签，抽中的图用
+  # 中文指令写 caption；**tag 段永远是英文 danbooru**（中文 tag 在训练侧没有
+  # 对应词表）。25% 来自标注规范 v0.2 §5 的初始配比（英文 75 / 中文 25）。
+  # 改它等于改产出分布：它会进缓存指纹，中英混批时靠质检 signals 里的 lang
+  # 字段分辨。写 0 就退回全英文。
+  caption_zh_ratio: 0.25
+  # 额外要求模型抄录图中文字（规范 v0.2 §6），产物落 `visible_text` 字段：
+  #   [{text_exact, language, script, legibility, bbox?}]
+  # 开 = 每张图的回复多一段 <VISIBLE_TEXT> JSON；关 = 省这部分 token，
+  # 但训练侧就拿不到"图里到底写了什么字"，只剩 caption 里的引号。
+  # §8 把这一项列成验收必填字段，除非整批明确不要，否则别关。
+  visible_text: true
 
 # ---------------------------------------------------------------------------
 # tag 反推（CPU 侧分类头，与 GPU 上的 VLM 并行跑）
@@ -325,10 +367,15 @@ tagging:
 #   3. 取不到就留空并记原因，不拿文件名或上级目录去凑。错的标签比没有更糟。
 # ---------------------------------------------------------------------------
 artist:
-  enabled: false         # 开关。命令行 --artist / --no-artist 可临时覆盖
+  # 默认开：画师是这批数据里最贵的标注（人工整理 + 原始 tag 校对），
+  # 默认关掉的话，别人拿到产物才发现没有 @name，只能整批重打。
+  # 命令行 --artist / --no-artist 可临时覆盖。
+  enabled: true
   depth: 0               # 取第几层目录，0 = 第一层
   prefix: "@"            # 社区惯例，如 @sakimichan
-  inject_caption: true   # true = 拼到 caption 开头；false = 只写 JSON 字段
+  # 两个独立开关：NL 与 TAG 是两条训练输入，有人只要其一。
+  inject_caption: true   # NL 正文（.nl）开头带 @画师
+  inject_tags: true      # TAG 串（.tag）开头带 @画师
   max_len: 64            # 超过这个长度视为异常路径，不是作者名
   # 有空格才转下划线，没有空格一个字都不改。
   # 原因：caption 按空格分词，`@sakimi chan` 会被切成 @sakimi 和 chan 两个 token，
@@ -337,6 +384,16 @@ artist:
   # 翻译表。文件不存在时自动创建；遇到新名字会先登记进去（译文留空），
   # 人工填完译文后长期复用。见 `tagger artists --input-dir <素材目录>`。
   aliases_path: configs/artist_aliases.json
+  # 画师对照表（可选）。三种写法：
+  #   单个 parquet  —— 全表，946 万条约 66 MB，第一次查询时整份读进内存；
+  #   一个目录      —— 里面是 shard-000123.artist.parquet，用哪片读哪片；
+  #   在线地址      —— hf://datasets/<repo>/<文件或目录>，带 .parquet 是单表，
+  #                    其余当分片目录，用哪片拉哪片（token 走 HF_TOKEN 环境变量）。
+  # 表优先、目录名兜底：danbooru 原始 artist tag 与人工整理的目录名各有缺失，
+  # 谁有就用谁；两边都没有就留空，不猜、不拿上级目录凑。
+  # 在线分片用来解决"成员机器上没那份 104 MB 的表"：跟着分片按需下载。
+  # table: K:/anlia/_artist/shards
+  # table: hf://datasets/<your-name>/danbooru-artists/shards
 
 # ---------------------------------------------------------------------------
 # 质量评分与重试
@@ -412,6 +469,13 @@ merge:
   image_ext: .jpg
   sample_n: 20               # 抽检条数
   sample_seed: 42            # 固定 seed，同一批数据抽出来的样本必须可复现
+  # 最终表字段名。规范 v0.2 §8 用 nl_final / tags_final，现有下游读 caption / tag。
+  #   both  两套并列（默认）：谁都不用改代码，代价是 caption 多存一份
+  #         （3000 万条约十几 GB）
+  #   legacy 只写 caption / tag
+  #   v02    只写 nl_final / tags_final
+  # 换命名不用重打标，重跑一次 merge 即可。
+  final_names: both
   # 分包总表（tagger split 写出）。有它才能检测"整包没交"：
   # 某个区间一条产出都没有，基本等于负责那个人整份都没回来。
   # 分发包已经不在了也照样能查，因为它只用区间。

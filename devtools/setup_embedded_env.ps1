@@ -34,7 +34,10 @@
 .PARAMETER TorchIndex
     torch/torchvision 从哪个索引装。留空按机器自动选：
     有 nvidia-smi 用 cu126，没有用 cpu。想装别的 CUDA 版本时显式传，
-    例如 https://download.pytorch.org/whl/cu124。
+    例如 https://download.pytorch.org/whl/cu130。
+    注意：PyTorch 的索引按 CUDA 版本分目录，每个目录只放自己那份——传一个
+    没有 2.14.1 的目录（如 cu124，最高只到 2.6.0；cu128 也没有）会直接
+    "No matching distribution found"，换之前先确认那目录里有清单钉死的版本。
 
 .PARAMETER SkipTag
     跳过打标运行时（torch/transformers/timm/onnxruntime/datasets，约 2.5 GB）。
@@ -232,7 +235,27 @@ if ($SkipTag) {
         # 有卡就装 CUDA 版：CPU 版跑 tag 反推是 10 张/秒量级，装错了会让人
         # 以为"这软件就这么慢"。没卡只能 CPU，那也是唯一能跑的。
         if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-            $TorchIndex = 'https://download.pytorch.org/whl/cu126'
+            # 光有 nvidia-smi 不够：cu126 的轮子要求驱动支持 CUDA 12.6。驱动太老
+            # 时装得上、`import torch` 才报 driver version insufficient（pip 阶段
+            # 一切正常，页面也是一片绿），所以先读一句表头里的 CUDA Version。
+            $driverCuda = $null
+            try {
+                $smiOut = (& nvidia-smi 2>$null) -join "`n"
+                if ($smiOut -match 'CUDA Version:\s*(\d+)\.(\d+)') {
+                    $driverCuda = [version]("{0}.{1}" -f $Matches[1], $Matches[2])
+                }
+            } catch {
+                $driverCuda = $null
+            }
+            if ($null -eq $driverCuda) {
+                $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+                Write-Warning "[env] 有显卡但没读出驱动的 CUDA 版本，先装 CPU 版（打标会慢十倍）；驱动装好后重跑 install.bat 会换成 CUDA 版"
+            } elseif ($driverCuda -lt [version]'12.6') {
+                $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+                Write-Warning "[env] 驱动只支持 CUDA $driverCuda，cu126 版 torch 装上 import 也会报驱动版本不足；改装 CPU 版（慢十倍）。想用显卡把驱动升到 CUDA 12.6 以上"
+            } else {
+                $TorchIndex = 'https://download.pytorch.org/whl/cu126'
+            }
         } else {
             $TorchIndex = 'https://download.pytorch.org/whl/cpu'
             Write-Host "[env] 没检测到 nvidia-smi，装 CPU 版 torch"

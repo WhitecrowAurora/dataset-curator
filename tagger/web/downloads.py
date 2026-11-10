@@ -25,11 +25,25 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from .. import hf_source
+from ..hf_source import HFCancelled, SEG_MIN_BYTES
+
 ROOT = Path(__file__).resolve().parents[2]
 MODELS_ROOT = ROOT / "models"
 
 _KINDS = {"vlm", "tag"}
 _CHUNK = 512 * 1024
+
+
+def _conns() -> int:
+    """大文件开几条连接：页面设置 > TAGGER_DL_CONNS > 4。
+
+    国内单条 TCP 常被压到几百 KB/s，16G 的 safetensors 靠一条连接要下一天。
+    优先级与取值区间统一在 `config.download_conns()`，这里不重复一份。
+    """
+    from ..config import download_conns
+
+    return download_conns()
 
 
 def default_dir(kind: str, key: str) -> Path:
@@ -131,8 +145,8 @@ class Task:
     dest: Path
     proxy: str = ""                  # 空 = 直连；每任务带一份，改设置不影响在跑的
     # 只下这些文件（glob）。空 = 整仓库。
-    # GGUF 仓库一个名字底下挂着 6 个量化档（20G+），全量下载纯属浪费；
-    # 具体要哪几份由 tiers.yaml 的 download_files 声明，不在代码里写死。
+    # VLM 现在一律整仓库下原始权重（传空）：少一个 config/tokenizer/分片，
+    # 本地就转不出 GGUF。这个参数留着是给"只要清单里几份"的场合备的。
     allow: tuple[str, ...] = ()
     status: str = "queued"           # queued / running / done / error / canceled
     message: str = ""
@@ -145,6 +159,8 @@ class Task:
     started_at: float = field(default_factory=time.time)
     finished_at: float = 0.0
     cancel: bool = False
+    # 后台线程的句柄。删除目录前要 join 它：取消只是打个标记，线程还在写文件。
+    thread: threading.Thread | None = field(default=None, repr=False, compare=False)
     _sample_bytes: int = 0
     _sample_at: float = field(default_factory=time.time)
 
@@ -157,11 +173,15 @@ class Task:
 
         窗口估速而不是"总量/总时间"：全程均值在断点续传和限速抖动下会明显
         骗人，用户盯的是"现在多快"。
+
+        ★ 起步 2 秒内不估速：这段时间全花在 TLS 握手、302、分段铺开上，
+          采出来的值能低一个数量级（实测 0.35 MB/s vs 30 MB/s），页面上的
+          "剩 35 小时"就是这么来的——看着像卡死，其实刚热身完。
         """
         self.bytes_done = done
         now = time.time()
         dt = now - self._sample_at
-        if dt >= 0.5:
+        if dt >= 0.5 and now - self.started_at >= 2.0:
             self.speed = (done - self._sample_bytes) / dt
             self._sample_bytes = done
             self._sample_at = now
@@ -169,6 +189,9 @@ class Task:
     def state(self) -> dict[str, Any]:
         elapsed = (self.finished_at or time.time()) - self.started_at
         pct = (self.bytes_done / self.bytes_total * 100.0) if self.bytes_total else 0.0
+        # ETA 要等跑稳了再给：前几秒的速度是握手期的噪声，按它算出来的
+        # 剩余时间只会吓人（"剩 127906s"）。页面拿到 null 显示"测速中…"。
+        steady = elapsed >= 5.0 and self.status == "running"
         return {
             "kind": self.kind,
             "key": self.key,
@@ -186,7 +209,7 @@ class Task:
             "speed": round(self.speed, 1),
             "elapsed": round(elapsed, 1),
             "eta": (round((self.bytes_total - self.bytes_done) / self.speed, 1)
-                    if self.speed > 0 and self.status == "running" else None),
+                    if self.speed > 0 and steady else None),
         }
 
 
@@ -235,8 +258,10 @@ class DownloadManager:
             task = Task(kind=kind, key=key, repo=repo, dest=Path(dest),
                         proxy=normalize_proxy(proxy), allow=globs)
             self._tasks[tid] = task
-        threading.Thread(target=self._worker, args=(task,), daemon=True,
-                         name=f"dl-{tid}").start()
+        th = threading.Thread(target=self._worker, args=(task,), daemon=True,
+                              name=f"dl-{tid}")
+        task.thread = th
+        th.start()
         return task.state()
 
     def cancel(self, kind: str, key: str) -> dict[str, Any] | None:
@@ -255,16 +280,44 @@ class DownloadManager:
         with self._lock:
             self._tasks.pop(f"{kind}:{key}", None)
 
+    def wait_done(self, kind: str, key: str, timeout: float = 20.0) -> bool:
+        """等后台线程真正收工；True = 已经不在跑了。
+
+        取消只是给线程打了个标记，它还在把当前块写完、断开连接、落分段状态
+        ——这段时间里文件句柄是开着的，Windows 上立刻删就是
+        `[WinError 32] 另一个程序正在使用此文件`（实测：暂停后点删除必现）。
+        """
+        t = self.get(kind, key)
+        th = t.thread if t else None
+        if th is None or not th.is_alive():
+            return True
+        th.join(timeout)
+        return not th.is_alive()
+
     # ---- 删文件 / 开目录
 
     def delete_dir(self, dest: Path) -> None:
         """删除下载目录。**只有 models/ 之内的路径才允许删**——这条不是洁癖，
-        是防止有人把 local_dir 填成素材目录，一点删除就没了。"""
+        是防止有人把 local_dir 填成素材目录，一点删除就没了。
+
+        删失败要重试：Windows 上除了下载线程，杀软 / 索引器也会短暂占住刚写完
+        的大文件，一次 `rmtree` 撞上就报 WinError 32，看起来像"删不掉"。
+        """
         target = self._guard(dest)
-        if target.is_dir():
-            shutil.rmtree(target)
-        elif target.exists():
-            target.unlink()
+        last: OSError | None = None
+        for delay in (0.0, 0.2, 0.5, 1.0, 2.0):
+            if delay:
+                time.sleep(delay)
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.exists():
+                    target.unlink()
+                return
+            except OSError as exc:      # noqa: PERF203 - 就是为了接住这几次
+                last = exc
+        if last is not None:
+            raise last
 
     def reveal_dir(self, dest: Path) -> str:
         target = self._guard(dest)
@@ -336,13 +389,37 @@ def _explain(exc: Exception, proxy: str = "") -> str:
     if any(k in name for k in ("Connect", "Timeout", "ReadTimeout", "Proxy")):
         return (f"连不上 {_endpoint()}（{name}）。{note}。\n"
                 f"① 在「下载代理」里填本机代理，如 http://127.0.0.1:7890；\n"
-                f"② 或设环境变量 HF_ENDPOINT=https://hf-mirror.com 走镜像后重启服务。")
+                f"② 或把「下载源」换成 https://hf-mirror.com —— 国内直连，不用梯子。")
     return f"{name}: {exc}"
 
 
 def _endpoint() -> str:
-    """HF 直链前缀。国内镜像走 HF_ENDPOINT，与 huggingface_hub 同一套环境变量。"""
-    return (os.environ.get("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
+    """HF 直链前缀：页面设置的「下载源」> HF_ENDPOINT > 官方。
+
+    优先级统一放在 `config.download_endpoint()`：下载、清单、代理测试都读
+    同一处，免得设置页显示镜像、实际请求还打官方。
+    """
+    from ..config import download_endpoint
+
+    return download_endpoint()
+
+
+def normalize_endpoint(url: str) -> str:
+    """下载源地址。空 = 跟随 HF_ENDPOINT / 官方；只认 http(s)，去掉末尾斜杠。
+
+    镜像站跟官方是同一套 API，只换前缀；填错的典型是漏协议（`hf-mirror.com`
+    会被 httpx 当成相对路径）或带了 `models/` 之类的尾巴，直接拒掉比让它
+    跑出 404 好查。
+    """
+    text = (url or "").strip().rstrip("/")
+    if not text:
+        return ""
+    if "://" not in text:
+        raise ValueError("下载源要带协议，如 https://hf-mirror.com")
+    scheme = text.split("://", 1)[0].lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"下载源只支持 http / https：{scheme}")
+    return text
 
 
 def _token() -> str | None:
@@ -405,7 +482,10 @@ def _list_files(repo: str, proxy: str = "") -> list[tuple[str, int]]:
         while url:
             resp = client.get(url, headers=_headers())
             if resp.status_code in (401, 403):
-                raise RuntimeError(f"没有读权限：{repo}（私有/门禁仓库需要 HF_TOKEN）")
+                raise RuntimeError(
+                    f"没有读权限：{repo}（私有/门禁仓库需要 HF_TOKEN）。"
+                    f"若 token 已配好，把「下载源」切回官方再试——"
+                    f"镜像站不一定转发门禁仓库。")
             if resp.status_code == 404:
                 raise RuntimeError(f"仓库不存在：{repo}")
             resp.raise_for_status()
@@ -433,6 +513,11 @@ def _fetch(task: Task, name: str, size: int, done: int) -> int:
         task.tick(done + have)
         return done + have
 
+    # 大文件走多连接分段（见 `_fetch_segmented`）：一条 TCP 下 16G 太慢，
+    # 这里才是"多线程下载"真正有意义的地方。
+    if size >= SEG_MIN_BYTES * 2 and _conns() > 1:
+        return _fetch_segmented(task, name, size, done, dest)
+
     url = f"{_endpoint()}/{task.repo}/resolve/main/{quote(name)}"
     headers = _headers()
     if have and size:
@@ -457,6 +542,43 @@ def _fetch(task: Task, name: str, size: int, done: int) -> int:
                     base += len(chunk)
                     task.tick(base)
     return base
+
+
+def _fetch_segmented(task: Task, name: str, size: int, done: int,
+                     dest: Path) -> int:
+    """多连接分段下一个大文件。
+
+    直接复用 `hf_source.download_shard`：那边已经有"预分配稀疏 .part + 每段
+    状态文件 + 段级重试 + 取消保留半成品"这一整套，且是打标链路在跑的代码。
+    这里只换 URL（模型是 `/models/.../resolve/`，那边默认是 `/datasets/...`）
+    并把进度映射到任务的累计字节。
+    """
+    # 单连接时代留下的半截文件：分段实现只认自己的 `.part`，而这个同名
+    # `dest` 只要存在且非空，`download_shard` 就会当成"下完了"直接返回。
+    # 所以先清掉——升级前下到一半的那份只能放弃（一次性代价）。
+    if have := (dest.stat().st_size if dest.is_file() else 0):
+        if have < size:
+            dest.unlink(missing_ok=True)
+
+    url = f"{_endpoint()}/{task.repo}/resolve/main/{quote(name)}"
+    lock = dest.with_name(dest.name + ".download.lock")
+    try:
+        hf_source.download_shard(
+            task.repo, name, task.dest, url=url, token=_token(),
+            conns=_conns(), proxy=task.proxy, verbose=False,
+            on_progress=lambda written, _total: task.tick(done + written),
+            should_stop=lambda: task.cancel,
+        )
+    except HFCancelled:
+        return done                     # 半成品留在原地，下次接着下
+    finally:
+        # 锁文件是 hf_source 的实现细节，别让它留在模型目录里
+        try:
+            lock.unlink(missing_ok=True)
+        except OSError:
+            pass
+    task.tick(done + size)
+    return done + size
 
 
 DOWNLOADS = DownloadManager()

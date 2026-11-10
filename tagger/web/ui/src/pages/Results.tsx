@@ -60,7 +60,6 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
 
   const pages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1
   const page = Math.floor(offset / limit) + 1
-  const failedCount = data?.items.filter((it) => !it.ok).length ?? 0
 
   const avgTags = useMemo(() => {
     if (!data?.items.length) return null
@@ -80,9 +79,9 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
             : '正在读取产物…'
         }
         badges={
-          failedCount > 0 ? (
+          data?.failed_total ? (
             <StatusChip tone="danger" icon={<TriangleAlert size={11} />}>
-              本页 {failedCount} 张无产物
+              失败 {fmtCount(data.failed_total)} 张
             </StatusChip>
           ) : undefined
         }
@@ -142,6 +141,9 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
           aria-pressed={onlyFailed}
         >
           <TriangleAlert size={13} /> 只看失败
+          {data?.failed_total ? (
+            <span className="tabular-nums opacity-80">{fmtCount(data.failed_total)}</span>
+          ) : null}
         </button>
 
         <select
@@ -178,7 +180,21 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
               className="group relative overflow-hidden rounded-lx border border-lx bg-lx-surface text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-lx-hover hover:shadow-[0_10px_24px_-10px_rgba(0,0,0,0.7)]"
             >
               <div className="relative aspect-square overflow-hidden bg-[color-mix(in_srgb,var(--lx-bg)_70%,var(--lx-surface))]">
-                {item.ok ? (
+                {item.thumb === false ? (
+                  /* VLM 任务拿不到原图（分片流式读，没有原图索引），所以卡片
+                     正面直接放 NL 文案——比一个空缩略图占位有用。 */
+                  <div className="flex h-full flex-col justify-center p-2.5">
+                    {item.ok ? (
+                      <p className="line-clamp-6 text-[11px] leading-relaxed text-lx-secondary">
+                        {item.caption || '（这条没有文案）'}
+                      </p>
+                    ) : (
+                      <p className="line-clamp-6 text-[11px] leading-relaxed text-lx-danger">
+                        {item.error || '失败'}
+                      </p>
+                    )}
+                  </div>
+                ) : item.ok ? (
                   <img
                     src={api.thumbUrl(jobId, item.image_id, 360)}
                     alt={item.image_id}
@@ -192,9 +208,11 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
                     <span className="text-[11px]">无产物</span>
                   </div>
                 )}
-                <span className="absolute right-1.5 top-1.5 rounded-[4px] bg-black/55 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-white/85 backdrop-blur">
-                  {item.tags.length}
-                </span>
+                {item.tags.length > 0 && (
+                  <span className="absolute right-1.5 top-1.5 rounded-[4px] bg-black/55 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-white/85 backdrop-blur">
+                    {item.tags.length}
+                  </span>
+                )}
               </div>
 
               <div className="space-y-1.5 p-2.5">
@@ -267,7 +285,7 @@ function DetailDrawer({
   item: ResultItem
   onClose: () => void
 }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'tag' | 'caption' | null>(null)
   const sorted = useMemo(() => [...item.tags].sort((a, b) => b[1] - a[1]), [item.tags])
   const rating = RATING_ORDER.filter((k) => k in item.rating)
 
@@ -277,13 +295,13 @@ function DetailDrawer({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  async function copy() {
+  async function copy(text: string, what: 'tag' | 'caption') {
     try {
-      await navigator.clipboard.writeText(item.tag)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1400)
+      await navigator.clipboard.writeText(text)
+      setCopied(what)
+      window.setTimeout(() => setCopied(null), 1400)
     } catch {
-      setCopied(false)
+      setCopied(null)
     }
   }
 
@@ -313,9 +331,11 @@ function DetailDrawer({
             <h3 className="truncate font-mono text-[13px] text-lx" title={item.image_id}>
               {item.image_id}
             </h3>
-            <p className="mt-0.5 truncate text-[11px] text-lx-muted" title={item.rel}>
-              {item.rel}
-            </p>
+            {item.rel && (
+              <p className="mt-0.5 truncate text-[11px] text-lx-muted" title={item.rel}>
+                {item.rel}
+              </p>
+            )}
           </div>
           <button className="lx-btn-ghost-icon" onClick={onClose} aria-label="关闭">
             <X size={16} />
@@ -323,7 +343,9 @@ function DetailDrawer({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-[18px] py-4 md:px-6">
-          {item.ok ? (
+          {/* thumb === false 是 VLM 任务：分片流式读，没有原图可回头取，
+              渲染 <img> 只会得到一串 404 破图。 */}
+          {item.thumb === false ? null : item.ok ? (
             <img
               src={api.thumbUrl(jobId, item.image_id, 720)}
               alt={item.image_id}
@@ -332,6 +354,33 @@ function DetailDrawer({
           ) : (
             <div className="mb-4 flex items-center gap-2 rounded-lx border border-lx-danger bg-lx-danger-subtle px-3 py-2 text-xs text-lx-danger">
               <ImageOff size={13} /> 这张没有产物
+            </div>
+          )}
+
+          {!item.ok && item.error && (
+            <div className="mb-5 rounded-lx border border-lx-danger bg-lx-danger-subtle px-3 py-2 text-xs text-lx-danger">
+              {item.error}
+            </div>
+          )}
+
+          {item.caption && (
+            <div className="mb-5">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-[11px] uppercase tracking-wide text-lx-muted">
+                  NL 文案 · {item.caption.length} 字
+                </span>
+                <button
+                  type="button"
+                  className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                  onClick={() => void copy(item.caption ?? '', 'caption')}
+                >
+                  {copied === 'caption' ? <Check size={12} /> : <Copy size={12} />}
+                  {copied === 'caption' ? '已复制' : '复制文案'}
+                </button>
+              </div>
+              <p className="whitespace-pre-wrap rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 text-[12.5px] leading-relaxed text-lx-secondary">
+                {item.caption}
+              </p>
             </div>
           )}
 
@@ -356,36 +405,40 @@ function DetailDrawer({
             </div>
           )}
 
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-lx-muted">
-              {sorted.length} 个 tag
-            </span>
-            <button
-              type="button"
-              className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
-              onClick={() => void copy()}
-            >
-              {copied ? <Check size={12} /> : <Copy size={12} />}
-              {copied ? '已复制' : '复制 tag 串'}
-            </button>
-          </div>
+          {sorted.length > 0 && (
+            <>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wide text-lx-muted">
+                  {sorted.length} 个 tag
+                </span>
+                <button
+                  type="button"
+                  className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                  onClick={() => void copy(item.tag, 'tag')}
+                >
+                  {copied === 'tag' ? <Check size={12} /> : <Copy size={12} />}
+                  {copied === 'tag' ? '已复制' : '复制 tag 串'}
+                </button>
+              </div>
 
-          <ul className="space-y-0.5">
-            {sorted.map(([name, prob]) => (
-              <li
-                key={name}
-                className="flex items-center gap-2 rounded-lx-sm px-1 py-1 transition-colors hover:bg-[color-mix(in_srgb,var(--lx-text)_4%,transparent)]"
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-lx-secondary" title={name}>
-                  {name}
-                </span>
-                <ProgressBar percent={clamp01(prob) * 100} className="w-16 shrink-0" />
-                <span className="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-lx-muted">
-                  {prob.toFixed(2)}
-                </span>
-              </li>
-            ))}
-          </ul>
+              <ul className="space-y-0.5">
+                {sorted.map(([name, prob]) => (
+                  <li
+                    key={name}
+                    className="flex items-center gap-2 rounded-lx-sm px-1 py-1 transition-colors hover:bg-[color-mix(in_srgb,var(--lx-text)_4%,transparent)]"
+                  >
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-lx-secondary" title={name}>
+                      {name}
+                    </span>
+                    <ProgressBar percent={clamp01(prob) * 100} className="w-16 shrink-0" />
+                    <span className="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-lx-muted">
+                      {prob.toFixed(2)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
 
         <footer className="shrink-0 border-t border-lx px-[18px] py-3 text-[11px] text-lx-muted md:px-6">

@@ -37,11 +37,15 @@ tag = [
 ]
 # 本地量化成 GGUF（原始 safetensors → F16 → Q4_K_M/Q6_K）。走 llama.cpp 的
 # 官方 convert_hf_to_gguf.py，它要 transformers 读权重；脚本自己 import torch。
+# sentencepiece 不是可选项：Qwen / Llama 这类权重带 tokenizer.model 时，脚本走
+# `_set_vocab_sentencepiece`（conversion/base.py:2548），缺了会在读完权重之后
+# 才炸 —— 那时候用户已经等了几分钟。
 # 只要 llama-server 能跑、权重也有现成 GGUF 的机器不用装。
 convert = [
     "torch>=2.2",
     "transformers>=4.49",
     "safetensors>=0.4",
+    "sentencepiece>=0.2.0",
 ]
 # W4A16 量化（页面点「开始量化」才会用到）。产物是 compressed-tensors 的
 # W4A16，vLLM 能直接加载。量化本身只需要 PyTorch + NVIDIA 显卡，Windows 原生

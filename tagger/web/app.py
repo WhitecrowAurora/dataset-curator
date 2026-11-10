@@ -47,6 +47,7 @@ from .hf_downloads import HfDownloads
 from .packaging import DATAJOBS
 from .hf_downloads import DOWNLOADS
 from .vllm_service import VLLM
+from .center import CENTER, CenterError
 from .multi_gpu import MULTI
 from .selfcheck import SELFCHECK
 from .deps import DEPS
@@ -64,6 +65,8 @@ class JobRequest(BaseModel):
     # 加字段必须两边同改，漏一边就是"表单发了、任务收不到"的静默丢参。
     # ---- 输入。vlm 引擎走 HF 仓库时可为空，本地引擎必填（create 校验）
     input_dir: str = ""
+    # 只打这些本地分片（离线包面板勾出来的绝对路径）；空 = 按 input_dir 整包
+    input_shards: list[str] = []
     out_dir: str = ""
     recursive: bool = True
     include_zips: bool = True
@@ -112,6 +115,12 @@ class JobRequest(BaseModel):
     # 它与 max_tokens 是两件事：max_tokens 管"写不下就截断"，这个管"往多长写"。
     # 实测 400-1024 → 250-500：字数 −33%、延迟 −36%、要素覆盖只掉 2~3pp。
     caption_chars: list[int] | None = None
+    # 中文 NL 的比例（0~1）。按 (seed, image_id) 抽签，抽中的图用中文写 caption；
+    # tag 段永远英文。0 = 全英文退回（是合法值，不能当"没填"吞掉）。
+    caption_zh_ratio: float = 0.3
+    # 用哪份 NL 提示词：prompt/<名字>.json 的名字。空 = 内置那份（按上面的
+    # 长度/比例参数生成）。文件里写的是整段指令，会替换内置提示词。
+    prompt_id: str = ""
     timeout_s: int = 90
     concurrency: int = 2
     # 多卡（数据并行）。multi_gpu 打开时忽略 url，改用多卡服务组的地址；
@@ -184,8 +193,14 @@ class JobRequest(BaseModel):
     # ---- 命名
     artist: bool = True
     artist_depth: int = 0
-    # 画师名写进 .tag/.nl 文本开头（false = 只留在 JSON 字段里）
+    # 画师名写进 .nl 正文开头（false = 只留在 JSON 字段里）
     artist_inject: bool = True
+    # 画师名写进 .tag 串开头。与上一项分开：NL 与 TAG 是两条训练输入，
+    # 只想要其一的场景绑成一个开关就没法表达。
+    artist_inject_tags: bool = True
+    # 画师对照表：单 parquet / 分片目录 / hf://datasets/<repo>/<文件或目录>。
+    # 空 = 跟 tiers.yaml 的 artist.table 走。
+    artist_table: str = ""
     layout: str = "flat"
     seq_width: int = 6
 
@@ -224,6 +239,18 @@ class ProxyRequest(BaseModel):
     """下载代理地址。空串 = 直连；支持 http:// 与 socks5://。"""
 
     url: str = ""
+
+
+class EndpointRequest(BaseModel):
+    """下载源前缀（镜像站）。空串 = 跟随 HF_ENDPOINT / 官方。"""
+
+    url: str = ""
+
+
+class ConnsRequest(BaseModel):
+    """大文件下载连接数。0 = 用默认（4）。"""
+
+    conns: int = 0
 
 
 class FtpRequest(BaseModel):
@@ -266,6 +293,8 @@ class DataPreviewRequest(BaseModel):
     exclude: str = ""
     recursive: bool = True
     limit: int = 0
+    # 画师表（空 = 跟配置）。预览要说"识别到几个画师"，不查表就会少报一大截。
+    artist_table: str = ""
 
 
 class HfFilesRequest(BaseModel):
@@ -422,6 +451,23 @@ class GgufConvertRequest(BaseModel):
     target: str = "q6_k"
 
 
+class CenterLoginRequest(BaseModel):
+    """调度中心的身份。secret 是管理员一次性签发的，留空表示服务端免签。"""
+    server: str
+    user_id: str
+    secret: str = ""
+
+
+class CenterRunRequest(BaseModel):
+    """托管 fox worker 的运行参数。全部可省略 = 沿用上次保存的配置。"""
+    tag_url: str | None = None
+    mode: str | None = None
+    out_dir: str | None = None
+    interval: int | None = None
+    extra_args: str | None = None
+    cmd_template: str | None = None
+
+
 # ---------------------------------------------------------------- 环境信息
 
 def _repo_root() -> Path:
@@ -443,22 +489,26 @@ def _weight_state(key: str, spec: dict[str, Any]) -> dict[str, Any]:
     """这套权重能不能直接跑（给新建任务页做"缺文件"提示）。
 
     口径与模型管理页一致：llama.cpp 要的 gguf / mmproj 都在盘上才算好，
-    只看目录非空是不够的（下错仓库时目录里全是 safetensors）。
+    只看目录非空是不够的——下载只下原始权重（safetensors），那两个文件得等
+    「本地量化」压出来；没压之前目录再满也跑不起来。
     """
     from . import downloads as dl
-    from .models import missing_weight_files
+    from .models import weight_summary
 
     try:
         dest = dl.resolve_dir("vlm", key, None)
         exists = dest.is_dir() and any(dest.iterdir())
     except OSError:
         dest, exists = None, False
-    missing = missing_weight_files(spec, dest)
+    summary = weight_summary(spec, dest)
     return {
         "exists": exists,
         # 目录里空着但文件在别处（path 写了绝对路径）也算能用
-        "ready": not missing,
-        "missing_files": missing,
+        "ready": not summary["missing_files"],
+        **summary,
+        # gguf_ready：哪几档 GGUF 真有文件（页面的精度选项据此置灰）
+        # raw_ready ：原始权重在不在（不在就只能用已有的档，压不出新的）
+        # quantized ：vLLM 的 W4A16 要有预量化权重
     }
 
 
@@ -629,9 +679,12 @@ def _defaults() -> dict:
         # 与"是否把画师名放进 id"是两件事，混用会让用户说不清自己选了什么。
         "artist": True,
         "artist_depth": int(artist.get("depth") or 0),
-        # 注入默认跟配置走：这是"画师名写不写进 .tag/.nl 文本"的开关
+        # 注入默认跟配置走；NL 与 TAG 两个开关分开（各管一条训练输入）
         "artist_inject": bool(artist.get("inject_caption", True)),
+        "artist_inject_tags": bool(artist.get("inject_tags", True)),
         "artist_prefix": str(artist.get("prefix") or "@"),
+        # 配置里配过就预填，用户可以在表单里改成别的表；清空 = 回落到配置。
+        "artist_table": str(artist.get("table") or ""),
         "seq_width": 6,
     }
 
@@ -782,11 +835,16 @@ def _drives() -> list[dict[str, str]]:
 
 
 def _list_dirs(path: Path) -> dict:
-    """给"选输入"用的极简浏览器。子目录 + 当前层图片/zip 数量。
+    """给"选输入"用的极简浏览器。子目录 + 当前层图片/素材包数量。
 
-    zip 单独计数并单独列出：4TB 级素材常见形态就是"一个目录里几个大包"，
+    素材包单独计数并单独列出：4TB 级素材常见形态就是"一个目录里几个大包"，
     只让用户选目录、却把包当成不存在，等于让他自己猜路径。
+
+    包**不只 zip**：HF 上下的数据集（含我们自己发的 webdataset）都是 `.tar`，
+    这里只认 zip 的话，选择器里那几个 tar 根本不出现，用户以为文件没下好。
     """
+    from ..pack import container_kind
+
     try:
         entries = sorted(path.iterdir(), key=lambda p: p.name.lower())
     except PermissionError as exc:
@@ -807,12 +865,12 @@ def _list_dirs(path: Path) -> dict:
             inner_zips = 0
             try:
                 inner_zips = sum(1 for p in entry.glob("*")
-                                 if p.suffix.lower() == ".zip")
+                                 if container_kind(p.name))
             except OSError:
                 inner_zips = 0
             dirs.append({"name": entry.name, "path": str(entry), "images": images,
                          "zips": inner_zips})
-        elif entry.is_file() and entry.suffix.lower() == ".zip":
+        elif entry.is_file() and container_kind(entry.name):
             try:
                 size = entry.stat().st_size
             except OSError:
@@ -958,12 +1016,18 @@ class DownloadRequest(BaseModel):
     conns: int = 4
 
 
-def _artist_context_default(enabled: bool, depth: int, inject: bool = True):
-    """预览接口用的画师上下文。与任务执行时同一份配置口径。"""
+def _artist_context_default(enabled: bool, depth: int, inject: bool = True,
+                            table: str = ""):
+    """预览接口用的画师上下文。与任务执行时同一份配置口径。
+
+    `table` 必须一起传：预览是"命名长什么样"的唯一防线，如果预览按目录名
+    算、实际跑却查表，用户看到的 `alice-000001.jpg` 会变成 `ban_syou-000001.jpg`，
+    而这正是预览存在的意义所在。
+    """
     from .jobs import _artist_context
 
     spec = JobSpec(input_dir="", artist=enabled, artist_depth=depth,
-                   artist_inject=inject)
+                   artist_inject=inject, artist_table=table)
     return _artist_context(spec)
 
 
@@ -997,6 +1061,12 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         # 量化的子进程同样要收：它比 vLLM 更贪显存，留着会让下一次启动直接 OOM。
         try:
             QUANT.cancel()
+        except Exception:               # noqa: BLE001
+            pass
+        # 调度中心的 worker 子进程也要收：它手上可能还握着租约，进程留着不放，
+        # 包会一直显示"有人在跑"，而那个"人"已经不是本机了。
+        try:
+            CENTER.shutdown()
         except Exception:               # noqa: BLE001
             pass
 
@@ -1084,13 +1154,35 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         """探一次 HF：通不通、延迟多少。失败是正常结果，返回 ok=false 不抛。"""
         return MODELS.test_proxy(req.url)
 
+    # ---- 下载源（镜像站）
+
+    @app.put("/api/models/endpoint")
+    def put_endpoint(req: EndpointRequest) -> dict:
+        """空串 = 跟随 HF_ENDPOINT / 官方；只存前缀，不在这里探连通。"""
+        try:
+            return MODELS.set_endpoint(req.url)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"写不进覆盖文件：{exc}") from exc
+
+    @app.put("/api/models/conns")
+    def put_conns(req: ConnsRequest) -> dict:
+        """大文件下载连接数。0 = 用默认；下次下载生效（在跑的沿用旧值）。"""
+        try:
+            return MODELS.set_conns(req.conns)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"写不进覆盖文件：{exc}") from exc
+
     @app.get("/api/fs")
     def fs(path: str = "") -> dict:
         return _list_dirs(_start_path(path))
 
     @app.get("/api/preview")
     def preview(path: str = "", layout: str = "flat", artist: bool = True,
-                artist_depth: int = 0, recursive: bool = True,
+                artist_depth: int = 0, artist_table: str = "", recursive: bool = True,
                 include_zips: bool = True, include_loose: bool = True,
                 limit: int = 0, seq_width: int = 6, pack: bool = True, start_seq: int = 1,
                 out_dir: str = "", formats: str = "", jpeg_quality: int = 0,
@@ -1127,13 +1219,18 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             except ConfigError as exc:
                 raise HTTPException(400, str(exc)) from exc
         try:
-            rule, aliases = _artist_context_default(artist, artist_depth)
+            from ..artist import ArtistTable
+
+            rule, aliases = _artist_context_default(artist, artist_depth,
+                                                    table=artist_table)
             plan = plan_inputs(
                 path, recursive=recursive, include_zips=include_zips,
                 include_loose=include_loose, limit=max(0, limit),
                 # 与 JobManager.create 同一口径：不封包就走旧 id
                 assign_ids=pack, layout=layout if pack else "flat",
                 seq_width=seq_width, start_seq=start_seq, artist_rule=rule, aliases=aliases,
+                # 预览也要查表：否则"画师名会变成什么"与实际跑出来的不一样。
+                artist_table=ArtistTable(rule.table),
             )
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
@@ -1162,23 +1259,201 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         MANAGER.start(job)
         return job.snapshot()
 
+    # ---- 新建任务页的参数记忆（上次填的那套，关掉程序再开还在）
+
+    @app.get("/api/job-form")
+    def get_job_form() -> dict:
+        from . import ui_form
+
+        return ui_form.load()
+
+    @app.post("/api/job-form")
+    def save_job_form(payload: dict) -> dict:
+        """填一项存一项的入口：`form` 是页面快照，`spec` 只在提交成功时来。"""
+        from . import ui_form
+
+        form = payload.get("form") if isinstance(payload, dict) else None
+        spec = payload.get("spec") if isinstance(payload, dict) else None
+        if form is None and spec is None:
+            raise HTTPException(400, "form / spec 至少给一个")
+        if form is not None and not isinstance(form, dict):
+            raise HTTPException(400, "form 必须是一个对象")
+        if spec is not None and not isinstance(spec, dict):
+            raise HTTPException(400, "spec 必须是一个对象")
+        return ui_form.save(form=form, spec=spec)
+
+    # ---- NL 提示词（仓库根 prompt/*.json）
+
+    # 名字走 query 而不是路径：提示词名就是文件名，中文、空格、括号都合法，
+    # 塞进 path 得先编码一遍，反而多一处出错的地方（与 presets 同一取舍）。
+
+    @app.get("/api/prompts")
+    def list_prompts() -> dict:
+        """下拉框清单。目录不存在时返回空清单——那是"还没建"，不是错误。"""
+        from .. import prompts as prompt_files
+
+        return prompt_files.info()
+
+    @app.get("/api/prompts/template")
+    def prompt_template() -> dict:
+        """新建时的初始内容：内置那份在当前配置下长什么样。
+
+        对着空白框从零写一套指令不现实，从这里改才有意义。
+        """
+        from ..config import DEFAULT_TIERS, OutputSpec, load_ops, load_tier_table
+        from ..client import SYSTEM_PROMPT, _prompt_for
+
+        try:
+            output = load_ops(load_tier_table(DEFAULT_TIERS)).output_spec()
+        except Exception:                    # noqa: BLE001 - 配置坏了不该挡住这个入口
+            output = OutputSpec()
+        return {
+            "prompt": _prompt_for(output),
+            "prompt_zh": _prompt_for(output, zh=True),
+            "system": SYSTEM_PROMPT,
+        }
+
+    @app.get("/api/prompts/one")
+    def get_prompt(id: str) -> dict:          # noqa: A002 - 与前端字段同名
+        from .. import prompts as prompt_files
+
+        try:
+            return prompt_files.detail(id)
+        except prompt_files.PromptError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.put("/api/prompts/one")
+    def put_prompt(payload: dict, id: str) -> dict:   # noqa: A002
+        from .. import prompts as prompt_files
+
+        try:
+            return prompt_files.save(id, payload)
+        except prompt_files.PromptError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"写不进提示词文件：{exc}") from exc
+
+    @app.post("/api/prompts", status_code=201)
+    def create_prompt(payload: dict) -> dict:
+        from .. import prompts as prompt_files
+
+        name = payload.get("name") if isinstance(payload, dict) else None
+        if not isinstance(name, str):
+            raise HTTPException(400, "新建提示词要给一个名字（name）")
+        try:
+            return prompt_files.create(name, payload)
+        except prompt_files.PromptError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"写不进提示词文件：{exc}") from exc
+
+    @app.post("/api/prompts/reveal")
+    def reveal_prompts() -> dict:
+        """在系统文件管理器里打开 prompt 目录（不存在就先建出来）。"""
+        from .. import prompts as prompt_files
+
+        try:
+            return {"path": prompt_files.reveal()}
+        except OSError as exc:
+            raise HTTPException(500, f"打不开目录：{exc}") from exc
+
+    # ---- 配置方案（顶栏下拉）：具名快照，可保存 / 切换 / 删除 / 自动保存
+    # 名字用 query 传而不是放路径里：中文、空格、冒号都是合法方案名，
+    # 塞进 path 就得先编码一遍，反而多一处出错的地方。
+
+    @app.get("/api/presets")
+    def list_presets() -> dict:
+        from . import ui_presets
+
+        return ui_presets.meta()
+
+    @app.get("/api/presets/one")
+    def get_preset(name: str) -> dict:
+        from . import ui_presets
+
+        got = ui_presets.payload(name)
+        if got is None:
+            raise HTTPException(404, "没有这个方案")
+        return got
+
+    @app.post("/api/presets")
+    def save_preset(payload: dict) -> dict:
+        from . import ui_presets
+
+        name = payload.get("name") if isinstance(payload, dict) else None
+        form = payload.get("form") if isinstance(payload, dict) else None
+        spec = payload.get("spec") if isinstance(payload, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(400, "name 必填")
+        if form is not None and not isinstance(form, dict):
+            raise HTTPException(400, "form 必须是一个对象")
+        if spec is not None and not isinstance(spec, dict):
+            raise HTTPException(400, "spec 必须是一个对象")
+        try:
+            return ui_presets.save(name, form or {},
+                                   spec if isinstance(spec, dict) else None)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/presets/apply")
+    def apply_preset(payload: dict) -> dict:
+        from . import ui_presets
+
+        name = payload.get("name") if isinstance(payload, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(400, "name 必填")
+        got = ui_presets.apply(name)
+        if got is None:
+            raise HTTPException(404, "没有这个方案")
+        return got
+
+    @app.delete("/api/presets")
+    def delete_preset(name: str) -> dict:
+        from . import ui_presets
+
+        return ui_presets.remove(name)
+
+    @app.post("/api/presets/auto")
+    def auto_preset(payload: dict) -> dict:
+        """`enabled` 在就是开关自动保存；只带 `form` 就是"写一次当前配置"。"""
+        from . import ui_presets
+
+        body = payload if isinstance(payload, dict) else {}
+        form = body.get("form")
+        spec = body.get("spec")
+        if form is not None and not isinstance(form, dict):
+            raise HTTPException(400, "form 必须是一个对象")
+        if "enabled" in body:
+            return ui_presets.set_auto(bool(body.get("enabled")), form=form,
+                                       spec=spec if isinstance(spec, dict) else None)
+        got = ui_presets.autosave(form, spec if isinstance(spec, dict) else None)
+        return got if got is not None else ui_presets.meta()
+
     @app.get("/api/jobs")
     def list_jobs() -> dict:
-        return {"jobs": [j.snapshot() for j in MANAGER.all()[:20]]}
+        # 内存里的活任务 + 盘上的历史（重启后列表还在）。同 id 以内存为准。
+        return {"jobs": MANAGER.all_snapshots()}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict:
-        job = MANAGER.get(job_id)
-        if job is None:
+        snap = MANAGER.snapshot_of(job_id)
+        if snap is None:
             raise HTTPException(404, "没有这个任务")
-        return job.snapshot()
+        return snap
 
     @app.get("/api/jobs/{job_id}/events")
     def get_events(job_id: str, after: int = 0) -> dict:
-        """WS 的兜底：同一份数据、同一条 cursor。"""
+        """WS 的兜底：同一份数据、同一条 cursor。
+
+        历史任务（进程重启前的）没有事件流，回空表 + 快照：运行页据此渲染
+        成"只读的已完成任务"，而不是一个 404 让人以为记录丢了。
+        """
         job = MANAGER.get(job_id)
         if job is None:
-            raise HTTPException(404, "没有这个任务")
+            snap = MANAGER.snapshot_of(job_id)
+            if snap is None:
+                raise HTTPException(404, "没有这个任务")
+            return {"events": [], "snapshot": snap}
         return {"events": job.events_since(after), "snapshot": job.snapshot()}
 
     @app.post("/api/jobs/{job_id}/stop")
@@ -1268,6 +1543,10 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
                     q: str = "", only_failed: bool = False) -> dict:
         job = MANAGER.get(job_id)
         if job is None:
+            # 历史任务：进程重启后 Job 没了，但产物还在盘上。结果读取只依赖
+            # out_dir，按快照重建一个只读 Job 即可，不必另写一套路由。
+            job = MANAGER.build_readonly(job_id)
+        if job is None:
             raise HTTPException(404, "没有这个任务")
         return job.results(offset=offset, limit=min(200, max(1, limit)),
                            query=q, only_failed=only_failed)
@@ -1281,6 +1560,11 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         if bucket < STAT_FINE or bucket > 50000 or bucket % STAT_FINE:
             raise HTTPException(400, f"bucket 必须是 {STAT_FINE}~50000 之间 {STAT_FINE} 的倍数")
         job = MANAGER.get(job_id)
+        if job is None:
+            # 历史任务：细桶计数只在内存里，进程重启后就没了。这里仍然返回
+            # 结构完整的空统计，而不是 404——统计页对"没有数据"和"没有这个
+            # 任务"是两种文案，混起来会被当成链接坏了。
+            job = MANAGER.build_readonly(job_id)
         if job is None:
             raise HTTPException(404, "没有这个任务")
         return job.stats_buckets(bucket)
@@ -1399,7 +1683,11 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         ops = load_ops(table)
         rule = ops.artist_rule()
         rule.enabled = True          # 与 run_split 同口径
+        rule.table = (req.artist_table or "").strip() or rule.table
         aliases = AliasTable(rule.aliases_path).as_dict() if rule.aliases_path else {}
+        from ..artist import ArtistTable
+
+        reader = ArtistTable(rule.table)
         try:
             items = discover_inputs(req.input_dir, recursive=req.recursive,
                                     limit=req.limit or None)
@@ -1419,14 +1707,17 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         sources: dict[str, int] = {}
         no_artist = 0
         for it in items:
-            a = extract_artist(it.logical_path, rule, aliases)
-            if a.tag:
-                artists[a.tag] = artists.get(a.tag, 0) + 1
+            # 与 run_split 同口径：表优先、目录名兜底（分片表在分包阶段查不了，
+            # 会静默退成目录名——run_split 那边有一条日志说明这件事）。
+            got = reader.lookup(it.logical_path) if reader.active else []
+            name = got[0] if got else extract_artist(it.logical_path, rule, aliases).tag
+            if name:
+                artists[name] = artists.get(name, 0) + 1
             else:
                 no_artist += 1
             # 来源分布按"包 / 画师目录"聚合，而不是逐文件——散图语料
             # 一路扫下来每个文件都是自己的 source，逐文件列表没有信息量。
-            src_key = it.source if it.kind == "zip_member" \
+            src_key = it.source if it.is_member \
                 else str(Path(it.source).parent)
             sources[src_key] = sources.get(src_key, 0) + 1
         top = sorted(sources.items(), key=lambda kv: -kv[1])[:10]
@@ -1936,6 +2227,23 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             "free_bytes": DOWNLOADS.snapshot().get("free_bytes", 0),
         }
 
+    @app.get("/api/packs/shards")
+    def packs_shards(path: str = "", out: str = "") -> dict:
+        """离线包里的分片清单，附带每片已经产出多少行。
+
+        打标页的分片面板靠它渲染状态：产物按包名定名（artifacts-<包名>-…），
+        反解回去就知道哪片打过、打了多少。
+        """
+        from .pack_shards import scan
+
+        key = (path or "").strip()
+        if not key:
+            raise HTTPException(400, "缺少离线包目录")
+        try:
+            return scan(key, (out or "").strip())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.get("/api/downloads/cached")
     def downloads_cached(repo: str = "") -> dict:
         """这个仓库已经下到本地的分片（不含 .part 半截文件）。"""
@@ -2431,6 +2739,31 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             # 服务端关闭或客户端拔线：这里没有可做的补救，安静退出即可。
             return
         await ws.close()
+
+    # ---- 调度中心（托管 fox-label v3 worker 子进程）
+
+    @app.get("/api/center")
+    def center_state() -> dict:
+        return CENTER.snapshot()
+
+    @app.post("/api/center/login")
+    def center_login(req: CenterLoginRequest) -> dict:
+        try:
+            CENTER.login(req.server, req.user_id, req.secret)
+        except CenterError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return CENTER.snapshot()
+
+    @app.post("/api/center/start", status_code=202)
+    def center_start(req: CenterRunRequest) -> dict:
+        try:
+            return CENTER.start(**req.model_dump(exclude_none=True))
+        except CenterError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/center/stop")
+    def center_stop() -> dict:
+        return CENTER.stop()
 
     # ---- 静态前端
 

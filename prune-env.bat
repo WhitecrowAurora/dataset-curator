@@ -199,7 +199,7 @@ echo  [prune] On the target machine run install.bat ONCE before starting
 echo          Tagger.Shell.exe - it repoints .pth and installs missing deps.
 if "%KEEP%"=="0" (
     echo  [prune] tag runtime was removed. To get the tag backends back:
-    echo            env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+    echo            env\python\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
     echo            env\python\python.exe -m pip install -r requirements-tag.txt
 )
 echo.

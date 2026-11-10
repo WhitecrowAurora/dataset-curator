@@ -566,6 +566,51 @@ def cmd_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_artist_import(args: argparse.Namespace) -> int:
+    """把任意格式的画师输入整流成统一 parquet，可顺手按分片切开。
+
+    为什么要有独立命令而不是塞进打标流程：画师表是**跨任务**的资产，
+    一次整流、多批复用。塞进打标流程就意味着每批都得重解一遍那堆 csv，
+    而且各家写法不一致的问题会被摊到每个成员身上。
+    """
+    from .artist import AliasTable
+    from .artist_import import (collect, import_artists, raise_on_conflicts,
+                                split_by_shards)
+
+    aliases = AliasTable(args.aliases).as_dict() if args.aliases else {}
+
+    if args.split_by_dir:
+        table, report = collect(
+            args.input, aliases=aliases, max_len=args.max_len,
+            start=args.start, on_conflict=args.on_conflict)
+        raise_on_conflicts(report, args.on_conflict)
+        stats = split_by_shards(table, args.split_by_dir, args.out,
+                               source_label=args.source_label)
+        total = stats[-1]["rows"]
+        matched = stats[-1]["matched"]
+        print(f"[artist-import] 画师 {len(table)} 个，分片 {len(stats) - 1} 个")
+        print(f"[artist-import] 行 {total}，命中 {matched} "
+              f"（{stats[-1]['coverage']:.1%}），写出到 {args.out}")
+        for row in stats[:-1][: args.top]:
+            print(f"  {row['shard']}  {row['rows']:6d} 命中 {row['matched']:6d}")
+        if len(stats) - 1 > args.top:
+            print(f"  …共 {len(stats) - 1} 个分片")
+    else:
+        report = import_artists(
+            args.input, args.out, aliases_path=args.aliases,
+            max_len=args.max_len, start=args.start,
+            on_conflict=args.on_conflict, source_label=args.source_label)
+        print(f"[artist-import] {report.rows} 个 id、{report.names} 个画师名 -> "
+              f"{report.output}")
+
+    if report.skipped:
+        print(f"[artist-import] 跳过 {report.skipped} 行（没 id 或清洗后为空）")
+    if report.conflicts:
+        print(f"[artist-import][警告] {len(report.conflicts)} 处冲突按 "
+              f"{args.on_conflict} 处理，例如：{report.conflicts[0]}")
+    return 0
+
+
 def cmd_upload(args: argparse.Namespace) -> int:
     """把已封口的分片推到 FTP。失败的留在本地，下次可重传。
 
@@ -902,6 +947,88 @@ def cmd_split(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sample(args: argparse.Namespace) -> int:
+    """按配额从候选 manifest 里选样（规范 v0.2 §1–§3）。
+
+    输入是**已经导出的候选清单**，不是 HF 仓库：拉数据、解码、过滤分辨率
+    都是上游的事。这一层只负责配额与记账——换数据集只改配置，不改代码。
+    """
+    from .sample import (SampleError, read_candidates, select, write_report,
+                         write_selection)
+
+    table = load_tier_table(args.tiers)
+    ops = load_ops(table)
+    try:
+        spec = ops.sample_spec(args.profile)
+    except SampleError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    # 命令行覆盖配置。放在采样之前，且每一项都单独判 None：
+    # 0 是合法值（min_score=0 就是不要质量线），不能用 `or` 兜。
+    if args.seed is not None:
+        spec.seed = int(args.seed)
+    if args.min_score is not None:
+        spec.min_score = float(args.min_score)
+    if args.quota_total is not None:
+        spec.quota_total = max(0, int(args.quota_total))
+    if args.no_dedupe:
+        spec.dedupe = False
+    if args.no_borrow:
+        spec.allow_borrow = False
+    if args.mix:
+        parts = [p.strip() for p in str(args.mix).replace("/", ",").split(",")
+                 if p.strip()]
+        if len(parts) != 3:
+            raise ConfigError("--mix 要给三个数：质量,长尾,随机（如 0.6,0.25,0.15）")
+        try:
+            mix = tuple(float(p) for p in parts)
+        except ValueError as exc:
+            raise ConfigError(f"--mix 里有非数字：{args.mix!r}") from exc
+        if abs(sum(mix) - 1.0) > 1e-6:
+            raise ConfigError(f"--mix 三项合计必须是 1，收到 {sum(mix):.3f}")
+        spec.mix = mix  # type: ignore[assignment]
+
+    if not spec.quotas:
+        raise ConfigError(
+            "没有配额可执行：配置里的 sample.profiles 为空，或用 --profile 指一组")
+
+    by_source: dict[str, list[dict]] = {}
+    for item in args.inputs:
+        if "=" in item:
+            source, path = item.split("=", 1)
+        else:
+            path, source = item, Path(item).stem
+        source = source.strip()
+        rows = read_candidates(path, spec, source=source)
+        by_source.setdefault(source, []).extend(rows)
+        print(f"[sample] {source:<34}{len(rows):>10} 条候选 ← {path}")
+
+    result = select(by_source, spec)
+    out, written = write_selection(result, args.out)
+    report = write_report(result, args.report_out)
+
+    print()
+    print(f"  {'来源':<34}{'可用':>10}{'合格':>10}{'选中':>10}"
+          f"{'计划':>10}{'目标':>10}{'借入':>8}{'去重':>8}")
+    for r in result.report:
+        print(f"  {r.source:<34}{r.available:>10}{r.qualified:>10}"
+              f"{r.selected:>10}{r.quota_original:>10}{r.quota_final:>10}"
+              f"{r.borrowed:>8}{r.duplicates:>8}")
+    print()
+    print(f"[sample] 选中 {written} 条（计划 {result.quota_original} / "
+          f"目标 {result.quota_final}）")
+    print(f"         清单 {out}")
+    print(f"         记账 {report}")
+    if result.warnings:
+        print()
+        print("  需要注意：")
+        for msg in result.warnings:
+            print(f"    - {msg}")
+        print("    → 缺额不会自动补齐：补候选或改配额，"
+              "别让 selected 与 quota_original 的差额留在报告里没人看。")
+    return 0
+
+
 def cmd_dedup(args: argparse.Namespace) -> int:
     """图片去重：发分包前扫重复图，产出排除清单与报告，不动素材文件。
 
@@ -949,6 +1076,40 @@ def cmd_dedup(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------- 客户端
 
 
+def _make_progress_writer(path: Path):
+    """把打标进度写成派工端能直接读的 `{"done", "total"}`。
+
+    为什么走文件而不是回调：派工端（fox-label 的 `worker.py`）是用 `--cmd` 起的
+    **另一个进程**，它每 0.3s 读一次这个文件，再塞进心跳报给服务端。跨进程没有
+    更便宜的通道。
+
+    为什么节流 1s：30 万张的批次上一张写一次文件纯属浪费，而心跳 120s 才发一拍。
+    但**最后一条一定写**，否则收尾时进度会停在 99%。
+
+    `total` 是"数据源已经吐出的条目数"：tar/parquet 是流式读的，跑之前数不出总数，
+    它只能贴着 done 一起涨。派工端只用 done 算速率与"进度是否停滞"，所以不影响判活。
+    """
+    from .storage.atomic import write_json
+
+    path = Path(path)
+    state = {"last": 0.0}
+
+    def hook(kind: str, task, outcome, stats) -> None:
+        # 有归属的条目都算"过了这一张"：完成 / 跳过 / 失败 / 拉黑 / 被别的进程占着。
+        handled = (stats.done + stats.skipped + stats.failed
+                   + stats.blacklisted + stats.busy)
+        now = time.monotonic()
+        if handled < stats.total and now - state["last"] < 1.0:
+            return
+        state["last"] = now
+        try:
+            write_json(path, {"done": handled, "total": stats.total, "phase": "tag"})
+        except OSError:
+            pass            # 进度写不出去不该拖垮打标
+
+    return hook
+
+
 def cmd_client(args: argparse.Namespace) -> int:
     """成员端：照分发包的 manifest 顺序打标，产出 -tag.json / -nl.json 交回总机。
 
@@ -960,7 +1121,9 @@ def cmd_client(args: argparse.Namespace) -> int:
 
     table = load_tier_table(args.tiers)
     ops = load_ops(table)
-    return run_client(args, ops, table)
+    # 进度文件只给派工端用（心跳报进度）；不传时行为与以前完全一致。
+    hook = _make_progress_writer(args.progress_file) if args.progress_file else None
+    return run_client(args, ops, table, on_progress=hook)
 
 
 # ---------------------------------------------------------------- 合并
@@ -1022,6 +1185,12 @@ def cmd_merge(args: argparse.Namespace) -> int:
     require = getattr(args, "require", None) or spec.mode
     if require not in ("nl", "tag", "both"):
         raise ConfigError(f"--require 只能是 nl / tag / both，收到 {require!r}")
+    # 最终表字段名：命令行 > merge 段配置 > both（两套并列）。
+    final_names = (getattr(args, "final_names", None)
+                   or str(cfg.get("final_names", "both")))
+    if final_names not in ("legacy", "v02", "both"):
+        raise ConfigError(
+            f"--final-names 只能是 legacy / v02 / both，收到 {final_names!r}")
 
     # 应产出的 id 从分发包 manifest 汇总。没有它就只能做内容检查，
     # 发现不了"整条没交"。
@@ -1189,6 +1358,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
         records, args.out,
         dataset_name=dataset_name, image_root=image_root, image_ext=image_ext,
         fmt=args.format, require=require, skip_empty=not args.keep_empty,
+        final_names=final_names,
     )
     print()
     print(f"[merge] 总表写入 {out}（{written} 条，格式 {args.format}）")
@@ -1884,6 +2054,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp_manifest.add_argument("--out", default=None)
     sp_manifest.set_defaults(func=cmd_manifest)
 
+    sp_artist = sub.add_parser(
+        "artist-import", help="把任意格式的画师输入整流成统一 parquet")
+    sp_artist.add_argument("--input", "--in", nargs="+", required=True, dest="input",
+                           help="csv / tsv / jsonl / txt / parquet，可给多个")
+    sp_artist.add_argument("--out", required=True,
+                           help="输出 parquet 路径（--split-by-dir 时是目录）")
+    sp_artist.add_argument("--aliases", default=None,
+                           help="别名表 artist_aliases.json（原始名→英文名）")
+    sp_artist.add_argument("--split-by-dir", default=None, dest="split_by_dir",
+                           help="按这个目录里的 tar/zip 实际成员切成每片一个表")
+    sp_artist.add_argument("--source", default="import", dest="source_label",
+                           help="写进 sources 列与 metadata 的来源标签")
+    sp_artist.add_argument("--max-len", type=int, default=64, dest="max_len")
+    sp_artist.add_argument("--start", type=int, default=1,
+                           help="纯名字清单的顺序编号起点")
+    sp_artist.add_argument("--on-conflict", default="error", dest="on_conflict",
+                           choices=("error", "first", "last"),
+                           help="同 id 不同画师时怎么办；默认直接失败")
+    sp_artist.add_argument("--top", type=int, default=10, help="分片列表展示前 N 个")
+    sp_artist.set_defaults(func=cmd_artist_import)
+
     sp_upload = sub.add_parser("upload", help="把封口的分片上传到 FTP（默认关闭）")
     sp_upload.add_argument("--tiers", default=DEFAULT_TIERS)
     sp_upload.add_argument("--out-dir", default="work/out", dest="out_dir")
@@ -1914,6 +2105,32 @@ def build_parser() -> argparse.ArgumentParser:
     sp_artists.add_argument("--write-aliases", default=None, dest="write_aliases",
                             help="把当前识别到的名字导出成翻译表")
     sp_artists.set_defaults(func=cmd_artists)
+
+    sp_sample = sub.add_parser(
+        "sample", help="按配额从候选 manifest 里选样（规范 v0.2 §1–§3）")
+    sp_sample.add_argument("--tiers", default=DEFAULT_TIERS)
+    sp_sample.add_argument("--profile", default=None,
+                           help="配额分组（tiers.yaml 的 sample.profiles）；"
+                                "不给则用配置里的 active")
+    sp_sample.add_argument("--input", dest="inputs", action="append", required=True,
+                           help="<来源>=<候选清单>，可给多次（jsonl / parquet）；"
+                                "不带 = 时来源名取文件名")
+    sp_sample.add_argument("--out", default="work/sampled/picked.jsonl")
+    sp_sample.add_argument("--report-out", default="work/sampled/report.json",
+                           dest="report_out")
+    sp_sample.add_argument("--seed", type=int, default=None,
+                           help="换它 = 换一批样本（同 seed 必得同一批）")
+    sp_sample.add_argument("--min-score", type=float, default=None, dest="min_score",
+                           help="质量线；低于它的候选不参与选样")
+    sp_sample.add_argument("--quota-total", type=int, default=None, dest="quota_total",
+                           help="校验配额合计与实际选中数")
+    sp_sample.add_argument("--mix", default=None,
+                           help="质量,长尾,随机 三段比例，如 0.6,0.25,0.15")
+    sp_sample.add_argument("--no-dedupe", action="store_true", dest="no_dedupe",
+                           help="不做近重复去重（同 cluster 不再只留一条）")
+    sp_sample.add_argument("--no-borrow", action="store_true", dest="no_borrow",
+                           help="缺额不从其他来源补，各来源严格按自己的可用量")
+    sp_sample.set_defaults(func=cmd_sample)
 
     sp_split = sub.add_parser("split", help="生成分发包与分包表（分配全局 image_id）")
     sp_split.add_argument("--tiers", default=DEFAULT_TIERS)
@@ -2023,6 +2240,13 @@ def build_parser() -> argparse.ArgumentParser:
                            help="API 密钥；留空则读 OPENAI_API_KEY / ANTHROPIC_API_KEY")
     sp_client.add_argument("--mode", default=None, choices=["nl", "tag", "both"],
                            help="覆盖配置里的 output.mode")
+    # 中文 NL 比例。留空 = 跟 tiers.yaml 的 output 段（默认 0.3）；
+    # 0 是合法值（这批全英文），所以用 None 表示"没给"，不能拿 0 当哨兵。
+    sp_client.add_argument("--caption-zh-ratio", type=float, default=None,
+                           dest="caption_zh_ratio",
+                           help="中文 caption 比例 0~1：按 (seed, image_id) 抽签，"
+                                "抽中的图用中文写描述，tag 段仍是英文。"
+                                "0 = 全英文；留空跟配置")
     sp_client.add_argument("--temperature", type=float, default=None)
     sp_client.add_argument("--top-p", type=float, default=None, dest="top_p")
     sp_client.add_argument("--max-tokens", type=int, default=None, dest="max_tokens")
@@ -2096,6 +2320,10 @@ def build_parser() -> argparse.ArgumentParser:
                            help="把分段计时写到这个文件：read / tag / tag_decode / "
                                 "tag_fwd / b64 / http / parse / gate / write 各自的"
                                 "耗时与次数（tag_decode+tag_fwd ⊂ tag）")
+    sp_client.add_argument("--progress-file", default=None, dest="progress_file",
+                           help="把打标进度写成 {\"done\":已处理,\"total\":已知条目数}，"
+                                "供派工端（fox-label worker.py）心跳上报；"
+                                "它每 0.3s 读一次这个文件")
     sp_client.add_argument("--artifact-format", default="jsonl", dest="artifact_format",
                            choices=["json", "parquet", "jsonl"],
                            help="产物形态：jsonl=按分包落一片纯文本（默认，回传方便）；"
@@ -2132,6 +2360,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp_merge.add_argument("--decisions", default=None,
                           help="冲突决策文件（默认读 work/conflicts/decisions.json）；"
                                "批过的那条按批的取，不再算失败")
+    sp_merge.add_argument("--final-names", default=None, dest="final_names",
+                          choices=["legacy", "v02", "both"],
+                          help="最终表字段名：legacy=caption/tag（现有下游），"
+                               "v02=nl_final/tags_final（规范 §8），"
+                               "both=两套并列（默认，多占一份 caption 体积）")
     sp_merge.set_defaults(func=cmd_merge)
 
     sp_cf = sub.add_parser("conflicts", help="找「同 id 不同内容」的冲突，批或自动裁决")

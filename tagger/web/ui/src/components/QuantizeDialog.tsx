@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, Download, Loader2, TriangleAlert, X } from 'lucide-react'
+import { CheckCircle2, Download, ExternalLink, Loader2, TriangleAlert, X } from 'lucide-react'
 import { api, type DepState, type QuantState, type QuantTaskState } from '../lib/api'
 import { StatusChip } from './ui/launcher'
 import { ErrorBox } from './ui/ErrorBox'
@@ -39,15 +39,18 @@ function fmtBytes(n: number): string {
  * 所以这里只回答"这张卡该选哪一档精度"，腾显存的动作指向槽位。
  */
 function vramHint(gb: number | null): string {
+  // ★ 别把 W4A16 和 Q4 说成同一个东西：W4A16 是 vLLM 的 4bit（AWQ/GPTQ，
+  //   safetensors），Q4_K_M 是 llama.cpp 的 GGUF 文件。这句文案以前写成
+  //   "建议量化到 Q4（W4A16）"，直接把人导向"压完 AWQ 却被告知缺 gguf"。
   if (gb === null) {
-    return '16G 档可整卡跑 Q6/FP8；只有 12G 才需要 Q4。要让出显存调「槽位（-np）」。'
+    return 'W4A16 是 vLLM 的 4bit（safetensors）；llama.cpp 要省显存得压 GGUF 的 Q4_K_M。'
   }
   const v = Math.round(gb)
   if (v >= 24) return `本机 ${v}G：F16 / FP8 都能整卡装下，不必量化。`
   if (v >= 13) {
-    return `本机 ${v}G：Q6 / FP8 能整卡装下。要让显存给别的程序，去调「槽位（-np）」。`
+    return `本机 ${v}G：FP8 能整卡装下；要走 llama.cpp 就用 GGUF 的 Q6_K / Q4_K_M。`
   }
-  return `本机 ${v}G：建议量化到 Q4（W4A16）。`
+  return `本机 ${v}G：W4A16 能省一半显存；用 llama.cpp 则压 Q4_K_M（GGUF）。`
 }
 
 function fmtElapsed(seconds: number): string {
@@ -60,12 +63,15 @@ function fmtElapsed(seconds: number): string {
 export function QuantizeDialog({
   open,
   modelKey,
+  initialMethod,
   onCancel,
   onUse,
 }: {
   open: boolean
   /** '' = 按显存自动落档 */
   modelKey: string
+  /** 从「量化」菜单点进来的算法（gptq / awq） */
+  initialMethod?: string
   /** 放弃：调用方把精度退回 BF16 */
   onCancel: () => void
   /** 确认使用 W4A16（已有权重或刚量化完） */
@@ -121,7 +127,14 @@ export function QuantizeDialog({
         setInfo(s)
         setTask(s.task)
         setOutDir(s.suggested_dir)
-        setMethod(s.methods.includes('gptq') ? 'gptq' : (s.methods[0] ?? 'gptq'))
+        // 菜单里点了具体算法就用它；没点则默认 GPTQ（校准更稳）。
+        setMethod(
+          initialMethod && s.methods.includes(initialMethod)
+            ? initialMethod
+            : s.methods.includes('gptq')
+              ? 'gptq'
+              : (s.methods[0] ?? 'gptq'),
+        )
         // 没有现成权重时直接展开表单，少点一次
         setShowForm(!s.has_quantized)
       })
@@ -129,7 +142,15 @@ export function QuantizeDialog({
     return () => {
       alive = false
     }
-  }, [open, modelKey])
+  }, [open, modelKey, initialMethod])
+
+  // 跑完就把表单收起来，展示产物 + 「使用 W4A16」。
+  // ★ 不能靠渲染条件里判 task.status === 'done' 来收：后端会一直留着这条
+  // done 任务，于是「重新量化」点下去只把表单藏了、又被 done 判定顶回来，
+  // 表现为"点了没反应"。收起这个动作必须真的改状态。
+  useEffect(() => {
+    if (task?.status === 'done') setShowForm(false)
+  }, [task?.status])
 
   // 量化期间轮询。1.5s 一次：进度是阶段级的，再密也看不出差别。
   useEffect(() => {
@@ -220,6 +241,11 @@ export function QuantizeDialog({
       setError(msg(err))
       setInstalling(false)
     }
+  }
+
+  /** 转到依赖检测页：与 GGUF 那条一样，切路由就够了（弹窗会随页面卸载）。 */
+  function goDeps() {
+    location.hash = '/deps'
   }
 
   async function start() {
@@ -323,21 +349,32 @@ export function QuantizeDialog({
                       要求用户离开页面去命令行找解释器，等于这个功能不存在。 */}
                   {(info.missing_deps ?? []).length > 0 && (
                     <div className="mt-2 space-y-1.5">
-                      <button
-                        type="button"
-                        className="lx-btn-ghost inline-flex items-center gap-1.5 text-[11px]"
-                        disabled={busy || installing}
-                        onClick={() => void installDeps()}
-                      >
-                        {installing ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <Download size={12} />
-                        )}
-                        {installing
-                          ? '正在安装依赖…'
-                          : `一键安装（${(info.missing_deps ?? []).join('、')}）`}
-                      </button>
+                      {/* 两条路都给：就地点只装缺的；想看清整组装了什么、或者
+                          顺手把别的附加依赖也配齐，就去依赖检测页。 */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                        <button
+                          type="button"
+                          className="lx-btn-ghost inline-flex items-center gap-1.5 text-[11px]"
+                          disabled={busy || installing}
+                          onClick={() => void installDeps()}
+                        >
+                          {installing ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <Download size={12} />
+                          )}
+                          {installing
+                            ? '正在安装依赖…'
+                            : `一键安装（${(info.missing_deps ?? []).join('、')}）`}
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 text-[11px] text-lx-muted underline-offset-2 hover:text-lx hover:underline"
+                          onClick={goDeps}
+                        >
+                          <ExternalLink size={11} /> 去「依赖检测」里装
+                        </button>
+                      </div>
                       {installing && (
                         <pre className="max-h-28 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
                           {installLog.slice(-6).join('\n') || '正在启动 pip…'}
@@ -358,8 +395,9 @@ export function QuantizeDialog({
               {info?.available && (
                 <p>
                   选中的模型是 <code className="font-mono text-lx">{info.model}</code>。
-                  W4A16 需要一份预先量化好的权重，不能由 BF16 在启动时直接转换；
-                  量化要跑几十分钟，产物约是原权重的四分之一。
+                  W4A16 是 <b>vLLM 专用</b>：产物是 AWQ/GPTQ 的 safetensors
+                  （约原权重的四分之一，要跑几十分钟），不能由 BF16 在启动时直接
+                  转换；llama.cpp 不认这个格式，它要的是 GGUF 的 Q4_K_M。
                 </p>
               )}
 
@@ -380,7 +418,7 @@ export function QuantizeDialog({
                 </div>
               )}
 
-              {showForm && info?.available && !running && task?.status !== 'done' && (
+              {showForm && info?.available && !running && (
                 <div className="space-y-2.5">
                   <label className="block">
                     <span className="mb-1 block text-[11px] text-lx-muted">产物目录（必须在 models/ 之内）</span>
@@ -454,6 +492,15 @@ export function QuantizeDialog({
               )}
 
               {error && <ErrorBox text={error} />}
+              {error && /依赖|pip install|没装|ModuleNotFoundError/.test(error) && (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-[11px] text-lx-muted underline-offset-2 hover:text-lx hover:underline"
+                  onClick={goDeps}
+                >
+                  <ExternalLink size={11} /> 去「依赖检测」里补装
+                </button>
+              )}
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-lx px-[18px] py-3">
@@ -470,13 +517,18 @@ export function QuantizeDialog({
               {/* 已有量化权重时不受 available 限制：权重是现成的，这台机器
                   不能量化也不影响直接用它（比如权重在共享盘、vLLM 跑在别处）。 */}
               {!running && (info?.available || canUse) && (
-                canUse && (!showForm || task?.status === 'done') ? (
+                canUse && !showForm ? (
                   <>
                     {info?.available && (
                       <button
                         type="button"
                         className="lx-btn-ghost"
-                        onClick={() => setShowForm(true)}
+                        onClick={() => {
+                          // 顺手把上一条 done 任务从界面上摘掉：否则表单旁边还挂着
+                          // "已完成"的绿标和旧日志，看着像在改一份已经跑完的东西。
+                          setTask(null)
+                          setShowForm(true)
+                        }}
                       >
                         重新量化
                       </button>

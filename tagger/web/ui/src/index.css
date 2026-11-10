@@ -260,7 +260,7 @@ body {
   .lx-input {
     @apply bg-lx-input border border-lx rounded-lx-sm px-3 py-2 text-sm w-full outline-none;
     color: var(--lx-text);
-    color-scheme: dark;
+    /* color-scheme 由 tokens.css 挂在 :root 上，输入框继承即可。 */
     transition:
       border-color 0.15s ease,
       box-shadow 0.15s ease;
@@ -296,10 +296,6 @@ body {
 
   [data-theme='light'] .lx-select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2378838f' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  }
-
-  [data-theme='light'] .lx-input {
-    color-scheme: light;
   }
 
   select,

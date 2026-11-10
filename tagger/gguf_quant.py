@@ -60,6 +60,17 @@ _LAYER_RE = re.compile(r"blk\.(\d+)\.")
 _LOG_LINES = 200
 _LINE_MAX = 400
 
+# 量化阶段在进度里占多少（剩下的给落盘）。量化要走几百个张量的 matrix
+# 运算，落盘只是 I/O，90/10 大致对得上两者的耗时比。
+_QUANT_SPAN = 90.0
+
+
+def _pair(done: float, total: float) -> str:
+    """进度文案里的「已写/总长」。不到 1 GB 用 MB，免得小文件显示成 0.00 GB。"""
+    if total >= 1024 ** 3:
+        return f"{done / 1024 ** 3:.2f}/{total / 1024 ** 3:.2f} GB"
+    return f"{done / 1024 ** 2:.1f}/{total / 1024 ** 2:.1f} MB"
+
 # 档位 → quant-type 与界面说明。
 # 数字来自 devtools/nl-quant-ab.md（126 张真实素材、同 prompt 的 A/B），
 # 不是凭印象写的：Q4 的 caption 系统性短 12%，Q6 的长度反而和 Q8 齐平。
@@ -334,6 +345,9 @@ def quantize_file(src: Path, out: Path, flag: str,
 
     先写 `.part` 再改名：中途失败/取消时，目录里不会出现一个看起来能用、
     实际半截的 .gguf——那种文件拿去加载，报的错会离真正原因很远。
+
+    `progress` 的口径是整个文件：0~90 是逐张量量化，90~100 是落盘，
+    落盘阶段的 stage 里带"已写/总长"，调用方直接透给界面即可。
     """
     reader = Reader(src)
     if not reader.tensors:
@@ -368,11 +382,22 @@ def quantize_file(src: Path, out: Path, flag: str,
                     ttype = GGML_TYPE_Q4_K
                 out_tensors.append((TensorInfo(info.name, info.dims, ttype, 0), body))
                 log(f"{info.name} → {'Q6_K' if kind == 'q6k' else 'Q4_K'}")
-            progress(index * 100.0 / total, f"量化中 {index}/{total}")
+            progress(index * _QUANT_SPAN / total, f"量化中 {index}/{total}")
 
-        progress(100.0, "写入文件")
+        # 落盘单独占 10%：量化阶段先走到 90，剩下的由 write_gguf 每写完一个
+        # 张量回调一次。以前两段共用 100%，几个 GB 写下去时进度条一动不动。
+        progress(_QUANT_SPAN, "写入文件")
+
+        def _report_write(done: int, total_bytes: int) -> None:
+            # 落盘也能取消：按完取消还要再写几 GB 才停，等于按钮失灵。
+            if should_stop():
+                raise CancelledError()
+            frac = done / total_bytes if total_bytes else 1.0
+            progress(_QUANT_SPAN + (100.0 - _QUANT_SPAN) * frac,
+                     f"写入文件 {_pair(done, total_bytes)}")
+
         write_gguf(tmp, reader.metadata_bytes(), reader.kv_count,
-                   out_tensors, reader.alignment)
+                   out_tensors, reader.alignment, on_write=_report_write)
         tmp.replace(out)
     except BaseException:
         tmp.unlink(missing_ok=True)

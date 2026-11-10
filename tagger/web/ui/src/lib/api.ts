@@ -3,6 +3,8 @@
 
 export type JobSpec = {
   input_dir: string
+  /** 只打这些本地分片（绝对路径）；空 = 按 input_dir 整个目录走 */
+  input_shards?: string[]
   out_dir: string
   recursive: boolean
   include_zips: boolean
@@ -57,6 +59,10 @@ export type JobSpec = {
   max_pixels: number
   /** 描述长度引导（字符区间）；null = 按 token 区间派生 */
   caption_chars?: number[] | null
+  /** 中文 NL 比例（0~1）。按 (seed, image_id) 抽签，tag 段仍为英文；0 = 全英文 */
+  caption_zh_ratio?: number
+  /** 用哪份 NL 提示词（prompt/<名字>.json 的名字）；空 = 内置那份 */
+  prompt_id?: string
   seed: number | null
   /** 同一张图跨运行累计失败多少次后跳过；0 = 不限制 */
   max_failures: number
@@ -107,8 +113,12 @@ export type JobSpec = {
   // 命名
   artist: boolean
   artist_depth: number
-  /** 画师名写进 .tag/.nl 文本开头；false = 只留在 JSON 字段 */
+  /** 画师名写进 NL 正文（caption）开头；false = 只留在 JSON 字段 */
   artist_inject: boolean
+  /** 画师名写进 TAG 串开头；与上一条独立（NL / TAG 是两条训练输入） */
+  artist_inject_tags: boolean
+  /** 画师对照表：单 parquet / 分片目录 / hf://datasets/<repo>/<文件或目录>；空 = 跟配置 */
+  artist_table?: string
   layout: 'flat' | 'mirror'
   seq_width: number
   // 封包
@@ -213,6 +223,11 @@ export type Snapshot = {
   created: number
   started: number
   ended: number
+  /**
+   * 来自磁盘的历史记录（进程重启前的任务）。只有快照，没有事件流，
+   * 也没有 Job.reader —— 所以「进度 / 结果」打不开，只能看摘要或继续。
+   */
+  historical?: boolean
 }
 
 export type JobEvent = {
@@ -258,6 +273,14 @@ export type ResultItem = {
   tags: [string, number][]
   rating: Record<string, number>
   tag_backend: string
+  /** 只有 VLM 引擎有：NL 文案 */
+  caption?: string
+  /** 只有 VLM 引擎有：质检分 */
+  score?: number | null
+  /** false = 这个任务拿不到原图（VLM 流式读分片），结果页不出缩略图 */
+  thumb?: boolean
+  /** 失败行（来自 failures.jsonl）才有：失败原因 */
+  error?: string
   ts?: number
 }
 
@@ -266,6 +289,8 @@ export type ResultsPage = {
   offset: number
   limit: number
   items: ResultItem[]
+  /** 失败图数量（来自 failures.jsonl，去重）。产物里没有失败行，靠它提示。 */
+  failed_total?: number
 }
 
 // ---- 统计页（完成顺序分桶的质检趋势）
@@ -336,7 +361,10 @@ export type Defaults = {
   artist: boolean
   artist_depth: number
   artist_inject: boolean
+  artist_inject_tags: boolean
   artist_prefix: string
+  /** 配置里配过的画师表路径；空 = 没配。表单用它做预填与"跟配置走"提示 */
+  artist_table: string
   seq_width: number
 }
 
@@ -355,6 +383,14 @@ export type VllmModelOption = {
   ready?: boolean
   /** 缺哪几个文件（相对路径的文件名），空 = 不缺 */
   missing_files?: string[]
+  /** 哪几档 GGUF 真有文件（f16/q4/q6/q8）。空 = 一档都没压出来 */
+  gguf_ready?: string[]
+  /** 文件在、但明显不完整（量化中断留下的半截）的档 */
+  gguf_broken?: string[]
+  /** 有没有 transformers 原始权重（没有就压不出新档） */
+  raw_ready?: boolean
+  /** 有没有 vLLM 的预量化权重（W4A16 要有它才能用） */
+  quantized?: boolean
 }
 
 export type VllmTierOption = {
@@ -420,11 +456,14 @@ export type VllmState = {
     precision: string | null
     /** 接口路由名（--served-model-name） */
     served_name: string | null
+    /** 服务端并发上限。只对 vLLM 生效；llama.cpp 用下面的 slots */
     max_num_seqs: number | null
     max_num_batched_tokens: number | null
     gpu_mem: number | null
     /** 放行 file:// 的媒体根目录；只有本机自起的服务才可能有 */
     local_media_root: string | null
+    /** llama.cpp 的 -np。null = 按显存自动；vLLM 下恒为 null */
+    slots: number | null
   }
   /** 当前这组参数解析出的分档 / 权重 / 显存；ok=false 时 error 给原因 */
   plan: VllmPlan
@@ -452,6 +491,11 @@ export type VllmPlan =
       summary: string
       /** 槽位方案。只有 llama.cpp 有：vLLM 的并发由 max_num_seqs 动态分配 */
       slots?: VllmSlotPlan | { error: string }
+      /**
+       * 这组参数对应的权重在不在盘上（只有 llama.cpp 会算）。
+       * ok=false 时 error 里带着"缺哪一档、现有哪些档"的人话原因。
+       */
+      weights?: { ok: boolean; gguf?: string; mmproj?: string; error?: string }
     }
   | { ok: false; error: string }
 
@@ -494,6 +538,28 @@ export type ArtifactInfo = {
   mtime: number
   /** null = 读不动 footer（损坏/pyarrow 缺失），页面显示 "-" */
   rows: number | null
+}
+
+/** 离线包里的一个分片，以及它在产物目录里已经有多少行。 */
+export type PackShard = {
+  name: string
+  path: string
+  bytes: number
+  kind: 'parquet' | 'webdataset'
+  /** 只有 parquet 读得到（footer）；tar/zip 不扫，null = 未知 */
+  total_rows: number | null
+  done_rows: number
+  /** done = 行数凑满；partial = 有产物但不足/总数未知；none = 没有产物 */
+  state: 'done' | 'partial' | 'none'
+}
+
+export type PackShardScan = {
+  dir: string
+  out: string
+  out_exists: boolean
+  /** 产物是 jsonl 才带包名，parquet 产物按行数切、归属不到分片 */
+  attributable: boolean
+  shards: PackShard[]
 }
 
 export type FtpConfig = {
@@ -673,6 +739,8 @@ export type PreviewParams = {
   layout?: string
   artist?: boolean
   artist_depth?: number
+  /** 画师表；不传 = 跟配置。预览与真实跑必须用同一张表，否则名字对不上 */
+  artist_table?: string
   recursive?: boolean
   include_zips?: boolean
   include_loose?: boolean
@@ -947,12 +1015,19 @@ type LocalFiles = {
   download_repo: string
   download: DownloadState | null
   /**
-   * 目录里有文件、但 llama.cpp 要的那几个文件（gguf / mmproj）还缺哪些。
-   * 踩过：下的是 safetensors 仓库（17G），页面显示"已下载"，启动却报
-   * "GGUF 权重不存在"——所以判定不能只看目录非空。
+   * 原始权重已经下好、但 llama.cpp 要的那几个文件（gguf / mmproj）还没压出来。
+   * VLM 下的是 safetensors，GGUF 一律由「本地量化」产出，所以这里缺的是
+   * "还没做那一步"，不是"下载没下全"。
    */
   missing_files?: string[]
-  /** 真的能直接跑：目录有内容且不缺文件 */
+  /** 哪些 GGUF 档真的有文件（`q4` / `q6`…）；只登记了路径但文件不在的不算 */
+  gguf_ready?: string[]
+  /**
+   * 有没有 transformers 原始权重（config.json + *.safetensors）。
+   * 只有 NL 行有这个字段；目录里只剩量化产物（.gguf）时为 false。
+   */
+  raw_ready?: boolean
+  /** 真的能直接跑：原始权重在盘上，且该有的 GGUF / mmproj 也在 */
   ready?: boolean
 }
 
@@ -971,15 +1046,8 @@ export type VlmModelEntry = {
   /** llama.cpp 要的默认 GGUF 与视觉投影文件（相对仓库根） */
   gguf?: string
   mmproj?: string
-  /** 同一份权重的各档 GGUF：{q4: 路径, q6: 路径} */
+  /** 同一份权重的各档 GGUF。只会是本地产物（原始权重压出来的）。 */
   gguf_quants?: Record<string, string>
-  /** 下载清单（glob 或精确文件名） */
-  download_files?: string[]
-  /**
-   * 可单独下载的档位。空 = 没有 GGUF 分档（vLLM 用的原始权重）。
-   * 页面据此出"下哪一档"的下拉，不再一律下 Q4。
-   */
-  download_tiers?: { key: string; label: string; file: string }[]
 } & LocalFiles
 
 export type TagModelEntry = {
@@ -1003,6 +1071,14 @@ export type ModelCatalog = {
   proxy: string
   /** 装了 socksio 才支持 socks5:// */
   socks_supported: boolean
+  /** 下载源（镜像站），空 = 跟随 env_endpoint / 官方 */
+  endpoint: string
+  /** 环境变量 HF_ENDPOINT 的值，空 = 没设 */
+  env_endpoint: string
+  /** 最终生效的下载源（页面设置 > 环境变量 > 官方） */
+  effective_endpoint: string
+  /** 大文件下载连接数（页面设置 > 环境变量 > 默认 4） */
+  conns: number
 }
 
 export type ProxyTest = {
@@ -1160,6 +1236,12 @@ export type DepItem = {
   detail: string
   /** 上次检查的结果；没检查过就是 null */
   verified: DepVerify | null
+  /** 这个包同时属于另一个分组（同一份 site-packages，卸载会两边一起少） */
+  shared?: boolean
+  /** false = 当前平台用不了（例如 Windows 上的 vllm），安装/重装要置灰 */
+  supported?: boolean
+  /** 只支持哪些平台，展示用：["linux"] */
+  platforms?: string[]
 }
 
 /** 批量动作里的一项。单包动作也有一条，前端统一按列表画 */
@@ -1184,16 +1266,25 @@ export type DepJob = {
 
 export type DepGroup = {
   key: string
+  /** core / tag / optional / extra：extra 组来自 pyproject 的附加依赖 */
+  kind?: string
+  /** kind === 'extra' 时对应的 extra 名（install-extra 的参数） */
+  extra?: string
   title: string
   hint: string
   items: DepItem[]
   ok: number
+  missing?: number
+  /** 缺但本机装不了（Windows 上的 vllm），算进度要扣掉 */
+  blocked?: number
   total: number
 }
 
 export type DepState = {
   python: string
   torch_index: string
+  /** torch 走 CPU 版时的原因（驱动太老 / 读不出驱动）；空 = 正常走 CUDA */
+  torch_note: string
   summary: {
     total: number
     ok: number
@@ -1201,6 +1292,8 @@ export type DepState = {
     mismatch: number
     /** 元数据在但 import 失败：包坏了、DLL 缺了 */
     broken: number
+    /** missing 里本机装不了的那部分：按钮上的"要装几个"不能算它 */
+    blocked: number
   }
   /** 上次完整性检查的时间（0 = 还没查过） */
   verify_at: number
@@ -1304,7 +1397,66 @@ export type GgufConvertState = {
   targets: { key: string; label: string; note: string }[]
   /** 原始权重的落点；ready=false 表示还没下过 */
   source: { dir: string; bytes: number; ready: boolean; hint?: string }
+  /**
+   * 清单里登记过的 GGUF 档与落盘情况（`q4` / `q6` / `f16`…）。
+   * `bytes === 0` = 配置指着的那份文件已经不在了。
+   */
+  quants: Record<string, { file: string; bytes: number }>
   task: GgufConvertTask | null
+}
+
+// ---- 调度中心（把 fox-label v3 worker 托管成一个可启停的子进程）
+
+/** 服务端 `/api/v1/status` 里的一条租约。字段是 worker 那边定的，原样转。 */
+export type CenterLease = {
+  lease_id: string
+  /** active = 正在干；prelock = 干完这片后预占的下一片 */
+  kind: string
+  repo: string
+  package: string
+  /** 剩多少秒到期 */
+  expires_in: number
+  progress?: Record<string, unknown>
+}
+
+/** 只读看板。ok=false 时 reason 说人话，其余字段可能没有。 */
+export type CenterBoard = {
+  ok: boolean
+  reason?: string
+  status?: string
+  tier?: string
+  leases?: CenterLease[]
+}
+
+export type CenterConfig = {
+  server: string
+  user_id: string
+  tag_url: string
+  mode: string
+  out_dir: string
+  interval: number
+  extra_args: string
+}
+
+export type CenterIdentity = {
+  user_id?: string
+  device_id?: string
+  server?: string
+  server_id?: string
+  beat_interval?: number
+}
+
+export type CenterState = {
+  running: boolean
+  /** 上一轮进程的退出码；null = 还没跑过 */
+  last_rc: number | null
+  uptime_s: number
+  config: CenterConfig
+  /** 后端自动拼好的 worker --cmd，页面只读展示 */
+  cmd: string
+  identity: CenterIdentity
+  board: CenterBoard
+  log: string[]
 }
 
 export class ApiError extends Error {
@@ -1369,6 +1521,55 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
   return (await resp.json()) as T
 }
 
+/** 顶栏「配置方案」的一条（轻量，不带表单内容） */
+export type PresetMeta = { name: string; ts: string; auto: boolean }
+
+export type PresetState = {
+  items: PresetMeta[]
+  active: string | null
+  auto: boolean
+  auto_name: string | null
+}
+
+export type PresetPayload = PresetMeta & {
+  form: Record<string, unknown>
+  spec: Partial<JobSpec>
+}
+
+// ---- NL 提示词文件（仓库根 prompt/*.json）
+// 名字就是文件名，所以 id 与 name 恒等；分开写是为了界面别再去切路径。
+
+export type PromptItem = {
+  id: string
+  name: string
+  /** 相对仓库根显示，拿来在界面上说"改的就是这个文件" */
+  path: string
+  bytes: number
+  mtime: number
+  chars?: number
+  has_zh?: boolean
+  has_system?: boolean
+  note?: string
+  /** 文件读不了 / JSON 坏了的原因。有它就说明这份选不了 */
+  error?: string
+}
+
+export type PromptDoc = {
+  id: string
+  name: string
+  path: string
+  prompt: string
+  prompt_zh: string
+  system: string
+  note: string
+}
+
+/** 可提交的内容字段（新建/保存都只认这几个） */
+export type PromptBody = Pick<PromptDoc, 'prompt' | 'prompt_zh' | 'system' | 'note'>
+
+/** 新建时的初始内容 = 内置提示词在当前配置下的样子 */
+export type PromptTemplate = Pick<PromptDoc, 'prompt' | 'prompt_zh' | 'system'>
+
 export const api = {
   health: () => json<Health>('/api/health'),
   defaults: () => json<Defaults>('/api/defaults'),
@@ -1379,6 +1580,7 @@ export const api = {
     if (params.layout) qs.set('layout', params.layout)
     if (params.artist !== undefined) qs.set('artist', String(params.artist))
     if (params.artist_depth !== undefined) qs.set('artist_depth', String(params.artist_depth))
+    if (params.artist_table) qs.set('artist_table', params.artist_table)
     if (params.recursive !== undefined) qs.set('recursive', String(params.recursive))
     if (params.include_zips !== undefined) qs.set('include_zips', String(params.include_zips))
     if (params.include_loose !== undefined) qs.set('include_loose', String(params.include_loose))
@@ -1397,6 +1599,66 @@ export const api = {
   },
   createJob: (spec: Partial<JobSpec>) =>
     json<Snapshot>('/api/jobs', { method: 'POST', body: JSON.stringify(spec) }),
+  // ---- NL 提示词文件（仓库根 prompt/*.json）。名字就是文件名，走 query 传。
+  prompts: () => json<{ dir: string; items: PromptItem[] }>('/api/prompts'),
+  /** 新建时的初始内容 = 内置提示词在当前配置下的样子 */
+  promptTemplate: () => json<PromptTemplate>('/api/prompts/template'),
+  prompt: (id: string) =>
+    json<PromptDoc>(`/api/prompts/one?id=${encodeURIComponent(id)}`),
+  savePrompt: (
+    id: string,
+    body: { prompt: string; prompt_zh?: string; system?: string; note?: string },
+  ) =>
+    json<PromptDoc>(`/api/prompts/one?id=${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  createPrompt: (body: {
+    name: string
+    prompt: string
+    prompt_zh?: string
+    system?: string
+    note?: string
+  }) => json<PromptDoc>('/api/prompts', { method: 'POST', body: JSON.stringify(body) }),
+  revealPrompts: () => json<{ path: string }>('/api/prompts/reveal', { method: 'POST' }),
+  /**
+   * 新建任务页记住的东西，两份：
+   * `form` 页面 state 快照（填一项存一项，中途关掉也不丢）；
+   * `spec` 提交成功时的 JobSpec（字段语义稳定，旧记录靠它兜底）。
+   */
+  jobForm: () =>
+    json<{ form: Record<string, unknown>; spec: Partial<JobSpec> }>('/api/job-form'),
+  // ---- 配置方案：具名快照，存/切/删 + 自动保存。名字走 query，中文与空格都不怕。
+  presets: () => json<PresetState>('/api/presets'),
+  preset: (name: string) =>
+    json<PresetPayload>(`/api/presets/one?name=${encodeURIComponent(name)}`),
+  savePreset: (payload: {
+    name: string
+    form: Record<string, unknown>
+    spec?: Partial<JobSpec>
+  }) =>
+    json<PresetState>('/api/presets', { method: 'POST', body: JSON.stringify(payload) }),
+  applyPreset: (name: string) =>
+    json<PresetPayload & { state: PresetState }>('/api/presets/apply', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  deletePreset: (name: string) =>
+    json<PresetState>(`/api/presets?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  autoPreset: (payload: {
+    enabled?: boolean
+    form?: Record<string, unknown>
+    spec?: Partial<JobSpec>
+  }) =>
+    json<PresetState>('/api/presets/auto', { method: 'POST', body: JSON.stringify(payload) }),
+  saveJobForm: (payload: {
+    form?: Record<string, unknown>
+    spec?: Partial<JobSpec>
+  }) =>
+    json<{ form: Record<string, unknown>; spec: Partial<JobSpec> }>('/api/job-form', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   // ---- 冲突与决策
   conflicts: (offset = 0, limit = 100) =>
     json<ConflictsState>(`/api/conflicts?offset=${offset}&limit=${limit}`),
@@ -1536,10 +1798,11 @@ export const api = {
     json<{ ok: boolean; snapshot: DataJobState | null }>(`/api/datajob/${id}/stop`, {
       method: 'POST',
     }),
-  dataJobPreview: (input_dir: string, exclude = '', recursive = true) =>
+  dataJobPreview: (input_dir: string, exclude = '', recursive = true,
+                   artist_table = '') =>
     json<SplitPreview>('/api/datajob/preview', {
       method: 'POST',
-      body: JSON.stringify({ kind: 'split', input_dir, exclude, recursive }),
+      body: JSON.stringify({ kind: 'split', input_dir, exclude, recursive, artist_table }),
     }),
   // ---- HF 分片下载页
   hfFiles: (
@@ -1571,6 +1834,11 @@ export const api = {
         files: { filename: string; bytes: number }[]
       }[]
     }>('/api/downloads/packs'),
+  /** 离线包里的分片清单 + 各片已产出行数（分片管理面板用） */
+  packShards: (path: string, out: string) =>
+    json<PackShardScan>(
+      `/api/packs/shards?path=${encodeURIComponent(path)}&out=${encodeURIComponent(out)}`,
+    ),
   downloadsStart: (spec: {
     repo: string
     files: string[]
@@ -1607,6 +1875,18 @@ export const api = {
     json<ProxyTest>('/api/models/proxy/test', {
       method: 'POST',
       body: JSON.stringify({ url }),
+    }),
+  /** 下载源（镜像站）。空串 = 跟随 HF_ENDPOINT / 官方。 */
+  saveEndpoint: (url: string) =>
+    json<{ endpoint: string; effective: string; catalog: ModelCatalog }>(
+      '/api/models/endpoint',
+      { method: 'PUT', body: JSON.stringify({ url }) },
+    ),
+  /** 大文件下载连接数。0 = 用默认 4。 */
+  saveConns: (conns: number) =>
+    json<{ conns: number; catalog: ModelCatalog }>('/api/models/conns', {
+      method: 'PUT',
+      body: JSON.stringify({ conns }),
     }),
   vllmCapability: (engine: string) =>
     json<{ engine: string; ok: boolean; reason: string }>(
@@ -1689,8 +1969,8 @@ export const api = {
     json<ModelCatalog>('/api/models', { method: 'PUT', body: JSON.stringify(payload) }),
 
   /**
-   * 下载模型。precision 只对带 GGUF 分档的 VLM 模型有效：传 q4/q6/q8 时
-   * 只下这一档 + 配套 mmproj；不传按配置里的清单下（通常是好几档一起）。
+   * 下载模型。VLM 一律下原始权重（path 指的那个仓库，整包）；量化档不在
+   * 网上拿，由「本地量化」现场压。precision 只为兼容旧调用保留，不影响下载。
    */
   startDownload: (kind: string, key: string, precision?: string) =>
     json<DownloadState>('/api/models/download', {
@@ -1895,4 +2175,25 @@ export const api = {
     }),
 
   planCancel: () => json<PlanState>('/api/plan', { method: 'DELETE' }),
+
+  // ---- 调度中心
+  center: () => json<CenterState>('/api/center'),
+  /**
+   * 连接（换身份）。后端在跑的时候会拒：换 server 或换名字都要先停止，
+   * 否则老进程还在按旧身份续约，服务端会看见两套身份。
+   */
+  centerLogin: (payload: { server: string; user_id: string; secret?: string }) =>
+    json<CenterState>('/api/center/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  centerStart: (payload: {
+    tag_url?: string
+    mode?: string
+    out_dir?: string
+    interval?: number
+    extra_args?: string
+    cmd_template?: string
+  }) => json<CenterState>('/api/center/start', { method: 'POST', body: JSON.stringify(payload) }),
+  centerStop: () => json<CenterState>('/api/center/stop', { method: 'POST' }),
 }

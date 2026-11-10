@@ -67,6 +67,10 @@ class Record:
     # kind -> provenance（tag / nl 各一份）。两份的字段不完全一样：
     # tag_backend 只在 tag 文件里，nl 文件没有。分开存才不会串。
     prov: dict[str, dict] = field(default_factory=dict)
+    # 产物顶层的溯源字段（文档 V0.2 §8）。存在 payload 顶层而不是 provenance
+    # 里，是为了让下游一句 SQL 就能筛语言、模型版本、来源 revision。
+    # 用 dict 而不是五个字段：以后文档加字段不用再改 Record 的构造点。
+    meta: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -207,8 +211,35 @@ def _id_from_filename(name: str) -> str:
     return ""
 
 
-def _read_one(path: Path) -> tuple[str, str, str, str, dict]:
-    """读一个中间态文件，返回 (image_id, kind, 内容, image_path, provenance)。
+# 产物顶层里要一并带到最终表的字段（文档 V0.2 §8）。
+# 不放 provenance：那一份是"模型参数对账"用的，混进业务字段会让续跑校验
+# 和人工读日志都变模糊。
+_META_FIELDS = ("caption_language", "annotation_model", "annotation_version",
+                "source_revision", "tags_original", "visible_text")
+# 这两个字段是列表，不能走 str()：`str(["a"])` 会写成 "['a']"，下游 json.loads
+# 拿到的是字符串而不是字符串列表。
+_LIST_FIELDS = ("tags_original", "visible_text")
+
+
+def _annotation_meta_of(obj: object) -> dict:
+    """从 payload 顶层挑出溯源字段；空值不写，避免整列都是空串。
+
+    名字里带 `annotation` 是为了和 conflicts.py 里那个"按文件名取时间戳"的
+    `_meta_of` 区分开——两个都叫 `_meta_of` 时，import 一次就会串。
+    """
+    if not isinstance(obj, dict):
+        return {}
+    out: dict = {}
+    for key in _META_FIELDS:
+        val = obj.get(key)
+        if val in (None, "", []):
+            continue
+        out[key] = list(val) if key in _LIST_FIELDS else str(val)
+    return out
+
+
+def _read_one(path: Path) -> tuple[str, str, str, str, dict, dict]:
+    """读一个中间态文件，返回 (image_id, kind, 内容, image_path, provenance, meta)。
 
     内容为空不是这里判断的事——那是 empty_content 的活。这里只负责
     把「文件坏了」和「文件是空的」分开，因为两者处理方式不同：
@@ -222,42 +253,43 @@ def _read_one(path: Path) -> tuple[str, str, str, str, dict]:
 
     fallback_id = _id_from_filename(path.name)
     if not raw:
-        return fallback_id, kind, "", "", {}
+        return fallback_id, kind, "", "", {}, {}
 
     try:
         obj = json.loads(raw)
     except ValueError:
         # 不是 json 时按纯文本处理。成员手工改过、或工具直接写了裸文本。
-        return fallback_id, kind, raw, "", {}
+        return fallback_id, kind, raw, "", {}, {}
 
     if isinstance(obj, str):
-        return fallback_id, kind, obj.strip(), "", {}
+        return fallback_id, kind, obj.strip(), "", {}, {}
     if not isinstance(obj, dict):
-        return fallback_id, kind, "", "", {}
+        return fallback_id, kind, "", "", {}, {}
 
     return _tuple_from_payload(obj, fallback_id, kind)
 
 
 def _tuple_from_payload(obj: object, fallback_id: str,
-                        kind: str) -> tuple[str, str, str, str, dict]:
-    """把一份 payload 折成 (image_id, kind, 内容, image_path, provenance)。
+                        kind: str) -> tuple[str, str, str, str, dict, dict]:
+    """把一份 payload 折成 (image_id, kind, 内容, image_path, provenance, meta)。
 
     json 文件与 parquet 行共用这一段：两种形态存的是**同一份 payload**，
     解析口径必须只有一处，否则"换成 parquet 之后对账结论变了"这种问题
     会查很久。
     """
     if not isinstance(obj, dict):
-        return fallback_id, kind, "", "", {}
+        return fallback_id, kind, "", "", {}, {}
     image_id = str(obj.get("image_id") or fallback_id)
     value = obj.get("tag") if kind == "tag" else (obj.get("caption")
                                                   or obj.get("nl") or "")
     prov = obj.get("provenance")
     return (image_id, kind, str(value or "").strip(),
             str(obj.get("image_path") or ""),
-            prov if isinstance(prov, dict) else {})
+            prov if isinstance(prov, dict) else {},
+            _annotation_meta_of(obj))
 
 
-def _iter_shard_records(root: Path) -> Iterator[tuple[str, str, str, str, dict]]:
+def _iter_shard_records(root: Path) -> Iterator[tuple[str, str, str, str, dict, dict]]:
     """读分片形态的产物（artifacts-*.parquet / artifacts-*.jsonl）。
 
     tag / nl 两个字段存的是与 json 文件完全相同的 payload 字符串，见
@@ -275,16 +307,16 @@ def _iter_shard_records(root: Path) -> Iterator[tuple[str, str, str, str, dict]]
                     obj = parse_payload(kind, str(row.get(kind) or ""))
                     if obj is None:
                         continue
-                    image_id, k, value, image_path, prov = _tuple_from_payload(
+                    image_id, k, value, image_path, prov, meta = _tuple_from_payload(
                         obj, fallback, kind)
-                    yield image_id, k, value, image_path, prov, f"{path}#{idx}"
+                    yield image_id, k, value, image_path, prov, meta, f"{path}#{idx}"
         except Exception as exc:      # noqa: BLE001 - 坏片要报，不该中断整批
             raise ValueError(f"{path}: {exc}") from exc
 
 
 def _iter_member_records(
     root: Path, stats: MergeStats,
-) -> Iterator[tuple[str, str, str, str, dict]]:
+) -> Iterator[tuple[str, str, str, str, dict, dict]]:
     """把逐图 json 与分片（parquet / jsonl）统一成一个流。
 
     同一个目录里几种形态并存时（改了 --artifact-format 重跑），各边的记录
@@ -292,14 +324,18 @@ def _iter_member_records(
     """
     for path in _iter_json_files(root):
         try:
-            image_id, kind, value, image_path, prov = _read_one(path)
+            got = _read_one(path)
         except ValueError as exc:
             stats.unreadable.append(f"{path}: {exc}")
             continue
+        # 解包放在 try 外面：`_read_one` 的返回结构一变就要当场炸。放在 try 里
+        # 会被上面那个 `except ValueError` 当成"文件读不了"，整批候选静默归零
+        # —— 只在统计里多一个 unreadable 数字，看起来像数据没交。
+        image_id, kind, value, image_path, prov, meta = got
         if not image_id:
             stats.unreadable.append(f"{path}: 文件名里取不到 image_id")
             continue
-        yield image_id, kind, value, image_path, prov, str(path)
+        yield image_id, kind, value, image_path, prov, meta, str(path)
 
     try:
         yield from _iter_shard_records(root)
@@ -352,7 +388,8 @@ def collect(
             per_root[str(base)] = 0
             continue
         per_root.setdefault(str(base), 0)
-        for image_id, kind, value, image_path, prov, source in _iter_member_records(base, stats):
+        for (image_id, kind, value, image_path, prov, meta,
+             source) in _iter_member_records(base, stats):
             if should_stop is not None and should_stop():
                 stopped = True
                 break
@@ -388,6 +425,11 @@ def collect(
                 rec.prov[kind] = prov
             else:
                 rec.prov.pop(kind, None)
+            if meta:
+                # 溯源字段跟着内容走：tag/nl 两份都带同一份值，先读到哪份用哪份。
+                # 被拒的版本不覆盖（与 prov 同一个处置），否则"批了 A 却记着 B 的
+                # 模型版本"。
+                rec.meta.update(meta)
             if kind == "tag":
                 rec.tag = value
             else:
@@ -703,6 +745,45 @@ def _stats_by_artist(
 
 # ------------------------------------------------------------------ 输出
 
+# 最终表的两套字段名。
+#   legacy : caption / tag        —— 现在所有下游读的就是这两个
+#   v02    : nl_final / tags_final —— 标注规范 §8 的验收字段名
+#   both   : 两套并列（默认）
+# ★默认 both 是有代价的：caption 是长文本，3000 万条复制一份约十几 GB。
+#   要省体积就用 `--final-names v02`（或 legacy）重跑一次 merge——merge 只读
+#   产物不碰模型，重出一份命名不同的表是分钟级的事，不需要重打标。
+FINAL_NAMES = ("legacy", "v02", "both")
+
+_CAPTION_KEYS = ("caption", "nl_final")
+_TAG_KEYS = ("tag", "tags_final")
+
+
+def final_field(row: dict, kind: str) -> str:
+    """按别名取正文。kind 给 caption / nl_final 取 NL，给 tag / tags_final 取 tag。
+
+    读侧一律走这里：盘上可能是任一套列名（旧表只有 caption，新表可能只有
+    nl_final），比较/过滤时按固定键名取值会静默把所有行判成空。
+    """
+    keys = _CAPTION_KEYS if kind in ("caption", "nl_final", "nl") else _TAG_KEYS
+    for key in keys:
+        value = row.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def apply_final_names(row: dict, mode: str) -> dict:
+    """把一行改成目标命名。mode 见 FINAL_NAMES。"""
+    if mode == "legacy":
+        return row
+    out = dict(row)
+    if mode == "v02":
+        out.pop("caption", None)
+        out.pop("tag", None)
+    out["nl_final"] = row.get("caption", "")
+    out["tags_final"] = row.get("tag", "")
+    return out
+
 
 def build_rows(
     records: dict[str, Record],
@@ -724,6 +805,7 @@ def build_rows(
     ordered = records.sorted_items() if isinstance(records, SpillMap) else (
         (key, records[key]) for key in sorted(records))
     for image_id, rec in ordered:
+        meta = rec.meta or {}
         yield {
             "image_id": image_id,
             # HF 模式下产物自带 image_path（hf://datasets/<repo>/<shard>#<key>），
@@ -731,6 +813,18 @@ def build_rows(
             "image_path": rec.image_path or f"{prefix}/{image_id}{image_ext}",
             "caption": rec.caption,
             "tag": rec.tag,
+            # 文档 V0.2 §8：五列必须逐行存在。缺的写空值而不是省略键——jsonl
+            # 省略了还能读，转成 parquet 就会因为各行的键集合不同直接失败。
+            "caption_language": str(meta.get("caption_language") or ""),
+            "tags_original": list(meta.get("tags_original") or []),
+            "annotation_model": str(meta.get("annotation_model") or ""),
+            "annotation_version": str(meta.get("annotation_version") or ""),
+            "source_revision": str(meta.get("source_revision") or ""),
+            # 规范 §8 要求这一列逐行存在（可为空）。存 JSON 字符串的理由同
+            # pack.py：每条的字段集不同（bbox 可选），list<struct> 会让
+            # parquet 的 schema 在第二行就冲突。
+            "visible_text": json.dumps(list(meta.get("visible_text") or []),
+                                       ensure_ascii=False),
         }
 
 
@@ -744,24 +838,33 @@ def write_merged(
     fmt: str = "jsonl",
     require: str = "both",
     skip_empty: bool = True,
+    final_names: str = "both",
 ) -> tuple[Path, int]:
     """写出总表。默认 JSONL，因为 3000 万条做成单个 JSON 数组没有工具吃得下。
 
     skip_empty 按 require 过滤，而不是"有任一字段就留"：both 模式下
     caption 空、tag 有值的记录若写进总表，训练侧读到空 caption 会当成
     "这张图没有描述"——比不写更糟，因为它看起来是条合法数据。
+
+    final_names 见 FINAL_NAMES：默认同时给 caption/tag 与 nl_final/tags_final
+    两套列名，谁都不用改代码。
     """
+    if final_names not in FINAL_NAMES:
+        raise ValueError(f"final_names 只能是 {'/'.join(FINAL_NAMES)}，"
+                         f"收到 {final_names!r}")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     def _keep(row: dict) -> bool:
         if not skip_empty:
             return True
+        caption = final_field(row, "caption")
+        tag = final_field(row, "tag")
         if require == "both":
-            return bool(row["caption"] and row["tag"])
+            return bool(caption and tag)
         if require == "nl":
-            return bool(row["caption"])
-        return bool(row["tag"])
+            return bool(caption)
+        return bool(tag)
 
     rows = (r for r in build_rows(records, dataset_name=dataset_name,
                                   image_root=image_root, image_ext=image_ext) if _keep(r))
@@ -778,7 +881,8 @@ def write_merged(
             for row in rows:
                 if fmt == "json" and written:
                     f.write(",\n")
-                f.write(json.dumps(row, ensure_ascii=False))
+                f.write(json.dumps(apply_final_names(row, final_names),
+                                   ensure_ascii=False))
                 if fmt != "json":
                     f.write("\n")
                 written += 1

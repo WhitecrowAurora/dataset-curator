@@ -30,8 +30,11 @@ function fmtClock(ts: number): string {
 }
 
 /**
- * 历史任务。数据直接来自 /api/jobs（后端只保留本进程最近的 20 条）——
- * 不做本地缓存：任务簿在任何终端都可能被重启，缓存只会让页面与后端互相打脸。
+ * 历史任务。数据直接来自 /api/jobs：内存里的活任务 + 盘上的历史（run/history/），
+ * 后端各留最近 20 条。不做本地缓存：缓存只会让页面与后端互相打脸。
+ *
+ * 来自磁盘的那批带 historical 标记，只有快照没有 reader —— 「进度 / 结果」
+ * 打不开（那两页要读产物索引），只能看摘要或者点「继续」按原参数重跑。
  */
 export function History({
   currentId,
@@ -92,9 +95,9 @@ export function History({
     <div className="mx-auto lx-page-enter flex max-w-6xl flex-col gap-3.5">
       <PageHeader
         icon={<HistoryIcon size={17} />}
-        eyebrow="本进程内最近 20 条"
+        eyebrow="最近 20 条 · 含重启前的记录"
         title="历史任务"
-        description="停下或失败的任务点「继续」接着做。"
+        description="停下或失败的任务点「继续」接着做；重启前的记录只能看摘要。"
         actions={
           <button
             type="button"
@@ -127,6 +130,8 @@ export function History({
               // progress 为 null = 流式任务（HF 分片），总量未知：进度条退化为计数
               const pct = (job.progress ?? (job.counts.total ? (job.counts.settled / job.counts.total) : 0)) * 100
               const active = job.id === currentId
+              // 盘上的历史记录：只有快照，事件流和产物索引都随进程没了。
+              const offline = Boolean(job.historical)
               return (
                 <div
                   key={job.id}
@@ -208,6 +213,8 @@ export function History({
                     <button
                       type="button"
                       className="lx-btn-ghost inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px]"
+                      disabled={offline}
+                      title={offline ? '进程重启后这条只剩记录，没有实时进度' : undefined}
                       onClick={() => onOpenRun(job.id)}
                     >
                       <PlayCircle size={13} /> 进度
@@ -215,6 +222,8 @@ export function History({
                     <button
                       type="button"
                       className="lx-btn-ghost inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px]"
+                      disabled={offline}
+                      title={offline ? '产物索引随进程退出，历史记录打不开结果页' : undefined}
                       onClick={() => onOpenResults(job.id)}
                     >
                       <ListChecks size={13} /> 结果

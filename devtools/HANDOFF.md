@@ -97,6 +97,22 @@ env\python\python.exe -m tagger.cli client --url http://127.0.0.1:8010 ^
   worker，同一个 id 接着跑）；`stopped` / `failed` 走 `/api/jobs/{id}/restart`
   （线程已退出，按原 spec 重开一个，历史里会多一条）。两者对用户都叫"继续"，
   区别只在后台是一条命还是两条命。
+- **历史任务落盘**（2026-11-08）：每条任务写一份 `run/history/<id>.json`，
+  内容是 `Job.snapshot()` 原样存——`Job` 握着锁/线程/进度表，序列化不了。
+  列表 = 内存里的活任务 + 盘上的历史，同 id 以内存为准，各取最近 20 条。
+  重启时会把还写着 `running/pending/paused` 的记录改写成 `stopped` 并注一句
+  原因：不改的话它会一直占着"已有任务在跑"的位子，新建任务永远 409。
+  历史条目带 `historical: true`，前端据此把「进度 / 结果」置灰（那两页要读
+  `Job.reader`，进程没了就没有），「继续」仍然可用——`restart` 从历史取 spec
+  重建，只认 `JobSpec` 现存的字段，旧版本多出来的键会被忽略，不会报"不兼容"。
+- **新建任务页记住上次填的**（2026-11-08）：`configs/ui-form.json` 存两份。
+  `form` 是页面 state 的逐项快照（键名与 useState 同名），**改一项防抖 700ms
+  写盘**，所以中途关掉程序也不丢；`spec` 是提交成功时的 JobSpec，字段语义
+  跨版本稳定，用来兜住旧记录。恢复顺序 **spec 先、form 后**：form 是实时快照，
+  一定比上次提交的更新，让它压在上面；form 里没有的键再由 spec 补。
+  为什么不只存 JobSpec：它要等提交才存在，而逐项保存在输入过程中就要写；
+  从 state 现造 JobSpec 得复制 submit 里那一百多行分支，迟早对不上。
+  两份都剔掉 `api_key` / `hf_token`（凭据有专门存档）。
 - **暂停时强制落盘**（`_flush_sink`）：parquet 产物默认攒满 2000 行才写一片，
   不在这里 flush 的话，用户按完暂停就关窗口，界面上的「已完成 300 张」会随着
   关闭凭空消失、下次还要重打。json 布局逐张写，不受影响。
@@ -129,6 +145,14 @@ env\python\python.exe -m tagger.cli client --url http://127.0.0.1:8010 ^
   更新的 torch 时，这一下会把它降级并重下 2.5GB。
 - pip 输出逐行进日志（400 行环形），页面每秒轮询；装 torch 的十几分钟里，
   没有输出是最难熬的。可中途取消（terminate 子进程）。
+- **附加依赖（pyproject 的 extra）也在这页**：`convert`（本地量化 GGUF）、`quantize`
+  （4bit 量化）、`parquet`、`serve`，每组一个分区，组头带「安装本组」（只装这一组
+  缺的）。它们原来只长在各自的功能弹窗里，想"先把环境配齐再干活"的人在这一页
+  看不到还缺什么——而这一页是唯一能回答"整台机器缺什么"的地方。
+  **但它们不进「安装缺失」那个批量**：`serve` 在 Windows 上装了也起不来、
+  `llmcompressor` 几百 MB，一次全装就是误伤。
+- 附加依赖组里与主清单重名的包（torch / transformers / pyarrow…）挂一个「共用」
+  小标：两组改的是同一份 site-packages，在组里点「卸载」会把打标一起弄停。
 
 **重依赖（`heavy`）不能跟着批量装**。vllm 实测会拖进 80+ 个包，并把 numpy
 2.5.4→2.2.6、starlette 1.10→1.7、fastapi 0.162→0.136、transformers 4.x→5.17。
@@ -193,15 +217,18 @@ pip 照装、返回 0。不捞的话用户只看到一个绿色的"完成"，而
 
 ### 本地量化成 GGUF（模型管理页「本地量化」）
 
-默认引擎 llama.cpp 只吃 GGUF。模型没有现成 GGUF 时（自训 / 微调 / 某些破限版），
-用这条把**原始权重**变成能跑的档位：
+默认引擎 llama.cpp 只吃 GGUF，而**下载一律只下原始权重**（`path` 指的
+transformers 仓库，整包 safetensors）。网上现成的 GGUF 一份都不下——同一份
+权重两种来路，产出漂了根本查不出是哪一环。所以流程固定两步：
 
-1. 模型行下载档位选「原始权重（用于本地量化）」→ 整仓库 safetensors 落到 `models/nl/<key>/`
+1. 模型行点「下载原始权重」→ 整仓库落到 `models/nl/<key>/`
 2. 点「本地量化」→ 选 Q4_K_M / Q6_K → 开始
 3. 完成后产物自动登记进 `configs/models.json` 的 `gguf_quants`，新建任务页选同名档位即可
 
-- 脚本用的是 llama.cpp 官方 `convert_hf_to_gguf.py`，按运行时 tag 自动取到
-  `runtime/llama.cpp/convert/`（首次约 10 MB 源码包），**不要自己手改**那几份文件
+- 脚本用的是 llama.cpp 官方 `convert_hf_to_gguf.py`。它**内置在 `vendor/llama-convert/`**
+  （脚本 + `conversion/` + `gguf-py/`，约 2 MB 纯 Python，随发布包走），所以第一次
+  转换不用联网；内置那份被删/残缺才回落到 `runtime/llama.cpp/convert/`，再不行才去
+  GitHub 取源码包。**不要自己手改**那几份文件
 - 依赖是 `convert` 这个 extra（torch + transformers），页面能一键装
 - 视觉模型会跑两趟：文本塔写 `--outfile`，第二趟加 `--mmproj`（它只是开关，
   输出名自动加 `mmproj-` 前缀）
@@ -224,16 +251,18 @@ pack-dist.bat -NoTests -Out D:\x.zip :: 不要测试、指定输出路径
 
 **脚本自动包含**：`tagger\`（含 `web\ui\dist`，排除 `node_modules` / `dist.bak`）、`tests\`、
 `devtools\`、`configs\`、`desktop\`（排除 `bin` `obj`）、`env\initialization\`（embeddable
-解释器 + pip wheel，约 12MB）、根目录脚本与 `Tagger.Shell.exe`。
+解释器 + pip wheel，约 12MB）、`vendor\llama-convert\`（GGUF 转换脚本，约 2MB）、
+根目录脚本与 `Tagger.Shell.exe`。
 
 **永远不会包含**：`models\`（42GB）、`work\`、`run\`、`.pytest_cache`、`node_modules`、
 `dist\desktop`、`env\python`（除 `-WithEnv`）、**`configs\models.json`**。
 
 `configs\models.json` 是**接收方自己的**覆盖文件（加过的模型、改过的下载目录、代理、
 本地量化登记进去的 `gguf_quants`）。它是本机数据，跟着包发出去等于"升级一次就把他们的
-配置清空"（我们这边通常只有 `{}`）。所以 `pack-dist.bat` 拷完 `configs\` 会把它删掉，
-只发 `tiers*.yaml`。同理：**升级只覆盖代码与默认配置，权重与任务断点（`run\resume.json`、
-产物目录）都不在包里，解压不会影响他们跑到一半的活**。
+配置清空"（我们这边通常只有 `{}`）。`configs\ui-form.json`（新建任务页"上次填的那套"：逐项快照 `form` + 提交过的
+`spec`）同理，也一起删。所以 `pack-dist.bat` 拷完 `configs\` 会把这两个删掉，只发 `tiers*.yaml`。
+同理：**升级只覆盖代码与默认配置，权重、任务断点与历史（`run\` 整个目录）、产物目录
+都不在包里，解压不会影响他们跑到一半的活**。
 
 `-WithEnv` 会先看 `env\python` 里还有没有 torch，有就中止——否则会出一个 4GB 的包。要带环境
 就先 `prune-env.bat -Apply -StripBytecode`。
@@ -268,9 +297,10 @@ pack-dist.bat -NoTests -Out D:\x.zip :: 不要测试、指定输出路径
 | `web/packaging.py` | 分包/拼接/封包的后台任务（`/api/datajob*`） | 完整 |
 | `web/models.py` | **模型清单**：`/api/models` 读写 `configs/models.json`（只存与 tiers.yaml 的差异），下拉与 CLI 共用同一份合并结果 | 完整 |
 | `web/downloads.py` | **权重下载**：流式下载 + 进度/网速 + 按文件断点续传 + 取消 + 代理（http/socks5）；删除只允许 `models/` 之内 | 完整 |
-| `gguf_convert.py` | **本地量化成 GGUF**：原始 safetensors → `convert_hf_to_gguf.py`（按运行时 tag 自动取脚本）→ F16 → `gguf_quant` 压成 Q4_K_M/Q6_K → 登记回覆盖文件。视觉模型多跑一趟导出 mmproj | 完整 |
+| `gguf_convert.py` | **本地量化成 GGUF**：原始 safetensors → `convert_hf_to_gguf.py`（内置在 `vendor/llama-convert/`，缺了才回落下载）→ F16 → `gguf_quant` 压成 Q4_K_M/Q6_K → 登记回覆盖文件。视觉模型多跑一趟导出 mmproj | 完整 |
 | `gguf_quant.py` | GGUF 再压（自研 numpy，Q4_K/Q6_K，输入必须是 F16/BF16 的 GGUF） | 完整 |
 | `netutil.py` | 回环地址判定：本机请求一律不吃系统代理（代理软件会拦 127.0.0.1） | 完整 |
+| （外部）`fox-label worker.py` | **分发包派工/心跳/租约**由同事的服务端项目负责，不在本仓库；我们只提供 `client --progress-file` 这一条出口（见 §37） | 外部 |
 
 ### 前端（`tagger/web/ui/`）
 
@@ -588,6 +618,13 @@ UI 滑块范围 90-100，低于 92 显示体积/画质提示。若将来真要�
 - tag 后端：`wd-eva02` 本地权重在 `models/wd-eva02/`，CUDA 可用
 - 实测吞吐：800 张 / 32.0s ≈ **40ms/张**（4070 Ti SUPER，bf16，batch=4，含解码与写盘）；模型加载另算 6~8s
 - 默认端口 `27100`；前端 dev 在 `3010`
+- **壳子的端口必须固定 27100**：WebView2 的 localStorage 按 origin（含端口）隔离，
+  随机端口等于每次换站点，主题/上次任务/轮询间隔这些本机偏好会集体失效。
+  `PythonServer.PickPort()` 先试 27100，被占用才退回系统分配
+- 输入容器：「读取包内图片」认 `.zip` 与 `.tar` / `.tar.gz` / `.tgz`（HF 上下来的 webdataset
+  分片就是 tar）。取图统一走 `pack.ContainerReader`（按容器缓存句柄 + 一把锁）——
+  tar 每张重开一次等于全包重扫，慢到像卡死。判断"是不是包内成员"只用
+  `InputItem.is_member`，别再写 `kind == "zip_member"`
 - 产物（本地打标）：`<out>/tags/<image_id>-tag.json`，含 `tag / tags[] / rating{} / provenance{}`；
   封包任务的 `image_id` 是全局序号（`alice-000001`），纯打标任务仍是相对路径 id
 - 产物（打包）：parquet（默认）/ `.tar`（webdataset）/ `.zip`，按 `max_records` 封口；
@@ -598,6 +635,12 @@ UI 滑块范围 90-100，低于 92 显示体积/画质提示。若将来真要�
 - 桌面壳子产物：`dist/desktop/Tagger.Shell.exe`（约 152 KB，依赖 .NET 8+ 桌面运行时）
 - vLLM 服务：页面拉起的写 `run/fingerprint.json`（任务也读这个同一个路径）；
   端点 `/api/vllm`，模块 `web/vllm_service.py`
+- NL 提示词从 `prompt/*.json` 选（文件名=界面显示名，中文照原样），页面可编辑/新建/打开目录；
+  字段见 `prompt/README.md`。**整段替换**内置的那份（不追加），`provenance.prompt_name` 只作备注，
+  同源判定仍看 prompt 文本的 sha，所以改名不会让历史产物被判成"参数变了"
+- `prompt/默认提示词.json` = 内置提示词在**默认产出规格**下的静态快照，随包发出去当底稿；
+  它是死文本，不会跟着「描述长度」「中文比例」变，那两项只对「内置（按参数生成）」生效。
+  `pack-dist.bat` 的拷贝白名单里已加上 `prompt\`（漏了会在打包输出里 WARNING）
 - 模型权重可在「模型管理」页直接下载：每行一个目录（默认 tag=`models/<后端>`、
   NL=`models/nl/<key>`），进度/网速靠轮询 `/api/models` 的 `download` 字段；
   下完变成「删除 / 打开位置」，取消后留下的半截文件会标记 `partial` 并支持续传。
@@ -612,13 +655,15 @@ UI 滑块范围 90-100，低于 92 显示体积/画质提示。若将来真要�
   官方 `qwen3vl-4b/8b` 降为对照与回退。原因是训练 diffusion 的图集里暴露内容
   占比不低，原版遇到 NSFW 直接拒答，表现是"整张只出几句干话、一个 tag 都没有"
   且不报错——静默漏标。
-  同一条目里两套权重各有用途：`path` 是原始 bf16（vLLM / 量化的输入），
-  `gguf` / `mmproj` 是 llama.cpp 的成品（mradermacher 转的 Q4_K_M，作者原仓库
-  只有 BF16/Q8_0，16G 卡放不下 BF16）。新增 `download_repo` / `download_files`：
-  模型管理页的下载按钮按它们走，只拉主权重 + mmproj，不下整个 GGUF 仓库
-  （那个仓库 6 个档合计 20G+）。
+- **下载只下原始权重**（2026-11-08 定）：VLM 的下载入口不再分档，一律整包下
+  `path` 指的 transformers 仓库（4B 8.27G / 8B 16.33G，单文件 safetensors）。
+  网上现成的 GGUF 一份都不下，`download_repo` / `download_files` 两个字段
+  已从配置和覆盖文件白名单里移除——留着就是一条"从网上拿成品量化权重"的后门。
+  量化档只能由「本地量化」压出来，所以 `gguf` / `mmproj` / `gguf_quants` 全部
+  指向 `models/nl/<key>/` 下的本地产物（命名见 `gguf_convert.default_outputs`），
+  没压之前启动会明确报缺哪一份。
   ★覆盖文件是整体替换：`quantize._register` 写回时必须把 gguf / mmproj /
-  download_repo / download_files 一起抄过去，漏一个就会让默认引擎报"没配 GGUF"。
+  gguf_quants 一起抄过去，漏一个就会让默认引擎报"没配 GGUF"。
   量化默认对象跟着分档走（`_model_source(None)` → resolve_profile），所以三档
   改了模型，量化默认也就是破限版，不需要改代码。
 - 新建页的「打标方式」是三选：**Tag 打标**（engine=local）/ **NL 打标**（engine=vlm + output_mode=nl）/
@@ -1601,6 +1646,330 @@ W4A16 继续用原有的 `/api/vllm/quantize/*`，一行没动——弹窗在用
 - **默认产物名带档位**（`<源文件名>-Q4_K_M.gguf`）。两份 GGUF 只差一个后缀位
   摆在同一目录，换错文件跑一天才发现，成本太高。
 
+## 23. 2026-11-09：两条量化路合成一个「量化」菜单（附两个"点了没反应"的修复）
+
+### 23.1 一个按钮、两个引擎分组
+
+模型管理页每行原本并排两个按钮：「压 GGUF」和「量化 W4A16」。它们其实是
+**同一个问题的两种答案**——llama.cpp 只吃 .gguf，vLLM 只吃 W4A16，选错引擎
+产物就是废的——并排摆着会让人以为要各点一次、或者以为两个都要做。
+
+现在合成一个「量化 ▾」，点开是浮动菜单（`components/QuantizeMenu.tsx`，
+形态照抄 PresetMenu：`relative` 容器 + 绝对定位面板 + 点外部/Esc 收起）：
+
+| 分组 | 环境 | 档位 | 落到哪个弹窗 |
+|---|---|---|---|
+| llama.cpp | Windows 直接能跑 | F16 / Q4_K_M / Q6_K | `GgufConvertDialog` |
+| vLLM | 需要 Linux / WSL2 | GPTQ / AWQ | `QuantizeDialog` |
+
+菜单只做**快捷选档**，两个弹窗各自仍然是选档 + 确认 + 装依赖的地方：两个弹窗
+分别多了一个 `initialTarget` / `initialMethod` 参数，打开就是菜单里点的那一档。
+档位 key 必须与后端对齐（`gguf_convert.TARGETS` / `quantize.QUANT_METHODS`），
+真正的清单仍从 `/api/gguf`、`/api/vllm/quantize` 取，后端加档位不至于两边打架。
+
+按钮常驻：权重没下完时置灰（title 说明原因），而不是消失。
+
+### 23.2 「重新量化」点了没反应：done 判定把表单顶回去
+
+`QuantizeDialog` 原来靠渲染条件 `task?.status === 'done'` 决定"显示结果 + 使用
+W4A16"还是"显示表单"。而 `QuantManager` 会把上一条任务一直留在快照里，
+所以只要这一次会话量化成功过、或者上次成功过，`done` 就一直是 true：
+
+1. 点「重新量化」→ `showForm = true`；
+2. 表单区被 `task?.status !== 'done'` 挡住，不出现；
+3. 页脚又因为 `(!showForm || task?.status === 'done')` 落回原来那两个按钮。
+
+净效果 = 除了"已有量化权重"那张卡片消失外什么都没变，用户看到的就是"点了没反应"。
+
+修法：**收起表单这件事必须真的改状态，不能靠渲染条件去伪装**。加一个
+`useEffect(() => { if (task?.status === 'done') setShowForm(false) }, [task?.status])`，
+渲染条件退化成 `showForm` 单一真相源（`showForm` 真 → 表单 + 开始量化；
+假 → 结果 + 重新量化/使用）。以后再加状态也别在条件里拼"当前看起来应该是什么"。
+
+### 23.3 「本地量化」下载完就消失：入口长在了错误的那个分支里
+
+`LocalFilesBar` 的工具栏按 `running / downloaded / 其它` 三分支渲染，「本地量化」
+只写在**最后一个分支**里——于是它天生属于"还没下完"这个状态：一下完，整个
+分支不再渲染，按钮随之消失；把权重移出去（`exists` 变 false）它又出现。
+这就是用户报的"移出去再移回来就好了"——那个"好"只是状态过期。
+
+现在这一条入口整个删掉，统一到行头的「量化 ▾」（见 23.1）。
+
+### 23.4 校验
+
+`cd tagger/web/ui && npx tsc --noEmit` 0 错、lint 0、`npm run build` 通过
+（服务端直接吃 `dist/`，不重建看不到改动）。
+
+## 24. 2026-11-09：「No module named 'conversion'」与选不到 Q4/Q6
+
+### 24.1 那句报错不是缺 pip 包，是 sys.path
+
+现象：点「开始转换并量化」立刻失败，日志里
+
+    File "...\runtime\llama.cpp\convert\convert_hf_to_gguf.py", line 18
+        from conversion import (
+    ModuleNotFoundError: No module named 'conversion'
+
+看着像少装了一个包，其实 `conversion` 是**同一个 tar 里的目录**（还有
+`gguf-py/`），官方脚本靠 `sys.path[0] = 脚本所在目录` 找到它们。子进程被
+包了一层启动器、环境里开了 `PYTHONSAFEPATH`、或从别的 cwd 拉起时，这一项就
+没了。本地复现一句就够：
+
+    python -P runtime/llama.cpp/convert/convert_hf_to_gguf.py --help
+    # 同样的 ModuleNotFoundError: No module named 'conversion'
+
+修法（`gguf_convert._run_script`）：给子进程显式注入
+
+    PYTHONPATH = <TOOLS_DIR>;<TOOLS_DIR>/gguf-py
+
+`-P` / `PYTHONSAFEPATH=1` 都只影响 `sys.path[0]`，**不影响 PYTHONPATH**，所以
+这条兜得住。已验证 `-P`、`PYTHONSAFEPATH=1` 两种情况下脚本都能正常 import。
+
+> ⚠ **2026-11-09 追加：这条对随程序发的内嵌 Python 无效。** 那个解释器带
+> `python312._pth`，属于 isolated 模式（`ignore_environment=1`），**PYTHONPATH
+> 会被整个忽略**，报错一模一样。真正的修法见 §27。教训是：验证要用*那个*
+> 解释器（`env\python\python.exe`）验，系统 python 验过不算数。
+
+另一半是"半套解压"也会长成同一句话（断网 / 盘满 / 进程被杀留下"只有脚本、
+没有 conversion 包"）：所以
+
+- `tools_ready()` 三个文件都验（`convert_hf_to_gguf.py` + `conversion/__init__.py`
+  + `gguf-py/gguf/__init__.py`），`snapshot().script_ready` 也换这个口径；
+- `ensure_tools()` 不齐就重取，重取前先清 `conversion/`、`gguf-py/`，避免新旧
+  两版混在一起；
+- 跑挂了且日志里缺的是**我们自己那两个包**（`conversion` / `gguf`）→
+  `ensure_tools(force=True)` 重取一次再跑，只重试一次。缺 `sentencepiece`
+  这类第三方模块不触发重下——下了也没用。
+
+### 24.2 模型管理里选不到 Q4/Q6
+
+精度下拉原来只有 `int4 / int8 / bf16 / fp16 / fp32`，全是 vLLM 的口径。自己
+添一个模型、压出 Q4/Q6 之后，这里根本没有那一项可选 —— 于是"自定义模型没法
+用本地量化产物"。
+
+现在按两条链路分组（`Models.tsx`）：
+
+| 分组 | 取值 | 含义 |
+|---|---|---|
+| vLLM（加载方式，不换文件） | bf16 / fp8 / w4a16 | 同一份权重怎么加载 |
+| llama.cpp（GGUF 档） | f16 / q4 / q5 / q6 / q8 | 换的是权重文件本身 |
+
+- 已压过的档后面带「· 已压」（读 `gguf_quants` 的键）；选了没压过的档就提示
+  "先用行首的「量化」压一份"，别等启动才报缺文件。
+- 老清单里的 `int4` 等写法仍留一条 option：不留的话 `value` 对不上，下拉框会
+  显示成别的档，用户以为精度被改了。
+- 新增条目默认 `f16`（与默认引擎 llama.cpp 的默认档一致），不再是 `int4`。
+- 后端 `web/models.py` 的 `_PRECISIONS` 补了 `fp8` / `w4a16`：原来漏了它们，
+  页面上选完保存会被**静默归一成 int4**。
+
+顺手把 `test_api_reports_two_targets_and_source` 改成三档口径（`f16` 早就加进
+`snapshot()` 了，断言没跟上，一直是红的）。
+
+校验：`pytest tests/test_gguf_convert.py tests/test_web_models.py
+tests/test_precision.py tests/test_config.py tests/test_nl_engine.py` 全绿；
+前端 `tsc --noEmit` 0 错、`npm run build` 通过。
+
+## 25. 2026-11-09：「我明明看见有权重」→ 那是 GGUF，不是原始权重
+
+现象：点「量化」→ 选档 → 弹窗说"还缺原始权重"，提示里那句"我找过：
+H:\tagger\models\nl\qwen3vl-8b"，而那个目录里确实躺着 6 个文件。
+
+真身：目录里是 `*-F16.gguf` / `*-Q4_K_M.gguf` / `*-Q6_K.gguf`，
+**没有 config.json、没有 *.safetensors**。本地量化这条路要吃的是 transformers
+的原始权重，压好的 GGUF 反过来是它的**产物**。也就是说这条模型早就压完了，
+根本不用再走一遍。
+
+改了三处，都是为了让人一眼看出这个区别：
+
+1. `gguf_convert.source_dir()` 的报错不再只说"不在本地"，而是逐个候选目录
+   说明里面有什么（`_describe_dir`）：只有 N 份 GGUF / 有 safetensors 但缺
+   `config.json` / 空目录。只有 GGUF 那一种会额外补一句"这些是已经压好的量化档，
+   直接用就行"。
+2. `snapshot()` 增加 `quants`：清单里登记的每档 + 文件真实大小（`bytes == 0`
+   = 配置指着的文件已经不在了）。弹窗据此在"还缺原始权重"那张卡片里先列出
+   "已经有 Q4_K_M（5.0 GB）"，并在档位下拉里标「本地已有」。
+3. 顺手修了两处陈旧文案：弹窗原来写"回到这一行的下载档位，选「原始权重（用于
+   本地量化）」"——**那个档位选择器早就不存在了**，下载只有"下载原始权重"这
+   一个动作。
+
+另外 `web/models.py` 给每条 VLM 加了 `gguf_ready`（登记过且**文件真在**的档），
+模型管理页的「已压」标记和"本地还没有这一档"的提示都改成读它。原来只看
+`gguf_quants` 有没有这个键，配置里指向一个被删掉/改了名的文件时照样显示"已压"。
+
+### 25.1 顺带查出的数据问题（未改，等人决定）
+
+`qwen3vl-8b` 的 `gguf_quants.q6` 指向 `qwen3vl-8b-Q6_K.gguf`，磁盘上没有
+这个文件；实际那份叫 `Qwen3VL-8B-Instruct-Q6_K.gguf`（旧版本按仓库名命名产物
+留下的）。所以这模型选 q6 会报"缺文件"。要么把文件改成清单里的名字，要么把
+`tiers.yaml` 的映射指过去——两份都是 6.7G，改配置更省事。
+
+### 25.2 「原始权重已下载」也是假的 + 重新下载入口
+
+同一个坑的另一半：`exists` 只看"目录里有文件"，于是只剩 `.gguf` 的目录照样
+显示"原始权重已下载"，而且整个下载入口在 `downloaded` 分支里消失了——想重下
+原始权重的人被卡在"已下载"这个状态里，无处可点。
+
+- 后端 `_local_state()` 给 VLM 行加 `raw_ready`（`config.json` + 至少一份
+  `*.safetensors`，判据与 `gguf_convert.source_dir()` 一致）。文案据此分成
+  「原始权重已下载」与「目录里只有量化后的 GGUF」。
+- `downloaded` 分支里补一个下载按钮：
+  - 没有原始权重 → 文案「下载原始权重」，点前 confirm（真要拉十几 G）；
+  - 已有原始权重 → 文案「重新下载」，**幂等补齐**：`_fetch()` 对下完的文件按
+    大小跳过、对半截的走 Range 续传，所以不会白下一遍 16 G。想要真·覆盖就先
+    点旁边的「删除」。
+- `mergeLocal`（下载轮询只刷本地字段那个）补上 `missing_files / gguf_ready /
+  raw_ready / ready`：之前这几个不跟着刷，下完原始权重仍显示"只有 GGUF"。
+
+### 25.3 「下载要点两次」——其实第一次就下上了，只是没人把结果读回来
+
+点下载 → 后端任务确实起来了，但这一行的 `download` 字段还是空的；而轮询
+（1.2s 的 `api.models()`）是在 `downloading = 某一行 isRunning` 为真时才启动的，
+于是「要等刷新 → 才能开始轮询 → 才会显示在下载」形成死锁：界面上什么都没有。
+
+第二次点之所以"能下"，是它先走了 `onPrepare()`（保存并回读清单），那次回读
+才看见第一次已经启动的任务，进度条于是出现——看起来就像"第二下才生效"。
+
+修法：两个下载入口点完 `startDownload` 后**立刻 `return await api.models()`**，
+交给 `act()` 的 `onRefresh` 合并进去，轮询随即启动。
+
+## 26. 2026-11-09：下载改多连接分段（大文件）
+
+`web/downloads.py` 原来是"一个文件一条连接、文件之间排队"。16.4G 的
+`safetensors` 在国内单条 TCP 上常被压到几百 KB/s，这不是优化问题，是能不能
+在一天内下完的问题。
+
+**不新写一套**：`hf_source.download_shard` 里已经有完整的分段实现（预分配稀疏
+`.part` 让峰值只占 1 倍空间、每段进度写 `.part.json`、段级重试、
+`Range` 探测失败自动退回单连接、取消保留半成品），而且是打标链路在跑的代码。
+
+- 给 `download_shard` 加 `url` 入参：它的默认直链是 `/datasets/...`，模型下载
+  要走 `/models/.../resolve/`，路径不同，不能靠改常量。
+- `_fetch()`：`size >= 2×SEG_MIN_BYTES`（16 MB）且连接数 > 1 时走
+  `_fetch_segmented()`。连接数默认 4，`TAGGER_DL_CONNS` 可调（1 = 关掉分段）。
+  小文件（config/tokenizer）保持单连接——多开只是多几次 TLS 握手。
+- 两个坑写在代码里了：
+  1. `download_shard` 只要见到**非空同名文件**就当"已下完"返回，而单连接时代
+     留下的半截文件正是这种形态 → 分段前先把它删掉（升级前下到一半的只能放弃）；
+  2. 它的 `.download.lock` 是内部细节，用完清掉，别留在模型目录里。
+- 取消：`HFCancelled` 不推进累计字节、`.part` 留着续传。
+
+**只对单文件分段，文件之间仍顺序**：一个仓库的瓶颈永远是最大的那份文件，
+并行下 5 个 4G 分片和顺序下（每片 4 连接）的总带宽一样，但后者不会把 20 条
+连接一起砸到镜像站上。
+
+测试：`tests/test_web_downloads.py`（大文件必走分段、半截文件被清、锁文件被清、
+取消保留 `.part`）。
+
+## 27. 2026-11-09：下载源（镜像站）搬进页面设置
+
+以前只有 `HF_ENDPOINT` 环境变量这一条路，而且改完要重启服务。用户的实际处境
+是"每下 16G 就走一次梯子"，镜像站（hf-mirror.com）国内直连，才是那个解。
+
+- 覆盖清单里新增一项 `endpoint`（和 `proxy` 并列，不进分档表、整表保存时原样
+  带回）。空 = 没设过。
+- **优先级收敛到一处**：`config.download_endpoint()` = 页面设置 > `HF_ENDPOINT`
+  > 官方。`web/downloads._endpoint()` 改成调它，于是清单、下载、代理测试、
+  分段下载全都自动跟着走——优先级散在各调用点上，迟早出现"设置页显示镜像、
+  实际请求还打官方"。
+- `PUT /api/models/endpoint`（与 `/proxy` 同构）+ `models.set_endpoint()`：
+  只认 http/https、吃掉末尾斜杠、空串 = 跟随环境变量。漏协议（`hf-mirror.com`）
+  直接 400——httpx 会把它当相对路径，报出来的错跟"网络不通"分不清。
+- 页面「下载代理」那一栏改名「下载网络」，顶部加「下载源」下拉：
+  默认 / 官方 / 镜像 hf-mirror.com / 自定义，下面一行显示**当前生效**的地址
+  （环境变量在起作用时也说明）。镜像与代理是替代关系，不必同时开。
+
+**没覆盖**：数据集分片下载（`hf_source.HF_RESOLVE` 写死官方的 `/datasets/`）。
+那条链路要接镜像得单独改，别顺手一起动——它影响的是打标输入，不是权重。
+
+测试：`tests/test_web_models.py::test_endpoint_setting_wins_over_env`
+（优先级 + 末尾斜杠 + 清空回落到环境变量）、`::test_endpoint_rejects_missing_scheme`。
+
+### 27.1 默认值改成镜像站
+
+`config.DEFAULT_ENDPOINT = "https://hf-mirror.com"`。优先级变成
+**页面设置 > HF_ENDPOINT > 镜像站**（原来兜底是官方）。
+
+理由是默认值也是一种设计：官方在国内基本要挂代理，十几 G 的权重走按流量
+计费的梯子，默认选官方等于默认让人肉疼。要回官方得在「下载源」里显式选。
+门禁/私有仓库如果镜像不转发 `HF_TOKEN`，401 的报错里会直接提示切回官方。
+
+## 28. 2026-11-09：暂停后点删除 → WinError 32
+
+现象：`删不掉：[WinError 32] … model.safetensors.download.lock`。
+
+根因是"取消"只是**改状态**：`cancel()` 把 status 置成 canceled 让页面立刻
+有反馈，但后台线程还在把当前块写完、断开连接、落分段状态；这段时间
+`.part` 和 `.download.lock` 的句柄都开着，Windows 不允许删。
+
+修法两层：
+
+1. `Task.thread` 记住后台线程，`DownloadManager.wait_done()` join；
+   `models.delete_files()` 先 `cancel()` 再 `wait_done()`，超时才报
+   "下载线程还在收尾，几秒后再点一次"。
+2. `delete_dir()` 对 `OSError` 重试（0 / 0.2 / 0.5 / 1 / 2 秒）——Windows 上
+   杀软和索引器也会短暂占住刚写完的大文件，一次 `rmtree` 撞上就报同一个错。
+
+顺手：分段下载的 `.download.lock` 在我们这层用完就删（`_fetch_segmented` 的
+finally），不再留在模型目录里。
+
+## 29. 2026-11-09：连接数可选 + 起步不再显示"剩 35 小时"
+
+用户实测镜像站：**单条约 0.35 MB/s，总速随连接数近乎线性涨**
+（4 条 1.2、8 条 1.8、16 条 5.8 MB/s），16.3 G 在 4 条下要 4 小时、16 条约
+45 分钟。原来连接数写死 4，等于白送。
+
+- 覆盖清单加 `conns`（0 = 默认），`config.download_conns()` 统一优先级：
+  页面设置 > `TAGGER_DL_CONNS` > 4，钳到 1~32。`web/downloads._conns()` 调它，
+  旧的那份"自行 clamp 到 8"的逻辑删掉（两份口径必然分叉）。
+- `PUT /api/models/conns` + `models.set_conns()`；「下载网络」面板加一个
+  1 / 4 / 8 / 16 / 24 / 32 的下拉，改完下次下载生效（在跑的沿用旧值）。
+
+第二个问题是**看着像卡死**：起步那几秒全花在 TLS 握手、302、分段铺开上，
+0.5s 窗口采出来的速度能低一个数量级（实测 0.35 MB/s vs 稳定后 30 MB/s），
+按它算 ETA 就成了"剩 127906s"。
+
+- `Task.tick()`：起步 2 秒内不估速（`now - started_at >= 2.0` 才采样）。
+- `Task.state()`：`elapsed >= 5` 才给 `eta`，否则 `null`；页面在 `elapsed < 5`
+  时显示"测速中…"，之后没有 ETA 就什么都不显示（真停住时不该写"测速中"）。
+
+测试：`test_web_models.py::test_conns_setting_roundtrip`（默认 4 / 设 16 /
+清 0 / 99 被拒）。
+
+## 30. 2026-11-09：转换卡在 0% —— 其实卡在**取脚本**，不是转换
+
+现象：点转换，1 分 51 秒还是 `0% · 转换（safetensors → GGUF）`，没有任何日志。
+
+问运行中的服务（`GET /api/gguf?model=...`）看到真相：
+
+    ModuleNotFoundError: No module named 'conversion'
+    脚本自检失败（缺模块），重取一份转换脚本后重试
+    取转换脚本（llama.cpp v0.9.0）
+    下载源码 8/37 MB        ← 卡在这
+
+也就是说：**脚本是半套的**（第 25 节那个坑），新加的自愈把目录清掉重取，
+于是去 GitHub 下 37 MB 源码包——国内直连实测 **0.03 MB/s**，要下二十分钟，
+界面上就是"0% 一动不动"。
+
+五处改动：
+
+1. 源码包多路兜底（`_SOURCE_ROUTES`）：直连 → `gh-proxy.com` → `ghfast.top`，
+   15 秒内不到 3 MB 就换下一条（实测 gh-proxy 1.37 MB/s，37 MB 半分钟）。
+2. 这条下载允许用**页面设置的代理**（`_settings_proxy()`）。注意不能用
+   "下载源"——那是 HF 的前缀，跟 GitHub 无关。全部路都不通时报错里直接写
+   "填个代理 / 手动把三个目录解到 runtime/llama.cpp/convert"。
+3. 阶段要自曝：取脚本时 `stage` = "获取转换脚本（首次要下 ~37 MB）"。
+4. **运行中也显示日志**（对话框最近 4 行）——0% 停住时，日志里写着在干什么。
+5. 子进程加 `-u` + `PYTHONUNBUFFERED=1`（原来 stdout 块缓冲，进度行攒到 8 KB
+   才吐），主循环从"阻塞读 stdout"改成"读线程 + 0.2s 轮询"：
+   - 加载 16 G 权重的几分钟里**也能取消**（原来只能等下一行输出）；
+   - 超过 30 秒还没产物，stage 改写成"加载原始权重，前几分钟没有进度是正常的"。
+
+现状：这台机器的 `runtime/llama.cpp/convert` 已用新逻辑装好
+（`tools_ready() == True`），重启服务后直接就能转，不用再下那 37 MB。
+
+测试：`test_gguf_convert.py::test_source_download_falls_back_to_mirror`、
+`::test_source_download_reports_actionable_error`。
+
 ### 22.5 前端
 
 `pages/Quantize.tsx`，导航在「模型管理」下面。轮询 1.5s（有任务）/ 5s（空闲），
@@ -2100,3 +2469,674 @@ requests` —— 裁完得到一个 `import huggingface_hub` 会抛 ImportError 
 - `prune-env.bat` 用脚本复现其匹配逻辑做过 dry-run：55 项待删，关键包全保留
 - `pyzipper==0.4.0` / `py7zr==1.1.4` / `huggingface_hub==2.4.0` /
   `psutil==7.2.2` 已按本机实测版本钉死，`pip install` 可解析
+
+## 27. 2026-11-09：转换脚本内置，以及 `conversion` 报错的真正原因
+
+### 27.1 现象
+
+「本地量化」点下去：下载 37 MB 源码包 → 日志写"转换脚本就绪" → 紧接着
+
+    File "...\runtime\llama.cpp\convert\convert_hf_to_gguf.py", line 18
+        from conversion import (
+    ModuleNotFoundError: No module named 'conversion'
+
+而 `tools_ready()` 明明是 True（三个文件都在）。于是 §24.1 的"自愈重下"又跑
+了一遍，重新下了 37 MB，同一个错误。用户看到的就是同一个错误刷两次。
+
+### 27.2 真因：内嵌解释器是 isolated 模式
+
+    > env\python\python.exe -c "import sys; print(sys.flags)"
+    sys.flags(... ignore_environment=1, isolated=1, safe_path=True ...)
+
+目录里放着 `env\python\python312._pth`（内容：`python312.zip` / `.` / `Lib` /
+`Lib\site-packages` / `import site`）。**一旦有 `._pth`，Python 进入 isolated
+模式**，两条后果，任何一条都足以让转换跑不起来：
+
+1. `ignore_environment=1` → **PYTHONPATH 被整个忽略**，父进程里拼得再对也不进
+   `sys.path`。§24.1 的修法在这里等于没写。
+2. `safe_path=True` → **脚本自己所在的目录也不进 `sys.path`**（`sys.path[0]` 被
+   拿掉），于是官方脚本第 18 行 `from conversion import ...` 找不到同目录的包。
+   它只给自己补了 `gguf-py`（第 15 行），从没管过 `conversion`。
+
+一句复现（用的是*那个*解释器，不是系统 python）：
+
+    > python -c "import sys,os; e=dict(os.environ); e['PYTHONPATH']=r'...\convert'; \
+        print(subprocess.run([sys.executable,'-c','import conversion'],env=e).returncode)"
+    1        # 依旧 No module named 'conversion'
+
+### 27.3 修法
+
+**a) path 只能在子进程里补** —— 新增 `tagger/convert_runner.py`：
+
+    sys.path[:0] = [工具目录/gguf-py, 工具目录]   # 先补，再跑
+    sys.argv = [脚本, *其余参数]
+    runpy.run_path(脚本, run_name="__main__")
+
+`_run_script` 改成
+`python -u convert_runner.py <工具目录> <src> --outfile ... --outtype f16`。
+参数是列表直传（不过 shell），带空格/中文的路径不用转义。**以后别往子进程塞
+PYTHONPATH 了**，对这个解释器它永远是空的。
+
+**b) 脚本内置** —— `vendor/llama-convert/`（`convert_hf_to_gguf.py` +
+`conversion/` + `gguf-py/`，2.1 MB / 143 文件，纯 Python，随仓库与发布包走）：
+
+- `gguf_convert.tools_dir()`：**内置优先** → 回落 `runtime\llama.cpp\convert`；
+  `_complete()` 三个文件都验，`ensure_tools()` 见内置齐了就直接返回，绝不下载；
+- 内置那份"缺模块"**不触发**重取（重下也修不好，只会白等 37 MB）；
+- `snapshot()` 多一个 `bundled` 字段，页面/日志能看出这次用的是哪份；
+- `pack-dist.bat` 无条件带上 `vendor\llama-convert`（跟 `-WithLlama` 无关：要的是
+  2 MB 的 .py，不是 743 MB 的 CUDA 构建），并且**缺了直接 abort**——否则接收方
+  第一次量化就得去 GitHub 拉 37 MB，正是国内最容易卡住的一步。
+
+### 27.4 校验
+
+- `pytest tests/test_gguf_convert.py -q` → 16 passed（新增 3 条：内置目录齐、
+  内置缺失时回落、runner 能把 `conversion` 放进 `sys.path`）
+- 真跑一次内置脚本：`python -u tagger/convert_runner.py vendor/llama-convert --help`
+  → 正常打出 usage（`import torch`、`from conversion import ...`、`import gguf`
+  全过），这就是这条链路的实机证据
+- 打包：`pack-dist.bat` 的 preflight 会先查 `vendor\llama-convert\convert_hf_to_gguf.py`
+
+## 28. 2026-11-09：内置脚本跑通了，然后卡在 sentencepiece
+
+### 28.1 现象
+
+§27 修好之后第一次真跑（qwen3vl-8b-abliterated），已经能看到脚本从
+`vendor\llama-convert\` 启动、`conversion` / `gguf` / `torch` 全 import 通过，
+然后：
+
+    File "...\conversion\qwen.py", line 67, in set_vocab
+        self._set_vocab_sentencepiece()
+    File "...\conversion\base.py", line 2548, in _create_vocab_sentencepiece
+        from sentencepiece import SentencePieceProcessor
+    ModuleNotFoundError: No module named 'sentencepiece'
+
+### 28.2 为什么漏了
+
+`convert` 这个 extra 原来只写了 `torch` / `transformers` / `safetensors`，
+而 `sentencepiece` 是**特定架构的 tokenizer 才需要**的：权重目录里有
+`tokenizer.model` 时（Qwen 系、Llama 系都是），脚本走
+`_set_vocab_sentencepiece`，否则走 BPE/tiktoken 那条。所以"我这台机器转成功过
+一次"完全不代表别人不缺——机型不同，只是这次终于撞上了 Qwen。
+
+更糟的是**发现得太晚**：这个 import 在读完 config + tokenizer 之后才发生，
+用户已经等了几分钟，日志看着又像"少装了个普通 pip 包"。
+
+### 28.3 修法
+
+1. `pyproject.toml` 的 `convert` extra 加 `sentencepiece>=0.2.0` ——「依赖」页那
+   一键装的清单是**直接读 pyproject** 的，写在这里两处同时生效。
+2. `requirements-embedded.txt` 钉 `sentencepiece==0.2.3`（1.7MB 轮子）：转换脚本
+   已经内置，这一颗补齐之后"第一次量化"才真正开箱即用；`prune-env.bat` 的
+   PREFIXES 不含它，裁环境不会把它删掉。
+3. `gguf_convert._REQUIRED` 加 `sentencepiece`：`capability()` 在**点按钮之前**
+   就把缺包报出来（页面上是禁用按钮 + 原因），不再让人等几分钟后炸。
+4. `gguf_convert._missing_module()`：日志末尾里认出 `No module named '<X>'`
+   的那几个（sentencepiece / mistral_common / torch / transformers），
+   `_run_script` 据此抛"缺 X 没装 + `python -m pip install X` + 装完要重跑"，
+   而不是一句 `转换失败（退出码 1）`。
+
+### 28.4 校验
+
+- 实机装 `sentencepiece==0.2.3` 后，用真实权重目录只跑词表：
+  `convert_runner.py vendor/llama-convert <model dir> --outfile x.gguf --vocab-only`
+  → `EXIT=0`，`n_tensors = 0, metadata only`，产出 5.9MB 词表 GGUF。说明
+  tokenizer 这条路径彻底通了（真转仍要十几分钟，没在这轮跑完）。
+- `pytest tests/test_gguf_convert.py -q` → 18 passed（新增 2 条：缺包要点名、
+  缺包要在长跑之前拦住；另 1 条断言 extra 里必须有 sentencepiece）
+
+## 29. 2026-11-09：附加依赖组搬进「依赖检测」，缺依赖给两条路
+
+### 29.1 问题
+
+`convert` / `quantize` / `parquet` / `serve` 这四组依赖原来只长在各自的功能弹窗里
+（「本地量化」一个按钮、「量化」一个按钮）。想"先把环境配齐再干活"的人打开
+「依赖检测」，看到的是 core / tag / optional 三组——**这一页回答不了"附加依赖缺什么"**，
+而那恰好是唯一能回答"整台机器缺什么"的地方。sentencepiece 那次就是活例子：
+页面上一切正常，一转换才炸。
+
+### 29.2 改法
+
+后端 `deps.py`：
+
+- `_EXTRA_GROUPS`（key / 标题 / 说明）从 `pyproject` 的 `[project.optional-dependencies]`
+  现读，作为 `kind: "extra"` 的分区拼到 `snapshot()["groups"]` 末尾；
+- 每组多两个字段：`extra`（`install-extra` 的参数）和 `missing`（组头角标用它）；
+- 与主清单重名的包标 `shared: true`（torch 之类在两组都出现，卸载是同一个
+  site-packages）；
+- **不进** `install_missing`：那个批量是"补几个小包"，混进 llmcompressor（几百 MB）
+  和 vllm（Windows 装不了）就是误伤。每组自己一个按钮。
+- `verified`（导入自检）原来只贴给主清单的行，extra 行也要贴，否则附加依赖里
+  永远看不到「导入失败」。
+
+前端：
+
+- `Deps.tsx`：组头 `trailing` 放「安装本组 N」，只在 `kind === 'extra'` 时出现；
+  行上「共用」小标；
+- `GgufConvertDialog` / `QuantizeDialog`：缺依赖时**两条路并排**——就地点
+  「一键安装（xxx 依赖组）」，或者「去「依赖检测」里装」（`location.hash = '/deps'`，
+  切路由后弹窗随页面卸载，不用手动关）。报错文本命中 `依赖 / pip install / 没装 /
+  ModuleNotFoundError` 时，错误框下面也给同一个入口——§28 那种"跑挂了才发现缺包"
+  就靠它落地。
+
+### 29.3 校验
+
+- `pytest tests/test_deps.py tests/test_gguf_convert.py -q` → 35 passed
+  （新增 2 条：附加依赖组在快照里、组内缺数与行状态一致、共用标记；以及
+  llmcompressor **不在**核心分组里）
+- `/api/deps` 实测：`core / tag / optional / convert / quantize / parquet / serve`
+  七个分区，convert 组 4/4（torch、transformers、safetensors、sentencepiece，全带 `shared`）
+- 前端 `npx tsc --noEmit` 0 错、`npm run build` 通过（dist 已重建，服务端直接吃）
+
+## 30. 2026-11-09：mmproj 把 F16 覆盖了；新建任务页的"能不能选"
+
+### 30.1 「视觉投影文件（mmproj）不存在」的真身
+
+现象：选 qwen3vl-8b-abliterated + Q6，报
+`视觉投影文件（mmproj）不存在：...\mmproj-...-F16.gguf`；而模型目录里只有一个
+**0.47G** 的 `-Q6_K.gguf`（正常 6.3G），没有任何 `mmproj-*.gguf`。
+
+根因在 `gguf_convert._convert` 的第二趟：
+
+- 官方脚本的 `mmproj-` 前缀**只在 `--outfile` 是个目录时**才自动加
+  （`conversion/base.py:3175`，`MmprojModel.prepare_metadata` 的 `is_dir()` 分支）。
+  传文件路径时它只走 `gguf.fill_templated_filename(name, outtype)`，而那个函数
+  对**没有占位符**的名字原样返回。
+- 我们第二趟传的是 `--outfile <model>/xxx-F16.gguf`，也就是**第一趟的 F16**。
+  于是 mmproj（1.08G）直接覆盖了 15.6G 的 F16；接着量化把这 1.08G 的 mmproj
+  当文本模型压，产出 0.44G 的"Q6"——和实测的 0.47G 对得上；`mmproj-*.gguf`
+  则从头到尾没存在过，直到起服务才炸。
+- 代码里那句 `else: 没有生成 mmproj——起服务后图片会无法识别` 只写日志不报错，
+  整条链路看起来是"成功"的。
+
+修法：
+
+1. 第二趟 `--outfile` 直接用 `task.mmproj` 的路径（脚本对无占位符的原样落盘）；
+2. 视觉模型**没导出 mmproj 直接报错**：llama-server 不带它也能起来，但每张图都
+   被当纯文本，模型开始"看图说话"地编内容，比报错难查得多；
+3. `_run` 的 finally：失败/取消时按 mtime 删掉**这次真写过**的产物（半截文件比
+   没有更坏——它会让页面/清单都以为这一档好了）；
+4. `_quantize` 加体积闸：产物 < F16 的 15% 判坏并删（Q4≈30%、Q6≈40%、Q8≈53%）；
+5. `models._gguf_tiers_state`：有原始权重当基准时，GGUF < 20% 归入 `broken`，
+   不再算"已压"，页面上说"文件不完整，重压一次"。
+
+实机校验：用修好的命令对同一份权重单跑第二趟 →
+`mmproj-qwen3vl-8b-abliterated-F16.gguf` **1.08G 正确落盘**（此前从未存在过）。
+
+### 30.2 新建任务页：模型与精度都置灰，但都留了出口
+
+- 后端 `_defaults().vllm_models` 补 `gguf_ready` / `gguf_broken` / `raw_ready` /
+  `quantized`，口径与模型管理页共用 `models.weight_summary`（两页各算各的就会
+  互相打脸）。
+- **模型**从 `<select>` 换成一列卡片：不可用的整行灰掉、点不动，右侧给「下载」
+  或「去量化」直接跳模型管理。原生 `<option>` 里放不了按钮，而"没下 / 没压"
+  的每一条都需要一个可点的出口。`SettingRow` 因此新增 `wide`（独占整行）——
+  右侧那 260~360px 的窄列塞不下一列卡片。
+- **权重精度**：`ChoiceGrid` 新增 `optionDisabled` / `onBlocked`。没有对应文件的
+  档置灰，但**仍然可以点**——点了在下面挂一条"这档还没压，去模型管理点量化"
+  加跳转按钮。真设成 HTML `disabled`，用户只看到一个按不动的灰块，反而更困惑。
+- **「这套权重还能不能用」改成按当前引擎判**（llama.cpp 看 `gguf_ready`、vLLM 看
+  `raw_ready` / `quantized`），不再用 `ready`——那个是按 tiers.yaml 里写的默认档
+  （f16）算的：只压了 Q6、也用 Q6 跑的人，原来会被挂一条"权重未下载"。
+
+### 30.3 校验
+
+- `pytest -q` 全量通过（新增：mmproj 第二趟必须写自己的文件名、半截 GGUF 不算
+  ready、`/api/defaults` 带 gguf_ready）
+- 前端 `npx tsc --noEmit` 0 错、`npm run build` 通过（dist 已重建）
+
+## 31. 2026-11-09：Linux-only 的包在这台机器上不再能点「安装」
+
+### 31.1 问题
+
+`vllm` 在 `optional` 组和 `serve` 这个 extra 里都有一份，而它的轮子只有 Linux：
+Windows 上 `pip install vllm` 会装出一个缺 C 扩展的壳，`import` 时报
+`No module named 'vllm_C_stable_libtorch'`，还会顺手把钉死的 torch 换掉。
+原来的页面把它当普通"缺失"包：红色角标、「安装」亮着、「安装缺失」把它算进
+"缺 N 个"里，点下去必然失败一次，失败原因还指向一个跟用户操作无关的模块名。
+
+### 31.2 改法
+
+后端 `deps.py`：
+
+- `_PLATFORM_ONLY = {"vllm": ("linux",)}` + `Item.platforms` / `Item.supported`
+  （`sys.platform.startswith(...)` 判定）。键按分发名归一（小写、下划线当连字符），
+  所以 `requirements` 和 pyproject 两条路径共用同一张表——只改一条的话，
+  「安装本组」在 Windows 上照样会装。
+- `describe()` 输出 `supported` / `platforms`；`install` / `reinstall` / `install_missing`
+  / `install_extra` 一律先过 `supported`（原来 `install_extra` 是把 `serve` 这个名字
+  硬编码进去的，现在按表走，加新包不用再改那种 if）。
+- 快照里 `summary.blocked` 与每组 `blocked`：**缺、但本机装不了**的条数。
+  `missing` 仍保持原样（行上的"缺失"角标和它一致），页面用 `missing - blocked`
+  算按钮上的"要装几个"。
+- `_verify_one` 对装不了的包直接判过：那不是环境坏了，判成失败会让「检查完整性」
+  整批返红，用户照着修却无从修起。
+
+前端 `Deps.tsx`：
+
+- 行的副标题第一优先显示「仅 linux 可用」（压过"导入失败"与版本号），
+  「安装」/「重装」按钮 `disabled` 并给同样口径的 `title`；
+- 顶部「安装缺失」与组头「安装本组 N」都按 `canInstall = missing - blocked` 计数，
+  全都不剩时按钮置灰，`title` 说"缺的 N 个只有 linux 版"。否则用户看到
+  "缺 1 个"却点了报错。
+
+### 31.3 校验
+
+- `python -m pytest tests/test_deps.py -q` → 21 passed（新增 4 条：平台标记、
+  `blocked` 计数与行状态一致、Windows 上 `install`/`reinstall` 被拒、
+  `serve` 组不发起 pip）
+- `snapshot()` 实测（win32）：`summary.blocked = 1`，`optional` 与 `serve` 两组
+  各 `missing 1 / blocked 1`
+- 后端 `ast.parse` 通过；前端 `npx tsc --noEmit` 0 错、`npm run build` 通过（dist 已重建）
+
+### 31.4 顺带扫出来的同类问题（"点了必然失败"）
+
+1. **网页装 torch 用的是 `cu124` 索引，而清单钉死的是 `2.14.1+cu126`。**
+   实测索引目录：`whl/cu124/torch/` 最高只到 **2.6.0**、`whl/cu128` 也没有
+   2.14.1（只有 `cu126` / `cu130` / `cpu` 有）。也就是说有 N 卡的机器在依赖页
+   点「安装 / 重装 torch」必然 `No matching distribution found`。
+   `setup_embedded_env.ps1` 改成 cu126 那次（§见 torch 版本钉死那节）只改了安装
+   脚本，网页这一处漏了。修法：
+   - `deps.py: TORCH_INDEX_GPU` → `.../cu126`，注释写清"按 CUDA 版本分目录、
+     各放各的"；
+   - 新增测试 `test_torch_索引贴着清单里实测的_cuda_版本`：从
+     `requirements-tag.txt` 里读 `torch 2.14.1+cu126`，断言网页索引里含同一个
+     `cu126`——两处再各写各的就会红；
+   - 手抄命令的地方一并纠正：`prune-env.bat` 的 `cu124`、`embedded-env.md` 与
+     `setup_embedded_env.ps1` 里的举例（原来举 cu124 / cu128，两个都装不了
+     2.14.1）。
+2. **本来就有拦截、不用动的三处**（口径都是"平台/能力不够就置灰并说明"）：
+   llama.cpp 下载按 `snap.supported`（macOS 无官方二进制）；vLLM 启动按 `capOk`
+   （`nl_engine.check_engine` → `model_loader.check_environment`）；量化按
+   `available` + `missing_deps` 给「一键安装」（走的正是 `install-extra`，
+   现在也过平台表）。
+3. **留给以后的问题（不是 bug，是 knob）**：`_torch_index()` 只按"有没有
+   `nvidia-smi`"分档，不看驱动版本。装了 cu126 但驱动太老，pip 阶段一切正常，
+   要等 `import torch` 才报 driver 版本不足。要不要探测驱动版本、或把
+   「检查完整性」的报错翻成人话，等真有人撞上再说。
+   → 已按"要修"处理，见 §31.5。
+
+校验：`python -m pytest tests/test_deps.py tests/test_web_features.py
+tests/test_requirements_cover.py -q` → 42 passed。
+
+### 31.5 驱动版本：有显卡也可能装不了 cu126
+
+**问题**：索引选对了还不够。`nvidia-smi` 存在只说明"有卡"，不说明驱动支持
+CUDA 12.6。驱动只到 12.4 的机器上，cu126 的轮子 pip 照样装得上，直到
+`import torch` 才报 `CUDA driver version is insufficient`：pip 阶段一片绿、
+页面显示"已装"，第一次打标才炸，两句之间没有任何线索。
+
+**改法**：
+
+- `deps.py` 新增 `torch_plan() -> (索引, 一句话)`：
+  没卡 → CPU（无提示）；有卡但读不出驱动 CUDA → CPU + 提示；驱动 CUDA < 12.6 →
+  CPU + "驱动只支持 CUDA 12.4……想用显卡把驱动升到 CUDA 12.6 以上"；够新 → cu126。
+  退 CPU 而不是照装，是因为"能跑、只是慢"至少可用，且原因能写在页面上。
+- `_driver_cuda()` 跑一次 `nvidia-smi` 解析表头的 `CUDA Version:`，结果**缓存
+  60 秒**——依赖页在 pip 跑的时候每秒拉一次快照，不缓存会把轮询变成进程风暴。
+- 快照多一个 `torch_note`：页面底部用 warning 色显示那原因；`_one()` 里装 torch
+  时也往日志里打一条（事后翻日志能看出当时为什么装的是 CPU 版）。
+- `devtools/setup_embedded_env.ps1` 同一口径：显式 `-TorchIndex` 优先；否则按
+  驱动 CUDA 版本退 CPU 并 `Write-Warning`（原来只判 `nvidia-smi` 存不存在）。
+
+**校验**：`pytest tests/test_deps.py -q` → 26 passed（新增 4 条：无卡 / 驱动太老 /
+驱动够新 / 快照把 note 带出去）；本机实测 `_driver_cuda() = (13, 2)` → 走 cu126
+（13.x 驱动能跑 12.6 的构建）；ps1 `Parser::ParseFile` 无错误，`12.4 → tooOld=True`、
+`13.0 → False`；前端 `npx tsc --noEmit` 0 错、`npm run build` 通过（dist 已重建）。
+
+## 32. 2026-11-10：从旧项目抽「post id → 画师」全表
+
+**背景**：需求方（An）要 danbooru 源把画师写进 caption 正文（`@name`）、参考 tag
+全量喂给模型、图里文字保原语言。旧项目 `MatchaCuratio/NewBie-Training-XML-Caption`
+里有 8 份标注 json（最大 26 GB），画师在 `<artists>` 元素里——**不是 tag 串第一个**
+（Danbooru 的 `tag_string` 是字母序，画师走 `tag_string_artist`）。
+
+**做法**：`work/build_artist_table2.py` 流式读（字节级状态机切 JSON 对象 + HTTP
+Range 断点续传；v1 直连 26 GB 中途被 reset 白跑一次），合并成
+`work/danbooru_artists.parquet`：
+
+| 项 | 值 |
+|---|---|
+| 唯一 id / 有画师 | 9,465,535 / 9,226,534（97.5%） |
+| 体积 | 69.7 MB |
+| 与第二批 768 分片抽样 8000 条比对 | **95.2%** 能查到画师 |
+
+e621 排除，gelbooru 用 `sources` 单独标；空 `artists` 的行故意保留（区分"没标注"
+与"表里没这条"）。字段说明见 `work/danbooru_artists_README.md`。
+
+**踩到的坑**：远端执行机（121.225.25.33）**没有任何 Python**（`py.exe` 只是启动器，
+全盘常见位置都没有解释器），GitHub 又不通，只能在开发机跑；源文件是 JSON 数组、
+单条 3.6 KB，28 GB 整读不可能，必须流式。
+
+### 32.1 分片（在那台机器上切）
+
+远端后来从华为镜像装了 `C:\py312`（3.12.10）+ `pyarrow/huggingface_hub`（清华源），
+画师全表经 scp 传过去（66 MB / 9.8 s），`work/shard_artists.py` 按 **tar 成员名**
+（不是 manifest 字节数推算）切片：
+
+| 项 | 值 |
+|---|---|
+| 分片 | 844（对应 768 分发，88 片已在 HF 上） |
+| 行数 / 命中 | 8,005,010 / 7,763,950（**96.99%**） |
+| 体积 | 104.4 MB（每片约 124 KB） |
+| 耗时 | 17 分钟（单进程；瓶颈是磁盘，不是 CPU） |
+
+产物在 `K:\anlia\_artist\shards\`，每个 parquet 带 `shard/rows/matched/built_at/source`
+metadata 供加载时配对校验。**坑**：`Start-Process` 起的进程会随 SSH 会话结束被杀，
+只有 21 个文件就停；换 `Invoke-CimMethod Win32_Process Create`（WMI）才活得下来。
+
+### 32.2 工具侧：画师表 + 注入 + prompt v4
+
+- `artist.py`：`ArtistRule.table`（单个 parquet 或目录）+ `ArtistTable`
+  （目录形态只读当前分片那一份，id 从 `8349000` / `8349000.jpg` 都能取）。
+  **分片要配对才用**：拿 parquet 文件级 `shard`/`rows` metadata 与请求的分片名
+  比对（`shard_stem` 会把本地路径 / `hf://…#member` / `dist-0003.zip::成员`
+  归一到同一个 stem），对不上直接拒答 + 报一次 `[artist][警告]`。错片的列名、
+  行数、类型全都合法，只有编号是旧的，照用等于静默张冠李戴。
+- `client.py`：`_artist_names` → 表优先、目录名兜底、都没有就留空；多画师**只注入
+  第一个**（`@a`），全量留在 json 的 `artists` 字段，并标 `artist_source=table`。
+- 默认值改成开：`ArtistRule.enabled=True`（`from_dict` 缺省也是 True），
+  `configs/tiers.yaml` 同步；web 表单本来就是 `artist=True`。
+- **tag 串也带画师**：`@name` 放在 tag 列表最前、`tags` 里给 `1.0`（训练时 tag 是
+  条件，只写进 caption 等于没绑上）。NL 与 TAG 各一个开关（`inject_caption` /
+  `inject_tags`），关掉时 `artist_tag` 字段仍在，只是不进文本。web 侧两个开关
+  都要能从表单进 `JobSpec`（`JobRequest` 少一个字段就是"表单发了、任务收不到"）。
+  注意 `@name` 不是 danbooru 词汇，下游若拿 WD 词表做校验会被过滤，
+  这个约定要和训练侧对齐。
+- prompt **v3 → v4**：① caption 段加"整体画风/媒介"一条（v3 一句都没有）；
+  ② 加"引号内文字保持原语言、不翻译不罗马化"（v3 只写 English only，模型会把
+  中文招牌译掉）；③ 新增 `<REFERENCE>` 段，把源数据原始 tag 喂进去（`_ref_block`，
+  没 tag 时一个字不加）。`TaskRow.ref_tags` 从 manifest 的 `tags/tags_original/
+  danbooru_tags` 读。
+- `quality.py`：`_cjk_ratio` 默认剔除引号内引用——否则英文 caption 正确引用中文
+  招牌会被判成中文，进而跳过 tag 覆盖率、按 0.45 缩字符线。
+- `configs/tiers.yaml`：`artist.table` 注释了两种写法；web 任务经
+  `_artist_context` 把配置里的 table 传进 `ArtistRule`。
+- 测试：`tests/test_artist_table.py` 17 条（查表/串片/回退/多画师/参考段/引文不判中文），
+  全量 `pytest -q` 通过。
+
+## 33. 2026-11-10：画师整流器 + 在线画师表 + 画师随图走
+
+**背景**：画师输入实际有四种形态（目录名、danbooru 表、封包产物里的 artist 列、
+手工整理的表），分隔符/命名/有无 id 全不一样；而"图片和画师打在一起"这件事，
+打包产物其实早就有位置（parquet 的 artist 列、webdataset 的 `<stem>.json`），
+缺的是**封包时不去查表**和**打标时优先级反了**。
+
+### 33.1 整流器 `tagger artist-import`（新文件 `artist_import.py`）
+任何格式 → 一种 schema：`id:int64 / artists:list<str> / sources:list<str>`
++ metadata（`shard`/`rows`/`built_at`/`source`），与 `work/shard_artists.py` 同构。
+
+- 吃 csv / tsv / jsonl / txt / parquet；`id,names` 与 `names,id` 两种列序都认
+  （按"哪边是纯数字"判断，不靠列序）。
+- 多画师按 `& , ; | 、` 切；**不按 `/` 切**——`hatsune_miku_(cosplay)` 会被劈成两个。
+- 清洗走 `clean_artist_name`（与注入侧同一口径），别名走 `AliasTable` 且只映射
+  **切分后的每一段**（整段查在 `a & b` 上永远不命中）。
+- 同 id 不同画师**默认失败**，`--on-conflict first|last` 才覆盖。失败在写盘之前，
+  不会留半份表。
+- `--split-by-dir <tar目录>`：按分片**实际成员**切片，每个成员写一行（没画师也写
+  空列表），所以 `rows` == 成员数，`ArtistTable` 的配对校验直接能吃。
+
+### 33.2 在线画师表 `hf://datasets/<repo>/<文件或目录>`
+`ArtistTable` 现在三种形态：本地单表 / 本地分片目录 / 在线（单表或分片目录）。
+带 `.parquet` 是单表，其余当分片目录——猜错的代价是整批静默无画师，所以写法
+必须有唯一解。用 `hf_hub_download` 按需拉，缓存落 `run/hf-cache/<repo>--artist`。
+token 走 `HF_TOKEN` 环境变量，**不进 ArtistRule**（那字段会进任务快照与历史记录）。
+远程拉不到要记住（`_failed`）：仓库里没有这片就是没有，否则每张图重试一次
+等于几十万次 404；本地相反（文件可能边跑边拷）。
+
+**组合矩阵（现在是 4/4）**：本地分片 / 在线 tar × 本地表 / 在线表 全部对得上。
+唯一仍不支持的是 **HF parquet 流式 + 画师表**：那条路径的 `task.shard` 是仓库里的
+`pack-00000.parquet`，不是 webdataset 分片名。画师随图走（33.3）之后这条路不需要表。
+
+### 33.3 画师随图走（封包烧表 + 包内优先）
+- `plan_inputs(artist_table=...)`：表优先、目录名兜底，来源写进 `TagItem.artist_source`
+  （`table` / `path`）。`packaging.run_pack` 与 `split` 都把配置里的 `artist.table`
+  传进来。
+- 产物带来源：pipeline 的 meta 加 `artist_source`/`artists`，`pack.py` 的 parquet
+  加 `artist_source` 列，`distribute` 的 manifest 也加。
+- 打标侧优先级改成 **包内 table 口径 > 查表 > 包内 path 口径 > 空**。
+  理由：包内 table 值是逐图确认过的，再按分片查一次只会把它换成依赖分片命名的
+  推测值；数据一重新切片，分片名对不上就全错。目录名没有这个特权。
+- 分包阶段拿不到分片名（分包完才知道谁在哪片），所以那里只对全表生效，
+  检测到分片目录会打一条日志说明，不静默。
+
+### 33.4 校验
+`tests/test_artist_import.py` 15 条 + `tests/test_artist_table.py` 37 条
+（新增 20 条：在线地址解析/按需拉取/失败不重试/配对校验/包内优先级/封包查表）。
+全量 `pytest -q` 878 passed、`read_lints` 0。CLI 冒烟：
+`python -m tagger.cli artist-import --in a.csv --out all.parquet` → 2 id / 3 名字。
+
+### 33.5 webui：画师表从"只能改 yaml"变成表单字段
+之前 `artist.table` 只有 `configs/tiers.yaml` 一个入口，页面上的画师开关只管
+"要不要注入"，管不了"名字从哪来"——换数据集就得改 yaml，而改 yaml 会把上一个
+任务的口径一起改掉。现在三个页面都能填，**空 = 回落配置**：
+
+- 打标页（`NewJob.tsx`）：本地与 VLM 两个分支各一个「画师表」输入框，
+  共用同一个 state；`/api/preview` 也带上 `artist_table`，否则预览按目录名算、
+  实际跑却查表，名字对不上（而这个预览正是"发现命名不对"的唯一防线）。
+- 数据打包页（`Packaging.tsx`）：分包与封包各一个。分包阶段它影响 image_id 的
+  排序键（画师是 `(artist, rel_path)` 的第一项），封包阶段它决定"跟着图封进去
+  的画师是谁"，两边都必须与打标那次一致。
+- `/api/datajob/preview` 同样接表，否则分包预览会少报一大截画师覆盖。
+
+后端链路：`JobRequest.artist_table` → `JobSpec.artist_table` →
+`_artist_context`（`spec 覆盖 yaml`）→ `ArtistRule.table`；打包侧
+`SplitParams/PackParams.artist_table` → `rule.table`。
+`/api/defaults` 返回配置里的值，前端只拿来做**占位提示**、不预填——预填之后
+"空 = 跟配置"这个语义就失效了。
+
+校验：`npx tsc --noEmit` 0 错、`npm run build` 通过（dist 已重建）、
+全量 `pytest -q` 884 passed。冒烟：`/api/preview?artist_table=...` 的
+`samples[0].artist` 从空变成表里的值。
+
+## 34. 2026-11-10：新建任务页的参数按引擎归属（vLLM / llama.cpp）
+
+**背景**：「批调度」那块把两套引擎的开关摆在一起，只有槽位做了条件渲染。查下来的
+归属是这样的（依据 `model_loader.build_command` 与 `nl_engine.build_command` 两条
+命令的实际拼装）：
+
+| 前端字段 | vLLM | llama.cpp |
+|---|---|---|
+| 上下文长度 | `--max-model-len` | 只当每槽上限，且被 `CTX_PER_SLOT=3072` 截断 |
+| max_num_seqs | `--max-num-seqs` | 不生效（等价物是 `-np` 槽位） |
+| max_num_batched_tokens | `--max-num-batched-tokens` | 不生效（llama-server 的 `-b/-ub` 是另一套口径，未接） |
+| 显存占比 | `--gpu-memory-utilization` | **没有这个语义**：显存只能靠槽位/上下文/KV 量化间接控 |
+| 槽位 slots | 传了会被后端直接拒绝 | `-np` |
+| file:// 放行目录 | `--allowed-local-media-path` | **没有这个开关**，图片只收 base64 |
+| `-ngl 99`、`-ctk/-ctv q8_0` | — | 固定值，不是可调项 |
+
+**真问题不是"少了几个框"，是 max_num_seqs 在 llama.cpp 下的假生效**：前端照传 →
+进 `profile.max_num_seqs` → 进 `fingerprint_env` → 被 `client.resolve_concurrency`
+当成"服务端愿意同时处理多少条" → 决定任务并发。可 `nl_engine.build_command` 根本
+不读它，真实并发是 `slots`（16G 卡自动 12）。于是改这个框能改指纹、能改在途数，
+唯独改不动 llama-server：12 槽的机器按 8 条发，白丢约三成吞吐。
+
+**做法**：
+
+- 指纹补 `engine` 与 `slots`（`ServerHandle` 加两个字段；`start_server` 从刚拼好的
+  命令里回读 `-np`，不另算一份 `slot_plan`，避免两个真相源）。`resolve_concurrency`
+  按 `engine` 取值：llamacpp 读 `slots`，其余读 `max_num_seqs`，无 `engine` 的旧指纹
+  行为不变。
+- 前端：`max_num_seqs` / `max_num_batched_tokens` / 显存占比 / file:// 四项只在 vLLM
+  引擎下渲染；折叠摘要与「模型」行的「默认并发」按引擎改读槽位；分档下拉里的
+  「并发 8」也是 vLLM 口径，llamacpp 下不显示。启动/预览请求不再把这三项发给
+  llamacpp（`local_media_root` 同样只给 vLLM）。
+- 后端：llamacpp 收到这三个参数时往服务日志写一行"已忽略"，不再静默吞掉。
+
+`-ngl 99` 那条注释解释了为什么显存占比无法"接上"：`-ngl` 是"多少层上卡"，一旦
+小于总层数就退化成 CPU 推理（PCIe 往返让 decode 掉一个数量级），没有"调小一点、
+温和换显存"的中间档。
+
+**校验**：`npx tsc --noEmit` 0 错、`npm run build` 通过（dist 已重建）；
+`pytest tests/test_web.py tests/test_cli.py tests/test_client.py tests/test_nl_engine.py
+tests/test_throughput.py tests/test_web_vllm.py` → 142 passed / 0 failed
+（新增 `test_client_concurrency_uses_slots_for_llamacpp`、
+`test_fingerprint_separates_engine_and_its_concurrency_field`）。
+
+## 35. 2026-11-10：按《抽样与重标注规范 v0.2》对齐标注协议（§5 / §6 / §7）
+
+规范原文由主创给出（`image_dataset_sampling_annotation_v0_2.md`，共 8 节）。
+本轮只做**标注协议**部分，抽样配额（§1–§3）另做。
+
+### 35.1 参考 tag 按类别分组（§7.1）
+
+`ref_tags` 以前是空格平铺进 `<REFERENCE>`。平铺时 `hatsune_miku` 与
+`long_hair` 在模型眼里是同一类东西，实测会写成 "hatsune miku hair" 这种外貌词。
+
+- 新增 `tagger/tag_categories.py`：读 `models/*/selected_tags.csv` 的 category
+  列建映射（`TAGGER_TAG_VOCAB` 可覆盖路径），按
+  `character → copyright → artist → general → meta → unclassified` 渲染成
+  `character_tags: ...` 这类行（字段名带 `_tags`，与规范 §7.1 一致）。
+- `client._ref_block` 改成始终分组；**词表里查不到的 tag 归 `unclassified_tags`**，
+  不再冒充 general——规范写明"不可把未分类的任意冒充 artist"。
+- `rating`（`general`/`sensitive`/`explicit`/`questionable` 这四个词本身在词表里
+  是 category=9）直接不注入：它是审核等级，不是画面事实。
+- `PROMPT_VERSION` 升 **v5**。
+
+★**词表覆盖是残缺的**：`models/wd-eva02/selected_tags.csv` 16473 行里
+general 11601、character 4868、rating 4，**copyright / artist / meta 是 0 条**。
+所以 `vocaloid`、`sakimichan` 这种真 tag 现在落 `unclassified_tags`。
+要补全三类只有两条路：本地 `work/danbooru_artists.parquet`（946 万条）能补
+artist 一类；全五类得从远端导出全量 danbooru tag 表。
+
+### 35.2 图中文字结构化 `visible_text`（§6 + §8）
+
+- prompt 在 `<TAGS>` 之后、`<CAPTION>` 之前加 `<VISIBLE_TEXT>` 块，要求输出
+  `[{"text_exact","language","script","legibility","bbox?"}]`；没有文字输出 `[]`。
+  ★放在 caption**之前**是刻意的：自回归先写下原文，后面 caption 引号里才引得住。
+- 解析：`_TAG_BLOCK` / `_CAPTION_BLOCK` 的对齐 lookahead 都补了
+  `(?=<VISIBLE_TEXT>)`，否则新块正文会流进 tag 段被洗成假 tag。
+  `parse_output_full()` 返回三元组，`parse_output()` 保留二元组给老调用方。
+- 解析是**降级**的：JSON 被 max_tokens 切断时，先按 `"text_exact": "..."` 逐条
+  捞回，捞不到才按行；宁可少 language/script 字段，也不丢已经抄对的原文。
+- `OutputSpec.visible_text: bool = True`（`tiers.yaml` output 段同名开关），
+  **进缓存指纹**；`max_tokens` 的 `need_tokens` 预留 160 token。
+- ★**质检口径**：`nl_tokens` 是整段回复的 usage，而 `nl_max_tokens` 是给
+  caption 定的。不扣掉这一块，每张带字的图都会被判 "NL 过长" 反复重试。
+  `_estimate_visible_tokens()` 按"每条 20 token 结构开销 + 中日韩一字一 token
+  + 其余四字符一 token"扣减后再进 `QC`。
+- 产物：nl payload 顶层 `visible_text` **必写**（空就是 `[]`——"这张没字"与
+  "这版没跑"不能混成同一个缺字段）；`pack.py` parquet 与 `merge.build_rows`
+  都加同名列，**存 JSON 字符串**而不是 `list<struct>`：每条的键集不同
+  （bbox 可选），pyarrow 会按第一行建 schema，第二行多一个键就写不进去。
+
+### 35.3 语言配比（§5）
+
+- 抽签键从 `hash(seed:image_id)` 改为 `hash(source:image_id:seed)`，
+  `source` 取 `TaskRow.shard`。理由：某个来源的 id 成段时（Pixiv 的 pid、
+  内部连号），只按 image_id 抽会让那一整段集体中签——全局 25%、拆到目录
+  变成"这个 90% 那个 0%"，分层配比作废。
+- `tiers.yaml` 的 `caption_zh_ratio` 由 0.3 改 **0.25**（规范 §5 的 75/25）。
+
+### 35.4 校验
+
+`pytest tests -q` → 全绿（含新增 `tests/test_tag_categories.py` 11 条、
+`tests/test_visible_text.py` 12 条）；`read_lints` 0 诊断。
+
+### 35.5 还没做的（按规范顺序）
+
+1. **§1–§3 抽样配额**：MONET 3000 万按 6 个来源定额（laion 1030 万 /
+   coyo 660 万 / …）、Fine-T2I 100 万按五个目录定额；需要"候选 manifest →
+   分层选样 → quota_original/quota_final 记账"的独立模块，仓库里目前
+   **零配额代码**（只有 `--limit` 与 `skip=` 截断）。
+2. **§8 字段名**：最终表现在叫 `caption` / `tag`，规范要求
+   `nl_final` / `tags_final`。改名会断既有下游，需要定"改名还是加别名"。
+3. **§7.5 原 tag 顺序与类别**：产物只留 `tags_original`（名字列表），
+   类别/顺序没落盘。
+4. **§4 旧字段退出**：属流程与 manifest 过滤，当前管线没有"最终表排除旧
+   Caption"这一步。
+
+## 36. 2026-11-10：抽样配额子系统 + 最终表双字段名
+
+### 36.1 最终表同时认两套字段名（§8）
+
+规范用 `nl_final` / `tags_final`，现有下游读 `caption` / `tag`。做法是**并列**，
+不是改名：
+
+- `merge.FINAL_NAMES = legacy | v02 | both`，`apply_final_names()` 在写盘那一步
+  加别名，`final_field()` 是读侧的统一取值口（两套列名都认）。
+- 默认 `both`：一份表两种读法，谁都不用改代码。代价是 caption 复制一份
+  （3000 万条约十几 GB）。要省体积就 `tagger merge --final-names v02` 重出一份
+  ——merge 不碰模型，重出是分钟级。
+- 配置 `merge.final_names`，命令行 `--final-names` 覆盖。
+- ★`build_rows()` 保持旧键名不动：别名只在写盘那一步加，否则"内层一套、
+  外层一套"迟早对不上。
+
+### 36.2 抽样配额（§1–§3）：`tagger/sample.py` + `tagger sample`
+
+仓库此前**零配额代码**（只有 `--limit` / `skip=` 截断）。新子系统只管
+"从候选 manifest 选 id"，不下载、不解码、不打标——规范要求的中间产物正是
+"每个来源一份候选 manifest"。
+
+三层纯函数：
+
+| 函数 | 职责 | 关键口径 |
+|---|---|---|
+| `resolve_quotas` | 来源维度定 `quota_original` / `quota_final` | 可用不足削顶；缺额按**余量比例**跨来源补；补进来的量单记 `borrowed`，`quota_original` 永不被改写 |
+| `dedupe_clusters` | 同簇只留一条 | 跨来源全局比 `(score, id)`，留最高分（§2） |
+| `pick` | 60% 质量 / 25% 长尾 / 15% 随机 | 质量段按分数排序取头部（不是加权随机，理由见函数注释）；长尾按 stratum 频次**升序轮转**；随机段用 `hash(seed:source:id)` 排序 |
+
+- ★**去重必须在选样之前**：先选后去重会把某来源配额悄悄打掉一截，报告里
+  `selected` 却还是原数，账对不上。
+- ★选中键用 `(source, id)` 而不是 `id`：跨库同图会撞 id，用 id 当键后到的
+  会覆盖先到的，选中数凭空少一截。
+- 配置 `configs/tiers.yaml` 的 `sample:` 段带两组 profile（`monet` 3000 万
+  按 6 个来源、`fine-t2i` 100 万按 5 个目录，数字逐项来自规范 §2/§3），
+  profile 之间不共用 `quota_total`（两批是独立交付物，合计算谁都不对）。
+  `columns` 做深合并，profile 只覆盖 score/cluster 两列。
+- 用法：`tagger sample --profile monet --input monet/laion=work/cand/laion.parquet
+  --input monet/coyo=work/cand/coyo.parquet --out work/sampled/monet.jsonl`。
+  输出行剥掉内部键（`_` 开头），加 `sample_source` / `sample_quota` 两列记账。
+
+### 36.3 校验
+
+`pytest tests -q` 全绿。新增 `tests/test_sample.py` 22 条、
+`tests/test_final_names.py` 7 条。CLI 冒烟（两份候选、配额 20+40、其中一组
+只有 30 条）实测：缺额补到有余量的那组、合计守恒、三类警告都出得来。
+
+### 36.4 还没做
+
+1. **候选 manifest 的导出**：`tagger sample` 吃的是 manifest，现在没有
+   "从 HF parquet 分片导出候选清单"的命令（要读 `source`/美学分/sscd 簇，
+   MONET 的字段名已写进配置）。
+2. **§4 旧字段退出**：最终表还没有"排除旧 Caption"的过滤步骤。
+3. **§7.5 原 tag 类别与顺序**：只落了 `tags_original`（名字列表）。
+4. **分类词表补全**：`wd-eva02` 缺 copyright/artist/meta 三类（见 §35.1）。
+
+## 37. 2026-11-10：分发包派工接入（fox-label v3）
+
+服务端由另一位同事开发，v3 源码交付在 `server/fox-label-v3-src-20261110/`
+（`server.py` / `dispatch.py` / `worker.py` + 314 项测试）。我先前按自拟契约写的
+`tagger/dispatch/` 骨架（含 27 条测试）**已全部删除**——看到真源码后确认契约对不上，
+留着就是第二套错实现。
+
+**结论：协调层用人家的 `worker.py`，我们只补一个进度出口。**
+
+| 项 | 真实 v3 |
+|---|---|
+| 端点 | `POST /api/v1/{handshake,heartbeat,done,fail,release,status}` |
+| 身份 | `user_id` 人填 + handshake **一次性签发**的 `secret` + 自动生成的 `device_id` |
+| 派工 | handshake 一次给 active + prelock；heartbeat 每次顺带补派 |
+| TTL | beat 120s / active 360s / prelock **240s** / 进度 6h 告警、24h 强收 / 租约寿命上限 168h |
+| 下载 | 服务端只给 `repo`+`package`+`size`+`sha256`，地址按 `HF_ENDPOINT` 拼，`curl -C -` 续传 |
+| 完成 | `/done` 只收 `stats` 字符串，服务端截断 200 字写进 `packages.note`（要结构化结果得服务端加字段） |
+
+我们的接线（`worker.py` 用 `--cmd` 起子进程）：
+
+```bash
+python worker.py run --cmd "python -m tagger.cli client --shard \"{shard}\" --out-dir \"{out}\" --url http://127.0.0.1:8000 --mode both"
+```
+
+- `--cmd` 是 `str.format` + `shell=True`，**路径里有空格就会断**，占位符务必自己加引号；
+- 心跳要的进度由 `client --progress-file <out>/.fox-progress` 提供，写
+  `{"done","total","phase"}`；节流 1s、收尾那条必写。`total` 是"数据源已吐出的条目数"
+  （tar/parquet 流式读，跑前数不出来），服务端只用 `done` 算速率与停滞。
+- 不传 `--progress-file` 时行为与以前完全一致（CLI 老路径零改动）。
+
+**已复现的服务端缺陷（未修，已反馈）**：全新 data dir 下 `status` 与 `serve --server-id`
+直接崩 `no such table`。根因：`Store.__init__` 只在 `db.sqlite3` 已存在时才 `init_schema()`
+（server.py:229-230），而 `cmd_serve` 写 `server_id` 那句（1455-1458）在 `init_schema()`
+（1462）之前。按 README §9 的 v3 快速开始（`serve --server-id` 打头）照抄就能撞上。
+
+**校验**：`tests/test_cli.py` 13 条通过（新增 2 条：`--progress-file` 可选开关、
+进度文件键名与节流/收尾）。全量 pytest 见本轮结果。

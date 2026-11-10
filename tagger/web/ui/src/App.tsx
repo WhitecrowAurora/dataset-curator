@@ -9,6 +9,7 @@ import {
   Layers,
   ListChecks,
   Merge,
+  Network,
   Package,
   PlayCircle,
   PlusCircle,
@@ -35,6 +36,7 @@ import { TagManage } from './pages/TagManage'
 import { Conflicts } from './pages/Conflicts'
 import { Deps } from './pages/Deps'
 import { Settings } from './pages/Settings'
+import { Center } from './pages/Center'
 import { GlobalProgress } from './components/GlobalProgress'
 import { SelfCheckDialog } from './components/SelfCheckDialog'
 import { ResumeBanner } from './components/ResumeBanner'
@@ -57,6 +59,7 @@ type Route =
   | { name: 'stats' }
   | { name: 'history' }
   | { name: 'deps' }
+  | { name: 'center' }
   | { name: 'settings' }
 
 const LAST_KEY = 'tagger-last-job'
@@ -75,6 +78,7 @@ function parseRoute(hash: string): Route {
   if (path === '/tag-manage') return { name: 'tag-manage' }
   if (path === '/stats') return { name: 'stats' }
   if (path === '/deps') return { name: 'deps' }
+  if (path === '/center') return { name: 'center' }
   if (path === '/settings') return { name: 'settings' }
   return { name: 'new' }
 }
@@ -253,6 +257,14 @@ export default function App() {
       onClick: () => resultsId && go(`/results/${resultsId}`),
     },
     {
+      key: 'center',
+      label: '调度中心',
+      icon: <Network size={15} />,
+      active: route.name === 'center',
+      hint: '连上总机领分片打标；开始/停止与租约看板都在这一页',
+      onClick: () => go('/center'),
+    },
+    {
       key: 'settings',
       label: '设置',
       icon: <Settings2 size={15} />,
@@ -319,6 +331,7 @@ export default function App() {
       {route.name === 'packaging' && <Packaging />}
       {route.name === 'stats' && <Stats />}
       {route.name === 'deps' && <Deps />}
+      {route.name === 'center' && <Center />}
       {route.name === 'settings' && (
         <Settings
           progressInterval={progressInterval}

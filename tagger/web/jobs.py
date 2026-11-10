@@ -309,6 +309,10 @@ class JobSpec:
 
     # vlm 引擎走 HF 仓库输入时可为空；本地引擎由 create() 显式校验
     input_dir: str = ""
+    # 只打这些本地分片（绝对路径）。空 = 按 input_dir 整个目录走。
+    # 离线包面板勾选后走这里：input_dir 仍是包目录（算产物目录、界面回显用），
+    # 真正喂给 run_client 的输入清单以本字段为准。
+    input_shards: list[str] = field(default_factory=list)
     out_dir: str = ""
     backend: str = "wd-eva02"
     model_dir: str = ""
@@ -329,13 +333,21 @@ class JobSpec:
     # 从素材目录第一层取画师名：进 image_id、进归档 meta。
     artist: bool = True
     artist_depth: int = 0
-    # 画师名写进样本文本（caption / tag 串）开头，而不只是 JSON 字段。
-    # 训练侧读的是 .tag / .nl，模型要学到画师绑定就得在文本里。
+    # 画师名写进 NL 正文（caption）开头，而不只是 JSON 字段。
     artist_inject: bool = True
+    # 画师名写进 TAG 串开头。与上一项分开：NL 与 TAG 是两条训练输入，
+    # 有人只要其一，绑成一个开关就表达不了。
+    artist_inject_tags: bool = True
+    # 画师对照表。空 = 跟配置（tiers.yaml 的 artist.table）走。
+    # 三种写法：单个 parquet / 分片目录 / hf://datasets/<repo>/<文件或目录>。
+    # 做成任务级开关而不是只认配置：同一台机器上经常要对着不同批次用不同的表
+    # （换数据集、试在线版），改 yaml 会让上一个任务的口径跟着变。
+    artist_table: str = ""
     # flat = 画师-000123.jpg（全部拍平）；mirror = 保留原目录结构
     layout: str = "flat"
     seq_width: int = 6
-    # zip 内的成员是否算输入；散图是否算输入。默认都算。
+    # 包内成员（.zip / .tar / .tar.gz）是否算输入；散图是否算输入。默认都算。
+    # 字段名沿用 include_zips（表单、历史任务快照里都是这个名字），语义是"素材包"。
     include_zips: bool = True
     include_loose: bool = True
 
@@ -373,7 +385,8 @@ class JobSpec:
     top_p: float = 0.9
     max_tokens: int = 0              # 0 = 用配置默认（run_client 里会按规格兜底抬高）
     timeout_s: int = 90
-    # 在途请求数。0 = 跟服务端 max_num_seqs 走（见 client.resolve_concurrency）。
+    # 在途请求数。0 = 跟服务端的并发走：vLLM 是 max_num_seqs，llama.cpp 是
+    # -np 槽位（见 client.resolve_concurrency）。
     # 30M 量级下把它填成 1 等于让机器闲置着跑。
     concurrency: int = 0
     # 多卡（数据并行）。开着的时候每张卡各起一个推理服务，打标侧把它们
@@ -390,6 +403,14 @@ class JobSpec:
     # 与 max_tokens 不同：max_tokens 是生成硬上限（写不下就截断），
     # 这个只告诉模型"往多长写"，不动合格线。改它会写进 provenance。
     caption_chars: list[int] | None = None
+    # 中文 NL 的比例（0~1）。按 (seed, image_id) 抽签，抽中的图用中文写 caption；
+    # tag 段永远英文。默认 0.3 = 主创定的口径（tiers.yaml 的 output 段同值）。
+    # 0 = 全英文退回；1 = 全中文。
+    caption_zh_ratio: float = 0.3
+    # NL 提示词配置文件的名字（prompt/<名字>.json 去掉后缀）。空 = 内置那份，
+    # 按 caption_chars / 比例生成。文件内容整段替换内置提示词，provenance 里
+    # 记 prompt 文本的 sha，所以改名不影响"这批数据同不同源"。
+    prompt_id: str = ""
     seed: int | None = None
     # 同一张图跨运行累计失败多少次后跳过。0 = 不限制。
     # 这个数不复用会出问题：一张必然失败的图每次重跑都要重试 3 次，
@@ -481,9 +502,14 @@ class JobSpec:
     def resolved_out_dir(self) -> Path:
         if self.out_dir:
             return Path(self.out_dir)
-        if self.engine == "vlm" and not self.input_dir:
+        if self.engine == "vlm" and not self.input_dir and not self.input_shards:
             # HF 输入没有本地素材目录可参照，落 CLI client 的默认
             return Path("work/out")
+        if not self.input_dir and self.input_shards:
+            # 只勾了分片、没给包目录：按这些片所在的目录起名。拿 `shard-000005`
+            # 当产物目录名会让勾十片散出十个目录，之后自己都找不回来。
+            src = Path(self.input_shards[0]).resolve().parent
+            return src / f"{src.name}-tags"
         # 默认落在素材目录**旁边**：往素材目录里写产物会让下次扫描把它自己
         # 也扫进去（rename 成 .json 之前还是 .png），也容易误删。
         src = Path(self.input_dir).resolve()
@@ -527,7 +553,9 @@ class JobSpec:
         }
 
     def artist_rule(self, *, prefix: str = "@", aliases_path: str | None = None,
-                    inject_caption: bool | None = None) -> ArtistRule:
+                    table: str | None = None,
+                    inject_caption: bool | None = None,
+                    inject_tags: bool | None = None) -> ArtistRule:
         """画师规则。enabled/depth/注入 由本任务的开关决定，其余口径跟配置走。
 
         为什么不让配置的 artist.enabled 直接决定：封包任务需要画师名进
@@ -542,8 +570,41 @@ class JobSpec:
             prefix=prefix,
             inject_caption=(bool(self.artist_inject) if inject_caption is None
                             else bool(inject_caption)),
+            inject_tags=(bool(self.artist_inject_tags) if inject_tags is None
+                         else bool(inject_tags)),
             aliases_path=aliases_path,
+            # 画师对照表跟配置走：任务表单只管"要不要注入"，不管"名字从哪来"。
+            table=table,
         )
+
+
+# VLM 任务的结果不在 Job.items 里（那个列表只有本地引擎会填），而是落在
+# 产物目录。结果页每次都要一个 total，而 jsonl 动辄几十万行，所以按「产物
+# 文件签名」缓存一次行数；文件一追加，size/mtime 变了自然失效。
+_ARTIFACT_TOTAL_CACHE: dict[tuple, int] = {}
+# 失败账去重后的条数，同样按文件签名缓存——结果页每次请求都要它。
+_FAILURE_TOTAL_CACHE: dict[tuple, int] = {}
+
+
+def _count_lines(path: Path) -> int:
+    n = 0
+    try:
+        with path.open("rb") as fh:
+            while True:
+                chunk = fh.read(1 << 20)
+                if not chunk:
+                    break
+                n += chunk.count(b"\n")
+    except OSError:
+        return 0
+    return n
+
+
+def _append_fine_row(job_id: str, row: list[int]) -> None:
+    """把一个满桶追加到 run/history/<id>.stats.jsonl。"""
+    from . import history as history_store
+
+    history_store.append_stats(job_id, row)
 
 
 class Job:
@@ -593,6 +654,8 @@ class Job:
         self._events: list[dict] = []
         # 分桶统计的细桶行（布局见 _ROW_COLS）；note_item 在锁里追加
         self._fine: list[list[int]] = []
+        # 已经落盘的桶数：满桶立刻追加，最后不满的一桶等终态再补（见 _flush_fine）
+        self._fine_saved = 0
         self._lock = threading.Lock()
         self.stop_flag = threading.Event()
         # 暂停：与 stop_flag 分开两个标志，因为语义完全不同——stop 是"收工"，
@@ -631,6 +694,11 @@ class Job:
         """
         with self._lock:
             if not self._fine or self._fine[-1][0] >= STAT_FINE:
+                if self._fine:
+                    # 上一桶满了：立刻落盘。100 张才写一次 1KB，持着锁做个追加
+                    # 不亏；这样进程被硬杀也只丢最后不满的那一桶。
+                    _append_fine_row(self.id, self._fine[-1])
+                    self._fine_saved = len(self._fine)
                 self._fine.append([0] * _ROW_LEN)
             row = self._fine[-1]
             row[0] += 1
@@ -694,7 +762,9 @@ class Job:
         ]
         return {
             "id": self.id, "status": snap["status"],
-            "total": counts["total"],
+            # 老快照没有 counts（或早期 VLM 版本没记 total）：总数不该小于已
+            # 结算数，否则页面上会出现"0 张里完成了 250 张"。
+            "total": max(counts["total"], totals["settled"]),
             # settled 用桶汇总：与图上的数字同源，页面内部永远自洽
             "settled": totals["settled"],
             "bucket": bucket, "buckets": buckets, "totals": totals,
@@ -842,6 +912,284 @@ class Job:
             "ts": payload.get("ts"),
         }
 
+    # ---- VLM 结果：数据源是产物，不是 Job.items
+    #
+    # 本地引擎在 create() 里扫出 plan，Job.items 就是"这一批有哪些图"；
+    # VLM 引擎走 run_client 流式读分片，压根没有 plan，items 恒空。于是结果页
+    # 对 NL 任务一直是"还没有产物"，哪怕产物一个不少地躺在磁盘上。
+    # 下面这组方法把产物当成唯一真相：三种落盘形态各读一种。
+
+    @staticmethod
+    def _json_stem(path: Path) -> str:
+        """`<id>-tag.json` / `<id>-nl.json` → `<id>`。"""
+        for suffix in ("-tag.json", "-nl.json"):
+            if path.name.endswith(suffix):
+                return path.name[: -len(suffix)]
+        return path.stem
+
+    def _artifact_files(self) -> tuple[list[Path], list[Path], list[Path]]:
+        out = Path(self.out_dir)
+        if not out.is_dir():
+            return [], [], []
+        # VLM 的逐图 json 落在 out 根下；本地引擎那套落在 tags/ 子目录。
+        # **两个后缀都要收**：纯 NL 模式（backend=none）只写 <id>-nl.json，
+        # tag 文件根本不存在；只认 -tag.json 会让「NL 打标 + json 产物」的
+        # 结果页继续空着——这正是最常用的一种组合。
+        # 同一 stem 在根目录和 tags/ 下都出现时只留一份，按 stem 去重。
+        jsons: dict[str, Path] = {}
+        for base in (out, out / "tags"):
+            if not base.is_dir():
+                continue
+            for pattern in ("*-tag.json", "*-nl.json"):
+                for p in sorted(base.glob(pattern)):
+                    if p.is_file():
+                        jsons[self._json_stem(p)] = p
+        return (
+            sorted(out.glob("artifacts-*.jsonl")),
+            sorted(out.glob("artifacts-*.parquet")),
+            list(jsons.values()),
+        )
+
+    @staticmethod
+    def _parse_artifact_row(raw: dict) -> dict | None:
+        """jsonl / parquet 的一行 → {image_id, tag, nl, ts}。tag / nl 是 JSON 串。"""
+        image_id = str(raw.get("image_id") or "").strip()
+        if not image_id:
+            return None
+
+        def pick(value):
+            if isinstance(value, dict):
+                return value
+            if not value:
+                return None
+            try:
+                obj = json.loads(value)
+            except (TypeError, ValueError):
+                return None
+            return obj if isinstance(obj, dict) else None
+
+        return {"image_id": image_id, "tag": pick(raw.get("tag")),
+                "nl": pick(raw.get("nl")), "ts": raw.get("ts")}
+
+    def _iter_artifact_rows(self):
+        """按产物顺序产出 {image_id, tag, nl, ts}。
+
+        同时存在多种形态时只认优先级最高的那种：同一批图在两份产物里各有一行，
+        混着读会让结果页出现重复卡片。
+        """
+        jsonls, parquets, jsons = self._artifact_files()
+        if jsonls:
+            for path in jsonls:
+                try:
+                    with path.open("r", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                raw = json.loads(line)
+                            except ValueError:
+                                continue
+                            if isinstance(raw, dict):
+                                row = self._parse_artifact_row(raw)
+                                if row is not None:
+                                    yield row
+                except OSError:
+                    continue
+            return
+        if parquets:
+            try:
+                import pyarrow.parquet as pq
+            except ImportError:
+                return
+            for path in parquets:
+                try:
+                    table = pq.read_table(
+                        str(path), columns=["image_id", "tag", "nl", "ts"])
+                except Exception:      # noqa: BLE001 - 半截/坏 footer 跳过这一片
+                    continue
+                for raw in table.to_pylist():
+                    row = self._parse_artifact_row(raw)
+                    if row is not None:
+                        yield row
+            return
+        for path in jsons:
+            stem = self._json_stem(path)
+            # 两个文件都试，不假设手里这份是哪一种：纯 NL 模式下就只有 nl。
+            tag_obj = self._read_json(path.with_name(f"{stem}-tag.json"))
+            nl_obj = self._read_json(path.with_name(f"{stem}-nl.json"))
+            if tag_obj is None and nl_obj is None:
+                continue
+            yield {"image_id": stem, "tag": tag_obj, "nl": nl_obj,
+                   "ts": (tag_obj or {}).get("ts") or (nl_obj or {}).get("ts")}
+
+    @staticmethod
+    def _read_json(path: Path) -> dict | None:
+        try:
+            obj = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            return None
+        return obj if isinstance(obj, dict) else None
+
+    def _artifact_total(self) -> int:
+        jsonls, parquets, jsons = self._artifact_files()
+        files = [*jsonls, *parquets, *jsons]
+        try:
+            sig = tuple(
+                f"{p}:{p.stat().st_size}:{int(p.stat().st_mtime)}" for p in files)
+        except OSError:
+            sig = ()
+        if sig:
+            hit = _ARTIFACT_TOTAL_CACHE.get(sig)
+            if hit is not None:
+                return hit
+        if jsonls:
+            n = sum(_count_lines(p) for p in jsonls)
+        elif parquets:
+            n = 0
+            try:
+                import pyarrow.parquet as pq
+                for p in parquets:
+                    try:
+                        n += int(pq.ParquetFile(str(p)).metadata.num_rows)
+                    except Exception:      # noqa: BLE001
+                        continue
+            except ImportError:
+                pass
+        else:
+            n = len(jsons)
+        if sig:
+            _ARTIFACT_TOTAL_CACHE[sig] = n
+        return n
+
+    def _artifact_item(self, row: dict) -> dict:
+        tag = row.get("tag") or {}
+        nl = row.get("nl") or {}
+        tags = [[str(t), float(p)] for t, p in (tag.get("tags") or [])]
+        return {
+            "image_id": row["image_id"],
+            "rel": str(tag.get("image_path") or nl.get("image_path") or ""),
+            "name": row["image_id"],
+            "artist": str(tag.get("artist") or nl.get("artist") or ""),
+            "in_zip": False,
+            "ok": bool(tag.get("ok") or nl.get("ok")),
+            "tag": str(tag.get("tag") or ""),
+            "tags": tags,
+            "rating": tag.get("rating") or {},
+            "tag_backend": str(tag.get("tag_backend") or ("vlm" if nl else "")),
+            # NL 文案与质检分：本地引擎这两项没有，前端按缺省处理。
+            "caption": str(nl.get("caption") or ""),
+            "score": nl.get("score"),
+            # VLM 是流式读分片，没有"原图索引"，缩略图接口拿不到图——与其让
+            # 前端请求一串 404，不如明确告诉它这次不出缩略图。
+            "thumb": False,
+            "ts": row.get("ts") or tag.get("ts") or nl.get("ts"),
+        }
+
+    def _failure_index(self) -> dict[str, dict]:
+        """failures.jsonl → {image_id: 最后一条}。
+
+        失败账跨运行累计（同一 id 每次失败追加一行），取最后一条才是当前状态。
+        """
+        path = Path(self.out_dir) / "failures.jsonl"
+        latest: dict[str, dict] = {}
+        if not path.is_file():
+            return latest
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    image_id = str(obj.get("image_id") or "").strip()
+                    if image_id:
+                        latest[image_id] = obj
+        except OSError:
+            return {}
+        return latest
+
+    def _failure_total(self) -> int:
+        """失败图数量（去重后）。按文件签名缓存，翻页不会反复读失败账。"""
+        path = Path(self.out_dir) / "failures.jsonl"
+        try:
+            st = path.stat()
+        except OSError:
+            return 0
+        sig = (str(path), st.st_size, int(st.st_mtime))
+        hit = _FAILURE_TOTAL_CACHE.get(sig)
+        if hit is not None:
+            return hit
+        n = len(self._failure_index())
+        _FAILURE_TOTAL_CACHE[sig] = n
+        return n
+
+    def _failure_results(self, *, offset: int, limit: int, query: str) -> dict:
+        """只看失败：数据源是 failures.jsonl，不是产物。
+
+        产物只写成功行，失败的根本进不去——所以「只看失败」在产物里永远是
+        空表，用户会以为"一张都没失败"。
+        """
+        latest = self._failure_index()
+        if query:
+            latest = {k: v for k, v in latest.items() if query in k.lower()}
+        items: list[dict] = []
+        for idx, (image_id, obj) in enumerate(latest.items()):
+            if idx < offset:
+                continue
+            if len(items) >= limit:
+                break
+            items.append({
+                "image_id": image_id,
+                "rel": str(obj.get("file") or ""),
+                "name": image_id,
+                "artist": "",
+                "in_zip": False,
+                "ok": False,
+                "tag": "",
+                "tags": [],
+                "rating": {},
+                "tag_backend": "",
+                "error": str(obj.get("error") or ""),
+                "thumb": False,
+                "ts": obj.get("ts"),
+            })
+        return {"total": len(latest), "offset": offset, "limit": limit,
+                "items": items, "failed_total": len(latest)}
+
+    def _artifact_results(self, *, offset: int, limit: int, query: str,
+                          only_failed: bool) -> dict:
+        q = query.strip().lower()
+        if only_failed:
+            # 失败不在产物里，走失败账（见 _failure_results 的说明）。
+            return self._failure_results(offset=offset, limit=limit, query=q)
+        if not q:
+            items: list[dict] = []
+            for idx, row in enumerate(self._iter_artifact_rows()):
+                if idx < offset:
+                    continue
+                if len(items) >= limit:
+                    break
+                items.append(self._artifact_item(row))
+            return {"total": self._artifact_total(), "offset": offset,
+                    "limit": limit, "items": items,
+                    "failed_total": self._failure_total()}
+        # 带筛选只能全扫：总数不数完就不准。
+        matched: list[dict] = []
+        total = 0
+        for row in self._iter_artifact_rows():
+            if q and q not in row["image_id"].lower():
+                continue
+            item = self._artifact_item(row)
+            if offset <= total < offset + limit:
+                matched.append(item)
+            total += 1
+        return {"total": total, "offset": offset, "limit": limit,
+                "items": matched, "failed_total": self._failure_total()}
+
     def results(self, *, offset: int = 0, limit: int = 40, query: str = "",
                 only_failed: bool = False) -> dict:
         """从产物文件现读，不缓存。
@@ -852,6 +1200,12 @@ class Job:
         无筛选时先切页再读文件：整目录 30 万张，每页只该付 40 次读盘，
         以前是把所有产物读完才分页，翻一页扫全库。
         """
+        # items 为空 = 这台任务没有 plan：VLM 引擎本来就没有 plan，历史任务
+        # （按快照重建出来的 Job）也没有。这两种都只能从产物读（见上面那组
+        # _artifact_*）。本地活任务 items 非空，照旧走 items。
+        if not self.items:
+            return self._artifact_results(offset=offset, limit=limit,
+                                     query=query, only_failed=only_failed)
         q = query.strip().lower()
         if not q and not only_failed:
             page = self.items[offset:offset + limit]
@@ -902,6 +1256,13 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        # 盘上的历史：进程没了之后还能把列表画出来。启动读一次进内存，
+        # 之后每次落盘顺带更新——否则每个列表请求都要扫一遍目录。
+        from . import history as history_store
+
+        self._history: dict[str, dict] = {
+            str(h["id"]): h for h in history_store.load_all()
+        }
 
     # ---- 查询
 
@@ -913,6 +1274,121 @@ class JobManager:
         with self._lock:
             jobs = list(self._jobs.values())
         return sorted(jobs, key=lambda j: j.created, reverse=True)
+
+    def all_snapshots(self, limit: int = 20) -> list[dict]:
+        """列表用：内存里的活任务 + 盘上的历史，同 id 以内存为准。
+
+        历史条目只有快照，没有 Job 对象——它们跑不了、也不能被"暂停/停止"，
+        但列表、详情、结果页都还能用。
+        """
+        with self._lock:
+            live = [j.snapshot() for j in self._jobs.values()]
+            # 历史表会被任务线程写（_persist）。不持锁直接迭代 items() 会撞上
+            # "dictionary changed size during iteration"——任务刚建好（新 id 入表）
+            # 的同时正好有人在拉列表，就是 500。
+            hist = list(self._history.items())
+        seen = {str(s.get("id") or "") for s in live}
+        # 历史条目带 historical 标记：页面据此把「进度/结果」置灰，
+        # 因为那两页要读 Job.reader，而进程重启后早就没了。
+        merged = live + [dict(h, historical=True)
+                         for k, h in hist if k not in seen]
+        merged.sort(key=lambda s: float(s.get("created") or 0), reverse=True)
+        return merged[:limit]
+
+    def snapshot_of(self, job_id: str) -> dict | None:
+        """单条详情。内存里没有就去历史里找——历史页点开旧任务不能 404。"""
+        job = self.get(job_id)
+        if job is not None:
+            return job.snapshot()
+        with self._lock:
+            return self._history.get(job_id)
+
+    def build_readonly(self, job_id: str) -> Job | None:
+        """按历史快照重建一个**只用来读结果**的 Job。
+
+        进程重启后 Job 对象就没了，但产物还躺在磁盘上。结果页要的东西只有
+        out_dir —— 与其在路由里另拼一套读产物的逻辑，不如把快照里的 spec
+        还原成 Job，让读路径只存在一份。
+
+        注意：凭据本来就不落历史，这个对象不能拿去续跑/停止，只给读。
+        """
+        with self._lock:
+            snap = self._history.get(job_id)
+        if not snap:
+            return None
+        saved = snap.get("spec") or {}
+        known = set(JobSpec.__dataclass_fields__)
+        try:
+            spec = JobSpec(**{k: v for k, v in saved.items() if k in known})
+        except TypeError:
+            return None
+        try:
+            job = Job(job_id, spec, None)
+        except Exception:                  # noqa: BLE001 - 快照残缺就当没有
+            return None
+        # 快照里的 out_dir 是任务当时真正用的那个；重算一遍可能因为相对路径、
+        # cwd 变化而偏掉，所以优先用快照。
+        out = str(snap.get("out_dir") or "").strip()
+        if out:
+            job.out_dir = Path(out)
+        # 把状态与计数灌回去：重建出来的 Job 默认是 pending / 全零，直接拿去
+        # 渲染统计页会显示"等待中、已完成 0"，而桶里明明有几百条记录。
+        job.status = str(snap.get("status") or "pending")
+        job.phase = str(snap.get("phase") or "")
+        job.error = str(snap.get("error") or "")
+        job.created = float(snap.get("created") or 0) or job.created
+        job.started = float(snap.get("started") or 0) or 0.0
+        job.ended = float(snap.get("ended") or 0) or 0.0
+        counts = snap.get("counts") or {}
+        if counts:
+            job.stats.total = int(counts.get("total") or 0)
+            job.stats.done = int(counts.get("done") or 0)
+            job.stats.skipped = int(counts.get("skipped") or 0)
+            job.stats.failed = int(counts.get("failed") or 0)
+        # 细桶统计：内存那份随进程没了，读回落盘的分桶。列数按当前版本补齐
+        # （老版本行更短），多的截掉，保证 merge_buckets 读到的是等长行。
+        from . import history as history_store
+
+        rows = history_store.load_stats(job_id)
+        if rows:
+            fixed: list[list[int]] = []
+            for row in rows:
+                if len(row) < _ROW_LEN:
+                    row = row + [0] * (_ROW_LEN - len(row))
+                fixed.append(row[:_ROW_LEN])
+            job._fine = fixed
+            job._fine_saved = len(fixed)
+        return job
+
+    def _flush_fine(self, job: Job) -> None:
+        """补写还没落盘的桶（终态调一次）。
+
+        中途不补：不满的那桶还在继续累加，写了下次还得再覆盖一遍，容易落成
+        "同一桶两行"。代价是进程被硬杀时丢最后不到 100 张的统计——比统计
+        错位好接受。
+        """
+        with job._lock:
+            pending = [list(row) for row in job._fine[job._fine_saved:]]
+            job._fine_saved = len(job._fine)
+        for row in pending:
+            _append_fine_row(job.id, row)
+
+    def _persist(self, job: Job) -> None:
+        """把当前快照写进历史。写不进去只影响"重启后还能看到"，
+        不该让任务本身失败，所以异常全吞。
+        """
+        from . import history as history_store
+
+        if job.status in ("done", "stopped", "failed"):
+            self._flush_fine(job)
+        try:
+            snap = job.snapshot()
+        except Exception:                  # noqa: BLE001 - 快照坏了也不该炸任务
+            return
+        with self._lock:
+            self._history[str(snap.get("id") or "")] = snap
+        # 磁盘写在锁外：别让一次慢 IO 卡住所有列表请求。
+        history_store.save(snap)
 
     def running(self) -> Job | None:
         # paused 也算"占着位子"：它随时可能被唤醒接着往同一个 out_dir 写，
@@ -943,12 +1419,14 @@ class JobManager:
         if spec.engine == "vlm":
             # VLM 引擎吃的是 HF 分片或 split 分发包，没有本地素材目录可扫；
             # 总量流式统计，plan 留空。
-            if not (spec.hf_repo or spec.input_dir):
+            # 本地这一侧有两个入口：整目录（input_dir）与勾选清单（input_shards）。
+            local_any = bool(spec.input_dir) or bool(spec.input_shards)
+            if not (spec.hf_repo or local_any):
                 raise ValueError(
                     "VLM 任务要么填 HF 仓库（hf_repo），"
                     "要么给本地分片（input_dir：.parquet / .zip / .tar）。")
-            if spec.hf_repo and spec.input_dir:
-                raise ValueError("hf_repo 与 input_dir 二选一：一边是仓库拉取，一边是本地分片。")
+            if spec.hf_repo and local_any:
+                raise ValueError("hf_repo 与本地分片二选一：一边是仓库拉取，一边是本地分片。")
             # 格式决定磁盘行为（parquet 流式 vs tar 落盘），非法值不能等到
             # 跑进 run_client 才被当成"默认 tar"——那样会静默下几个 GB。
             fmt = str(spec.hf_format or "auto").strip().lower()
@@ -982,6 +1460,16 @@ class JobManager:
             if lo > hi:
                 raise ValueError(
                     f"质检：最短字符数（{lo}）不能大于最长字符数（{hi}）")
+            # 选中的提示词文件必须真的在：跑进线程才报的话，页面已经显示
+            # "运行中"再变成"失败"，人会以为是自己模型/服务的问题。
+            pid = str(spec.prompt_id or "").strip()
+            if pid:
+                from .. import prompts as prompt_files
+
+                try:
+                    prompt_files.load(pid)
+                except prompt_files.PromptError as exc:
+                    raise ValueError(str(exc)) from exc
             plan = None
         else:
             if not spec.input_dir:
@@ -1018,6 +1506,7 @@ class JobManager:
                    for j in self._jobs.values()):
                 raise RuntimeError("已有任务在跑。请等它结束或先停止。")
             self._jobs[job.id] = job
+        self._persist(job)
         return job
 
     def start(self, job: Job) -> None:
@@ -1036,6 +1525,7 @@ class JobManager:
         where = "封包" if job.phase == "pack" else "打标"
         job.push("log", message=f"收到停止请求，等当前这一块{where}完就收尾")
         self._save_resume(job, "stopped")
+        self._persist(job)
         return True
 
     # ---- 暂停 / 继续
@@ -1064,6 +1554,7 @@ class JobManager:
         job.status = "paused"
         job.push("log", message="已暂停：在途的几张打完就停，产物都在盘上")
         self._save_resume(job, "paused")
+        self._persist(job)
         return True
 
     def resume(self, job_id: str) -> bool:
@@ -1078,6 +1569,7 @@ class JobManager:
         job.pause_flag.clear()
         job.status = "running"
         job.push("log", message="已继续")
+        self._persist(job)
         return True
 
     def restart(self, job_id: str) -> Job:
@@ -1089,7 +1581,24 @@ class JobManager:
         """
         old = self.get(job_id)
         if old is None:
-            raise ValueError("任务不存在")
+            # 进程重启后 Job 对象没了，但历史里有它的参数——「继续」对历史任务
+            # 同样该能用。凭据本来就不落历史（与 resume.json 同口径），要 key
+            # 的远程来源得让用户重填，这里不假装还记得。
+            with self._lock:
+                snap = self._history.get(job_id)
+            if snap is None:
+                raise ValueError("任务不存在")
+            saved = snap.get("spec") or {}
+            known = set(JobSpec.__dataclass_fields__)
+            # 只取认识的键：旧版本留下的记录可能多出已删字段，直接
+            # JobSpec(**) 会 TypeError，把"继续"变成一句看不懂的报错。
+            try:
+                spec = JobSpec(**{k: v for k, v in saved.items() if k in known})
+            except TypeError as exc:
+                raise ValueError(f"这条历史记录与当前版本不兼容：{exc}") from exc
+            job = self.create(spec)
+            self.start(job)
+            return job
         if old.status in ("pending", "running", "paused"):
             raise RuntimeError("这个任务还在跑，直接在运行页点「继续」就行，不用重开")
         job = self.create(replace(old.spec))     # create 内部会再判一次"已有任务在跑"
@@ -1174,6 +1683,7 @@ class JobManager:
         active_resume = running_lock(RESUME_PATH, job.id)
         job.status = "running"
         job.started = time.time()
+        self._persist(job)
         job.push("job_started",
                  total=len(job.items),
                  out_dir=str(job.out_dir), spec=_redacted_spec(spec),
@@ -1233,6 +1743,8 @@ class JobManager:
             job.ended = time.time()
             job.push("job_finished", status=job.status, error=job.error,
                      counts=job.snapshot()["counts"])
+            # 终态落盘：历史列表要显示"已完成/失败"和最终计数。
+            self._persist(job)
             # 后端持有几百 MB 权重与 CUDA 上下文，任务结束就放手，
             # 否则连跑三个任务会占着三份显存不放。
             # 跑完/失败的记录没有"继续"的必要，删掉；暂停与停止的留着。
@@ -1325,6 +1837,8 @@ class JobManager:
         artist_cfg = dict(ops.artist or {})
         artist_cfg["enabled"] = bool(spec.artist)
         artist_cfg["inject_caption"] = bool(spec.artist and spec.artist_inject)
+        # NL 与 TAG 是两个开关、两条训练输入，只搬其中一个等于另一个永远是默认值。
+        artist_cfg["inject_tags"] = bool(spec.artist and spec.artist_inject_tags)
         ops = replace(ops, artist=artist_cfg)
 
         # 质检线同理：配置里是一套保守默认，页面上调过就以表单为准。
@@ -1405,12 +1919,22 @@ class JobManager:
         backend_name = vlm_backend_for(mode, spec.backend)
         provider = spec_provider(spec)
 
+        # 提示词文件在真正开跑时现读一次：从建任务到线程启动之间用户可能刚
+        # 编辑过，页面显示的和实际发出去的对不上是最难查的那类问题。
+        prompt_doc = None
+        if str(spec.prompt_id or "").strip():
+            from .. import prompts as prompt_files
+
+            prompt_doc = prompt_files.load(spec.prompt_id)
+
         args = argparse.Namespace(
             # HF 输入与本地分片二选一（create 已校验）；shard=None 时
             # run_client 走 HF 分支。本地必须给**列表**：collect_shards /
             # classify_local_inputs 都按序列遍历，传单个字符串会逐字符解析，
             # 报出来的是"分片不存在: D"。
-            shard=None if spec.hf_repo else [spec.input_dir],
+            # input_shards 优先：勾了几片就只跑这几片。classify_local_inputs
+            # 本来就按序列认（文件、目录可以混着给），所以直接给列表即可。
+            shard=None if spec.hf_repo else (list(spec.input_shards) or [spec.input_dir]),
             out_dir=str(job.out_dir),
             # 多卡时 url 是第一个槽，urls 是其余槽；按空闲槽补发。
             url=multi_urls[0] if multi_urls else spec.url,
@@ -1439,6 +1963,14 @@ class JobManager:
             # None 时不传，run_client 会按 token 区间派生（保持旧行为）
             caption_chars=(list(spec.caption_chars)
                            if getattr(spec, "caption_chars", None) else None),
+            # 0 也照传：它不是"没设置"，而是"明确全英文"。
+            caption_zh_ratio=float(getattr(spec, "caption_zh_ratio", 0.0) or 0.0),
+            # 提示词文件：空串 = 用内置生成的那份。中文/系统提示词一起带上，
+            # 三个都空时 run_client 的行为与改造前完全一致。
+            prompt_text=prompt_doc.prompt if prompt_doc else "",
+            prompt_zh_text=prompt_doc.prompt_zh if prompt_doc else "",
+            system_text=prompt_doc.system if prompt_doc else "",
+            prompt_name=prompt_doc.id if prompt_doc else "",
             tier="", variant="", seed=spec.seed,
             quiet=True, use_file_url=bool(spec.use_file_url),
             failures=None, stats_json=None,
@@ -1654,7 +2186,7 @@ def _artist_context(spec: JobSpec) -> tuple[ArtistRule, dict[str, str]]:
     前缀与别名表的口径跟配置走；**是否注入 caption 跟任务表单走**
     （`artist_inject`）——它是用户这次的选择，不该被配置里的默认值盖掉。
     """
-    prefix, aliases_path = "@", None
+    prefix, aliases_path, table = "@", None, None
     try:
         from ..config import DEFAULT_TIERS, load_ops, load_tier_table
 
@@ -1662,10 +2194,14 @@ def _artist_context(spec: JobSpec) -> tuple[ArtistRule, dict[str, str]]:
         configured = ops.artist_rule()
         prefix = configured.prefix
         aliases_path = configured.aliases_path
+        table = configured.table
     except Exception:                     # noqa: BLE001 - 配置文件坏了不该连任务都建不了
         pass
 
-    rule = spec.artist_rule(prefix=prefix, aliases_path=aliases_path)
+    # 表单填了就以表单为准；空才回落到配置。任务级覆盖是刻意的：
+    # 换数据集要换表，改 yaml 会让上一个任务的口径跟着变。
+    table = (spec.artist_table or "").strip() or table
+    rule = spec.artist_rule(prefix=prefix, aliases_path=aliases_path, table=table)
     aliases: dict[str, str] = {}
     if aliases_path:
         try:

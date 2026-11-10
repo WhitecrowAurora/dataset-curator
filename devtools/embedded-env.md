@@ -105,7 +105,13 @@ install.bat -WheelDir env\initialization\wheels   # Windows
 没有它们第一次跑打标就会失败。只想打包或跑 NL 时用 `-SkipTag` /
 `--skip-tag` 跳过（省十分钟）。torch 的 wheel 不在 PyPI，所以脚本把它单独
 提到 PyTorch 索引去装：有 `nvidia-smi` 用 `cu126`（本机实测组合），没有用
-`cpu`；换 CUDA 版本用 `-TorchIndex https://download.pytorch.org/whl/cu128`。
+`cpu`；换 CUDA 版本用 `-TorchIndex https://download.pytorch.org/whl/cu130`。
+
+**索引目录和清单版本必须对得上**：PyTorch 是按 CUDA 版本分目录的，每个目录
+只放自己那份——`cu124` 最高只到 2.6.0、`cu128` 也没有 2.14.1，拿它们去装
+钉死的 `torch==2.14.1` 会直接 `No matching distribution found`。网页上的
+「安装 / 重装」用的是同一口径（`deps.py: TORCH_INDEX_GPU`），
+`tests/test_deps.py` 有一条断言把它和清单里记的 `+cu126` 绑在一起。
 
 **仍然按需装的**：
 

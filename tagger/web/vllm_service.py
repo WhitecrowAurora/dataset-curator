@@ -258,6 +258,15 @@ class VllmService:
                     out["slots"] = nl_engine.describe(p, slots_override)
                 except Exception as exc:      # noqa: BLE001 - 预估失败不拦启动
                     out["slots"] = {"error": f"{type(exc).__name__}: {exc}"}
+                # 权重在不在盘上，也在预览里说清楚。选的这档没下载时，
+                # resolve_weights 会明确指出"缺哪一档、现有哪些档"——这比
+                # 只判断"目录空不空"准得多（选了 Q6 但只有 Q4 也拦得住）。
+                try:
+                    gguf, mmproj = nl_engine.resolve_weights(p)
+                    out["weights"] = {"ok": True, "gguf": gguf.name,
+                                      "mmproj": mmproj.name if mmproj else ""}
+                except Exception as exc:      # noqa: BLE001 - 预览不拦启动
+                    out["weights"] = {"ok": False, "error": str(exc)}
             return out
         except ConfigError as exc:
             # ConfigError 的 message 本来就是给人看的，带个类名只会让它更像 traceback
@@ -461,6 +470,15 @@ class VllmService:
                                "slots": slots_n}
             self.log_path = str(FINGERPRINT_PATH.parent / f"vllm-{port}.log")
             self._notes.clear()
+            # 批调度三件套是 vLLM 的，llama-server 没有对应开关。静默吞掉
+            # 比报错更坏：页面/CLI 会以为改了。留一行痕，免得下次又对着
+            # "改了没反应"排查半天。
+            if eng == "llamacpp" and (seqs is not None or batched is not None
+                                      or mem is not None):
+                self._append_log(
+                    "llama.cpp 不接受 max_num_seqs / max_num_batched_tokens / "
+                    "gpu_mem：这三项已忽略。并发请用槽位（slots，即 -np），"
+                    "显存由槽位数与上下文长度决定。")
             self._stop_flag.clear()
             # 每次启动一个令牌。上一个线程收尾慢（比如还在等就绪）时，
             # 它晚到的状态写入会被令牌挡掉，不会把新一轮的状态改回去。

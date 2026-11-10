@@ -30,7 +30,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from io import BytesIO
@@ -38,7 +37,7 @@ from pathlib import Path
 from typing import Callable
 
 from .archive import sha256_of
-from .pack import InputItem, discover_inputs
+from .pack import InputItem, discover_inputs, read_item_bytes
 
 DB_NAME = "hashes.db"
 EXCLUDE_NAME = "dedup-exclude.txt"
@@ -150,33 +149,30 @@ def _hash_loose(item: InputItem, mtime: int) -> dict:
                 "error": f"{type(exc).__name__}: {exc}"[:200]}
 
 
-def _hash_zip_chunk(source: str, members: list[tuple[InputItem, int]]) -> list[dict]:
-    try:
-        zf = zipfile.ZipFile(source, "r")
-    except Exception as exc:      # noqa: BLE001 - 整包坏掉：这批全记错误
-        msg = f"{type(exc).__name__}: {exc}"[:200]
-        return [{"key": it.key, "size": it.size, "mtime_ns": m,
-                 "sha256": "", "dhash": None, "error": msg}
-                for it, m in members]
+def _hash_member_chunk(source: str, members: list[tuple[InputItem, int]]) -> list[dict]:
+    """容器成员（zip / tar）按块算哈希。
+
+    句柄由 pack.ContainerReader 缓存并按容器复用：tar 每次 open 都要扫全包建
+    索引，按张重开等于把"读一遍包"变成"每张读一遍包"。
+    """
     out: list[dict] = []
-    with zf:
-        for it, m in members:
-            try:
-                data = zf.read(it.member)
-                out.append({"key": it.key, "size": len(data), "mtime_ns": m,
-                            "sha256": sha256_of(data),
-                            "dhash": _to_signed64(dhash64(data)),
-                            "error": ""})
-            except Exception as exc:   # noqa: BLE001
-                out.append({"key": it.key, "size": it.size, "mtime_ns": m,
-                            "sha256": "", "dhash": None,
-                            "error": f"{type(exc).__name__}: {exc}"[:200]})
+    for it, m in members:
+        try:
+            data = read_item_bytes(it)
+            out.append({"key": it.key, "size": len(data), "mtime_ns": m,
+                        "sha256": sha256_of(data),
+                        "dhash": _to_signed64(dhash64(data)),
+                        "error": ""})
+        except Exception as exc:   # noqa: BLE001 - 单张坏掉不中断整批
+            out.append({"key": it.key, "size": it.size, "mtime_ns": m,
+                        "sha256": "", "dhash": None,
+                        "error": f"{type(exc).__name__}: {exc}"[:200]})
     return out
 
 
 def _hash_task(source: str, members: list[tuple[InputItem, int]]) -> list[dict]:
-    if members[0][0].kind == "zip_member":
-        return _hash_zip_chunk(source, members)
+    if members[0][0].is_member:
+        return _hash_member_chunk(source, members)
     it, m = members[0]
     return [_hash_loose(it, m)]
 
@@ -325,11 +321,11 @@ def _assign_artists(items: list[InputItem]) -> list[str]:
 
 def _build_tasks(items: list[InputItem], mtimes: list[int]
                  ) -> list[tuple[str, list[tuple[InputItem, int]]]]:
-    """散图一条任务一个；zip 成员按容器分组、ZIP_CHUNK 切块。"""
+    """散图一条任务一个；包内成员（zip / tar）按容器分组、ZIP_CHUNK 切块。"""
     by_source: dict[str, list[tuple[InputItem, int]]] = {}
     loose: list[tuple[str, list[tuple[InputItem, int]]]] = []
     for it, m in zip(items, mtimes):
-        if it.kind == "zip_member":
+        if it.is_member:
             by_source.setdefault(it.source, []).append((it, m))
         else:
             loose.append((it.source, [(it, m)]))

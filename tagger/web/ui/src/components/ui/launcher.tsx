@@ -207,6 +207,7 @@ export function SettingRow({
   help,
   icon,
   required = false,
+  wide = false,
   children,
 }: {
   label: string
@@ -222,10 +223,23 @@ export function SettingRow({
    * 有默认值能跑起来的项（输出目录、批量、阈值）一律不标。
    */
   required?: boolean
+  /**
+   * 控件独占一整行（不挤右侧那 260~360px 的窄列）。
+   *
+   * 给"控件本身是一列卡片/列表"的项用（比如模型选择：每条要放名称、状态和
+   * 一个「下载」按钮），塞进窄列只会全部折行。
+   */
+  wide?: boolean
   children: ReactNode
 }) {
   return (
-    <div className="grid gap-3 border-b border-lx py-3.5 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)] md:items-center">
+    <div
+      className={`grid gap-3 border-b border-lx py-3.5 last:border-b-0 ${
+        wide
+          ? 'md:grid-cols-1'
+          : 'md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)] md:items-center'
+      }`}
+    >
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-sm font-medium text-lx">
           {icon && <span className="text-lx-muted">{icon}</span>}

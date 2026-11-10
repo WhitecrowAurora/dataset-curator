@@ -1,0 +1,62 @@
+{
+  "ids": 9465535,
+  "ids_with_artist": 9226534,
+  "coverage": 0.9748,
+  "parquet_bytes": 69742581,
+  "seconds": 4250,
+  "files": {
+    "image_metadata_new.json": {
+      "records": 486554,
+      "with_artist": 475751,
+      "error": "[WinError 10054] 远程主机强迫关闭了一个现有的连接。"
+    },
+    "xmltags.json": {
+      "records": 820998,
+      "with_artist": 808085,
+      "gb": 1.32,
+      "source": "danbooru2024"
+    },
+    "caption.json": {
+      "records": 820995,
+      "with_artist": 0,
+      "gb": 1.66,
+      "source": "danbooru2024"
+    },
+    "add_metadata.json": {
+      "records": 1054820,
+      "with_artist": 1005449,
+      "gb": 0.88,
+      "source": "danbooru2024"
+    },
+    "dan_add_xml.json": {
+      "records": 857800,
+      "with_artist": 835743,
+      "gb": 1.38,
+      "source": "dan_2025_add"
+    },
+    "dan_add_caption.json": {
+      "records": 857800,
+      "with_artist": 0,
+      "gb": 1.96,
+      "source": "dan_2025_add"
+    },
+    "loli_xml.json": {
+      "records": 57089,
+      "with_artist": 57076,
+      "gb": 0.09,
+      "source": "gelbooru"
+    },
+    "loli_caption.json": {
+      "records": 57089,
+      "with_artist": 0,
+      "gb": 0.09,
+      "source": "gelbooru"
+    }
+  },
+  "big_file": {
+    "records": 6950402,
+    "with_artist": 6756495,
+    "bytes": 28181155195,
+    "retries": 0
+  }
+}

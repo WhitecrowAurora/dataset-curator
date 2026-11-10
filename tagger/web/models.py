@@ -20,17 +20,26 @@ from typing import Any
 
 # 覆盖文件里允许出现的 VLM 字段。多出来的（比如悄悄塞个 enabled: false）一律丢弃：
 # 未知字段进了配置就是"看起来生效、实际没人读"。
-# gguf / mmproj / download_repo / download_files 必须一起留着：页面整表保存时
-# 只带这些字段，漏一个就等于"在页面上点一下保存，把破限版的 GGUF 路径抹掉"。
+# gguf / mmproj / gguf_quants 必须一起留着：页面整表保存时只带这些字段，
+# 漏一个就等于"在页面上点一下保存，把本地量化产出的 GGUF 路径抹掉"。
 # gguf_quants 必须在内：覆盖是**整条替换**模型字典，不带上它，用户在页面上
-# 点一次保存就把 q5/q6/q8 三档映射抹掉——之后精度的 q6 找不到对应文件，
-# 静默回落 Q4_K_M，症状是"不管怎么选都是 q4"。
+# 点一次保存就把 q4/q6/q8 三档映射抹掉——之后精度选 q6 找不到对应文件。
+#
+# download_repo / download_files 不在名单里：下载只下 `path` 指的原始权重，
+# 量化档一律本地压。留着它们等于留一条"从网上拿成品量化权重"的后门。
 _VLM_FIELDS = ("path", "precision", "family", "revision", "quantized_path",
-               "gguf", "mmproj", "gguf_quants", "download_repo", "download_files")
+               "gguf", "mmproj", "gguf_quants")
 # awq/gptq 是页内量化写回来的格式名。不收它们的话，在模型管理页保存一次
 # 就会把 precision 改回 int4——虽然还能跑（quantized_path 还在），但页面上
 # 显示的口径就错了。
-_PRECISIONS = {"int4", "int8", "bf16", "fp16", "fp32", "auto", "awq", "gptq"}
+# ★ GGUF 那几档（f16/q4/q5/q6/q8）必须在内：默认档现在就是 f16，点名写在这里
+#   之前，页面保存一次就会把 f16 归一成 int4 并当成"差异"写进覆盖文件。
+_PRECISIONS = {"int4", "int8", "bf16", "fp16", "fp32", "auto", "awq", "gptq",
+               "f16", "q4", "q5", "q6", "q8",
+               # fp8 / w4a16 是 vLLM 的正常档位（见 config.QUANT_PRECISIONS）。
+               # 这里漏了它们，页面上选完保存会被**静默归一成 int4**——界面
+               # 显示 int4、实际加载的却是别的，口径就再也对不上了。
+               "fp8", "w4a16"}
 
 
 def _config_paths():
@@ -53,25 +62,10 @@ def _clean_vlm_spec(raw: dict[str, Any], key: str) -> dict[str, Any]:
     spec["revision"] = revision or None
     quantized = str(raw.get("quantized_path") or "").strip()
     spec["quantized_path"] = quantized or None
-    for field in ("gguf", "mmproj", "download_repo"):
+    for field in ("gguf", "mmproj"):
         spec[field] = str(raw.get(field) or "").strip()
     spec["gguf_quants"] = _quants_dict(raw.get("gguf_quants"))
-    spec["download_files"] = _glob_list(raw.get("download_files"))
     return spec
-
-
-def _glob_list(value: Any) -> list[str]:
-    """下载文件匹配清单。接受数组，也接受逗号/换行分隔的字符串（配置手写时更省事）。
-
-    空项一律丢弃：空串按 fnmatch 会匹配所有文件，等于把 20G 的仓库全拖下来。
-    """
-    if isinstance(value, str):
-        raw = value.replace("\n", ",").split(",")
-    elif isinstance(value, (list, tuple)):
-        raw = [str(x) for x in value]
-    else:
-        raw = []
-    return [seg.strip() for seg in raw if seg and seg.strip()]
 
 
 def _quants_dict(value: Any) -> dict[str, str]:
@@ -104,42 +98,10 @@ def _vlm_spec_of(raw: dict[str, Any]) -> dict[str, Any]:
             out[field] = str(value or "int4").strip().lower()
         elif field == "family":
             out[field] = str(value or "qwen3vl").strip() or "qwen3vl"
-        elif field == "download_files":
-            out[field] = _glob_list(value)
         elif field == "gguf_quants":
             out[field] = _quants_dict(value)
-        elif field == "download_repo":
-            # 没声明时按 path 派生。页面拿到的是派生值、提交回来的也是它，
-            # 两边同一条口径才不会把"配置里没写"误判成"用户改过了"——
-            # 否则点一次保存，整张清单就被冻结进覆盖文件。
-            declared = str(value or "").strip()
-            out[field] = declared or _download_repo(
-                "vlm", str(raw.get("path") or ""))
         else:
             out[field] = str(value or "").strip()
-    return out
-
-
-# GGUF 档位的展示名。顺序即下拉框顺序：Q4 最省显存，Q8 最准。
-_GGUF_LABELS = {"q4": "Q4_K_M", "q5": "Q5_K_M", "q6": "Q6_K", "q8": "Q8_0"}
-
-
-def _gguf_tiers(spec: dict[str, Any]) -> list[dict[str, str]]:
-    """这个模型能按哪些 GGUF 档跑，以及各档的文件名。
-
-    来源是 `gguf_quants`（"这模型确实能按这一档跑"），不是 `download_files`
-    （"上次决定要下哪几份"）。两者会不一致：download_files 里漏了 Q8，页面
-    就下不到 Q8——而用户在新任务页明明能选 Q8，选完只能看到"这一档还没下载"。
-    """
-    quants = spec.get("gguf_quants") or {}
-    if not isinstance(quants, dict):
-        return []
-    out: list[dict[str, str]] = []
-    for key in ("q4", "q5", "q6", "q8"):
-        path = str(quants.get(key) or "").strip()
-        if path:
-            out.append({"key": key, "label": _GGUF_LABELS[key],
-                        "file": Path(path).name})
     return out
 
 
@@ -150,12 +112,20 @@ def missing_weight_files(spec: dict[str, Any],
     目录里有文件 ≠ 跑得起来。踩过：下的是官方仓库的 safetensors（17G），
     页面显示"已下载"，启动却报"GGUF 权重不存在"——因为它要的是另一个仓库里
     的 Q4_K_M.gguf。所以点名缺哪几个，而不是只报"没有"。
+
+    ★ 只查**该模型当前精度那一档**的 GGUF：默认是 f16 的人自己压了 q4 之后，
+      再提示"缺 F16.gguf"就是假警报（反过来只压了 q4 的人也一样）。
+      非 GGUF 精度（vLLM 的 awq/bf16 等）没有对应文件，按 `gguf:` 兜底。
     """
     from . import downloads as dl
+    from ..config import GGUF_PRECISIONS
 
+    want = str(spec.get("precision") or "").strip().lower()
+    quants = spec.get("gguf_quants") or {}
+    gguf = (quants.get(want)
+            if want in GGUF_PRECISIONS and quants.get(want) else spec.get("gguf"))
     out: list[str] = []
-    for field in ("gguf", "mmproj"):
-        raw = str(spec.get(field) or "").strip()
+    for raw in (str(gguf or "").strip(), str(spec.get("mmproj") or "").strip()):
         if not raw:
             continue
         path = Path(raw)
@@ -166,6 +136,92 @@ def missing_weight_files(spec: dict[str, Any],
             continue
         out.append(path.name)
     return out
+
+
+def _gguf_tiers_state(spec: dict[str, Any],
+                      dest: Path) -> tuple[list[str], list[str]]:
+    """(完好且真有文件的档, 文件在但明显不完整的档)。
+
+    只看 `gguf_quants` 的键会骗人：清单里 q6 指着一个早被删掉/改了名的文件时，
+    页面照样标"已压"，直到启动才发现缺文件。所以这里按"文件在不在"算，
+    和 `missing_weight_files` 用同一套兜底（仓库根 + 下载目录两处都算）。
+
+    ★ 还要看**大小说得过去**：量化中途失败/取消会留下半截 .gguf，文件名齐、
+      大小不对，页面照样标"已压好"。实测踩过：8B 的 Q6 只有 0.47G（正常 6.3G），
+      起服务不报缺文件，直接加载出一坨垃圾。原始权重还在时拿它的体积当基准
+      （真量化档至少是它的 20%：Q4≈30%、Q6≈40%、Q8≈53%），低于这个就单列到
+      broken —— 得让页面说出"这一档文件不完整，重压一次"，而不是假装没有。
+    """
+    from . import downloads as dl
+
+    raw_bytes = 0
+    try:
+        if dest.is_dir():
+            raw_bytes = sum(p.stat().st_size for p in dest.glob("*.safetensors"))
+    except OSError:
+        raw_bytes = 0
+
+    ready: list[str] = []
+    broken: list[str] = []
+    for name, raw in (spec.get("gguf_quants") or {}).items():
+        path = Path(str(raw))
+        path = path if path.is_absolute() else dl.ROOT / path
+        found = path if path.is_file() else dest / path.name
+        if not found.is_file():
+            continue
+        try:
+            if raw_bytes and found.stat().st_size < raw_bytes * 0.2:
+                broken.append(str(name).lower())
+                continue          # 半截文件：别让它变成"这一档压好了"
+        except OSError:
+            continue
+        ready.append(str(name).lower())
+    return ready, broken
+
+
+def _gguf_tiers_on_disk(spec: dict[str, Any], dest: Path) -> list[str]:
+    """配置里登记过、且文件真的在盘上、大小也说得过去的 GGUF 档。"""
+    return _gguf_tiers_state(spec, dest)[0]
+
+
+def _has_raw_weights(dest: Path) -> bool:
+    """transformers 原始权重是否到位：config.json + 至少一份 *.safetensors。
+
+    ★ 只看"目录里有文件"会把量化产物也算成"原始权重已下载"——实测反馈过：
+      页面显示"原始权重已下载"，去点「本地量化」却说找不到输入。这两件事
+      必须分开，判据跟 `gguf_convert.source_dir()` 一致。
+    """
+    return (dest / "config.json").is_file() and any(dest.glob("*.safetensors"))
+
+
+def weight_summary(spec: dict[str, Any], dest: Path | None) -> dict[str, Any]:
+    """新建任务页判"这套权重能不能用"需要的那几项，一次算齐。
+
+    为什么单独拿出来：那一页要同时回答四个问题，而每个问题的口径都必须和
+    模型管理页一致——
+      · 缺哪几个文件（gguf / mmproj）
+      · 哪几档 GGUF 真有文件（精度选项该不该置灰）
+      · 有没有 transformers 原始权重（没有就不能再压新档）
+      · 有没有 vLLM 的预量化权重（W4A16 需要）
+    各算各的，就会出现"模型管理说已压好、新建任务说没有"这种对不上的话。
+    """
+    from . import downloads as dl
+
+    quantized = False
+    raw_q = str(spec.get("quantized_path") or "").strip()
+    if raw_q:
+        path = Path(raw_q)
+        quantized = (path if path.is_absolute() else dl.ROOT / path).exists()
+    ready, broken = (_gguf_tiers_state(spec, dest) if dest is not None
+                     else ([], []))
+    return {
+        "missing_files": missing_weight_files(spec, dest),
+        "gguf_ready": ready,
+        # 文件在但明显不完整（半截）的档：页面要说"重压一次"，不能装作没有
+        "gguf_broken": broken,
+        "raw_ready": _has_raw_weights(dest) if dest is not None else False,
+        "quantized": quantized,
+    }
 
 
 def _local_state(kind: str, key: str, dirs: dict[str, str],
@@ -205,6 +261,15 @@ def _local_state(kind: str, key: str, dirs: dict[str, str],
         "local_bytes": size,
         "download": state,
         "missing_files": missing,
+        # 哪些 GGUF 档真的有文件（页面上"已压"标记的依据）
+        "gguf_ready": (_gguf_tiers_on_disk(spec, dest)
+                       if kind == "vlm" and isinstance(spec, dict) else []),
+        # 文件在、但大小明显不对的档（量化中断留下的半截），不能当"已压"
+        "gguf_broken": (_gguf_tiers_state(spec, dest)[1]
+                        if kind == "vlm" and isinstance(spec, dict) else []),
+        # 有没有**原始权重**（safetensors）。只有 NL 有这个区别：tag 的目录里
+        # 就是权重本身，没有"原始/量化产物"之分，所以不给这个字段。
+        **({"raw_ready": _has_raw_weights(dest)} if kind == "vlm" else {}),
         "ready": exists and not missing,
     }
 
@@ -230,23 +295,17 @@ def _custom_dir(kind: str, key: str, raw: Any) -> str:
     return text
 
 
-def _download_repo(kind: str, spec_path: str, declared: str = "") -> str:
+def _download_repo(kind: str, spec_path: str) -> str:
     """这条能不能下载、从哪个仓库下。
 
-    优先用条目声明的 `download_repo`：破限版的原始权重在 prithivMLmods，
-    但默认引擎是 llama.cpp，实际要下的是 mradermacher 转好的 GGUF——
-    两者是同一份权重，仓库不同。没声明时退回 `path`。
+    NL 只从 `path` 指的 transformers 仓库下**原始权重**。不再接受"另指一个
+    仓库"的声明——那正是从前把原始权重和成品 GGUF 分成两个仓库、结果下错
+    地方的来源；现在量化档只能本地压，网上的一份都不下。
 
     NL 的 `path` 既可能是 HF 仓库名，也可能是本地目录；只有前者能下载。
     tag 的 `repo` 字段本来就是仓库名，直接给。
     """
     text = (spec_path or "").strip()
-    override = (declared or "").strip()
-    if override:
-        # 声明了下载仓库就等于"这里有个可下的东西"，但仍要拦本地目录误填。
-        if "/" not in override and "\\" not in override:
-            return ""
-        return override
     if kind == "tag":
         return text
     if not text or "/" not in text and "\\" not in text:
@@ -285,11 +344,9 @@ def catalog() -> dict[str, Any]:
             "tiers": tiers_of.get(str(key), []),
             **fields,
             **_local_state("vlm", str(key), dirs, fields),
-            # 下载时可选哪几档（页面据此出下拉）。空 = 没有 GGUF 分档。
-            "download_tiers": _gguf_tiers(fields),
-            "download_repo": _download_repo(
-                "vlm", str(fields.get("path") or ""),
-                str(fields.get("download_repo") or "")),
+            # 下载源只有一个：`path` 指的原始权重仓库。量化档不走下载，
+            # 由「本地量化」现场产出。
+            "download_repo": _download_repo("vlm", str(fields.get("path") or "")),
         })
     tag: list[dict[str, Any]] = []
     for key, repo in ((effective.get("tagging") or {}).get("models") or {}).items():
@@ -336,6 +393,14 @@ def catalog() -> dict[str, Any]:
         # 而不是等用户填完点保存才报"需要 socksio"。
         "proxy": str(overlay.get("proxy") or ""),
         "socks_supported": dl.socks_ready(),
+        # 下载源（镜像站）。空 = 跟随 HF_ENDPOINT / 官方；env_endpoint 用来
+        # 在页面上说清"你没设，但环境变量在起作用"，省得两边对不上。
+        "endpoint": str(overlay.get("endpoint") or ""),
+        "env_endpoint": str(os.environ.get("HF_ENDPOINT") or ""),
+        "effective_endpoint": _effective_endpoint(),
+        # 大文件下载连接数（页面设置 > 环境变量 > 默认）。镜像站实测总速
+        # 随连接数线性涨，所以这个值直接决定 16G 要下多久。
+        "conns": _effective_conns(),
     }
 
 
@@ -428,11 +493,12 @@ def save(payload: dict[str, Any]) -> dict[str, Any]:
         "hidden": hidden,
         "tag_hidden": tag_hidden,
     }
-    # 代理不属于这张表，但同一个文件里存着：整表保存时原样带回去，
-    # 否则改一次模型清单就把代理设置清掉了（用户会以为网络坏了）。
-    proxy = _read_overlay_raw().get("proxy")
-    if proxy:
-        doc["proxy"] = proxy
+    # 代理 / 下载源不属于这张表，但同一个文件里存着：整表保存时原样带回去，
+    # 否则改一次模型清单就把网络设置清掉了（用户会以为网断了）。
+    raw = _read_overlay_raw()
+    for keep in ("proxy", "endpoint", "conns"):
+        if raw.get(keep):
+            doc[keep] = raw[keep]
     _write(overlay_path(), doc)
     return catalog()
 
@@ -458,43 +524,32 @@ def _entry(kind: str, key: str) -> dict[str, Any]:
 
 def start_download(kind: str, key: str,
                    precision: str | None = None) -> dict[str, Any]:
+    """起一个下载。
+
+    VLM 只有一条路：整仓库原始权重（safetensors + config + tokenizer）。
+    网上现成的 GGUF 一份都不下——量化档必须由「本地量化」产出，这样每一档
+    都是从同一份原始权重压出来的，来历可追。
+
+    `precision` 是历史参数，前端还会传；不再影响下载内容（留着是为了老页面
+    发请求时不至于报意外参数）。
+    """
     from . import downloads as dl
 
     item = _entry(kind, key)
-    repo = str(item.get("download_repo") or "")
     dest = Path(item["local_abs"])
-    allow = item.get("download_files") or None
-    want = (precision or "").strip().lower()
-    if want == "raw":
-        # 原始权重：整仓库都要（config.json / tokenizer / 所有 safetensors 分片），
-        # 少一个文件本地就转不出 GGUF。这条路径只给「本地量化」用。
-        allow = None
-        # ★仓库要按 `path` 重新推：破限版的 download_repo 指向 mradermacher 的
-        # **GGUF** 仓库，那里一个 safetensors 都没有。下"原始权重"必须回到
-        # path 指的那个 transformers 仓库（prithivMLmods/...-MAX）。
-        raw_repo = _download_repo(kind, str(item.get("path") or ""))
-        if not raw_repo:
+    if kind == "vlm":
+        repo = _download_repo("vlm", str(item.get("path") or ""))
+        if not repo:
             raise ValueError(
                 f"{key} 的 path 是本地目录，没有可下载的原始权重。"
                 "直接把本地目录填进 path 即可，不需要走这条路。")
-        repo = raw_repo
-    elif want:
-        # 指定了档位就只下这一档 + 它配套的 mmproj。用**精确文件名**而不是
-        # glob：mmproj 有 f16 和 q8 两个版本，`*mmproj*` 会把两个都拖下来
-        # （多 1 G），而用户已经明确说了只要哪一档。
-        tiers = {t["key"]: t for t in _gguf_tiers(item)}
-        if not tiers:
-            raise ValueError(
-                f"{key} 没有可选的 GGUF 档，只能整包下载（不传 precision）")
-        if want not in tiers:
-            raise ValueError(
-                f"{key} 没有 {want} 这一档。可选：{' / '.join(tiers)}")
-        mmproj = Path(str(item.get("mmproj") or "")).name
-        allow = [tiers[want]["file"]] + ([mmproj] if mmproj else [])
-    # 不指定档位时按条目声明的清单下（GGUF 仓库一个名字下挂着十来个档，全量
-    # 下载纯属浪费）；清单为空则整仓库。
+        # allow=None = 整仓库。少一个文件（config.json / tokenizer / 某个
+        # 分片）本地就转不出 GGUF。
+        return dl.DOWNLOADS.start(kind, key, repo, dest, proxy=proxy_url(),
+                                  allow=None)
+    repo = str(item.get("download_repo") or "")
     return dl.DOWNLOADS.start(kind, key, repo, dest, proxy=proxy_url(),
-                              allow=allow)
+                              allow=None)
 
 
 def _read_overlay_raw() -> dict[str, Any]:
@@ -509,6 +564,60 @@ def _read_overlay_raw() -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _effective_endpoint() -> str:
+    """最终生效的下载源（页面设置 > 环境变量 > 官方）。"""
+    from ..config import download_endpoint
+
+    return download_endpoint()
+
+
+def _effective_conns() -> int:
+    """大文件下载连接数（页面设置 > TAGGER_DL_CONNS > 默认）。"""
+    from ..config import download_conns
+
+    return download_conns()
+
+
+def set_conns(count: int) -> dict[str, Any]:
+    """单独保存连接数。0 = 用默认值。"""
+    from ..config import overlay_path
+
+    n = int(count or 0)
+    if n and not 1 <= n <= 32:
+        raise ValueError("连接数要在 1~32 之间（0 = 用默认）")
+    doc = _read_overlay_raw()
+    if n:
+        doc["conns"] = n
+    else:
+        doc.pop("conns", None)
+    _write(overlay_path(), doc)
+    return {"conns": _effective_conns(), "catalog": catalog()}
+
+
+def endpoint_url() -> str:
+    """页面设置的那一项（空 = 没设过）。"""
+    from ..config import load_model_overlay
+
+    return str(load_model_overlay().get("endpoint") or "")
+
+
+def set_endpoint(url: str) -> dict[str, Any]:
+    """单独保存下载源。理由同 `set_proxy`：这是"这台机器从哪拿权重"，
+    跟清单里有几个模型无关，不该混进整表保存的校验里。
+    """
+    from ..config import overlay_path
+    from . import downloads as dl
+
+    text = dl.normalize_endpoint(url)
+    doc = _read_overlay_raw()
+    if text:
+        doc["endpoint"] = text
+    else:
+        doc.pop("endpoint", None)
+    _write(overlay_path(), doc)
+    return {"endpoint": text, "effective": _effective_endpoint(), "catalog": catalog()}
 
 
 def proxy_url() -> str:
@@ -556,6 +665,11 @@ def delete_files(kind: str, key: str) -> dict[str, Any]:
     item = _entry(kind, key)
     if item.get("download") and item["download"].get("status") == "running":
         raise ValueError("还在下载，先取消再删")
+    # 「暂停」只是把 status 改成 canceled，后台线程还在把当前块写完、断开连接：
+    # 这期间 `.part` 和 `.download.lock` 都开着，直接删就是 WinError 32。
+    dl.DOWNLOADS.cancel(kind, key)
+    if not dl.DOWNLOADS.wait_done(kind, key):
+        raise ValueError("下载线程还在收尾（断开连接），几秒后再点一次删除")
     dl.DOWNLOADS.delete_dir(Path(item["local_abs"]))
     dl.DOWNLOADS.forget(kind, key)
     return catalog()
@@ -580,6 +694,8 @@ class _Registry:
     reveal_files = staticmethod(reveal_files)
     set_proxy = staticmethod(set_proxy)
     test_proxy = staticmethod(test_proxy)
+    set_endpoint = staticmethod(set_endpoint)
+    set_conns = staticmethod(set_conns)
 
 
 MODELS = _Registry()

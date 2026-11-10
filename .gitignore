@@ -7,8 +7,37 @@
 *.log
 /work/_mt
 
+# 本机设置与任务历史：含素材路径、显存参数，换台机器就没意义
+/configs/ui-form.json
+/run/history/
+
 # 运维留档：含执行机 IP、HF 账号等信息，不入库
 /devtools/数据集构建进度.md
 /work/test
 /runtime/llama.cpp
 /work/dl
+/work/_pyt
+/work/_pyt4
+/work/_pyt6
+/work/pytest_dl4
+/work/pytest_ep2
+/work/pytest_ep3
+/work/pytest_gg
+/work/pytest_gg2
+/work/pytest_tmp
+/work/pytest_tmp4
+/work/pytest_tmp5
+/work/pytest_tmp6
+/work/pytest_tmp7
+/work/pytest_tmp8
+/work/pytest_tmp9
+/work/pytest_ep
+/work/pytest_dl3
+/work/pytest_dl2
+/work/pytest_cn
+/work/_zh_test
+/work/_pyt7
+/work/_pyt5
+/work/_pyt3
+/work/__pycache__
+/run/hf-cache

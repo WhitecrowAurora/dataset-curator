@@ -18,6 +18,9 @@ public sealed class PythonServer : IAsyncDisposable
 {
     private const string HealthPath = "/api/health";
 
+    /// <summary>固定首选端口，与 `tagger web` 的默认值一致（见 backend 的 cli.py）。</summary>
+    private const int PreferredPort = 27100;
+
     private readonly StringBuilder _log = new();
     private readonly object _logLock = new();
     private Process? _process;
@@ -143,6 +146,41 @@ public sealed class PythonServer : IAsyncDisposable
         return null;
     }
 
+    /// <summary>
+    /// 端口优先固定（与 CLI / run-web.cmd 的默认值一致）。
+    ///
+    /// 这不只是为了好记：WebView2 的 localStorage / IndexedDB 按 **origin** 隔离，
+    /// 而 origin 含端口。以前每次启动都让内核随机分一个端口，等于每次都换了个站点，
+    /// 于是主题、上次任务、轮询间隔这些本机偏好在重启后集体失效——只有把端口钉死，
+    /// 写下的偏好下次才读得回来。
+    ///
+    /// 固定端口被占（例如同时开着 run-web.cmd）才退回系统分配：这一次读不到旧偏好，
+    /// 但界面照常能用，不会因为端口冲突起不来。
+    /// </summary>
+    private static int PickPort()
+    {
+        if (IsPortFree(PreferredPort)) return PreferredPort;
+        return PickFreePort();
+    }
+
+    private static bool IsPortFree(int port)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, port);
+        try
+        {
+            listener.Start();
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+        finally
+        {
+            try { listener.Stop(); } catch (SocketException) { /* 没起来，无需收尾 */ }
+        }
+    }
+
     /// <summary>让内核分配一个空闲端口，再关掉监听把端口交还给 uvicorn。</summary>
     private static int PickFreePort()
     {
@@ -163,7 +201,7 @@ public sealed class PythonServer : IAsyncDisposable
     {
         if (_process is not null) throw new InvalidOperationException("服务已经在跑了");
 
-        Port = PickFreePort();
+        Port = PickPort();
         var psi = new ProcessStartInfo
         {
             FileName = PythonPath,

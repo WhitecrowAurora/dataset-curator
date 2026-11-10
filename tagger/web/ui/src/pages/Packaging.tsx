@@ -147,6 +147,10 @@ export function Packaging() {
   const [artist, setArtist] = useState(true)
   const [artistDepth, setArtistDepth] = useState(0)
   const [artistInject, setArtistInject] = useState(true)
+  // 画师对照表：空 = 跟 tiers.yaml 走。分包时它影响 image_id 的排序键，
+  // 封包时它决定"跟着图一起封进去的画师"是谁——两边必须与打标那次一致。
+  const [artistTable, setArtistTable] = useState('')
+  const [cfgArtistTable, setCfgArtistTable] = useState('')
   const [checkSpace, setCheckSpace] = useState(true)
   const [packPreview, setPackPreview] = useState<PlanPreview | null>(null)
 
@@ -191,6 +195,8 @@ export function Packaging() {
         setArtist(d.artist)
         setArtistDepth(d.artist_depth)
         setArtistInject(d.artist_inject)
+        // 配置值只做占位提示，不预填：填进去就分不清"配置的"和"我改的"
+        setCfgArtistTable(d.artist_table ?? '')
       })
       .catch(() => undefined)
   }, [])
@@ -262,6 +268,7 @@ export function Packaging() {
         recursive: splitRecursive,
         exclude: exclude.trim(),
         verify_pack: splitVerify,
+        artist_table: artistTable.trim(),
       }
     }
     if (mode === 'merge') {
@@ -295,6 +302,7 @@ export function Packaging() {
       artist,
       artist_depth: artistDepth,
       artist_inject: artistInject,
+      artist_table: artistTable.trim(),
       check_space: checkSpace,
     }
   }
@@ -338,7 +346,8 @@ export function Packaging() {
     setError(null)
     try {
       const probeExclude = exclude.trim() || excludeDefault
-      const p = await api.dataJobPreview(splitInput.trim(), probeExclude, splitRecursive)
+      const p = await api.dataJobPreview(
+        splitInput.trim(), probeExclude, splitRecursive, artistTable.trim())
       setPreview(p)
       if (!exclude.trim() && p.excluded > 0) {
         setExclude(probeExclude)
@@ -362,6 +371,8 @@ export function Packaging() {
         layout: packLayout,
         artist,
         artist_depth: artistDepth,
+        // 不传表的话，预览按目录名算、实际封包却查表 → 画师名与归档名对不上
+        artist_table: artistTable.trim() || undefined,
         pack: assignIds === 'global',
         seq_width: packSeqWidth,
         start_seq: packStartSeq,
@@ -542,6 +553,26 @@ export function Packaging() {
                     </div>
                   )}
                 </div>
+              </SettingRow>
+
+              <SettingRow
+                label="画师表"
+                help="单个 parquet、分片目录，或 hf://datasets/<repo>/<文件或目录>；留空跟配置走。分包阶段还没有分片名，这里只能用全表"
+                description={
+                  artistTable.trim()
+                    ? '按 post id 查画师，查不到再退回目录名（会影响 image_id 的排序键）'
+                    : cfgArtistTable
+                      ? `跟配置走：${cfgArtistTable}`
+                      : '未配置：只从目录名取画师'
+                }
+              >
+                <input
+                  className="lx-input font-mono text-xs"
+                  value={artistTable}
+                  onChange={(e) => setArtistTable(e.target.value)}
+                  placeholder={cfgArtistTable || 'K:/anlia/_artist/danbooru_artists.parquet'}
+                  disabled={running}
+                />
               </SettingRow>
 
               <SettingRow
@@ -1057,6 +1088,26 @@ export function Packaging() {
                     disabled={!artist}
                   />
                 </div>
+              </SettingRow>
+
+              <SettingRow
+                label="画师表"
+                help="单个 parquet、分片目录，或 hf://datasets/<repo>/<文件或目录>；留空跟配置走。查到的画师会跟着图一起封进产物（标记为 table 口径）"
+                description={
+                  artistTable.trim()
+                    ? '按 post id 查画师，查不到再退回目录名；来源会写进产物供打标侧判断优先级'
+                    : cfgArtistTable
+                      ? `跟配置走：${cfgArtistTable}`
+                      : '未配置：只从目录名取画师'
+                }
+              >
+                <input
+                  className="lx-input font-mono text-xs"
+                  value={artistTable}
+                  onChange={(e) => setArtistTable(e.target.value)}
+                  placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
+                  disabled={running || !artist}
+                />
               </SettingRow>
 
               <SettingRow label="每包条数" help="写满就封口；webdataset 下每条会展开成多个 tar 成员">

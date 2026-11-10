@@ -88,9 +88,11 @@ class TierSpec:
 #   w4a16 —— 权重以 4bit 存、激活仍 16bit；必须已有 AWQ/GPTQ 量化权重
 QUANT_PRECISIONS = ("bf16", "fp8", "w4a16")
 
-# llama.cpp 的 GGUF 量化档。Q4_K_M 是吞吐/质量的分水岭，Q6_K 显存约 1.4×
-# Q4 但长尾 tag 更稳，Q8_0 基本等于原精度（16G 卡放不下 8B 的 Q8）。
-GGUF_PRECISIONS = ("q4", "q5", "q6", "q8")
+# llama.cpp 的 GGUF 档位。f16 是**未压缩**的完整权重（8B 约 15.6 GB），
+# 也是默认档：质量口径优先，谁嫌慢/嫌占显存就自己量化成下面几档。
+# Q4_K_M 是吞吐/质量的分水岭，Q6_K 显存约 1.4× Q4 但长尾 tag 更稳，
+# Q8_0 基本等于原精度（16G 卡放不下 8B 的 Q8）。
+GGUF_PRECISIONS = ("f16", "q4", "q5", "q6", "q8")
 
 
 def normalize_quant_precision(value: str | None) -> str | None:
@@ -260,11 +262,12 @@ def _check_precision_supported(precision: str, gpu: GPUInfo,
     elif p in ("int4", "awq", "gptq", "w4a16"):
         if not gpu.supports_int4:
             raise ConfigError(f"{gpu.name} 太旧，不支持 int4 反量化推理。")
-    elif p in GGUF_PRECISIONS:
-        # GGUF 档由 llama.cpp 反量化，显存与算力门槛比 vLLM 低得多；
+    elif p in GGUF_PRECISIONS and p != "f16":
+        # GGUF 量化档由 llama.cpp 反量化，显存与算力门槛比 vLLM 低得多；
         # 装不装得下由文件大小决定，警告交给 _estimate_vram_headroom_check。
         return
-    elif p in ("bf16", "bfloat16", "fp16"):
+    elif p in ("bf16", "bfloat16", "fp16", "f16"):
+        # f16（GGUF 的完整权重）与 bf16 是同一档显存开销，一起按"装不装得下"判。
         # 只检查装得下，不检查算力。装不装得下由**模型**决定（8B 的 bf16
         # 权重就要 16GB），之前错查显卡型号里有没有 "8b"——显卡名里永远
         # 没有，于是任何卡都按 16GB 那档放行。
@@ -272,7 +275,8 @@ def _check_precision_supported(precision: str, gpu: GPUInfo,
         if gpu.vram_gb < need * 0.6:
             raise ConfigError(
                 f"{gpu.name} 只有 {gpu.vram_gb} GiB，跑 {model_key or 'bf16 模型'} "
-                f"的 bf16 很可能 OOM。建议改用 int4。"
+                f"的完整权重很可能 OOM。建议改用 q4（GGUF 量化档，需先在"
+                f"「模型管理」页压出来）或换更大的卡。"
             )
     else:
         raise ConfigError(f"未知精度档位: {precision}")
@@ -283,7 +287,7 @@ def _estimate_vram_headroom_check(profile: RunProfile, gpu: GPUInfo) -> list[str
     warns: list[str] = []
     small = "4b" in profile.model.key.lower()
     tb = 0.5 if small else 1.0  # 每 B 参数 int4 约 0.5GB
-    if profile.precision.lower() in ("bf16", "bfloat16"):
+    if profile.precision.lower() in ("bf16", "bfloat16", "f16"):
         tb = 2.2 if small else 4.4
     elif "fp8" in profile.precision.lower():
         tb = 1.1 if small else 2.2
@@ -297,7 +301,7 @@ def _estimate_vram_headroom_check(profile: RunProfile, gpu: GPUInfo) -> list[str
     if approx > gpu.vram_gb * 0.95:
         warns.append(
             f"粗估需要约 {approx:.1f} GiB 显存，本卡 {gpu.vram_gb} GiB，可能 OOM。"
-            f"建议降低 max_model_len 或改用更小模型。"
+            f"建议降低 max_model_len，或把权重压成 q4/q6 再用（默认档是完整权重）。"
         )
     return warns
 
@@ -334,6 +338,22 @@ def parse_caption_chars(value) -> tuple[int, int] | None:
     return lo, hi
 
 
+def _as_flag(value: Any, default: bool) -> bool:
+    """配置里的布尔开关。None = 用默认值。
+
+    yaml 的 false 会被解析成 bool，但 WebUI/命令行传进来的常是字符串
+    "false" / "0" / "no"，而 `bool("false")` 是 True——直接套 bool()
+    会让"显式关掉"变成"开着"，这种错只在跑完一批之后才看得出。
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() not in ("", "0", "false", "no", "off", "none")
+
+
 @dataclass(slots=True)
 class OutputSpec:
     """产出什么、多长。决定一次打标要生成哪些字段。
@@ -362,6 +382,17 @@ class OutputSpec:
     #   实测（Q4 8B，126 张）：400-1024 → 250-500 时字数 −33%、延迟 −36%，
     #   而要素覆盖只掉 2~3pp（见 devtools/nl-quant-ab.md §5.2）。
     caption_chars: tuple[int, int] | None = None
+    # 中文 NL 的比例（0~1）。按 (seed, image_id) 抽签，抽中的图用中文指令写
+    # caption；tag 段永远是英文 danbooru，不受它影响——中文 tag 在训练侧没有
+    # 对应词表，混进去只是脏数据。
+    # ★它改变产出分布，与 caption_chars 同级，必须进缓存指纹/ provenance
+    #   （client._cache_fingerprint 已含）。默认 0 = 全英文，老批次的复现不受影响。
+    caption_zh_ratio: float = 0.0
+    # 额外要求模型输出 `<VISIBLE_TEXT>` 结构化块（规范 v0.2 §6：text_exact /
+    # language / script / legibility）。默认开——§8 的验收字段里 `visible_text`
+    # 是必填（可以为空数组）。关掉它省的那点 token 换不来"训练侧拿不到图中文字"。
+    # ★进指纹：开了这一项的批次与没开的产物不能混用（多一段回复、token 口径不同）。
+    visible_text: bool = True
 
     @property
     def wants_nl(self) -> bool:
@@ -386,6 +417,13 @@ class OutputSpec:
             tag_min_count=int(d.get("tag_min_count", 12)),
             tag_max_count=int(d.get("tag_max_count", 160)),
             caption_chars=parse_caption_chars(d.get("caption_chars")),
+            # 越界值夹到 0~1，不报错：0.3 与 30 是同一件事，用户手写配置时
+            # 很容易写成百分数，为这个拦住整批任务不值得。
+            caption_zh_ratio=min(1.0, max(0.0, float(
+                d.get("caption_zh_ratio", 0.0) or 0.0))),
+            # yaml 里写成 "false" / "no" / 0 都算关。bool("false") 是 True，
+            # 直接套 bool() 会让"显式关掉"变成"开着"，这种坑只在跑完一批才现形。
+            visible_text=_as_flag(d.get("visible_text"), True),
         )
         if spec.nl_max_tokens and spec.nl_min_tokens > spec.nl_max_tokens:
             raise ConfigError(
@@ -415,6 +453,14 @@ class OpsConfig:
     tagging: dict[str, Any] = field(default_factory=dict)
     report: dict[str, Any] = field(default_factory=dict)
     variants: dict[str, Any] = field(default_factory=dict)
+    # 抽样配额（规范 v0.2 §1–§3）。结构见 configs/tiers.yaml 的 sample 段。
+    sample: dict[str, Any] = field(default_factory=dict)
+
+    def sample_spec(self, profile: str | None = None):
+        """抽样参数。延迟导入，避免 config 依赖 sample 的读取器。"""
+        from .sample import SampleSpec
+
+        return SampleSpec.from_dict(self.sample or {}, profile=profile)
 
     def report_batch_size(self) -> int:
         """报告的批次大小。配置只放默认值，命令行可覆盖。
@@ -493,6 +539,7 @@ def load_ops(table: dict[str, Any]) -> OpsConfig:
         tagging=table.get("tagging") or {},
         report=table.get("report") or {},
         variants=table.get("variants") or {},
+        sample=table.get("sample") or {},
     )
 
 
@@ -518,6 +565,14 @@ def overlay_path() -> Path:
     return Path(MODEL_OVERLAY)
 
 
+def _positive_int(value: Any) -> int:
+    """覆盖文件里手写的数字：坏了就当 0（= 用默认值），别把整张清单带崩。"""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def load_model_overlay() -> dict[str, Any]:
     """读覆盖清单。文件不在 / 坏了都返回空覆盖——模型清单坏了不该让打标开不了机。
 
@@ -529,7 +584,8 @@ def load_model_overlay() -> dict[str, Any]:
         tag_hidden["<backend>"]
     """
     empty: dict[str, Any] = {"vlm": {}, "tag": {}, "notes": {}, "dirs": {},
-                             "proxy": "", "hidden": [], "tag_hidden": []}
+                             "proxy": "", "endpoint": "", "conns": 0,
+                             "hidden": [], "tag_hidden": []}
     p = overlay_path()
     if not p.is_file():
         return empty
@@ -550,10 +606,60 @@ def load_model_overlay() -> dict[str, Any]:
         "dirs": {str(k): str(v) for k, v in (raw.get("dirs") or {}).items()},
         # 下载代理（http:// / socks5://），空 = 直连。同上，不进分档表。
         "proxy": str(raw.get("proxy") or ""),
+        # 下载源（镜像站），空 = 跟随 HF_ENDPOINT / 默认。同上。
+        "endpoint": str(raw.get("endpoint") or ""),
+        # 大文件下载连接数，0 = 用默认值。同上。
+        "conns": _positive_int(raw.get("conns")),
         "hidden": [str(k) for k in (raw.get("hidden") or [])],
         "tag_hidden": [str(k) for k in (raw.get("tag_hidden") or [])],
     }
     return out
+
+
+# 默认下载源。默认值就是镜像站：官方在国内基本要挂代理，而权重动辄十几 G，
+# 按流量付费的梯子扛不住。要回官方在「下载网络」里选一下，或设 HF_ENDPOINT。
+DEFAULT_ENDPOINT = "https://hf-mirror.com"
+
+
+def download_endpoint() -> str:
+    """HF 直链前缀。优先级：页面设置 > HF_ENDPOINT > 默认（镜像站）。
+
+    抽成一个函数，是因为下载、清单一堆地方要读它；优先级散在各调用点上，
+    迟早出现"设置页显示镜像、实际请求还打官方"这种查不动的问题。
+
+    镜像站（hf-mirror.com）跟官方是同一套 API 和 resolve 路径，只换前缀，
+    国内可直连——所以它和「下载代理」是**替代关系**，用镜像就不用开梯子。
+    """
+    import os
+
+    saved = str(load_model_overlay().get("endpoint") or "").strip()
+    text = saved or (os.environ.get("HF_ENDPOINT") or "").strip()
+    return (text or DEFAULT_ENDPOINT).rstrip("/")
+
+
+DEFAULT_CONNS = 4
+
+
+def download_conns() -> int:
+    """大文件分几条连接。优先级：页面设置 > TAGGER_DL_CONNS > 默认 4。
+
+    这个值直接决定 16 G 要下多久：镜像站实测是"每条 TCP 约 0.35 MB/s、
+    总线速随连接数线性涨"（4 条 1.2、8 条 1.8、16 条 5.8 MB/s），所以它
+    不是微调项。上限 32：再多镜像站会开始掐连接，反而更慢。
+    """
+    import os
+
+    raw = load_model_overlay().get("conns") or 0
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        try:
+            n = int(os.environ.get("TAGGER_DL_CONNS") or DEFAULT_CONNS)
+        except ValueError:
+            n = DEFAULT_CONNS
+    return max(1, min(n, 32))
 
 
 def apply_model_overlay(table: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

@@ -31,10 +31,7 @@ import hashlib
 import io
 import json
 import os
-import threading
 import time
-import zipfile
-from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,8 +41,8 @@ from .artist import ArtistRule, extract_artist, prepend_tag
 from .local_tag import TagItem, artifact_path, read_artifact
 from .naming import archive_name, make_image_id, normalize_ext, sanitize
 from .storage.discovery import check_stopped
-from .pack import (InputItem, PackOptions, PackState, Packer, discover_inputs,
-                   sha256_of_file)
+from .pack import (ContainerReader, InputItem, PackOptions, PackState, Packer,
+                   container_stem, discover_inputs, sha256_of_file)
 
 # 封包一次预取多少条。太小等于没并行，太大把转码后的图堆在内存里。
 _PACK_WINDOW_FACTOR = 4
@@ -77,49 +74,30 @@ DISK_HEADROOM = 0.2
 
 
 class MemberReader:
-    """按需读取散图 / zip 成员，复用 zip 句柄。
+    """按需读取散图 / 包内成员（zip 与 tar），复用容器句柄。
 
-    为什么需要池：`ZipFile(path).read(member)` 每次都要解析整个中央目录。
-    一个 4TB 级、十万成员的包，逐条读就是十万次目录解析——O(n²) 的固定
-    开销，而且它不会报错，只是越跑越慢。
+    为什么需要池：`ZipFile(path).read(member)` 每次都要解析整个中央目录，
+    `tarfile.open` 更是要把整个包扫一遍建成员索引。一个十万成员的包，逐条读
+    就是十万次全扫——O(n²) 的固定开销，而且它不会报错，只是越跑越慢。
 
-    为什么加锁：打标线程和 HTTP 缩略图线程会同时读同一个包。`ZipFile`
-    的 read 不是线程安全的（共用文件位置）。锁的粒度是"一次读一个成员"，
-    单张几十毫秒，不会成为瓶颈。
+    为什么加锁：打标线程和 HTTP 缩略图线程会同时读同一个包。容器的 read
+    不是线程安全的（共用文件位置）。锁的粒度是"一次读一个成员"，单张几十
+    毫秒，不会成为瓶颈。
+
+    容器类型判断与句柄缓存都在 pack.ContainerReader：这里只是把"散图"那一支
+    接上，避免两套缓存各写一遍、日后只改了一处。
     """
 
     def __init__(self, max_open: int = 4):
-        self._max_open = max(1, max_open)
-        self._open: OrderedDict[str, zipfile.ZipFile] = OrderedDict()
-        self._lock = threading.Lock()
+        self._reader = ContainerReader(keep=max_open)
 
     def read(self, item: TagItem) -> bytes:
         if not item.member:
             return item.path.read_bytes()
-        source = item.source or str(item.path)
-        with self._lock:
-            zf = self._open.get(source)
-            if zf is None:
-                while len(self._open) >= self._max_open:
-                    _, old = self._open.popitem(last=False)
-                    try:
-                        old.close()
-                    except OSError:
-                        pass
-                zf = zipfile.ZipFile(source, "r")
-                self._open[source] = zf
-            else:
-                self._open.move_to_end(source)
-            return zf.read(item.member)
+        return self._reader.read(item.source or str(item.path), item.member)
 
     def close(self) -> None:
-        with self._lock:
-            for zf in self._open.values():
-                try:
-                    zf.close()
-                except OSError:
-                    pass
-            self._open.clear()
+        self._reader.close()
 
     def __enter__(self) -> "MemberReader":
         return self
@@ -163,15 +141,15 @@ def _legacy_id(item: InputItem) -> str:
     """只在"不封包、只打标"的旧路径上用的 id。
 
     散图沿用历史行为（相对路径去扩展名），这样老产物还能命中、断点续跑
-    不失效。zip 成员没有独立路径，用 `<包路径>/<成员路径>` 去扩展名：
+    不失效。包内成员没有独立路径，用 `<包路径>/<成员路径>` 去扩展名：
     既唯一（含包名，避免多包同名覆盖），又不含 Windows 非法字符。
     """
-    if item.kind == "zip_member":
+    if item.is_member:
         # 包里没有"相对路径"这回事，用 `<包名>/<成员路径>` 造一个唯一 id。
-        # 包名去掉 .zip：id 会变成 tags/ 下的目录名，带扩展名只是噪声
-        # （且与 mirror 布局的命名口径不一致）。
-        zip_rel = Path(item.rel_path.split("::", 1)[0]).with_suffix("").as_posix()
-        base = "/".join(_path_segments(f"{zip_rel}/{item.member}"))
+        # 包名去掉容器后缀（.zip/.tar/.tar.gz）：id 会变成 tags/ 下的目录名，
+        # 带扩展名只是噪声（且与 mirror 布局的命名口径不一致）。
+        container = container_stem(item.rel_path.split("::", 1)[0])
+        base = "/".join(_path_segments(f"{container}/{item.member}"))
         stem = base.rsplit(".", 1)[0] if "." in base.rsplit("/", 1)[-1] else base
         return "/".join(sanitize(seg) or "_" for seg in stem.split("/"))
     rel = item.rel_path.replace("\\", "/")
@@ -188,7 +166,7 @@ def _mirror_name(item: InputItem, image_id: str, *, used: set[str]) -> str:
     真撞上同名（两个包里有同一个 `artist/0001.jpg`）时仍会追加 `-<id>`：
     那说明上游确实存在覆盖，此时保命比保结构重要。
     """
-    logical = item.member if item.kind == "zip_member" else item.rel_path
+    logical = item.member if item.is_member else item.rel_path
     parts = _path_segments(logical)
     if not parts:
         parts = [item.flat_name or image_id]
@@ -215,6 +193,7 @@ def plan_inputs(
     start_seq: int = 1,
     artist_rule: ArtistRule | None = None,
     aliases: dict[str, str] | None = None,
+    artist_table=None,
     should_stop=None,
 ) -> Plan:
     """发现输入并决定每张图的 id / 归档名。
@@ -222,6 +201,10 @@ def plan_inputs(
     assign_ids=True（封包路径）：按 (画师, 原始路径) 排序后全局编号。
     排序键与 `distribute.assign_ids` 一致，同一批素材两次跑出的 id 相同。
     assign_ids=False（只打标）：沿用相对路径当 id，兼容历史产物。
+
+    `artist_table` 给了就按 post id 查表（口径与打标侧一致：表优先、目录名
+    兜底），并把来源写进 `artist_source`。封包时查表的意义是让画师**跟着
+    图走**：产物里直接带着逐图确认的画师，下游不必再按分片名找索引表。
     """
     from .config import ConfigError
 
@@ -246,13 +229,25 @@ def plan_inputs(
 
     rule = artist_rule or ArtistRule(enabled=False)
     aliases = aliases or {}
+    # 表优先、目录名兜底——与打标侧 `_artist_names` 同一口径，否则同一张图
+    # "封包时记一个名字、打标时记另一个"，产物自己跟自己打架。
+    reader = artist_table if getattr(artist_table, "active", False) else None
 
     # 第一遍：取画师、算排序键。zip 成员的画师看包内路径（见 InputItem.logical_path）。
-    records: list[tuple[InputItem, str]] = []
+    records: list[tuple[InputItem, str, str, tuple[str, ...]]] = []
     for it in found:
         check_stopped(should_stop)
-        artist = extract_artist(it.logical_path, rule, aliases).tag if rule.enabled else ""
-        records.append((it, artist))
+        artist, origin, names = "", "", ()
+        if rule.enabled:
+            if reader is not None:
+                got = reader.lookup(it.logical_path)
+                if got:
+                    names = tuple(got)
+                    artist, origin = got[0], "table"
+            if not artist:
+                artist = extract_artist(it.logical_path, rule, aliases).tag
+                origin = "path" if artist else ""
+        records.append((it, artist, origin, names))
 
     check_stopped(should_stop)
     if assign_ids:
@@ -260,7 +255,7 @@ def plan_inputs(
         records.sort(key=lambda pair: (pair[1], pair[0].rel_path))
 
     used_names: set[str] = set()
-    for n, (it, artist) in enumerate(records, start=start_seq):
+    for n, (it, artist, origin, names) in enumerate(records, start=start_seq):
         check_stopped(should_stop)
         if assign_ids:
             image_id = make_image_id(artist, n, width=seq_width)
@@ -283,6 +278,8 @@ def plan_inputs(
             member=it.member,
             out_name=out_name,
             artist=artist,
+            artist_source=origin,
+            artists=names,
             size=it.size,
         )
         plan.items.append(item)
@@ -290,7 +287,7 @@ def plan_inputs(
 
     # 来源统计：至少让人看到"图是从哪几个包来的"
     by_source: dict[str, dict] = {}
-    for (it, _), item in zip(records, plan.items):
+    for (it, _, _, _), item in zip(records, plan.items):
         check_stopped(should_stop)
         row = by_source.setdefault(it.source, {
             "source": it.source, "name": Path(it.source).name,
@@ -718,6 +715,10 @@ def pack_items(
                 meta = {
                     "image_id": item.image_id,
                     "artist": item.artist,
+                    # 来源必须跟着走：打标侧据此判断包内值能不能压过查表，
+                    # 分不清来源就只能按目录名对待（保守但不会盖掉真表）。
+                    "artist_source": item.artist_source,
+                    "artists": list(item.artists),
                     "artist_tag": artist_tag,
                     "rel_path": item.rel,
                     "member": item.member,
@@ -725,6 +726,9 @@ def pack_items(
                     "width": w,
                     "height": h,
                     "tags": payload.get("tags") or [],
+                    # 图中文字（规范 v0.2 §6）：结构化抄录，不是 OCR 猜字。
+                    # 空数组也要带——"这张没字"和"这版没跑"不能混成同一个空值。
+                    "visible_text": payload.get("visible_text") or [],
                     "rating": payload.get("rating") or {},
                     "tag_backend": payload.get("tag_backend") or "",
                     "provenance": payload.get("provenance") or {},

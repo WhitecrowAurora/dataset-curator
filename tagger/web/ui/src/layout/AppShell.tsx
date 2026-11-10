@@ -3,6 +3,7 @@ import { Cpu, Moon, Sun, Server } from 'lucide-react'
 import type { Health } from '../lib/api'
 import type { Theme } from '../lib/theme'
 import { StatusChip } from '../components/ui/launcher'
+import { PresetMenu } from '../components/PresetMenu'
 import { Sidebar, type NavItem } from './Sidebar'
 
 /**
@@ -35,7 +36,9 @@ export function AppShell({
       <Sidebar items={items} footer={footer} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-lx bg-lx-surface/70 px-4 backdrop-blur md:px-5">
+        {/* relative z-30：backdrop-blur 会自建一层 stacking context，不抬 z-index 的
+            话顶栏里的下拉（配置方案）会被下面的 <main> 盖住——看得见、点不到。 */}
+        <header className="relative z-30 flex h-12 shrink-0 items-center justify-between gap-4 border-b border-lx bg-lx-surface/70 px-4 backdrop-blur md:px-5">
           <div className="flex min-w-0 items-center gap-2 text-[11.5px] text-lx-muted">
             <Server size={13} className="shrink-0" />
             <span className="truncate font-mono">
@@ -54,6 +57,9 @@ export function AppShell({
                 {gpu ? gpu.split(',')[0] : '未检测到显卡'}
               </span>
             </span>
+
+            {/* 配置方案紧挨着状态片：它是"今天用哪套口径"，与运行状态同一排 */}
+            <PresetMenu />
 
             <StatusChip tone={health ? (health.running_job ? 'accent' : 'success') : 'danger'}>
               {health ? (health.running_job ? '打标中' : '空闲') : '后端未响应'}

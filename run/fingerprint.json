@@ -6,7 +6,7 @@
   "max_pixels": 589824,
   "bucket_spec": "1x1:768x768+4x3:864x640+3x2:928x608+16x9:1024x576+9x16:576x1024",
   "max_model_len": 4096,
-  "max_num_seqs": 8,
+  "max_num_seqs": 4,
   "max_num_batched_tokens": 0,
   "gpu_memory_utilization": 0.88,
   "temperature": 0.2,

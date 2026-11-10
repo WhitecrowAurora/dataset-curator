@@ -44,20 +44,32 @@ _SPACES = re.compile(r"\s+")
 # 视为"非英文"的判据：只要出现非 ASCII 字母，就认为需要外部映射才能英文化。
 _NON_ASCII = re.compile(r"[^\x00-\x7F]")
 
+# 分片包的几种后缀。剥掉它们才和画师表文件名（`<stem>.artist.parquet`）对得上。
+_PACK_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip")
+
 
 @dataclass(slots=True)
 class ArtistRule:
     """画师标签的启用规则。全部来自配置，代码里不留魔法值。"""
 
-    enabled: bool = False
+    # 默认开着：画师是这批数据最贵的标注（人工整理 + 原始 tag 校对），
+    # 默认关掉的话别人拿到产物才发现没有 @name，只能整批重打。
+    enabled: bool = True
     # 从路径的第几层取（0 = 第一层目录）
     depth: int = 0
     # 注入前缀。扩散模型社区惯例是 @
     prefix: str = "@"
-    # 写进 caption 开头，还是只进 JSON 字段
+    # 写进 caption 开头（NL 侧）。
     inject_caption: bool = True
+    # 写进 tag 串开头（TAG 侧）。与上一项分开：有人只要 NL 里带画师、
+    # 或者只要 tag 条件里带，硬绑成一个开关就没法表达。
+    inject_tags: bool = True
     # 翻译表路径，为空则不查、也不自动累积
     aliases_path: str | None = None
+    # 画师对照表：单个 parquet（全表）或一个目录（里面是 shard-XXXX.artist.parquet）。
+    # 给了就优先查表，查不到再退回目录名提取——目录名是人工整理的，表是
+    # danbooru 原始标注，两边都可能缺，谁有不矛盾。
+    table: str | None = None
     # 允许出现在标签里的最大长度，超了视为异常路径而不是作者名
     max_len: int = 64
     # 名字里有空格时替换成下划线。
@@ -70,11 +82,13 @@ class ArtistRule:
     def from_dict(cls, d: dict | None) -> "ArtistRule":
         d = d or {}
         return cls(
-            enabled=bool(d.get("enabled", False)),
+            enabled=bool(d.get("enabled", True)),
             depth=int(d.get("depth", 0)),
             prefix=str(d.get("prefix", "@")),
             inject_caption=bool(d.get("inject_caption", True)),
+            inject_tags=bool(d.get("inject_tags", True)),
             aliases_path=d.get("aliases_path") or None,
+            table=d.get("table") or None,
             max_len=int(d.get("max_len", 64)),
             space_to_underscore=bool(d.get("space_to_underscore", True)),
         )
@@ -113,6 +127,15 @@ def _clean(name: str, max_len: int, *, space_to_underscore: bool = True) -> str:
     if space_to_underscore and " " in name:
         name = name.replace(" ", "_")
     return name[:max_len].strip()
+
+
+def clean_artist_name(name: str, max_len: int = 64) -> str:
+    """对外暴露的画师名清洗。
+
+    整流器（artist_import）必须和注入侧用**同一个**清洗口径，否则
+    "整流完查得到、注入时又变成另一个名字"，别名表也会因为 key 不一致失效。
+    """
+    return _clean(name, max_len)
 
 
 def load_aliases(path: str | Path | None) -> dict[str, str]:
@@ -334,6 +357,284 @@ def inject_into_caption(caption: str, tag: str, rule: ArtistRule) -> str:
     if not tag or not rule.inject_caption:
         return caption
     return prepend_tag(caption, tag)
+
+
+class ArtistTable:
+    """从 parquet 里查画师：`post id -> [名字]`。
+
+    两种形态：
+
+    - **单个 parquet**（全表，约 70 MB）：第一次查询时整份读进内存；
+    - **一个目录**（里面是 `shard-XXXXXX.artist.parquet`）：只读当前分片那一份。
+
+    为什么按分片读：一个分片约 200 KB，一次打标只跑一两个分片；把 845 份
+    全读进来要 130 MB 和好几秒，而按分片读是"用哪片读哪片"，还能让下载侧
+    只下自己需要的那一份。
+
+    分片必须**配对**才敢用：每片 parquet 的文件级 metadata 记着它是按哪个
+    tar 切的（`shard`）和切出多少行（`rows`），对不上就拒答。理由见
+    `_pairing_problem`——错片的答案看起来和正确答案一模一样，只是编号是旧的。
+
+    三种形态（前两种在本地，第三种在 HF）：
+
+    - `D:\\x\\all.parquet`
+    - `D:\\x\\shards`（里面是 `shard-XXXXXX.artist.parquet`）
+    - `hf://datasets/<repo>/<文件或目录>`：按需下载，不整目录预拉
+
+    在线形态存在的理由：画师表是 104 MB/844 片，成员机器上未必有，
+    每次 scp 一份不现实；而"用哪片拉哪片"正好是分片形态天生支持的。
+
+    读不到就返回空列表——调用方会退回目录名提取，再没有就留空。
+    宁可没有标签，也不要猜（见模块开头的第 3 条）。
+    """
+
+    HF_SCHEME = "hf://"
+    # 与 hf_source.HF_CACHE_ROOT 同口径。不直接 import 那个模块：它为了下载
+    # 拖了 httpx 与分段计划，而查表只需要一个文件落点。
+    HF_CACHE_ROOT = Path("run") / "hf-cache"
+
+    def __init__(self, spec: str | None):
+        raw = (spec or "").strip()
+        self.path: Path | None = None
+        self.remote_repo = ""
+        self.remote_file = ""       # 在线**单表**形态
+        self.remote_dir = ""        # 在线**分片目录**形态
+        self.error: str = ""
+        self._single: dict[int, list[str]] | None = None
+        self._shards: dict[str, dict[int, list[str]]] = {}
+        # 分片级问题：读不动、配对不上、拉不下来。只记账 + 报几次，
+        # **不**把整张表掐掉。
+        self.problems: list[str] = []
+        self._reported: set[str] = set()
+        # 拉不到/读不动的分片。远程形态下必须记住，否则每张图都会重试下载。
+        self._failed: set[str] = set()
+        if raw.startswith(self.HF_SCHEME):
+            self._parse_hf(raw)
+        elif raw:
+            self.path = Path(raw)
+            if not self.path.exists():
+                self.error = f"画师表不存在：{self.path}"
+
+    def _parse_hf(self, raw: str) -> None:
+        """`hf://datasets/<repo>/<文件或目录>` → (repo, file|dir)。
+
+        不猜"是文件还是目录"：带 `.parquet` 就是单表，其余一律当分片目录。
+        猜错的代价是一整批静默无画师，不如让写法有唯一解。
+        """
+        rest = raw[len(self.HF_SCHEME):].strip("/")
+        if rest.startswith("datasets/"):
+            rest = rest[len("datasets/"):]
+        parts = [p for p in rest.split("/") if p]
+        if len(parts) < 3:
+            self.error = (f"在线画师表要写成 hf://datasets/<repo>/<文件或目录>：{raw}")
+            return
+        self.remote_repo = "/".join(parts[:2])
+        tail = "/".join(parts[2:])
+        if tail.lower().endswith(".parquet"):
+            self.remote_file = tail
+        else:
+            self.remote_dir = tail.rstrip("/")
+
+    @property
+    def active(self) -> bool:
+        if self.error:
+            return False
+        return self.path is not None or bool(self.remote_repo)
+
+    @property
+    def online(self) -> bool:
+        return bool(self.remote_repo)
+
+    @staticmethod
+    def id_of(image_id: str) -> int | None:
+        """从 `8349000` / `8349000.jpg` / `artist-8349000` 里取 post id。
+
+        取**末段里最长的那串数字**：`8349000_1.jpg`（重名后缀）按"最后一串"
+        会拿到 1，`sub2/8349000.jpg` 按"第一串"会拿到 2。最长串两头都对。
+        """
+        text = str(image_id or "").strip()
+        if text.isdigit():
+            return int(text)
+        seg = re.split(r"[\\/]", text)[-1]
+        runs = re.findall(r"\d+", seg) or re.findall(r"\d+", text)
+        if not runs:
+            return None
+        return int(max(runs, key=len))
+
+    @staticmethod
+    def shard_stem(shard: str) -> str:
+        """把各种写法的分片名归一到 `shard-000012`。
+
+        实际见过的四种：本地路径 `D:\\...\\shard-000012.tar`、HF 直读的
+        `hf://datasets/x/y/shard-000012.tar#member`、manifest 里的
+        `dist-0003.zip::artist/0001.jpg`、以及已经是 parquet 名的。
+        用 `Path(...).stem` 只对第一种成立：`.tar.gz` 会留下 `.tar`，
+        `#member` / `::member` 会整段粘在名字后面，于是文件名对不上，
+        查询静默返回空。
+        """
+        text = str(shard or "").strip()
+        text = text.split("#", 1)[0]              # hf://.../#member
+        text = text.split("::", 1)[0]             # 包名::包内成员
+        name = text.replace("\\", "/").rsplit("/", 1)[-1]
+        low = name.lower()
+        if low.endswith(".artist.parquet"):
+            return name[: -len(".artist.parquet")]
+        for suf in _PACK_SUFFIXES:
+            if low.endswith(suf):
+                return name[: -len(suf)]
+        return Path(name).stem if "." in name else name
+
+    def _complain(self, key: str, msg: str) -> None:
+        """分片级问题：记账并报一次，但不动 `active`。
+
+        以前这类错误直接写 `self.error`，而 `active` 就看它——于是某一分钟
+        读不动一片，从那一刻起**每**一片都失效，退回目录名/旧字段，全程
+        没有一句提示。一片的问题必须止于一片。
+        """
+        if key in self._reported:
+            return
+        self._reported.add(key)
+        self.problems.append(msg)
+        # 在线形态下 844 片全拉不到会刷屏 844 行：前 20 条报出来，其余只记账。
+        if len(self.problems) <= 20:
+            print(f"[artist][警告] {msg}", flush=True)
+
+    def _fetch(self, filename: str) -> Path | None:
+        """从 HF 拉一个文件到本地缓存，返回本地路径；失败返回 None。
+
+        token 走 `HF_TOKEN` 环境变量（huggingface_hub 的标准口径）——画师表
+        可能在 gated 仓库里，但把 token 塞进 ArtistRule 意味着它会进任务快照
+        和历史记录，那是密钥泄露的常见路子。
+
+        不预取整个目录：844 片全拉是 104 MB + 844 次请求，而一次打标只用
+        一两片。
+        """
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError:
+            self.error = "在线画师表需要 huggingface_hub：pip install huggingface_hub"
+            return None
+        cache_dir = self.HF_CACHE_ROOT / (
+            self.remote_repo.replace("/", "--") + "--artist")
+        try:
+            local = hf_hub_download(
+                repo_id=self.remote_repo, filename=filename, repo_type="dataset",
+                cache_dir=str(cache_dir))
+        except Exception as exc:                       # noqa: BLE001
+            self._complain(
+                f"{self.remote_repo}/{filename}",
+                f"拉不到在线画师表 {self.remote_repo}/{filename}："
+                f"{type(exc).__name__} {exc}")
+            return None
+        return Path(local)
+
+    def _pairing_problem(self, tbl, path: Path, expect: str) -> str:
+        """分片 parquet 自带记号与请求对不上时的错因，对得上返回空串。
+
+        `work/shard_artists.py` 切表时把 tar 名和行数写进文件级 metadata，
+        就是为了让这一层能发现"拿错片"。没有这道校验，一片按旧数据切出来的
+        parquet 会被当成新片照用：行数、列名、类型全对，只有编号是旧的，
+        查出来的画师张冠李戴且一句日志都没有（错位是静默的）。
+        """
+        meta = tbl.schema.metadata or {}
+        mark = meta.get(b"shard")
+        if expect and mark:
+            got = self.shard_stem(mark.decode("utf-8", "replace"))
+            if got and got != expect:
+                return (f"{path.name} 记的是「{got}」，要查的是「{expect}」："
+                        f"两片对不上，照它回答等于给错画师")
+        rows = meta.get(b"rows")
+        if rows:
+            try:
+                want = int(rows.decode("utf-8", "replace"))
+            except ValueError:
+                want = -1
+            if want >= 0 and want != tbl.num_rows:
+                return (f"{path.name} 自称 {want} 行、实有 {tbl.num_rows} 行："
+                        f"这份表写了一半或换过版本")
+        return ""
+
+    def _read(self, path: Path, *, expect: str = "") -> dict[int, list[str]] | None:
+        """读一份 parquet。返回 None 表示读不了（错因已记账/写进 error）。"""
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            self.error = "查画师表需要 pyarrow：pip install pyarrow"
+            return None
+        try:
+            tbl = pq.read_table(path, columns=["id", "artists"])
+        except Exception as exc:                       # noqa: BLE001
+            why = f"读不了画师表 {path.name}：{type(exc).__name__} {exc}"
+            if expect:
+                self._complain(expect, why)
+            else:
+                self.error = why
+            return None
+        bad = self._pairing_problem(tbl, path, expect)
+        if bad:
+            self._complain(expect or path.name, bad)
+            return None
+        return dict(zip(tbl.column("id").to_pylist(),
+                        tbl.column("artists").to_pylist()))
+
+    def _single_dict(self) -> dict[int, list[str]]:
+        """单表形态（本地文件或远程 parquet）整份读进内存。"""
+        if self._single is not None:
+            return self._single
+        if self.remote_file:
+            local = self._fetch(self.remote_file)
+            got = self._read(local) if local is not None else None
+        else:
+            assert self.path is not None
+            got = self._read(self.path)
+        # 单表失败也缓存空表：否则每张图都会重新下一遍 70 MB。
+        # 错因已经进 error/problems，不会变成无声失败。
+        self._single = got or {}
+        return self._single
+
+    def _shard_dict(self, shard: str) -> dict[int, list[str]]:
+        stem = self.shard_stem(shard)
+        if not stem:
+            return {}
+        hit = self._shards.get(stem)
+        if hit is not None:
+            return hit
+        if self.remote_dir:
+            # 远程失败要记住：仓库里没有这片就是没有，每张图重试一次下载
+            # 会把 844 片变成几十万次 404。本地相反——文件可能是边跑边拷的。
+            if stem in self._failed:
+                return {}
+            local = self._fetch(f"{self.remote_dir}/{stem}.artist.parquet")
+            if local is None:
+                self._failed.add(stem)
+                return {}
+            got = self._read(local, expect=stem)
+        else:
+            assert self.path is not None
+            f = self.path / f"{stem}.artist.parquet"
+            if not f.is_file():
+                # 不缓存"没有"：分片表可能是边跑边拷的，钉死成空表等于
+                # 这一片从此再也查不到，退回目录名兜底且毫无提示。
+                return {}
+            got = self._read(f, expect=stem)
+        if got is None:
+            self._failed.add(stem)
+            return {}
+        self._shards[stem] = got
+        return got
+
+    def lookup(self, image_id: str, shard: str | None = None) -> list[str]:
+        if not self.active:
+            return []
+        pid = self.id_of(image_id)
+        if pid is None:
+            return []
+        # 单表：本地文件，或在线以 `.parquet` 结尾的地址
+        if self.remote_file or (self.path is not None and self.path.is_file()):
+            return self._single_dict().get(pid, [])
+        if not shard:
+            return []
+        return self._shard_dict(shard).get(pid, [])
 
 
 def collect_missing_translations(

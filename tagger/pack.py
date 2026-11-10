@@ -30,8 +30,10 @@ import io
 import json
 import os
 import tarfile
+import threading
 import time
 import zipfile
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,15 +44,40 @@ from .storage.discovery import check_stopped, sorted_files
 
 WORKDONE_NAME = ".packstate.jsonl"
 
+# 能当输入容器的后缀。tar 是必须的：HF 上的数据集（包括我们自己下载的
+# webdataset 分包）几乎都是 `.tar`，只认 zip 的话"读取包内图片"对它们等于
+# 没打开——页面上看到的是"扫到 0 张"。`.tar.gz` / `.tgz` 也认，但随机取成员
+# 要重新解压，比未压缩的 `.tar` 慢一个数量级。
+CONTAINER_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz")
+
+
+def container_kind(name: str) -> str:
+    """`"zip"` / `"tar"` / `""`（不是容器）。按后缀判断，不看文件头。"""
+    low = name.lower()
+    if low.endswith(".zip"):
+        return "zip"
+    if low.endswith((".tar", ".tar.gz", ".tgz")):
+        return "tar"
+    return ""
+
+
+def container_stem(container: str) -> str:
+    """去掉容器的后缀，给 id / 展示用。`.tar.gz` 要整体去掉，不能只去掉 `.gz`。"""
+    low = container.lower()
+    for suffix in (".tar.gz", ".tgz", ".tar", ".zip"):
+        if low.endswith(suffix):
+            return container[: -len(suffix)]
+    return container
+
 
 # ------------------------------------------------------------------ 发现
 
 
 @dataclass(slots=True)
 class InputItem:
-    kind: str                 # zip_member | loose_file
-    source: str               # zip 的路径，或散图的路径
-    member: str = ""          # zip 内的成员名
+    kind: str                 # zip_member | tar_member | loose_file
+    source: str               # 容器（zip/tar）的路径，或散图的路径
+    member: str = ""          # 容器内的成员名
     rel_path: str = ""        # 原始相对路径，保留在 meta 里供追溯
     flat_name: str = ""       # 归档后使用的名字（平铺）
     size: int = 0
@@ -61,15 +88,25 @@ class InputItem:
             self.key = f"{self.source}::{self.member}" if self.member else self.source
 
     @property
+    def is_member(self) -> bool:
+        """这张图在容器里（zip 或 tar），不是盘上的散图。
+
+        ★ 判断"是不是包内成员"只能用这个属性。以前各处直接写
+        `kind == "zip_member"`，一旦多出一种容器就得逐处改，漏一处就是
+        "tar 包里的图画师名/分组/id 全部按散图处理"——错得很安静。
+        """
+        return self.kind in ("zip_member", "tar_member")
+
+    @property
     def logical_path(self) -> str:
         """用于提取画师名的路径。
 
-        zip 成员必须看**包内**路径（member），不能看 rel_path——后者形如
-        `subdir/shard-0003.zip::artist/0001.jpg`，第一层是 zip 文件名，
+        包内成员必须看**包内**路径（member），不能看 rel_path——后者形如
+        `subdir/shard-0003.zip::artist/0001.jpg`，第一层是容器文件名，
         拿来当画师名会得到一堆 "shard-0003"。
         散图则用相对路径，第一层就是素材整理时建的画师目录。
         """
-        return self.member if self.kind == "zip_member" else self.rel_path
+        return self.member if self.is_member else self.rel_path
 
 
 def _is_image(name: str) -> bool:
@@ -137,6 +174,40 @@ def _iter_zip_members(path: Path, *, rel_prefix: str,
         return
 
 
+def _iter_tar_members(path: Path, *, rel_prefix: str,
+                      namer: FlatNamer, should_stop=None) -> Iterator[InputItem]:
+    """枚举一个 tar 内的图片成员（webdataset 分片就是 tar）。
+
+    用**可 seek** 的 `r:*` 而不是流式 `r|*`：流式模式跳过成员是把数据整段读掉，
+    实测 200MB 的包枚举一遍 149ms、可 seek 只要 3ms——对一个几十 GB 的数据集，
+    那等于"扫描阶段先把全部图片读一遍"。可 seek 模式按成员大小直接跳到下一个
+    头部，代价是把成员表放进内存（一个分片几千条，可以忽略）。
+
+    `.tar.gz` 在下没有便宜的路：seek 要靠解压，整个包会被顺序解一遍。
+    webdataset 的成员名是 `000123.jpg` / `000123.json`，非图片成员在这里滤掉。
+    """
+    try:
+        check_stopped(should_stop)
+        with tarfile.open(path, "r:*") as tf:
+            for info in tf:
+                check_stopped(should_stop)
+                if not info.isfile() or not _is_image(info.name):
+                    continue
+                if _skip_member(info.name):
+                    continue
+                yield InputItem(
+                    kind="tar_member",
+                    source=str(path),
+                    member=info.name,
+                    rel_path=f"{rel_prefix}{info.name}",
+                    flat_name=namer.make(info.name),
+                    size=info.size,
+                )
+    except (tarfile.TarError, OSError):
+        # 坏包 / 没传完的分片：跳过它，不要让整批素材卡在这里。
+        return
+
+
 def _iter_discover(root: Path, *, recursive: bool, include_zips: bool,
                    include_loose: bool, namer: FlatNamer,
                    limit: int | None, should_stop=None) -> Iterator[InputItem]:
@@ -151,9 +222,11 @@ def _iter_discover(root: Path, *, recursive: bool, include_zips: bool,
         path = Path(entry.path)
         rel = str(path.relative_to(root)).replace("\\", "/")
 
-        if include_zips and path.suffix.lower() == ".zip":
-            for item in _iter_zip_members(path, rel_prefix=f"{rel}::", namer=namer,
-                                          should_stop=should_stop):
+        kind = container_kind(path.name)
+        if include_zips and kind:
+            iter_members = _iter_zip_members if kind == "zip" else _iter_tar_members
+            for item in iter_members(path, rel_prefix=f"{rel}::", namer=namer,
+                                     should_stop=should_stop):
                 yield item
                 found += 1
                 if limit and found >= limit:
@@ -183,10 +256,11 @@ def discover_inputs(
     limit: int | None = None,
     should_stop=None,
 ) -> list[InputItem]:
-    """递归发现 root 下的所有图片，含 zip 分包内部成员。
+    """递归发现 root 下的所有图片，含 zip / tar 包内部成员。
 
-    root 也可以直接是一个 `.zip` 文件——4TB 级素材经常就是单个大包，
-    要求用户先解压再指目录是多余的一步。单图路径同样接受。
+    root 也可以直接是一个包文件（`.zip` / `.tar` / `.tar.gz` / `.tgz`）——
+    4TB 级素材经常就是单个大包，要求用户先解压再指目录是多余的一步。
+    单图路径同样接受。
     """
     check_stopped(should_stop)
     root = Path(root)
@@ -195,10 +269,12 @@ def discover_inputs(
 
     namer = namer or FlatNamer()
     if root.is_file():
-        if include_zips and root.suffix.lower() == ".zip":
+        kind = container_kind(root.name)
+        if include_zips and kind:
             from itertools import islice
-            items = _iter_zip_members(root, rel_prefix=f"{root.name}::",
-                                      namer=namer, should_stop=should_stop)
+            iter_members = _iter_zip_members if kind == "zip" else _iter_tar_members
+            items = iter_members(root, rel_prefix=f"{root.name}::",
+                                 namer=namer, should_stop=should_stop)
             try:
                 return list(islice(items, limit)) if limit and limit > 0 else list(items)
             finally:
@@ -211,18 +287,82 @@ def discover_inputs(
                 flat_name=namer.make(root.name),
                 size=root.stat().st_size,
             )]
-        raise ValueError(f"输入是个文件，但不是 .zip 也不是图片: {root}")
+        raise ValueError(
+            f"输入是个文件，但不是包（{'/'.join(CONTAINER_SUFFIXES)}）也不是图片: {root}")
 
     return list(_iter_discover(root, recursive=recursive, include_zips=include_zips,
                                include_loose=include_loose, namer=namer, limit=limit,
                                should_stop=should_stop))
 
 
+class ContainerReader:
+    """包内成员读取：句柄缓存 + 一把锁。
+
+    zip 每次 open 只读中央目录，很便宜；**tar 的 open 要把整个包扫一遍建成员
+    索引**，每张图重开一次的话，一个 8000 张的分片就是 8000 次全扫——比推理
+    本身还慢。所以句柄必须留住。
+
+    而 zipfile/tarfile 的读操作内部都会 seek，多线程共用一个句柄不加锁会读到
+    别人的字节（错位、偶发、极难复现）。真正的瓶颈是 GPU，锁的开销可以忽略。
+    """
+
+    def __init__(self, keep: int = 8) -> None:
+        self._keep = max(1, keep)
+        self._handles: OrderedDict[str, tuple[str, object]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def _open(self, source: str) -> tuple[str, object]:
+        hit = self._handles.get(source)
+        if hit is not None:
+            self._handles.move_to_end(source)
+            return hit
+        kind = container_kind(source) or "zip"
+        handle = (tarfile.open(source, "r:*") if kind == "tar"
+                  else zipfile.ZipFile(source, "r"))
+        self._handles[source] = (kind, handle)
+        while len(self._handles) > self._keep:
+            _, (_, old) = self._handles.popitem(last=False)
+            try:
+                old.close()                       # type: ignore[union-attr]
+            except OSError:
+                pass
+        return self._handles[source]
+
+    def read(self, source: str, member: str) -> bytes:
+        with self._lock:
+            kind, handle = self._open(source)
+            if kind == "tar":
+                fh = handle.extractfile(member)   # type: ignore[union-attr]
+                if fh is None:
+                    raise KeyError(f"{Path(source).name} 里没有成员 {member}")
+                try:
+                    return fh.read()
+                finally:
+                    fh.close()
+            return handle.read(member)            # type: ignore[union-attr]
+
+    def close(self) -> None:
+        with self._lock:
+            for _, handle in self._handles.values():
+                try:
+                    handle.close()                # type: ignore[union-attr]
+                except OSError:
+                    pass
+            self._handles.clear()
+
+
+_READERS = ContainerReader()
+
+
 def read_item_bytes(item: InputItem) -> bytes:
-    if item.kind == "zip_member":
-        with zipfile.ZipFile(item.source, "r") as zf:
-            return zf.read(item.member)
+    if item.is_member:
+        return _READERS.read(item.source, item.member)
     return Path(item.source).read_bytes()
+
+
+def close_readers() -> None:
+    """收掉缓存里的句柄。进程退出与测试清场时用。"""
+    _READERS.close()
 
 
 # ------------------------------------------------------------------ 记忆
@@ -639,8 +779,17 @@ class Packer:
                 "image_id": str(meta.get("image_id") or key),
                 "image": image_bytes,
                 "artist": str(meta.get("artist") or ""),
+                # table = 按 post id 查表得来；path = 目录名。下游靠它决定
+                # "包内这个值能不能压过查表结果"，没有就按 path 保守处理。
+                "artist_source": str(meta.get("artist_source") or ""),
                 "caption": nl,
                 "tag": tag_text,
+                # 存 JSON 字符串而不是 list<struct>：每条记录的字段集不一样
+                # （有的带 bbox、有的没有），pyarrow 会按第一行的 struct 建
+                # schema，第二行多一个键就直接写不进去。字符串列没这个问题，
+                # 下游 json.loads 一次即可。
+                "visible_text": json.dumps(meta.get("visible_text") or [],
+                                           ensure_ascii=False),
             })
 
         if "zip" in self.options.formats:
@@ -767,8 +916,12 @@ class Packer:
             "image_id": pa.array([r["image_id"] for r in rows], type=pa.string()),
             "image": pa.array([r["image"] for r in rows], type=pa.binary()),
             "artist": pa.array([r["artist"] for r in rows], type=pa.string()),
+            "artist_source": pa.array([r["artist_source"] for r in rows],
+                                      type=pa.string()),
             "caption": pa.array([r["caption"] for r in rows], type=pa.string()),
             "tag": pa.array([r["tag"] for r in rows], type=pa.string()),
+            "visible_text": pa.array([r["visible_text"] for r in rows],
+                                     type=pa.string()),
         })
         path = self.out_dir / f"{self._base()}.parquet"
         tmp = path.with_suffix(".parquet.tmp")

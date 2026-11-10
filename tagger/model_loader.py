@@ -42,7 +42,14 @@ class ServerHandle:
     # --allowed-local-media-path 放行的根目录。客户端要决定能不能用
     # file:// 传图，必须知道服务端到底放行了哪里——猜错的表现是
     # "HTTP 400 图片路径不被允许"，而那时已经浪费了一张图的排队。
+    # 只有 vLLM 有这个开关，llama.cpp 下恒为空。
     local_media_root: str = ""
+    # 起的是哪个引擎。两套引擎的服务端并发不是同一个数（vLLM 是
+    # max_num_seqs，llama.cpp 是 -np），指纹里必须分开记：客户端照哪个数
+    # 推在途请求数，取错就会"服务端排队而 GPU 空转"或反过来。
+    engine: str = "vllm"
+    # llama.cpp 实际生效的槽位数；vLLM 下为 None（它没有这个概念）。
+    slots: int | None = None
 
     def stop(self) -> None:
         if self.process is None:
@@ -280,6 +287,7 @@ def start_server(
     """
     resolved = normalize_engine(engine)
     base_url = f"http://127.0.0.1:{port}"
+    slots_used: int | None = None
 
     if resolved == "llamacpp":
         from . import nl_engine
@@ -291,6 +299,9 @@ def start_server(
             gguf=gguf, mmproj=mmproj,
             vram_gb=profile.vram_gb, slots_override=slots_override,
         )
+        # 从刚拼好的命令里回读 -np，而不是再算一遍 slot_plan：指纹要记的是
+        # "实际启动的那条命令"，另算一份就有了两个真相源。
+        slots_used = int(cmd[cmd.index("-np") + 1])
         # 只能用一张卡：CUDA_VISIBLE_DEVICES 必须在进程启动前定，-ngl 99
         # 会把整份权重放到此时唯一可见的那张卡上。
         child_env = dict(os.environ)
@@ -327,7 +338,8 @@ def start_server(
     handle = ServerHandle(process=process, base_url=base_url, port=port,
                           profile=profile,
                           local_media_root=(str(Path(data_root).resolve())
-                                            if data_root else ""))
+                                            if data_root else ""),
+                          engine=resolved, slots=slots_used)
 
     if not wait:
         log_file.close()
@@ -376,12 +388,19 @@ def fingerprint_env(handle: ServerHandle) -> dict:
         "model_id": p.model_id,
         "model_path": p.model.resolved_path,
         "model_revision": p.model.revision,
+        # 引擎决定这套参数怎么落地（两套命令行完全不通用），也决定下面
+        # 哪个字段才是"服务端并发"。
+        "engine": handle.engine,
         "precision": p.precision,
         "max_pixels": p.max_pixels,
         # 换桶等于换一套输入尺寸分布，必须进指纹，否则两批数据无法判断是否同源
         "bucket_spec": p.bucket_spec,
         "max_model_len": p.max_model_len,
         "max_num_seqs": p.max_num_seqs,
+        # llama.cpp 的服务端并发是 -np（slots），上面那行对 llama-server
+        # 一个字节都不生效——它是分档表按 vLLM 口径写的数。客户端要按
+        # engine 选字段，否则 16G 卡 12 槽会按 8 条在途跑（白丢约三成吞吐）。
+        "slots": handle.slots,
         "max_num_batched_tokens": p.max_num_batched_tokens,
         "gpu_memory_utilization": p.gpu_memory_utilization,
         "temperature": p.temperature,

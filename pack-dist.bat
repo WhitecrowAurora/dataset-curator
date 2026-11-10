@@ -20,6 +20,11 @@ rem  wasted -- the CUDA build is tied to the receiver's driver. Ship it only
 rem  when the target machine has no internet, or when you must pin the exact
 rem  build. runtime\llama.cpp\.download\ (the raw zips) is never copied.
 rem
+rem  What IS always included: vendor\llama-convert (~2MB, pure Python). That is
+rem  llama.cpp's convert_hf_to_gguf.py + conversion\ + gguf-py\, i.e. the script
+rem  behind "local quantization". Bundling it means the receiver never has to
+rem  pull a 37MB source tarball from GitHub just to turn safetensors into GGUF.
+rem
 rem  -WithEnv refuses to run while env\python still holds torch: that would
 rem  produce a 4GB zip. Run prune-env.bat -Apply first, or drop -WithEnv.
 rem
@@ -93,6 +98,18 @@ if not exist "%ROOT%\tagger\web\ui\dist\index.html" (
     echo         Build the frontend first:  cd tagger\web\ui ^&^& npm run build
     exit /b 1
 )
+rem vendor\llama-convert is the built-in GGUF convert script (llama.cpp's
+rem convert_hf_to_gguf.py + conversion\ + gguf-py\, ~2MB of pure Python). It is
+rem what makes "local quantization" work offline: without it the receiver's
+rem first convert goes to GitHub for a 37MB source tarball, and that download is
+rem exactly the step that stalls at 8/37 MB on many networks. 2MB is nothing --
+rem refuse to ship a package where it silently went missing.
+if not exist "%ROOT%\vendor\llama-convert\convert_hf_to_gguf.py" (
+    echo [ERROR] vendor\llama-convert\convert_hf_to_gguf.py is missing.
+    echo         Local quantization would fall back to downloading 37MB.
+    echo         Restore that folder from the repo, then pack again.
+    exit /b 1
+)
 rem And the reverse: a full node_modules is 121MB of build-time junk.
 if "%WITHENV%"=="1" (
     if exist "%ROOT%\env\python\Lib\site-packages\torch" (
@@ -149,6 +166,26 @@ if exist "%ROOT%\configs" (
     rem local quantization. Shipping ours means "upgrade once, lose all of it"
     rem (ours is usually just {}). Ship tiers.yaml, never this file.
     if exist "%STAGE%\configs\models.json" del /q "%STAGE%\configs\models.json"
+    rem ui-form.json is the "last used form" memory: material paths, VRAM
+    rem knobs, concurrency. Same reasoning -- never ship ours over theirs.
+    if exist "%STAGE%\configs\ui-form.json" del /q "%STAGE%\configs\ui-form.json"
+)
+
+rem NL prompt presets: prompt\*.json, one file per preset. The FILE NAME is what
+rem the "new job" page shows in its dropdown (Chinese names included). Ships with
+rem OUR files -- unlike configs\models.json this is not per-machine state: the
+rem built-in snapshot is the only thing a fresh install has to pick besides the
+rem generated prompt, so shipping it is what makes the feature discoverable.
+rem A receiver who edited a preset keeps the edits until a new package lands.
+if exist "%ROOT%\prompt" (
+    robocopy "%ROOT%\prompt" "%STAGE%\prompt" /E /XF *.tmp *.log /NFL /NDL /NJH /NJS /NP >nul
+    if errorlevel 8 goto copy_failed
+    if not exist "%STAGE%\prompt\*.json" (
+        echo  [pack] WARNING: prompt\ has no .json preset, so the dropdown will
+        echo         only offer the built-in generated prompt.
+    )
+) else (
+    echo  [pack] WARNING: prompt\ is missing, the receiver gets no presets.
 )
 
 rem desktop\ is source only: bin\ and obj\ hold last build's intermediate
@@ -162,6 +199,12 @@ if "%TESTS%"=="1" (
         if errorlevel 8 goto copy_failed
     )
 )
+
+rem Built-in GGUF convert script: independent of -WithLlama, because this is
+rem three .py folders (~2MB), not the 743MB CUDA build. It lets "local
+rem quantization" run on first click without fetching llama.cpp sources.
+robocopy "%ROOT%\vendor\llama-convert" "%STAGE%\vendor\llama-convert" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto copy_failed
 
 rem Initialization payload: the embeddable interpreter + pip wheel. Without
 rem these install.bat has nothing to unzip, and the receiver cannot install.
@@ -288,6 +331,9 @@ echo    pack-dist.bat -WithEnv           zip with a pruned env\python
 echo    pack-dist.bat -WithLlama         include runtime\llama.cpp (~743MB)
 echo    pack-dist.bat -NoTests           skip tests\
 echo    pack-dist.bat -Out D:\x.zip      explicit output path
+echo.
+echo   Always included: vendor\llama-convert (GGUF convert script, ~2MB)
+echo                    prompt\ (NL prompt presets, one .json per preset)
 echo.
 echo  Always excluded: models\ work\ run\ .pytest_cache node_modules
 echo                   env\python\Lib\site-packages (unless pruned and -WithEnv)

@@ -17,6 +17,7 @@ import mmap
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -175,17 +176,25 @@ class Reader:
 
 def write_gguf(path: Path, metadata: bytes, kv_count: int,
                tensors: list[tuple[TensorInfo, bytes]],
-               alignment: int = DEFAULT_ALIGNMENT) -> None:
+               alignment: int = DEFAULT_ALIGNMENT,
+               on_write: Callable[[int, int], None] | None = None) -> None:
     """按给定的张量列表写一个新 GGUF。
 
     tensors 里每个 (info, data) 的 offset 会被重算——调用方不用关心对齐。
+
+    头部在内存里拼（几 MB），数据段逐张量直接落盘。以前是把整个文件拼成一个
+    bytearray 再 `fh.write(bytes(out))`：一份 4 GB 的产物峰值要多占 4 GB
+    （bytearray 之外还复制了一份），而且那一次 write 全程报不出任何进度，
+    页面上"写入文件"就是一句死的——几 GB 落盘时看着像卡死。
+
+    `on_write(已写字节, 总字节)` 每写完一个张量回调一次，调用方据此报进度。
     """
-    out = bytearray()
-    out += GGUF_MAGIC
-    out += struct.pack("<I", 3)
-    out += struct.pack("<Q", len(tensors))
-    out += struct.pack("<Q", kv_count)
-    out += metadata
+    header = bytearray()
+    header += GGUF_MAGIC
+    header += struct.pack("<I", 3)
+    header += struct.pack("<Q", len(tensors))
+    header += struct.pack("<Q", kv_count)
+    header += metadata
 
     # tensor info 段
     offsets: list[int] = []
@@ -195,25 +204,37 @@ def write_gguf(path: Path, metadata: bytes, kv_count: int,
         cursor += _align(len(data), alignment)
 
     for (info, _), off in zip(tensors, offsets):
-        out += _write_string(info.name)
-        out += struct.pack("<I", len(info.dims))
+        header += _write_string(info.name)
+        header += struct.pack("<I", len(info.dims))
         for d in info.dims:
-            out += struct.pack("<Q", int(d))
-        out += struct.pack("<I", info.type)
-        out += struct.pack("<Q", off)
+            header += struct.pack("<Q", int(d))
+        header += struct.pack("<I", info.type)
+        header += struct.pack("<Q", off)
 
-    out += b"\x00" * (_align(len(out), alignment) - len(out))
+    header += b"\x00" * (_align(len(header), alignment) - len(header))
 
-    base = len(out)
-    for (info, data), off in zip(tensors, offsets):
-        want = base + off
-        if len(out) < want:
-            out += b"\x00" * (want - len(out))
-        out += data
+    base = len(header)
+    # 最后一个张量之后的补齐字节不会被写出去（文件到数据结尾为止），
+    # 所以总长要把它扣回来，否则进度永远差一截。
+    total = base + cursor
+    if tensors:
+        last = len(tensors[-1][1])
+        total += last - _align(last, alignment)
 
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pos = base
     with open(path, "wb") as fh:
-        fh.write(bytes(out))
+        fh.write(header)
+        for (info, data), off in zip(tensors, offsets):
+            want = base + off
+            if pos < want:
+                fh.write(b"\x00" * (want - pos))
+                pos = want
+            fh.write(data)
+            pos += len(data)
+            if on_write is not None:
+                on_write(pos, total)
 
 
 # ---------------------------------------------------------------- 基础工具

@@ -1,1 +1,22 @@
-{}
+{
+  "vlm": {
+    "qwen3vl-8b-abliterated": {
+      "path": "prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX",
+      "family": "qwen3vl",
+      "precision": "f16",
+      "gguf": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf",
+      "mmproj": "models/nl/qwen3vl-8b-abliterated/mmproj-qwen3vl-8b-abliterated-F16.gguf",
+      "gguf_quants": {
+        "f16": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf",
+        "q4": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q4_K_M.gguf",
+        "q6": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q6_K.gguf"
+      }
+    }
+  },
+  "tag": {},
+  "notes": {},
+  "dirs": {},
+  "hidden": [],
+  "tag_hidden": [],
+  "endpoint": "https://hf-mirror.com"
+}

@@ -136,13 +136,69 @@ class Verdict:
 
 _REFUSAL_PATTERNS = re.compile(
     r"\b(i'?m sorry|i cannot|i can'?t|as an ai|unable to (describe|view)|"
-    r"i don'?t see|no image (provided|attached)|无法(描述|查看|识别)|抱歉[，,])",
+    r"i don'?t see|no image (provided|attached)|"
+    r"无法(描述|查看|识别)|抱歉[，,]|我不能|我无法|作为(一个)?(ai|人工智能)|"
+    r"这张图(片)?(无法|不能|看不清))",
     re.IGNORECASE,
 )
 
+# 汉字（含扩展 A 与兼容区）。用来判"这条 caption 是不是中文写的"。
+_CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+# 中文标点：算字符但不算"词"，复读检测要剔掉，否则句读会稀释 n-gram。
+_CJK_PUNCT = "，。、；：！？…—～·「」『』（）《》〈〉【】“”‘’"
+
+# 同样一段信息，中文的字符数约为英文的 45%（1 汉字 ≈ 1 token，英文 4.4 字符/token）。
+# 只用在"字符数兜底"那条线上：token 口径本来就是语言无关的，不跟着缩。
+_CJK_CHAR_SCALE = 0.45
+
+
+# 引号里的内容不算"这段文本的语言"。英文 caption 原样引用中文招牌是**正确**产出
+# （规范 v0.2 §6 要求引文保持原语言），若把引文里的汉字算进比例，这条就会被判成
+# 中文：于是跳过 tag 覆盖率、字符线按 0.45 缩——用正确的产出触发错误的口径，
+# 而且失败原因指向"语言不对"，没人能从中看出是引文顶的。
+_QUOTED = re.compile(r'"[^"]*"|“[^”]*”|「[^」]*」|『[^』]*』')
+
+
+def _cjk_ratio(text: str, *, quoted: bool = False) -> float:
+    """汉字占非空白字符的比例。默认剔除引号内的引用。"""
+    if not text:
+        return 0.0
+    if not quoted:
+        text = _QUOTED.sub(" ", text)
+    dense = sum(1 for ch in text if not ch.isspace())
+    if not dense:
+        return 0.0
+    return len(_CJK.findall(text)) / dense
+
+
+def is_cjk_text(text: str) -> bool:
+    """这条文本要不要按中文口径处理。
+
+    靠**实际文本**判，不靠调用方传语言：让模型写中文它也可能写英文，
+    按自己的假设去选阈值，错的正好是出问题的那批。
+
+    引号内的引用不计入——那是"画面里的文字"，可以且应该不是正文的语言。
+    """
+    return _cjk_ratio(text) >= 0.2
+
 
 def repeat_ratio(text: str, n: int = 4) -> float:
-    """n-gram 重复率。VLM 量化后最容易出现的就是复读。"""
+    """n-gram 重复率。VLM 量化后最容易出现的就是复读。
+
+    ★中文不能沿用英文那套分词：`[\\w']+` 遇到"今天天气很好，光线柔和"会匹配成
+    两个"词"，永远凑不满 n*2，函数直接返回 0——中文复读完全抓不到。所以中文
+    按字符切，并且把 n 放大到 6：4 个汉字的重合在正常表达里太常见（"一只白色
+    的猫"这类），按 4 字判会把合格样本判成复读。
+    """
+    if is_cjk_text(text):
+        chars = [ch for ch in text if not ch.isspace() and ch not in _CJK_PUNCT]
+        m = max(6, n + 2)
+        if len(chars) < m * 2:
+            return 0.0
+        grams = [tuple(chars[i:i + m]) for i in range(len(chars) - m + 1)]
+        if not grams:
+            return 0.0
+        return 1.0 - len(set(grams)) / len(grams)
     words = re.findall(r"[\w']+", text.lower())
     if len(words) < n * 2:
         return 0.0
@@ -299,20 +355,36 @@ class QualityGate:
         # tag-only 模式下 caption 为空是预期，覆盖率改用 tag_line 评，
         # 否则每条都会被判成"覆盖率 0"而进重试队列。
         coverage_text = stripped or ann.tag_line
-        coverage, missing = tag_coverage(coverage_text, ann.tags)
+        # ★中文 caption 里不会出现英文 danbooru tag，"覆盖率"这个检查的前提就
+        # 不成立（必然 0 → 每一条都进重试队列）。中文条目跳过它，忠实度交给
+        # CLIP（开了才有）。signals 里留痕，别让事后看数据的人把 1.0 当成
+        # "检查通过"——那是"没检查"。
+        cjk = bool(stripped) and is_cjk_text(stripped)
+        if cjk:
+            coverage, missing = 1.0, []
+        else:
+            coverage, missing = tag_coverage(coverage_text, ann.tags)
         rr = repeat_ratio(coverage_text, p.repeat_ngram) if stripped else 0.0
         refused = looks_like_refusal(text) if stripped else False
         chars = len(stripped)
         tokens = ann.qc.nl_tokens
+        # 字符兜底线跟着语言走。token 线不缩：32 token 的中文和 32 token 的英文
+        # 是同一份信息量，按 token 判本来就是语言无关的。
+        char_scale = _CJK_CHAR_SCALE if cjk else 1.0
+        min_chars = max(1, int(p.min_chars * char_scale))
+        max_chars = max(min_chars + 1, int(p.max_chars * char_scale))
 
         signals = {
             "chars": chars,
             "nl_tokens": tokens,
+            "lang": "zh" if cjk else "en",
             "tag_coverage": round(coverage, 3),
             "missing_tags": missing[:8],
             "repeat_ratio": round(rr, 3),
             "refused": refused,
         }
+        if cjk:
+            signals["coverage_skipped"] = True
 
         # 忠实度：覆盖率为主，CLIP 为辅
         faithful = 1.0 + coverage * 3.0
@@ -338,12 +410,12 @@ class QualityGate:
             completeness = 2.5
             reasons.append(f"NL 过长 ({tokens} > {p.nl_max_tokens} token)")
             signals["nl_too_long"] = True
-        elif chars < p.min_chars:
-            completeness = max(1.0, 1.0 + 4.0 * chars / max(p.min_chars, 1) * 0.6)
-            reasons.append(f"caption 过短 ({chars} < {p.min_chars})")
-        elif chars > p.max_chars:
+        elif chars < min_chars:
+            completeness = max(1.0, 1.0 + 4.0 * chars / max(min_chars, 1) * 0.6)
+            reasons.append(f"caption 过短 ({chars} < {min_chars})")
+        elif chars > max_chars:
             completeness = 2.5
-            reasons.append(f"caption 过长 ({chars} > {p.max_chars})")
+            reasons.append(f"caption 过长 ({chars} > {max_chars})")
         else:
             completeness = 5.0
 

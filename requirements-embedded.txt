@@ -60,6 +60,12 @@ huggingface_hub==2.4.0
 # psutil：拆包时按可用内存砍并发。缺了会被 except 吞掉、并发不降，
 #   表现是"内存不够时整台机器被拖死"而不是报错。纯 C 扩展，很小。
 psutil==7.2.2
+# sentencepiece：**本地量化**要用，不是打标链条的。llama.cpp 的转换脚本在权重
+#   目录里有 tokenizer.model 时走 `_set_vocab_sentencepiece`（Qwen / Llama 系
+#   都是），缺了会在读完 config/tokenizer 之后才抛 ModuleNotFoundError，用户
+#   已经白等了几分钟。1.7MB 的轮子，装掉最省事：转换脚本已内置在
+#   vendor\llama-convert\，这里补齐之后"第一次量化"才真正开箱即用。
+sentencepiece==0.2.3
 
 # ---- Web UI ----
 # 壳子（Tagger.Shell）唯一的入口就是 `python -m tagger.cli web`，下面这些是它的

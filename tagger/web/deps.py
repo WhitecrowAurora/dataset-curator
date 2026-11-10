@@ -52,8 +52,70 @@ VERIFY_TIMEOUT = 60
 
 # torch 的轮子不在 PyPI。有 N 卡装 CUDA 版，没有就 CPU 版——装错了不会报错，
 # 只会慢十倍，然后用户以为"这软件就这么慢"。
-TORCH_INDEX_GPU = "https://download.pytorch.org/whl/cu124"
+#
+# ★这里的 cuXXX 必须与 requirements-tag.txt 里实测的那套（torch 2.14.1+cu126）
+#   对齐。PyTorch 的索引是**按 CUDA 版本分目录、各自只放自己那份**：cu124 目录
+#   最高只到 2.6.0，拿它去装钉死的 2.14.1 会直接 `No matching distribution found`，
+#   也就是页面上点「安装」必然失败——和 Windows 上点 vllm 是同一类毛病。
+#   测试 `test_torch_索引贴着清单里实测的_cuda_版本` 守着这条不漂。
+TORCH_INDEX_GPU = "https://download.pytorch.org/whl/cu126"
 TORCH_INDEX_CPU = "https://download.pytorch.org/whl/cpu"
+
+# cu126 的轮子要求驱动支持 CUDA 12.6。驱动太老时 pip 照样装得上，要到
+# `import torch` 才报 "CUDA driver version is insufficient"——页面一片绿、
+# 一跑打标才炸，是最难查的那类失败。所以装之前先问一句 nvidia-smi。
+TORCH_CUDA_MIN = (12, 6)
+
+# nvidia-smi 要起进程（Windows 上约一百毫秒），而依赖页在 pip 跑的时候每秒
+# 拉一次快照：缓存一分钟，别把轮询变成进程风暴。
+_DRIVER_TTL_S = 60.0
+_driver_cache: tuple[float, tuple[int, int] | None] | None = None
+
+
+def _driver_cuda() -> tuple[int, int] | None:
+    """驱动支持的最高 CUDA 版本（nvidia-smi 表头那句）。没卡/读不出来时 None。"""
+    global _driver_cache
+    now = time.time()
+    if _driver_cache is not None and now - _driver_cache[0] < _DRIVER_TTL_S:
+        return _driver_cache[1]
+    ver: tuple[int, int] | None = None
+    try:
+        out = subprocess.run(
+            ["nvidia-smi"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", out.stdout or "")
+        if m:
+            ver = (int(m.group(1)), int(m.group(2)))
+    except (OSError, subprocess.SubprocessError):
+        ver = None
+    _driver_cache = (now, ver)
+    return ver
+
+
+def torch_plan() -> tuple[str, str]:
+    """(torch 索引, 给人看的一句话)。装不了 CUDA 版时退 CPU 版，并把原因说清。
+
+    为什么要退而不是"照装 cu126"：CUDA 版本是驱动的能力上限，轮子本身看不出
+    来。照装的话 pip 成功、页面显示"已装"，直到第一次打标才报驱动版本不足——
+    用户没有任何线索能把两句联系起来。退到 CPU 版至少是"能跑、只是慢"，
+    再把"为什么慢、怎么变快"写在页面上。
+    """
+    if not shutil.which("nvidia-smi"):
+        return TORCH_INDEX_CPU, ""
+    cuda = _driver_cuda()
+    if cuda is None:
+        return TORCH_INDEX_CPU, (
+            "有显卡，但没读出驱动的 CUDA 版本，先按 CPU 版装（打标会慢十倍）；"
+            "驱动装好之后点一次「重装」就会换成 CUDA 版")
+    if cuda < TORCH_CUDA_MIN:
+        return TORCH_INDEX_CPU, (
+            f"驱动只支持 CUDA {cuda[0]}.{cuda[1]}，cu126 版 torch 装上了 import 也会报"
+            f"驱动版本不足，所以走 CPU 版（慢十倍）；想用显卡把驱动升到 CUDA "
+            f"{TORCH_CUDA_MIN[0]}.{TORCH_CUDA_MIN[1]} 以上")
+    return TORCH_INDEX_GPU, ""
 
 # 分发名 → 导入名。清单里写的是 pip 名，而 `import` 用的是另一套名字，
 # 少了这张表，页面会把装好的 Pillow 误报成"缺失"。
@@ -65,7 +127,23 @@ _MODULE_ALIAS = {
     "annotated-doc": "annotated_doc",
     "annotated-types": "annotated_types",
     "python-dotenv": "dotenv",
+    # 分发名和模块名对不上：pip 装 open_clip_torch，import 的却是 open_clip。
+    # 少了这条，「检查完整性」会把装好的包报成 ModuleNotFoundError: open_clip_torch，
+    # 而用户照着提示重装多少遍都不会变——错的是检查器，不是环境。
+    "open-clip-torch": "open_clip",
 }
+
+
+# 只在特定平台有轮子的包（键按分发名归一：小写、下划线当连字符）。
+# requirements 文件表达不了"这个包只有 Linux"，读完统一按这张表打标；
+# pyproject 里的 extras 也走同一张表，否则「安装本组」在 Windows 上照样会装。
+_PLATFORM_ONLY = {
+    "vllm": ("linux",),
+}
+
+
+def _platforms_of(name: str) -> tuple[str, ...]:
+    return _PLATFORM_ONLY.get(name.lower().replace("_", "-"), ())
 
 
 @dataclass
@@ -75,6 +153,16 @@ class Item:
     group: str                      # core | tag | optional
     note: str = ""
     torch_index: bool = False
+    # 只在这些平台可用（空 = 全平台）。典型是 vLLM：它的轮子只有 Linux，
+    # Windows 上 pip 会装出一个缺 C 扩展的壳，import 时报
+    # `No module named 'vllm_C_stable_libtorch'`，而且会把钉死的 torch 换掉。
+    platforms: tuple[str, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        """当前平台能不能用。sys.platform 是 win32 / linux / darwin。"""
+        return not self.platforms or any(
+            sys.platform.startswith(p) for p in self.platforms)
 
     @property
     def requirement(self) -> str:
@@ -94,13 +182,34 @@ class Item:
 _OPTIONAL: list[Item] = [
     Item("onnxruntime", "onnxruntime", "optional", "cl-tagger-v2 后端（不依赖 torch）"),
     Item("datasets", "datasets", "optional", "把 HuggingFace 数据集直接当输入源"),
-    Item("vllm", "vllm", "optional", "NL 生成服务，仅 Linux / WSL2"),
+    Item("vllm", "vllm", "optional", "NL 生成服务，仅 Linux / WSL2",
+         platforms=("linux",)),
 ]
 
 _GROUPS = [
     ("core", "运行环境", "界面、打标调度、产物读写都要它。缺了这些连服务都起不来。"),
     ("tag", "打标运行时", "tag 反推（图 → 标签）用。不跑打标可以不装。"),
     ("optional", "可选功能", "按需装，不装不影响主流程。"),
+]
+
+# 附加依赖（pyproject 的 extra）在页面上的展示名与说明。
+#
+# 为什么也搬进这一页：这几组原来只长在各自的功能弹窗里（「本地量化」里一个
+# 按钮、「量化」里一个按钮），想"先把环境配齐再干活"的人在这一页根本看不到
+# 它们缺什么——而这一页是唯一能回答"整台机器还缺什么"的地方。
+#
+# 但它们**不进**「安装缺失」那个批量动作：serve 在 Windows 上装了也跑不起来，
+# llmcompressor 几百 MB，一次全装是误伤。所以每组只给自己的按钮。
+_EXTRA_GROUPS: list[tuple[str, str, str]] = [
+    ("convert", "本地量化（GGUF）",
+     "safetensors → F16 → Q4_K_M/Q6_K。torch / transformers / safetensors 与"
+     "「打标运行时」共用同一份，卸载了打标也会停。"),
+    ("quantize", "4bit 量化（W4A16）",
+     "给 vLLM 用，llmcompressor 几百 MB；只打标不用装。"),
+    ("parquet", "parquet 打包",
+     "打包产物与 HF 分片流式读取（pyarrow + datasets）。"),
+    ("serve", "vLLM 推理服务",
+     "仅 Linux / WSL2 可装；Windows 上装了也起不来。"),
 ]
 
 
@@ -126,6 +235,7 @@ def _parse(path: Path, group: str) -> list[Item]:
             spec=name + rest,
             group=group,
             torch_index=name.lower() in ("torch", "torchvision"),
+            platforms=_platforms_of(name),
         ))
     return out
 
@@ -164,6 +274,7 @@ def load_extras() -> dict[str, list[Item]]:
                 name=name, spec=name + rest, group="extra",
                 note=EXTRA_NOTES.get(extra, ""),
                 torch_index=name.lower() in ("torch", "torchvision"),
+                platforms=_platforms_of(name),
             ))
         if items:
             out[extra] = items
@@ -225,6 +336,10 @@ def describe(item: Item) -> dict[str, Any]:
         "installed": ver,
         "status": status,
         "detail": detail,
+        # 当前平台用不了（例如 Windows 上的 vllm）：页面据此置灰并说明，
+        # 而不是让用户点了「安装」再收获一个 import 失败。
+        "supported": item.supported,
+        "platforms": list(item.platforms),
     }
 
 
@@ -261,15 +376,53 @@ class DepManager:
     def snapshot(self) -> dict[str, Any]:
         items = load_items()
         rows = [describe(it) for it in items]
+        # 与主清单重名的包（torch / transformers / pyarrow…）：在两组里点"卸载"
+        # 改的是同一个 site-packages，所以 extra 这边要标出来，别让人以为它只
+        # 属于某个功能。
+        shared = {it.name.lower().replace("_", "-") for it in items}
         groups = []
         for key, title, hint in _GROUPS:
             rows_of = [r for r in rows if r["group"] == key]
             groups.append({
                 "key": key,
+                "kind": key,
                 "title": title,
                 "hint": hint,
                 "items": rows_of,
                 "ok": sum(1 for r in rows_of if r["status"] == "ok"),
+                "missing": sum(1 for r in rows_of if r["status"] == "missing"),
+                # 缺、但这台机器上装不了（Windows 上的 vllm）。页面拿它把
+                # "要装几个"和按钮可用性算对，否则点下去必然收获一条报错。
+                "blocked": sum(1 for r in rows_of
+                                if r["status"] == "missing" and not r["supported"]),
+                "total": len(rows_of),
+            })
+        extra_rows: list[dict[str, Any]] = []
+        extras = load_extras()
+        for key, title, hint in _EXTRA_GROUPS:
+            members = extras.get(key) or []
+            if not members:
+                # pyproject 没这段（或读不到 tomllib）就不画空组：一个 0/0 的
+                # 分区只会让人怀疑"是不是漏装了"。
+                continue
+            rows_of = []
+            for it in members:
+                row = describe(it)
+                row["group"] = key
+                row["shared"] = it.name.lower().replace("_", "-") in shared
+                rows_of.append(row)
+            extra_rows.extend(rows_of)
+            groups.append({
+                "key": key,
+                "kind": "extra",
+                "extra": key,
+                "title": title,
+                "hint": hint,
+                "items": rows_of,
+                "ok": sum(1 for r in rows_of if r["status"] == "ok"),
+                "missing": sum(1 for r in rows_of if r["status"] == "missing"),
+                "blocked": sum(1 for r in rows_of
+                                if r["status"] == "missing" and not r["supported"]),
                 "total": len(rows_of),
             })
         with self._lock:
@@ -286,16 +439,25 @@ class DepManager:
                     "log": list(self.log[-120:]),
                     "batch": [dict(b) for b in self.batch],
                 }
-        for r in rows:
+        # extra 组也是同一批包，完整性结果一样要贴上去（漏了这两行，"导入失败"
+        # 标记永远不会出现在附加依赖那几组里）。
+        for r in [*rows, *extra_rows]:
             r["verified"] = self.verify.get(r["name"])
+        torch_index, torch_note = torch_plan()
         return {
             "python": sys.executable,
-            "torch_index": self._torch_index(),
+            "torch_index": torch_index,
+            # 走 CPU 版时的原因（驱动太老 / 读不出驱动）：页面底部照实说一句，
+            # 否则用户只会觉得"装了显卡还这么慢"。
+            "torch_note": torch_note,
             "summary": {
                 "total": len(rows),
                 "ok": sum(1 for r in rows if r["status"] == "ok"),
                 "missing": sum(1 for r in rows if r["status"] == "missing"),
                 "mismatch": sum(1 for r in rows if r["status"] == "mismatch"),
+                # 与各分组的 blocked 同义：缺，但本机装不了。
+                "blocked": sum(1 for r in rows
+                               if r["status"] == "missing" and not r["supported"]),
                 "broken": sum(1 for r in rows
                               if (self.verify.get(r["name"]) or {}).get("ok") is False),
             },
@@ -338,13 +500,24 @@ class DepManager:
     # ---------------------------------------------------------------- 动作
 
     def install(self, name: str) -> dict[str, Any]:
-        return self._start_many("install", [self._find(name)])
+        item = self._find(name)
+        if not item.supported:
+            raise ValueError(
+                f"{item.name} 只支持 {' / '.join(item.platforms)}，"
+                f"当前系统（{sys.platform}）装上也是坏的")
+        return self._start_many("install", [item])
 
     def uninstall(self, name: str) -> dict[str, Any]:
+        # 卸载不设平台限制：装错了的（比如 Windows 上的 vllm）本来就该能卸掉。
         return self._start_many("uninstall", [self._find(name)])
 
     def reinstall(self, name: str) -> dict[str, Any]:
-        return self._start_many("reinstall", [self._find(name)])
+        item = self._find(name)
+        if not item.supported:
+            raise ValueError(
+                f"{item.name} 只支持 {' / '.join(item.platforms)}，"
+                f"当前系统（{sys.platform}）装上也是坏的")
+        return self._start_many("reinstall", [item])
 
     # ---- 批量动作
 
@@ -355,7 +528,10 @@ class DepManager:
         （开发机手动装过更新的 torch 时尤其明显），批量做这种事太容易误伤。
         要降级就单独点那一行的「重装」，那一下用户是知情且确认过的。
         """
-        items = [it for it in load_items() if describe(it)["status"] == "missing"]
+        # 只装本平台能用的：Windows 上「安装缺失的包」不该顺手把 vllm 拉进来，
+        # 它装出来是个 import 就炸的壳，还会把钉死的 torch 换成另一版。
+        items = [it for it in load_items()
+                 if it.supported and describe(it)["status"] == "missing"]
         if not items:
             raise ValueError("没有缺失的包，不用装")
         return self._start_many("install-missing", items)
@@ -371,8 +547,17 @@ class DepManager:
         items = load_extras().get(extra)
         if not items:
             raise ValueError(f"没有这个附加依赖：{extra}")
-        todo = [it for it in items if describe(it)["status"] == "missing"]
+        # 平台装不了的先摘掉：vLLM 的轮子只有 Linux，Windows 上装出来是个
+        # import 就炸的壳，还会把钉死的 torch 换掉。要跑请去 WSL2 那边单独装。
+        todo = [it for it in items
+                if it.supported and describe(it)["status"] == "missing"]
         if not todo:
+            bad = [it for it in items if not it.supported]
+            if bad:
+                only = " / ".join(sorted({p for it in bad for p in it.platforms}))
+                names = " / ".join(it.name for it in bad)
+                raise ValueError(
+                    f"{names} 只支持 {only}，当前系统（{sys.platform}）装了也跑不起来")
             raise ValueError(f"{extra} 声明的依赖都装着了，不用装")
         return self._start_many(f"install-{extra}", todo)
 
@@ -458,10 +643,6 @@ class DepManager:
 
     # ---------------------------------------------------------------- 内部
 
-    @staticmethod
-    def _torch_index() -> str:
-        return TORCH_INDEX_GPU if shutil.which("nvidia-smi") else TORCH_INDEX_CPU
-
     def _emit(self, line: str) -> None:
         text = line.rstrip()
         if not text:
@@ -520,9 +701,11 @@ class DepManager:
             self._emit(f"—— {item.name} 卸载完成，开始重装 ——")
         args = ["install", "--no-warn-script-location", item.spec]
         if item.torch_index:
-            index = self._torch_index()
+            index, note = torch_plan()
             args += ["--index-url", index]
             self._emit(f"（torch 系列走 PyTorch 索引：{index}）")
+            if note:
+                self._emit(f"（{note}）")
         code = self._pip(args, token)
         return code == 0, "" if code == 0 else f"退出码 {code}"
 
@@ -533,6 +716,14 @@ class DepManager:
         夸张；而且导入之后再也退不回来，检查反而污染了被测对象。子进程还能
         超时 kill——本进程里的 import 卡住就只能等它。
         """
+        # 平台不支持的直接判过：这不是环境坏了，是这台机器上本来就跑不了。
+        # 判成失败会让「检查完整性」整批退出码 1，用户照着红色去修却无从修起。
+        if not item.supported:
+            detail = f"跳过：仅支持 {' / '.join(item.platforms)}，当前是 {sys.platform}"
+            with self._lock:
+                self.verify[item.name] = {"ok": True, "detail": detail, "ms": 0}
+                self.verify_at = time.time()
+            return True, detail
         t0 = time.time()
         try:
             proc = subprocess.run(

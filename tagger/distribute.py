@@ -35,6 +35,7 @@ from typing import Iterable, Sequence
 
 from .config import ConfigError
 from .naming import make_image_id, normalize_ext, sanitize
+from .pack import ContainerReader
 
 MANIFEST_NAME = "manifest.jsonl"
 TABLE_NAME = "shards.json"
@@ -96,6 +97,10 @@ class DistItem:
     size: int
     ext: str
     image_id: str = ""
+    # `table` = 按 post id 查表得来，`path` = 目录名。写进分包 manifest，
+    # 成员打标时靠它判断"manifest 里这个画师能不能压过查表"。
+    artist_source: str = ""
+    artists: tuple[str, ...] = ()
 
     @property
     def is_zip_member(self) -> bool:
@@ -205,40 +210,17 @@ def plan_shards(
 # ------------------------------------------------------------------ 打包
 
 
-def _read_member(source: str, member: str, pool: "_ZipPool | None" = None) -> bytes:
+def _read_member(source: str, member: str,
+                 pool: "ContainerReader | None" = None) -> bytes:
     if member:
         if pool is not None:
             return pool.read(source, member)
-        with zipfile.ZipFile(source, "r") as zf:
-            return zf.read(member)
+        reader = ContainerReader(keep=1)
+        try:
+            return reader.read(source, member)
+        finally:
+            reader.close()
     return Path(source).read_bytes()
-
-
-class _ZipPool:
-    """按路径复用 ZipFile 句柄。
-
-    write_shard 逐成员取图时每个成员重开一次 zip：包内几万成员就是几万次
-    打开-解析中央目录-关闭，O(n²) 的固定开销全花在重复解析上。一个包计划
-    内的成员都来自同一个 zip，句柄留到整包写完再关。
-    """
-
-    def __init__(self) -> None:
-        self._open: dict[str, zipfile.ZipFile] = {}
-
-    def read(self, source: str, member: str) -> bytes:
-        zf = self._open.get(source)
-        if zf is None:
-            zf = zipfile.ZipFile(source, "r")
-            self._open[source] = zf
-        return zf.read(member)
-
-    def close(self) -> None:
-        for zf in self._open.values():
-            try:
-                zf.close()
-            except OSError:
-                pass
-        self._open.clear()
 
 
 def _mirror_member(rel_path: str, image_id: str, ext: str) -> str:
@@ -295,7 +277,8 @@ def write_shard(
     tmp = final.with_suffix(".zip.tmp")
 
     comp = zipfile.ZIP_STORED if compress == "stored" else zipfile.ZIP_DEFLATED
-    pool = _ZipPool()
+    # 输入可能是 zip，也可能是 tar（HF 上的 webdataset 分片），句柄缓存两种都认。
+    pool = ContainerReader(keep=4)
     try:
         with zipfile.ZipFile(tmp, "w", compression=comp, allowZip64=True) as zf:
             rows: list[str] = []
@@ -318,6 +301,7 @@ def write_shard(
                     "image_id": it.image_id,
                     "file": name,
                     "artist": it.artist,
+                    "artist_source": it.artist_source,
                     "src": it.source,
                     "member": it.member,
                     "rel_path": it.rel_path,
@@ -357,7 +341,8 @@ class StreamingShardWriter:
         self._used: set[str] = set()
         self._plan: ShardPlan | None = None
 
-    def add(self, image_id: str, data: bytes, *, artist: str = "", src: str = "",
+    def add(self, image_id: str, data: bytes, *, artist: str = "",
+            artist_source: str = "", src: str = "",
             member: str = "", rel_path: str = "", ext: str = ".jpg",
             size: int | None = None) -> None:
         count = self._plan.count if self._plan else 0
@@ -388,6 +373,7 @@ class StreamingShardWriter:
         self._used.add(name.lower())
         self._rows.append(json.dumps({
             "image_id": image_id, "file": name, "artist": artist,
+            "artist_source": artist_source,
             "src": src, "member": member, "rel_path": rel_path, "bytes": len(data),
         }, ensure_ascii=False))
         if not self._plan.count:

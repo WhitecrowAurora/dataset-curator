@@ -78,6 +78,17 @@ function DepRow({
                 {item.requirement}
               </span>
             )}
+            {/* 附加依赖组里会再出现一次 torch / transformers 这些：它们在
+                别的分组里也管着同一份 site-packages，不标一下会以为"卸载只
+                影响这个功能"。 */}
+            {item.shared && (
+              <span
+                className="rounded-full border border-lx px-1.5 py-px text-[9.5px] font-normal text-lx-dim"
+                title="与其它分组共用同一份包：在这里卸载，那边也会少"
+              >
+                共用
+              </span>
+            )}
           </div>
           {/* 版本只在"对不上"时才并排显示：一致的时候两行都写 4.16.0 只是噪音，
               而真有差异时，光看一个数字根本不知道差在哪。
@@ -86,7 +97,13 @@ function DepRow({
             className="mt-0.5 min-h-[14px] truncate text-[10.5px] text-lx-muted"
             title={item.verified ? item.verified.detail : item.note}
           >
-            {item.verified && !item.verified.ok ? (
+            {item.supported === false ? (
+              /* 平台不支持优先于一切：说"导入失败"会让人以为是环境坏了，
+                 实际是这台机器上根本装不了。 */
+              <span className="text-lx-warning">
+                仅 {item.platforms?.join(' / ') || '其他系统'} 可用
+              </span>
+            ) : item.verified && !item.verified.ok ? (
               <span className="text-lx-danger">导入失败 · {item.verified.detail}</span>
             ) : item.status === 'mismatch' ? (
               <>
@@ -108,7 +125,12 @@ function DepRow({
           <button
             type="button"
             className="lx-btn-primary inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px]"
-            disabled={disabled}
+            disabled={disabled || item.supported === false}
+            title={
+              item.supported === false
+                ? `仅 ${item.platforms?.join(' / ') || '其他系统'} 可用，这台机器装上也是坏的`
+                : undefined
+            }
             onClick={() => onAct(item.name, 'install')}
           >
             {mine ? <Loader2 size={13} className="animate-spin" /> : <Package size={13} />}
@@ -118,11 +140,13 @@ function DepRow({
           <button
             type="button"
             className="lx-btn-ghost inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px]"
-            disabled={disabled}
+            disabled={disabled || item.supported === false}
             title={
-              item.status === 'mismatch'
-                ? `卸载后按清单装回 ${item.requirement}`
-                : '卸载再装一遍（包坏了、装了一半时用）'
+              item.supported === false
+                ? `仅 ${item.platforms?.join(' / ') || '其他系统'} 可用`
+                : item.status === 'mismatch'
+                  ? `卸载后按清单装回 ${item.requirement}`
+                  : '卸载再装一遍（包坏了、装了一半时用）'
             }
             onClick={() => onAct(item.name, 'reinstall')}
           >
@@ -255,6 +279,25 @@ export function Deps() {
     }
   }
 
+  /** 附加依赖组（convert / quantize / …）：只装这一组的缺失项。
+   *
+   * 不走 `bulk('missing')`：那个是"整台机器的核心清单"，而这里每一组都可能
+   * 装不上或不该装（vllm 在 Windows 上装不了、llmcompressor 几百 MB），
+   * 让用户一组一组点，才知道自己在往盘里放什么。
+   */
+  async function installExtra(extra: string) {
+    setPending(`extra:${extra}`)
+    setError(null)
+    try {
+      setState(await api.depInstallExtra(extra))
+      setShowLog(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPending('')
+    }
+  }
+
   const summary = state?.summary
   const job = state?.job
   const batch = job?.batch ?? []
@@ -263,6 +306,19 @@ export function Deps() {
   const failedItems = batch.filter((b) => b.status === 'failed')
   const checked = (state?.verify_at ?? 0) > 0
   const installedCount = summary ? summary.total - summary.missing : 0
+  // 缺的包里有一部分是这台机器根本装不了的（Windows 上的 vllm）：
+  // 它们照常显示在行里，但不能算进"要装几个"，否则点一下必然报错。
+  const blocked = summary?.blocked ?? 0
+  const canInstall = (summary?.missing ?? 0) - blocked
+  const blockedPlatforms = [
+    ...new Set(
+      (state?.groups ?? []).flatMap((g) =>
+        g.items
+          .filter((i) => i.status === 'missing' && i.supported === false)
+          .flatMap((i) => i.platforms ?? []),
+      ),
+    ),
+  ].join(' / ')
 
   return (
     <div className="mx-auto lx-page-enter flex max-w-6xl flex-col gap-3.5">
@@ -303,11 +359,13 @@ export function Deps() {
             <button
               type="button"
               className="lx-btn-primary inline-flex items-center gap-1.5"
-              disabled={!!running || !summary?.missing}
+              disabled={!!running || !canInstall}
               title={
-                summary?.missing
-                  ? `装上这 ${summary.missing} 个缺失的包（不动版本不符的）`
-                  : '没有缺失的包'
+                canInstall
+                  ? `装上这 ${canInstall} 个缺失的包（不动版本不符的；下面各附加依赖组用组内的「安装本组」）`
+                  : blocked
+                    ? `缺的 ${blocked} 个只有 ${blockedPlatforms || '别的系统'} 版，这台机器装上也是坏的`
+                    : '没有缺失的包'
               }
               onClick={() => void bulk('missing')}
             >
@@ -317,9 +375,9 @@ export function Deps() {
                 <Download size={14} />
               )}
               安装缺失
-              {summary?.missing ? (
+              {canInstall ? (
                 <span className="rounded-full bg-lx-on-accent/20 px-1.5 text-[10.5px] tabular-nums">
-                  {summary.missing}
+                  {canInstall}
                 </span>
               ) : null}
             </button>
@@ -443,26 +501,71 @@ export function Deps() {
       )}
 
       {state ? (
-        state.groups.map((group) => (
-          <section key={group.key} className="lx-sheet overflow-hidden">
-            <SheetHead
-              title={group.title}
-              count={`${group.ok}/${group.total}`}
-              hint={group.hint}
-            />
-            <div className="border-t border-lx">
-              {group.items.map((item) => (
-                <DepRow
-                  key={item.name}
-                  item={item}
-                  busy={!!running}
-                  pending={pending}
-                  onAct={(name, action) => void act(name, action)}
-                />
-              ))}
-            </div>
-          </section>
-        ))
+        state.groups.map((group) => {
+          // 缺的里也有本机装不了的（serve 那一组在 Windows 上整个都装不了）：
+          // 按钮可不可点按"能装的"算，不然点下去只会得到一条报错。
+          const blocked = group.blocked ?? 0
+          const installable = (group.missing ?? 0) - blocked
+          const only = [
+            ...new Set(
+              group.items
+                .filter((i) => i.status === 'missing' && i.supported === false)
+                .flatMap((i) => i.platforms ?? []),
+            ),
+          ].join(' / ')
+          return (
+            <section key={group.key} className="lx-sheet overflow-hidden">
+              <SheetHead
+                title={group.title}
+                count={`${group.ok}/${group.total}`}
+                hint={group.hint}
+                trailing={
+                  group.kind === 'extra' && group.extra ? (
+                    <button
+                      type="button"
+                      className="lx-btn-primary inline-flex items-center gap-1 px-2.5 py-1.5 text-[12px]"
+                      disabled={
+                        !!running || pending === `extra:${group.extra}` || !installable
+                      }
+                      title={
+                        installable
+                          ? `只装这一组缺的 ${installable} 个，不碰已装的`
+                          : blocked
+                            ? `这一组只有 ${only || '别的系统'} 版，这台机器装了也起不来`
+                            : '这一组已经装齐了'
+                      }
+                      onClick={() => void installExtra(group.extra as string)}
+                    >
+                      {pending === `extra:${group.extra}` ||
+                      (running && job?.action === `install-${group.extra}`) ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Download size={13} />
+                      )}
+                      安装本组
+                      {installable ? (
+                        <span className="rounded-full bg-lx-on-accent/20 px-1.5 text-[10.5px] tabular-nums">
+                          {installable}
+                        </span>
+                      ) : null}
+                    </button>
+                  ) : undefined
+                }
+              />
+              <div className="border-t border-lx">
+                {group.items.map((item) => (
+                  <DepRow
+                    key={item.name}
+                    item={item}
+                    busy={!!running}
+                    pending={pending}
+                    onAct={(name, action) => void act(name, action)}
+                  />
+                ))}
+              </div>
+            </section>
+          )
+        })
       ) : (
         !error && (
           <SectionPanel title="读取中">
@@ -478,6 +581,14 @@ export function Deps() {
           <>
             <br />
             torch / torchvision 走 PyTorch 索引：<span className="font-mono">{state.torch_index}</span>
+          </>
+        ) : null}
+        {/* 退到 CPU 版时必须说清为什么：页面上一切正常，只是慢十倍，
+            不说一句用户只会以为这软件就这速度。 */}
+        {state?.torch_note ? (
+          <>
+            <br />
+            <span className="text-lx-warning">{state.torch_note}</span>
           </>
         ) : null}
       </p>

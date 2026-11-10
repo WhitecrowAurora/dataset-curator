@@ -19,6 +19,8 @@ export function ChoiceGrid<T extends string>({
   renderLabel,
   glyph,
   disabled,
+  optionDisabled,
+  onBlocked,
 }: {
   options: readonly T[]
   value: T
@@ -33,6 +35,15 @@ export function ChoiceGrid<T extends string>({
   glyph?: (v: T, active: boolean) => React.ReactNode
   /** 整组置灰 */
   disabled?: boolean
+  /**
+   * 单个选项不可选（例如这一档 GGUF 还没压出来）。
+   *
+   * 与 `disabled` 的区别是**还能点**：点了走 `onBlocked` 而不是 `onChange`，
+   * 好让页面说明"为什么不能选、去哪儿能把它变成能选"。真把它设成 HTML
+   * disabled，用户只会看到一个按不动的灰块，反而更困惑。
+   */
+  optionDisabled?: (v: T) => boolean
+  onBlocked?: (v: T) => void
 }) {
   const groupRef = useRef<HTMLDivElement>(null)
   const sizeClass = size === 'sm' ? 'py-2 px-2 text-xs' : 'py-2.5 text-sm'
@@ -41,7 +52,14 @@ export function ChoiceGrid<T extends string>({
     groupRef.current?.querySelectorAll<HTMLButtonElement>("[role='radio']")[index]?.focus()
 
   const moveTo = (index: number) => {
-    onChange(options[index])
+    const opt = options[index]
+    if (optionDisabled?.(opt)) {
+      // 走到不可选的档只提示、不切换：静默切过去等于让用户以为选上了
+      onBlocked?.(opt)
+      focusOption(index)
+      return
+    }
+    onChange(opt)
     focusOption(index)
   }
 
@@ -74,20 +92,25 @@ export function ChoiceGrid<T extends string>({
       {options.map((opt) => {
         const active = opt === value
         const label = renderLabel ? renderLabel(opt) : opt
+        const blocked = !disabled && Boolean(optionDisabled?.(opt))
         return (
           <button
             key={opt}
             type="button"
             role="radio"
             aria-checked={active}
+            aria-disabled={blocked || undefined}
+            title={blocked ? '这一档还没有权重：先去「模型管理」把它压出来' : undefined}
             tabIndex={active ? 0 : -1}
             disabled={disabled}
-            onClick={() => onChange(opt)}
+            onClick={() => (blocked ? onBlocked?.(opt) : onChange(opt))}
             className={`${sizeClass} rounded-lx-sm font-medium transition-colors border ${mono ? 'font-mono' : ''} ${
               active
                 ? 'bg-lx-accent-subtle border-lx-accent text-lx'
                 : 'bg-lx-surface-raised border-lx text-lx-muted hover:text-lx'
-            } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+            } ${blocked ? 'opacity-45 line-through decoration-lx-dim decoration-1' : ''} ${
+              disabled || blocked ? 'cursor-not-allowed' : 'cursor-pointer'
+            }`}
           >
             {glyph ? (
               <span className="inline-flex max-w-full items-center justify-center gap-2 px-1">

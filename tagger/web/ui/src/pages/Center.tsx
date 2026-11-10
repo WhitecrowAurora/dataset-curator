@@ -20,7 +20,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import { api, ApiError, type CenterState } from '../lib/api'
-import { ChoiceGrid, ErrorBox } from '../components/ui/controls'
+import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import {
   MiniMetricCard,
   PageHeader,
@@ -40,9 +40,14 @@ function fmtUptime(sec: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
-export function Center() {
+export function Center({ onLinked }: { onLinked?: () => void }) {
   const [state, setState] = useState<CenterState | null>(null)
-  const [error, setError] = useState('')
+  // 两种错误分开存：
+  // pollError 是"这一轮没拉到数据"，下一轮成功就该消失；
+  // actionError 是"你刚点的那个按钮失败了"，得留着让人看清为什么——
+  // 混成一个的话，连接失败的红条会在 5 秒后被轮询悄悄抹掉。
+  const [pollError, setPollError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState('')
   // 身份三项是**草稿**：存下来的值只在第一次拉到时灌进来。否则用户改了一半
   // 又被轮询覆盖回去，会以为输入框坏了。
@@ -53,12 +58,16 @@ export function Center() {
   const [mode, setMode] = useState('both')
   const [tagUrl, setTagUrl] = useState('')
   const [outDir, setOutDir] = useState('')
+  const [waitMode, setWaitMode] = useState(true)
+  // 存成字符串而不是数字：输入框清空时得能表达"没填"，转成 NaN 再回填会变成 0
+  const [maxPkgs, setMaxPkgs] = useState('0')
   const seeded = useRef(false)
 
   const pull = useCallback(async () => {
     try {
       const s = await api.center()
       setState(s)
+      setPollError('')
       if (!seeded.current) {
         seeded.current = true
         setServer(s.config.server)
@@ -66,9 +75,11 @@ export function Center() {
         setMode(s.config.mode || 'both')
         setTagUrl(s.config.tag_url)
         setOutDir(s.config.out_dir)
+        setWaitMode(s.config.wait ?? true)
+        setMaxPkgs(String(s.config.max_packages ?? 0))
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setPollError(e instanceof ApiError ? e.message : String(e))
     }
   }, [])
 
@@ -89,11 +100,11 @@ export function Center() {
 
   const act = async (key: string, fn: () => Promise<CenterState>) => {
     setBusy(key)
-    setError('')
+    setActionError('')
     try {
       setState(await fn())
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setActionError(e instanceof ApiError ? e.message : String(e))
     } finally {
       setBusy('')
     }
@@ -104,6 +115,15 @@ export function Center() {
   const board = state?.board
   const cfg = state?.config
   const leases = board?.leases ?? []
+  // 打标服务与产物目录空着就不让开始：后端对空串是"保持原值"（免得把配置
+  // 清成空以后再起不来），所以输入框显示空、实际却用着旧地址，是更难查的错。
+  const startBlocked = !ident.device_id
+    ? '先在上面连接'
+    : !tagUrl.trim()
+      ? '打标服务地址不能为空'
+      : !outDir.trim()
+        ? '产物目录不能为空'
+        : ''
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5">
@@ -131,7 +151,7 @@ export function Center() {
         }
       />
 
-      {error && <ErrorBox error={error} />}
+      {(actionError || pollError) && <ErrorBox error={actionError || pollError} />}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <MiniMetricCard
@@ -216,6 +236,9 @@ export function Center() {
                 void act('login', async () => {
                   const s = await api.centerLogin({ server, user_id: userId, secret })
                   setSecret('')
+                  // 身份落盘了，顶栏那盏灯该立刻变绿：
+                  // 页面内虽然已经显示设备号，但用户看的是全屏的角落。
+                  onLinked?.()
                   return s
                 })
               }
@@ -252,6 +275,24 @@ export function Center() {
             </div>
           </dl>
         )}
+
+        {ident.device_id && (
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-lx pt-3">
+            <p className="text-[10.5px] leading-relaxed text-lx-dim">
+              断开只忘掉本机的设备身份，地址和姓名留着——重连不用再抄一遍。
+            </p>
+            <button
+              type="button"
+              className="lx-btn-ghost shrink-0"
+              disabled={running || busy === 'logout'}
+              title={running ? '跑着的时候不能断开，先停止' : ''}
+              onClick={() => void act('logout', api.centerLogout)}
+            >
+              {busy === 'logout' ? <Loader2 size={14} className="animate-spin" /> : null}
+              <span className={busy === 'logout' ? 'ml-1.5' : ''}>断开</span>
+            </button>
+          </div>
+        )}
       </SectionPanel>
 
       <SectionPanel
@@ -276,8 +317,8 @@ export function Center() {
             <button
               type="button"
               className="lx-btn-primary"
-              disabled={busy === 'start' || !ident.device_id}
-              title={ident.device_id ? '' : '先在上面连接'}
+              disabled={busy === 'start' || Boolean(startBlocked)}
+              title={startBlocked}
               onClick={() =>
                 void act('start', () =>
                   api.centerStart({
@@ -288,6 +329,8 @@ export function Center() {
                     // 页面不让人乱调（调小了对服务端是额外的负载）。
                     interval: cfg?.interval,
                     extra_args: cfg?.extra_args,
+                    wait: waitMode,
+                    max_packages: Number(maxPkgs || 0),
                   }),
                 )
               }
@@ -317,6 +360,7 @@ export function Center() {
             placeholder="http://127.0.0.1:8000"
             spellCheck={false}
             disabled={running}
+            aria-invalid={!tagUrl.trim()}
           />
         </SettingRow>
         <SettingRow label="产物目录" help="分片下载与打标产物都落在这里。">
@@ -327,8 +371,36 @@ export function Center() {
             placeholder="work/fox-work"
             spellCheck={false}
             disabled={running}
+            aria-invalid={!outDir.trim()}
           />
         </SettingRow>
+
+        <div className="mt-4 border-t border-lx pt-3">
+          <ToggleRow
+            checked={waitMode}
+            onChange={setWaitMode}
+            disabled={running}
+            label="挂着等派工（池子空了也不停）"
+            hint="关掉就是“把手上的干完就停”。开着的话，点一次开始就能一直挂在线上，别人往池子里放活它就接。"
+          />
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-lx-muted">本次最多打多少片</span>
+              <input
+                className="lx-input w-24 font-mono text-xs tabular-nums"
+                inputMode="numeric"
+                value={maxPkgs}
+                onChange={(e) => setMaxPkgs(e.target.value.replace(/[^\d]/g, ''))}
+                placeholder="0"
+                disabled={running || !waitMode}
+              />
+            </label>
+            <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
+              0 = 不限。填了数，跑够就自己停手，并把多派的那片还回池子。
+              {!waitMode && '（只在“挂着等派工”时生效）'}
+            </p>
+          </div>
+        </div>
 
         <details className="mt-3 border-t border-lx pt-3">
           <summary className="cursor-pointer text-[11px] text-lx-muted">高级：实际执行的命令</summary>

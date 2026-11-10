@@ -63,6 +63,7 @@ import httpx
 
 from . import nl_api
 from .artist import ArtistRule, ArtistTable, format_tag, inject_into_caption
+from .caption_text import tidy_caption
 from .config import ConfigError, OpsConfig, OutputSpec, parse_caption_chars
 from .cpu_tagger import (TagBackend, TagPrediction, TaggerUnavailable, build_backend,
                          resolve_device)
@@ -70,35 +71,15 @@ from .distribute import read_shard_manifest
 from .guard import ResourceGuard
 from .naming import annotation_name, normalize_ext
 from .netutil import trust_env_for
+from .prompt_rules import rules_for
 from .quality import QualityGate, QualityPolicy
 from .result_cache import ResultCache
 from .schema import Annotation, QC
 from .tag_categories import group_tags, render_groups
 
-# prompt 一改，版本号必须跟着改。provenance 靠它回答"这批数据是哪套指令产的"，
-# 不清不楚的话，两个 prompt 混出来的数据集永远查不出差异来自哪。
-# 注意：改 caption_chars、tag 数量这类配置，渲染出来的指令也变了，同样算"改了
-# prompt"——只改数字不 bump 版本，会出现两批都叫 v2 但指令不同的情况。
-# v2：长度与 tag 数量改为按配置生成（v1 是写死的 15-40 tag / 480-1000 字符）。
-# v3：颜色/材质从顺序句里提成独立条款（v2 实测颜色词只覆盖 17~28%、材质 57~66%，
-#     条款写在长句中间基本没被执行）；删掉 "Longer is fine"（与上限自相矛盾，
-#     且 both 模式下贴着 max_tokens 天花板）；长度补一条句数口径（字符数模型数不准）；
-#     both 模式补 "nothing else"；caption 段补身份名禁令（签名/水印会从"逐字转录"
-#     那条缝里漏进去）。
-# v4：按标注规范 v0.2 补三条——
-#     ① caption 必须描述整体画风/媒介（v3 的 caption 段一句风格要求都没有，
-#        只有 tag 段提过 art style）；
-#     ② 引号内的可见文字保持原语言原字形，不翻译不罗马化（v3 只写 "English only"，
-#        模型会为了满足那条把中文招牌译成英文）。样式由 _CAPTION_RULES 里新增的
-#        两条承担，中英各一份；
-#     ③ 新增"参考 tag"段（_ref_block）：源数据带原始 danbooru 标注时把它们作为
-#        输入，而不是让模型从图里猜。没有 tag 时一个字都不加。
-# v5：参考 tag 段按类别分组（general/character/copyright/artist/meta，取自
-#     models/*/selected_tags.csv）。平铺时角色名与外貌词在模型眼里是一类东西，
-#     实测会把 `hatsune_miku` 写成 "hatsune miku hair" 这种外貌词。词表缺失时
-#     退回 v4 的平铺形态，所以同一份 prompt 版本下仍有两种渲染结果——provenance
-#     里记的是版本号，具体形态看参考段有没有 `character:` 这种行首。
-PROMPT_VERSION = "v5"
+# prompt 只有一份，不设版本号。溯源靠 `prompt_sha`（见 _tag_payload）：它是
+# prompt 全文的哈希，改一个字就会变，比手写的编号可靠——手写的那个只要有人
+# 忘了改，两批指令不同的数据就会顶着同一个编号混在一起，而那是最难查的一类污染。
 
 SYSTEM_PROMPT = (
     "You annotate images for diffusion-model training data. "
@@ -122,7 +103,6 @@ _CAPTION_RULES = """<CAPTION> rules:
 - Describe only what is visible. Do not speculate about anything outside the frame.
 - Do not name or guess the artist, character, series or studio. A signature or watermark is static text: quote it like any other visible text, but never resolve it into a name.
 - Name the overall art style and medium in one clause (anime illustration, watercolour, oil painting, 3D render, photograph), and say what the line work and finish look like.
-- Text visible in the image keeps its own language and script inside the quotes, even though this paragraph is in English: never translate it, never romanise or transliterate it. A quoted Chinese or Japanese sign is correct as-is.
 - English only, plain prose: no markdown, no bullet points, no headings, no "Caption:" prefix."""
 
 
@@ -141,26 +121,17 @@ _CAPTION_RULES_ZH = """<CAPTION> 规则：
 - 只写画面里看得见的东西，不要推测画框外的内容。
 - 不要点名或猜测画师、角色、系列、工作室。签名或水印属于"可见文字"，原样引用，但不要把它解释成人名。
 - 用一句话说明整体画风与媒介（日式插画、水彩、油画、3D 渲染、摄影），并交代线条与完成度的特征。
-- 引号里的文字保持它原本的语言和字形，不要翻译、不要音译或罗马化；正文用简体中文，引文可以不是中文。
 - 这一段必须用简体中文写，不要用英文。纯散文：不要 markdown、不要分条、不要小标题、不要"描述："这类前缀。"""
 
-# 图中文字：规范 v0.2 §6 把它定为"最高优先级的语言忠实规则"。
-# 这一块只负责**抄**，不负责解释；`text_exact` 与 caption 引号里的字必须逐字一致，
-# 所以它排在 caption 之前——自回归模型先写下来的东西，后面才引得住。
-_VISIBLE_RULES = """<VISIBLE_TEXT> rules:
-- Transcribe every word that is actually legible in the image: signs, subtitles, speech bubbles, UI text, sound effects, watermarks.
-- Output one JSON array with one object per text region: [{"text_exact": "...", "language": "ja", "script": "Jpan", "legibility": "clear"}]
-- text_exact keeps the original characters, case and punctuation. Never translate, romanise, or correct a typo.
-- language is a short BCP-47 code (en, zh, ja, ko, ...); script is ISO 15924 (Latn, Hans, Hant, Jpan, Kore, Arab).
-- legibility is clear / partial / illegible. Never guess characters you cannot read: mark the region illegible and transcribe only the part that is certain.
-- If the image has no text at all, output exactly []."""
-_VISIBLE_RULES_ZH = """<VISIBLE_TEXT> 规则：
-- 把画面里真正能辨认的文字逐条抄下来：招牌、字幕、对话气泡、界面文字、拟声字、水印。
-- 输出一个 JSON 数组，每段文字一个对象：[{"text_exact": "…", "language": "zh", "script": "Hans", "legibility": "clear"}]
-- text_exact 保留原本的字形、大小写与标点，不翻译、不音译、也不替它改错别字。
-- language 用 BCP-47 短码（en / zh / ja / ko …），script 用 ISO 15924（Latn / Hans / Hant / Jpan / Kore / Arab）。
-- legibility 取 clear / partial / illegible。认不准的字不要猜：标成 illegible，只抄确定的那部分。
-- 画面里完全没有文字时，就输出 [] 本身。"""
+# 图中文字的条款**不在这个文件里**：它们在 `prompts/图中文字规则.md` 的
+# TEXT / TEXT_ZH 两节，由 _prompt_for 按需追加到 caption 规则后面。
+# 这样改措辞（字体风格、认不准别猜之类）只需要编辑 markdown，不用碰 Python。
+# 曾经有过一个 `<VISIBLE_TEXT>` 结构化 JSON 块（text_exact / language /
+# script / legibility），那是规范 v0.2 §6 被理解成"另抄一份表"的产物，
+# 已整体移除：主创要的是"文字按原本语言写进 caption/正文"，不是另存一份表。
+#
+# ★上面 _TAG_RULES / _CAPTION_RULES(_ZH) 同样是**兜底**：正常情况由
+#   prompts/打标规则.md 提供，只有文件读不到时才用这里的这份。
 
 # 中文 1 字 ≈ 1 token，英文 4.4 字符/token。同样的 token 预算，中文能写的字数
 # 只有英文的 1/4.4 ≈ 0.23。
@@ -187,6 +158,23 @@ _REF_EN = """
 - Use the tags to pin down the character, series, clothing and props at the level of detail they imply.
 - Where a tag contradicts what you actually see, trust the image and drop that tag.
 - Fold them into your own sentences; never output them as a list, and never invent a name that is not in them."""
+# 平铺形态（默认）：一串逗号分隔的 tag，不做类型区分。
+# ★分隔符是**逗号不是空格**（早期版本用空格）：danbooru tag 本身只含下划线和
+#   字母数字，空格在它里面不合法，逗号才是这种词汇表本来的分隔符。
+_REF_FLAT_EN = """
+
+<REFERENCE> the image's original danbooru tags:
+{tags}
+- They tell you the character, series, clothing and props when the source knew them.
+- Where a tag contradicts what you actually see, trust the image and drop that tag.
+- Fold them into your own sentences; never output them as a list, and never invent a name that is not in them."""
+_REF_FLAT_ZH = """
+<参考> 这张图在源数据里的原始 tag：
+{tags}
+- 它们能告诉你角色、系列、服装与道具（当源数据知道时）。
+- 某个 tag 与画面明显矛盾时以画面为准，直接丢掉那一条。
+- 把它们融进你自己的句子，不要原样罗列，也不要另外编名字。"""
+
 _REF_ZH = """
 <参考> 这张图在源数据里的原始 tag，已按类别分组：
 {tags}
@@ -197,21 +185,60 @@ _REF_ZH = """
 - 把它们融进你自己的句子，不要原样罗列，也不要另外编名字。"""
 
 
+# 动漫数据的风格声明（规范 v0.2 §5）：正文里必须出现"动漫风格/日式插画"这类词，
+# 目的是让训练侧能一眼分出通用数据与动漫数据——不是风格形容词装饰。
+# 已经有一条"必须交代画风与媒介"（v4 加的），但那条只说"点名画风"，模型会写
+# "digital painting" 而不点破是动漫；动漫批次混进通用数据集时，这条是唯一
+# 能在文本里把两类分开的痕迹。
+_MEDIA_ZH = """
+
+<媒体类型> 这张图来自**动漫/日式插画**数据集：正文里必须明确写出"日式动漫插画风格"
+（或同义的"动漫风格"）来交代画风，不要只写"数字绘画""插画"这种含糊说法。"""
+
+_MEDIA_EN = """
+
+<MEDIA TYPE> This image comes from an anime / manga dataset: when you name the art style,
+say explicitly that it is anime-style (e.g. "anime-style illustration"), not just
+"digital painting" or "illustration"."""
+
+# 上游 media 列的取值 → 是否动漫。只认明确的写法；`illustration` 这种不算：
+# 插画未必是动漫，判错了会把通用数据标成 anime，正好违反这条要防的事。
+_ANIME_WORDS = ("anime", "manga", "danbooru", "illustration_anime", "二次元",
+                "动漫", "日式插画")
+
+
+def is_anime(media: str | None) -> bool:
+    """上游的 media/风格标签是不是动漫类。空串/未知一律 False。"""
+    text = str(media or "").strip().lower()
+    return bool(text) and any(w in text for w in _ANIME_WORDS)
+
+
+def _media_block(media: str | None, zh: bool = False) -> str:
+    """动漫批次追加风格声明。非动漫/未知返回空串。"""
+    if not is_anime(media):
+        return ""
+    return _MEDIA_ZH if zh else _MEDIA_EN
+
+
 def _ref_block(tags: Sequence[str], zh: bool = False, *,
-               vocab: dict[str, str] | None = None) -> str:
+               vocab: dict[str, str] | None = None,
+               grouped: bool = False) -> str:
     """把原始 tag 渲染成 prompt 里的一段。空/全空串返回空串。
 
-    分类来自 `tag_categories`（`models/*/selected_tags.csv` 的 category 列）。
-    词表里查不到的 tag 归 `unclassified_tags`，不冒充 general。
+    `grouped=False`（默认）走平铺：`1girl, blue_hair, sitting`。
+    `grouped=True` 才按 `tag_categories` 分成
+    `character_tags:` / `artist_tags:` 等行——那是规范 §7.1 的做法，
+    主创看过之后说不懂，默认不起用。
+
     `vocab` 显式传入是为了测试能钉住各条分支，不依赖开发机上有哪份词表。
     """
     items = [str(t).strip() for t in tags if str(t).strip()]
     if not items:
         return ""
-    # 组名一律写出来（哪怕只剩 unclassified_tags）：规范 §7.1 要的就是
-    # "没有分类就注明"，平铺回去等于把未知类别又冒充成了画面描述。
-    text = render_groups(group_tags(items, vocab=vocab))
-    return (_REF_ZH if zh else _REF_EN).format(tags=text)
+    if grouped:
+        text = render_groups(group_tags(items, vocab=vocab))
+        return (_REF_ZH if zh else _REF_EN).format(tags=text)
+    return (_REF_FLAT_ZH if zh else _REF_FLAT_EN).format(tags=", ".join(items))
 
 
 def _sentences_for(char_lo: int, char_hi: int) -> tuple[int, int]:
@@ -237,10 +264,21 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False) -> str:
         char_lo = max(400, output.nl_min_tokens * 4)
         char_hi = max(char_lo + 200, min(1200, output.nl_max_tokens * 4))
 
+    lo, hi = output.tag_min_count, output.tag_max_count
+    anchor_lo = min(max(30, lo), hi)
+    anchor_hi = min(max(60, anchor_lo), hi)
+    fill = dict(lo=lo, hi=hi, anchor_lo=anchor_lo, anchor_hi=anchor_hi,
+                char_lo=char_lo, char_hi=char_hi)
+
     if zh:
         # 长度引导按中文口径重算：char 预算原本是"英文字符数"，直接拿去要求
         # 中文，模型会写出 400~1000 个汉字 ≈ 400~1000 token，超过 nl_max_tokens
         # （默认 256）被硬截断，截断的 caption 会被质检判废。
+        #
+        # ★这段只能跑一次。曾经上下各有一份完全相同的代码，缩放在这里被连乘
+        #   两遍（0.23² ≈ 0.053），中文预算掉到 40~100 汉字，实测产出的中文
+        #   caption 长度只有英文的 22%，风格描述被压成一句空话。改这里时务必
+        #   确认没有第二份。
         char_lo = max(40, round(char_lo * _ZH_CHAR_SCALE))
         char_hi = max(char_lo + 60, round(char_hi * _ZH_CHAR_SCALE))
         # 再按 token 闸门夹一次。上面那步只是"换成中文口径"，没有考虑闸门里
@@ -250,60 +288,42 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False) -> str:
         if char_hi > cap_hi:
             char_lo = max(40, round(char_lo * cap_hi / char_hi))
             char_hi = cap_hi
-        cap_rules = _CAPTION_RULES_ZH.format(char_lo=char_lo, char_hi=char_hi)
+        fill.update(char_lo=char_lo, char_hi=char_hi)
+        cap_fallback = _CAPTION_RULES_ZH
     else:
         # 句数口径：模型数不准字符，但数得准句子。它只是"roughly"，
         # 验收仍走 token 硬线，所以取整到句就够了。
         sent_lo, sent_hi = _sentences_for(char_lo, char_hi)
-        cap_rules = _CAPTION_RULES.format(char_lo=char_lo, char_hi=char_hi,
-                                         sent_lo=sent_lo, sent_hi=sent_hi)
+        fill.update(sent_lo=sent_lo, sent_hi=sent_hi)
+        cap_fallback = _CAPTION_RULES
 
-    lo, hi = output.tag_min_count, output.tag_max_count
-    anchor_lo = min(max(30, lo), hi)
-    anchor_hi = min(max(60, anchor_lo), hi)
-
-    tag_rules = _TAG_RULES.format(lo=lo, hi=hi,
-                                  anchor_lo=anchor_lo, anchor_hi=anchor_hi)
+    # ★规则优先从 `prompts/*.md` 读；文件没提供对应节时才用上面那几份内置块。
+    #   mode 决定要哪几套：tag 类带 TAG 规则，nl 类带 CAPTION 规则，text_rules
+    #   开关决定要不要再追加图中文字规则。切到哪个 tab 就强制带哪套，不靠配置。
+    file_tag, file_cap, file_text = rules_for(
+        output.mode, zh=zh, text_rules=bool(output.text_rules))
+    tag_rules = (file_tag or _TAG_RULES).format(**fill)
+    cap_rules = (file_cap or cap_fallback).format(**fill)
+    if file_text:
+        cap_rules = cap_rules + "\n" + file_text
 
     mode = output.mode
-    # 只有要写 NL 时才要求抄文字：tag-only 是"只要词表"的活法，多一个块
-    # 只是白烧 token。
-    want_visible = bool(output.visible_text) and output.wants_nl
-    vis_rules = ((_VISIBLE_RULES_ZH if zh else _VISIBLE_RULES)
-                 if want_visible else "")
-    vis_block = ("<VISIBLE_TEXT>\n"
-                 '[{"text_exact": "欢迎光临", "language": "zh", "script": "Hans", '
-                 '"legibility": "clear"}]\n</VISIBLE_TEXT>\n'
-                 if want_visible else "")
     if mode == "tag":
         return ("Produce one block about the image, in exactly this format:\n\n"
                 "<TAGS>\ntag_one, tag_two, tag_three\n</TAGS>\n\n"
                 f"{tag_rules}\n\nOutput the TAGS block and nothing else.")
-    if mode == "nl" and not want_visible:
+    if mode == "nl":
         return ("Produce one block about the image, in exactly this format:\n\n"
                 "<CAPTION>\none paragraph of description\n</CAPTION>\n\n"
                 f"{cap_rules}\n\nOutput the CAPTION block and nothing else.")
-    if mode == "nl":
-        return ("Produce two blocks about the image, in exactly this format:\n\n"
-                f"{vis_block}"
-                "<CAPTION>\none paragraph of description\n</CAPTION>\n\n"
-                f"{vis_rules}\n\n{cap_rules}\n\n"
-                "Output these two blocks, in this order, and nothing else.")
-    # both 模式原来不写"nothing else"：模型加一句 "Here are the tags:" 不致命
+    # both 模式必须写"nothing else"：模型加一句 "Here are the tags:" 不致命
     # （正则能抓），但 max_tokens 是按「NL 全量 + tag 全量 + 标记」抠出来的，
     # 那段前言是从 caption 的预算里偷的。
-    if not want_visible:
-        return ("Produce two blocks about the image, in exactly this format:\n\n"
-                "<TAGS>\ntag_one, tag_two, tag_three\n</TAGS>\n"
-                "<CAPTION>\none paragraph of description\n</CAPTION>\n\n"
-                f"{tag_rules}\n\n{cap_rules}\n\n"
-                "Output these two blocks, in this order, and nothing else.")
-    return ("Produce three blocks about the image, in exactly this format:\n\n"
+    return ("Produce two blocks about the image, in exactly this format:\n\n"
             "<TAGS>\ntag_one, tag_two, tag_three\n</TAGS>\n"
-            f"{vis_block}"
             "<CAPTION>\none paragraph of description\n</CAPTION>\n\n"
-            f"{tag_rules}\n\n{vis_rules}\n\n{cap_rules}\n\n"
-            "Output these three blocks, in this order, and nothing else.")
+            f"{tag_rules}\n\n{cap_rules}\n\n"
+            "Output these two blocks, in this order, and nothing else.")
 
 
 # 三道正则都写成「闭合标签可有可无」：模型偶尔只写开标记就往下走，
@@ -313,12 +333,9 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False) -> str:
 # （实测会产出 captiona_woman_with 这种鬼东西）。★加新块时**每一道**的
 # lookahead 都要补上，漏一道就等于让新块的正文流进上一个块。
 _TAG_BLOCK = re.compile(
-    r"<TAGS>(.*?)(?:</TAGS>|(?=<CAPTION>)|(?=<VISIBLE_TEXT>)|\Z)", re.S | re.I)
+    r"<TAGS>(.*?)(?:</TAGS>|(?=<CAPTION>)|\Z)", re.S | re.I)
 _CAPTION_BLOCK = re.compile(
-    r"<CAPTION>(.*?)(?:</CAPTION>|(?=<TAGS>)|(?=<VISIBLE_TEXT>)|\Z)", re.S | re.I)
-_VISIBLE_BLOCK = re.compile(
-    r"<VISIBLE_TEXT>(.*?)(?:</VISIBLE_TEXT>|(?=<TAGS>)|(?=<CAPTION>)|\Z)",
-    re.S | re.I)
+    r"<CAPTION>(.*?)(?:</CAPTION>|(?=<TAGS>)|\Z)", re.S | re.I)
 
 _TAG_SPLIT = re.compile(r"[,;\n、]+")
 _TAG_BAD = re.compile(r"[^a-z0-9_\-.:()]+")
@@ -427,144 +444,32 @@ def normalize_caption(raw: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-_LEGIBILITY = ("clear", "partial", "illegible")
-
-
-def _visible_one(item: object) -> dict | None:
-    """一条可见文字 → 规范 §6 的结构。拿不到 text_exact 就丢掉这条。"""
-    if isinstance(item, str):
-        item = {"text_exact": item}
-    if not isinstance(item, dict):
-        return None
-    exact = str(item.get("text_exact") or item.get("text") or "").strip()
-    if not exact:
-        return None
-    rec: dict = {"text_exact": exact}
-    lang = str(item.get("language") or "").strip().lower()
-    if lang:
-        # 只留语言码本体：模型常写成 "ja (Japanese)" 这种带注解的形式。
-        rec["language"] = re.split(r"[\s(（,;]+", lang)[0]
-    script = str(item.get("script") or "").strip()
-    if script:
-        rec["script"] = re.split(r"[\s(（,;]+", script)[0][:4].title()
-    leg = str(item.get("legibility") or item.get("text_readable") or "").strip().lower()
-    if leg in ("true", "readable", "yes"):
-        leg = "clear"
-    rec["legibility"] = leg if leg in _LEGIBILITY else "unknown"
-    bbox = item.get("bbox") or item.get("bbox_optional")
-    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-        try:
-            rec["bbox"] = [round(float(v), 4) for v in bbox]
-        except (TypeError, ValueError):
-            pass
-    return rec
-
-
-def normalize_visible(raw: str) -> list[dict]:
-    """把 `<VISIBLE_TEXT>` 段洗成 `[{text_exact, language, script, legibility, bbox?}]`。
-
-    ★解析是**降级**的，不是二元的：模型给 JSON 就用 JSON；给了逐行原文（或
-    JSON 被 max_tokens 截断）就按行收，每条只带 `text_exact` + `unknown`。
-    宁可少几个字段，也不该把已经抄对的原文整段丢掉——原文正是这一块最贵的
-    信息，丢了这一段就白花 token 了。
-    """
-    text = (raw or "").strip()
-    if not text:
-        return []
-    # 模型偶尔包 ```json 围栏；块标记里出现围栏是它的习惯，不是我们要的数据。
-    text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", text, flags=re.I | re.M).strip()
-    items: object = None
-    start, end = text.find("["), text.rfind("]")
-    if 0 <= start < end:
-        try:
-            items = json.loads(text[start:end + 1])
-        except ValueError:
-            items = None
-    if not isinstance(items, list):
-        # 截断/纯文本兜底。先按 `"text_exact": "..."` 抠——JSON 被 max_tokens
-        # 切断时，前面已经写完的条目仍能一条条捞回来（按行切会把 `[`、`{`
-        # 这些结构行也当成"文字"）。
-        pairs = re.findall(r'"text_exact"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
-        if pairs:
-            items = []
-            for raw in pairs:
-                try:
-                    items.append({"text_exact": json.loads(f'"{raw}"')})
-                except ValueError:
-                    items.append({"text_exact": raw})
-        else:
-            # 连键名都没有：一行一条纯文本。空行与纯结构行都不算。
-            items = [re.sub(r"^\s*[-*]\s*", "", ln) for ln in text.splitlines()
-                     if ln.strip() and ln.strip(" \t[]{},:")]
-    out: list[dict] = []
-    for item in items:
-        rec = _visible_one(item)
-        if rec is not None:
-            out.append(rec)
-    return out
-
-
-def _estimate_visible_tokens(visible: Sequence[dict]) -> int:
-    """估算 `<VISIBLE_TEXT>` 段吃掉了多少 completion token。
-
-    ★为什么要扣：`nl_tokens` 是**整段回复**的 usage，而 `nl_max_tokens`
-    这条闸门是给 caption 定的。不扣掉这一块，每张带字的图都会顶破 256，
-    质检判 "NL 过长"（completeness 2.5）→ 反复重试 → 真正的原因是"多了个
-    必填字段"，不是模型话多。这批数据会静默地整体降分。
-
-    粗估口径：每条 20 token 的固定结构开销（键名 + 括号 + 逗号），正文按
-    中日韩一字一 token、其余四字符一 token。
-    """
-    if not visible:
-        return 0
-    cjk = other = 0
-    for rec in visible:
-        for ch in str(rec.get("text_exact") or ""):
-            o = ord(ch)
-            if (0x3040 <= o <= 0x30FF or 0x4E00 <= o <= 0x9FFF
-                    or 0xAC00 <= o <= 0xD7AF or 0x3400 <= o <= 0x4DBF):
-                cjk += 1
-            else:
-                other += 1
-    return 20 * len(visible) + cjk + other // 4
-
-
-def parse_output_full(text: str, mode: str) -> tuple[list[str], str, list[dict]]:
-    """从模型输出里取出 (tags, caption, visible_text)。
+def parse_output(text: str, mode: str) -> tuple[list[str], str]:
+    """从模型输出里取出 (tags, caption)。
 
     没有块标记时按模式兜底：tag/nl 单模式把整段当结果；both 模式直接判空——
     在两个块的输出里靠猜切分，等于批量制造脏数据，宁可让它进重试。
     """
     body = (text or "").strip()
     if not body:
-        return [], "", []
+        return [], ""
 
-    have_marker = bool(_TAG_BLOCK.search(body) or _CAPTION_BLOCK.search(body)
-                       or _VISIBLE_BLOCK.search(body))
+    have_marker = bool(_TAG_BLOCK.search(body) or _CAPTION_BLOCK.search(body))
     if not have_marker:
         if mode == "tag":
-            return normalize_tags(body), "", []
+            return normalize_tags(body), ""
         if mode == "nl":
-            return [], normalize_caption(body), []
-        return [], "", []
+            return [], normalize_caption(body)
+        return [], ""
 
     tags: list[str] = []
     caption = ""
-    visible: list[dict] = []
     if mode in ("tag", "both"):
         m = _TAG_BLOCK.search(body)
         tags = normalize_tags(m.group(1)) if m else []
     if mode in ("nl", "both"):
         m = _CAPTION_BLOCK.search(body)
         caption = normalize_caption(m.group(1)) if m else ""
-        m = _VISIBLE_BLOCK.search(body)
-        visible = normalize_visible(m.group(1)) if m else []
-    return tags, caption, visible
-
-
-def parse_output(text: str, mode: str) -> tuple[list[str], str]:
-    """(tags, caption) 二元组。保留给老调用方/测试；新代码用 parse_output_full。"""
-    tags, caption, _ = parse_output_full(text, mode)
     return tags, caption
 
 
@@ -590,6 +495,11 @@ class TaskRow:
     # 源数据里的原始 danbooru 标注（已分类与否都行，只用于喂 prompt）。
     # 没有就是空元组——不写空段落（见 _ref_block）。
     ref_tags: tuple[str, ...] = ()
+    # 上游标注的数据类别：`anime` / `photo` / ... 空串 = 不知道。
+    # 规范 v0.2 §5 要求动漫样本的正文里必须出现"动漫风格"这类词（中英各按其
+    # 叙述语言取词），用来把通用数据和动漫数据分开。不知道就不写——比猜错好，
+    # 猜错等于往通给数据里塞"anime"字样，那正好是这条要防的事。
+    media: str = ""
     rel_path: str = ""
     # HF 模式下才有值：`hf://datasets/<repo>/<shard>#<member>`。
     # 会原样写进产物，主机拿它拼总表的 image_path。
@@ -954,6 +864,7 @@ class TaggerClient:
         provider: str = "",
         api_key: str = "",
         caption_zh_ratio: float = 0.0,
+        ref_grouped: bool = False,
     ):
         # 推理来源："" = 本机/自建（OpenAI 兼容 + 环境指纹）；
         # openai / anthropic = 外部 API。方言差异全在 nl_api，这里只记下来。
@@ -1005,6 +916,9 @@ class TaggerClient:
                 else ""
             )
         self.variant = variant
+        # 参考 tag 是平铺还是分组。默认平铺——分组是规范 §7.1 的做法，
+        # 主创确认不需要。两种形态渲染出的 prompt 不同，指纹里要分开。
+        self.ref_grouped = bool(ref_grouped)
         # 分段计时器。默认自己建一个，好让单独调用 TaggerClient 的代码
         # （测试、基准脚本）不用关心它；正式流程会把它传进来以便汇总输出。
         self.stage = stage or StageTimer()
@@ -1083,10 +997,13 @@ class TaggerClient:
             "prompt_zh": (hashlib.sha256(self.prompt_zh.encode("utf-8")).hexdigest()
                           if self.prompt_zh else ""),
             "zh_ratio": round(self.caption_zh_ratio, 4),
+            # 文字规则是从 prompts/*.md 读的，内容已经落在上面两个哈希里；
+            # 这里再记文件名，是为了事后能一眼看出"这批用的哪份规则"——
+            # 光看哈希没人知道它是哪一版措辞。
+            "text_rules": self.output.text_rules,
+            # 平铺与分组的参考段是两套指令，同一张图不能跨这两档命中缓存。
+            "ref_grouped": self.ref_grouped,
             "mode": self.output.mode,
-            # 开了 visible_text 的回复比没开的多一整块：同一张图不能跨这两档
-            # 命中缓存，否则会拿回一条没有 visible_text 的旧产物。
-            "visible_text": bool(self.output.visible_text),
             "nl_budget": [self.output.nl_min_tokens, self.output.nl_max_tokens],
             "tag_count": [self.output.tag_min_count, self.output.tag_max_count],
             "model": [self.prov_base.get("model_id"),
@@ -1150,8 +1067,7 @@ class TaggerClient:
                 task, str(nl_rec.get("caption") or ""),
                 int(nl_rec.get("tag_count") or 0), temperature, tokens,
                 attempts, verdict, escalated=escalated, cache_hit=True,
-                prompt_tokens=prompt_tokens,
-                visible=nl_rec.get("visible_text") or ())
+                prompt_tokens=prompt_tokens)
         if tag_payload is None and nl_payload is None:
             return None
         # 命中的这条没花 GPU：wall_ms 如实记成"还原产物用了多久"，
@@ -1282,7 +1198,8 @@ class TaggerClient:
         """
         zh = self._wants_zh(task)
         base = self.prompt_zh if zh else self.prompt
-        return base + _ref_block(task.ref_tags, zh=zh)
+        return base + _media_block(task.media, zh=zh) + _ref_block(
+            task.ref_tags, zh=zh, grouped=self.ref_grouped)
 
     def _wants_zh(self, task: TaskRow) -> bool:
         """这张图出中文还是英文。
@@ -1329,7 +1246,11 @@ class TaggerClient:
             "caption_language": "zh" if self._wants_zh(task) else "en",
             "tags_original": list(task.ref_tags),
             "annotation_model": str(base.get("model_id") or "unknown"),
-            "annotation_version": f"{rev or 'unknown'}+p{PROMPT_VERSION}",
+            # 规范 v0.2 §8 要这个字段。值改成"模型 revision + prompt 指纹"：
+            # 没有版本号了，但这两段拼起来仍能唯一定位到"哪套模型、哪套指令"。
+            "annotation_version": (
+                f"{rev or 'unknown'}+"
+                f"{hashlib.sha256(self.prompt.encode('utf-8')).hexdigest()[:12]}"),
             "source_revision": task.source_revision or "",
         }
 
@@ -1403,9 +1324,8 @@ class TaggerClient:
             base["escalated"] = True
             base["escalated_model"] = self.escalate_model
         base["temperature"] = round(temperature, 3)
-        base["prompt_ver"] = PROMPT_VERSION
-        # prompt 指纹。AB 变体之间常常只差一句话，prompt_ver 分不出来；
-        # 事后想回答"这批的 12 个 tag 是哪套指令逼出来的"，只能靠它。
+        # prompt 指纹。事后想回答"这批的 12 个 tag 是哪套指令逼出来的"，
+        # 只能靠它——版本号是手写的，漏 bump 就失效，哈希不会。
         base["prompt_sha"] = hashlib.sha256(
             self.prompt.encode("utf-8")).hexdigest()[:12]
         if self.variant:
@@ -1564,7 +1484,16 @@ class TaggerClient:
             tokens_total += tokens
             prompt_total += p_tok
             with self.stage.track("parse"):
-                tags, caption, visible = parse_output_full(text, self.output.mode)
+                tags, caption = parse_output(text, self.output.mode)
+
+            # 引文清洗放在质检之前：质量门会数引文、判长度，洗过的文本才是
+            # 真正入库的那份，拿未洗的去过门等于对错的文本打分。
+            #   1. 重复引用去掉引号（同一段文字只留第一次）
+            #   2. 砍掉末尾那段"画面中可见文字：XXX 为某某字体"的复述
+            # 两步都只动引号和复述段，不删画面描述，长度损失很小。
+            if caption:
+                with self.stage.track("text_clean"):
+                    caption = tidy_caption(caption)
 
             # 显式空产出检查必须放在质检之前：质量门在 tags 为空时
             # tag_coverage 返回 1.0（"没有强 tag，视为全覆盖"），
@@ -1597,10 +1526,7 @@ class TaggerClient:
                 tags=[(t, 1.0) for t in head],
                 caption_dense=caption,
                 tag_line=", ".join(head),
-                # nl_tokens 扣掉可见文字块：闸门是给 caption 定的，见
-                # _estimate_visible_tokens 里的说明。
-                qc=QC(caption_chars=len(caption),
-                      nl_tokens=max(0, tokens - _estimate_visible_tokens(visible))),
+                qc=QC(caption_chars=len(caption), nl_tokens=tokens),
             )
             with self.stage.track("gate"):
                 # CLIP 打分要的是图本身。解码失败就当没有图（跳过 L2），
@@ -1673,7 +1599,6 @@ class TaggerClient:
                                             for k, v in (rating or {}).items()}}
                                 if self.need_tags else None),
                         "nl": ({"caption": caption,
-                                "visible_text": visible,
                                 "score": float(verdict.score),
                                 "reasons": list(verdict.reasons),
                                 "tag_count": len(tags_with_prob)}
@@ -1689,9 +1614,8 @@ class TaggerClient:
                     nl=(self._nl_payload(task, caption, len(tags_with_prob),
                                          temperature, tokens, attempts, verdict,
                                          escalated=escalated,
-                                         prompt_tokens=prompt_total,
-                                         visible=visible)
-                        if want_nl else None),
+                                         prompt_tokens=prompt_total)
+                       if want_nl else None),
                     wall_ms=int((time.perf_counter() - started) * 1000),
                     attempts=attempts, tokens=tokens_total,
                     prompt_tokens=prompt_total, rate_limited=rate_limited,
@@ -1855,8 +1779,7 @@ class TaggerClient:
     def _nl_payload(self, task: TaskRow, caption: str, tag_count: int,
                     temperature: float, tokens: int, attempts: int, verdict,
                     *, escalated: bool = False, cache_hit: bool = False,
-                    prompt_tokens: int = 0,
-                    visible: Sequence[dict] | None = None) -> dict:
+                    prompt_tokens: int = 0) -> dict:
         artist = self._artist_fields(task)
         artist_tag = artist["artist_tag"]
         text = caption
@@ -1869,10 +1792,6 @@ class TaggerClient:
             "caption": text,
             **artist,
             "tag_count": tag_count,
-            # 规范 v0.2 §8：`visible_text` 是必填字段，没有文字就是空数组。
-            # 空数组照写——"这张图没有字"和"这一版没跑这一项"是两回事，
-            # 缺字段会让下游两种都分不出来。
-            "visible_text": list(visible or ()),
             "nl_tokens": tokens,
             # 见 _tag_payload：本机模式不写，API 模式才有依据核算成本。
             "prompt_tokens": prompt_tokens or None,
@@ -1948,6 +1867,9 @@ def _hf_task(sample: dict, shard: str) -> TaskRow:
         source_revision=str(sample.get("source_revision")
                             or sample.get("revision") or ""),
         ref_tags=_ref_tags_of(sample),
+        # 上游给的数据类别（anime / photo / …）。没有就空串，prompt 里不加
+        # 动漫声明——见 _media_block。
+        media=str(sample.get("media") or sample.get("dataset_media") or ""),
         rel_path=path,
         image_path=path,
     )
@@ -2628,6 +2550,7 @@ def load_tasks(shards: Sequence[Path], *, hf_repo: str = "") -> list[TaskRow]:
                 source_revision=str(row.get("source_revision")
                                     or row.get("revision") or ""),
                 ref_tags=_ref_tags_of(row),
+                media=str(row.get("media") or row.get("dataset_media") or ""),
                 # rel_path 里存"镜像布局该走的路径"：优先 zip 内的原始 member，
                 # 它才是训练侧认识的层级；散图没有 member 时退回 rel_path。
                 rel_path=str(row.get("member") or row.get("rel_path") or ""),
@@ -2743,7 +2666,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                         # 的后果是"表单/命令行给了比例、跑出来一个中文字都没有"，
                         # 而且不报错——这一条是被真实分片测出来的。
                         caption_zh_ratio=output.caption_zh_ratio,
-                        visible_text=output.visible_text)
+                        text_rules=output.text_rules)
 
     quality: QualityPolicy = ops.quality_policy()
     artist_rule: ArtistRule = ops.artist_rule()
@@ -2821,7 +2744,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                             tag_max_count=output.tag_max_count,
                             caption_chars=output.caption_chars,
                             caption_zh_ratio=output.caption_zh_ratio,
-                            visible_text=output.visible_text)
+                            text_rules=output.text_rules)
 
     # 变体可以带自己的生成上限与温度；命令行显式给了就以命令行为准。
     variant_max_tokens = variant.max_tokens if variant is not None else None
@@ -2833,11 +2756,6 @@ def run_client(args, ops: OpsConfig, table: dict,
     need_tokens = 64 + (output.nl_max_tokens if output.wants_nl else 0)
     if output.wants_tag:
         need_tokens += output.tag_max_count * 3      # 一个 danbooru tag ≈ 2~3 token
-    # <VISIBLE_TEXT> 是 NL 之外的独立一段。不预留就会从 caption 的预算里偷：
-    # 表现是「有字的图 caption 被截断」——而那恰好是文字类样本，损失定向且隐蔽。
-    # 160 ≈ 5 条文字 × 20 token 结构开销 + 正文余量。
-    if output.visible_text and output.wants_nl:
-        need_tokens += 160
     if max_tokens < need_tokens:
         print(f"[client][警告] max_tokens={max_tokens} 放不下 "
               f"{output.tag_max_count} 个 tag + {output.nl_max_tokens} token 的 NL，"

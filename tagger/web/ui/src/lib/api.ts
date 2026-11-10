@@ -1436,6 +1436,12 @@ export type CenterConfig = {
   out_dir: string
   interval: number
   extra_args: string
+  /** 长驻等待：池子空了不退出，挂着等人派活 */
+  wait: boolean
+  /** 配 wait：连续这么多秒没活就自己收工（0 = 一直等） */
+  idle_timeout: number
+  /** 本次最多交付多少片（0 = 不限） */
+  max_packages: number
 }
 
 export type CenterIdentity = {
@@ -1457,6 +1463,23 @@ export type CenterState = {
   identity: CenterIdentity
   board: CenterBoard
   log: string[]
+}
+
+/**
+ * 顶栏那盏灯的输入。
+ *
+ * `linked` 只看本地身份文件：存过就一直为真，总机关了也一样——所以不能用它
+ * 点灯。灯看 `online`，那是"此刻真的连得上"，由后端发一次短超时的只读请求判定。
+ */
+export type CenterBrief = {
+  /** 配过身份（登录过）。不代表现在连得上。 */
+  linked: boolean
+  /** 此刻连得上调度中心。未登录恒为 false */
+  online: boolean
+  running: boolean
+  user_id: string
+  /** online 为 false 且 linked 为 true 时的原因，给悬浮提示用 */
+  reason: string
 }
 
 export class ApiError extends Error {
@@ -2178,6 +2201,8 @@ export const api = {
 
   // ---- 调度中心
   center: () => json<CenterState>('/api/center'),
+  /** 顶栏的灯：只读后端本地身份，不打远端 */
+  centerBrief: () => json<CenterBrief>('/api/center/status'),
   /**
    * 连接（换身份）。后端在跑的时候会拒：换 server 或换名字都要先停止，
    * 否则老进程还在按旧身份续约，服务端会看见两套身份。
@@ -2194,6 +2219,11 @@ export const api = {
     interval?: number
     extra_args?: string
     cmd_template?: string
+    wait?: boolean
+    idle_timeout?: number
+    max_packages?: number
   }) => json<CenterState>('/api/center/start', { method: 'POST', body: JSON.stringify(payload) }),
   centerStop: () => json<CenterState>('/api/center/stop', { method: 'POST' }),
+  /** 断开：忘掉本机设备身份（地址和姓名留着，重连不用重填） */
+  centerLogout: () => json<CenterState>('/api/center/logout', { method: 'POST' }),
 }

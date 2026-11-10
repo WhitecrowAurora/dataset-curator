@@ -388,11 +388,10 @@ class OutputSpec:
     # ★它改变产出分布，与 caption_chars 同级，必须进缓存指纹/ provenance
     #   （client._cache_fingerprint 已含）。默认 0 = 全英文，老批次的复现不受影响。
     caption_zh_ratio: float = 0.0
-    # 额外要求模型输出 `<VISIBLE_TEXT>` 结构化块（规范 v0.2 §6：text_exact /
-    # language / script / legibility）。默认开——§8 的验收字段里 `visible_text`
-    # 是必填（可以为空数组）。关掉它省的那点 token 换不来"训练侧拿不到图中文字"。
-    # ★进指纹：开了这一项的批次与没开的产物不能混用（多一段回复、token 口径不同）。
-    visible_text: bool = True
+    # 图中文字规则用 `prompts/` 下的哪一份（文件名不带后缀）。空 = 这批不加
+    # 图中文字约束。规则是 markdown，主创自己改措辞不用动代码。
+    # ★它进缓存指纹与 provenance：换了规则文本就是换了指令，两批不能混。
+    text_rules: str = ""
 
     @property
     def wants_nl(self) -> bool:
@@ -421,9 +420,8 @@ class OutputSpec:
             # 很容易写成百分数，为这个拦住整批任务不值得。
             caption_zh_ratio=min(1.0, max(0.0, float(
                 d.get("caption_zh_ratio", 0.0) or 0.0))),
-            # yaml 里写成 "false" / "no" / 0 都算关。bool("false") 是 True，
-            # 直接套 bool() 会让"显式关掉"变成"开着"，这种坑只在跑完一批才现形。
-            visible_text=_as_flag(d.get("visible_text"), True),
+            # 规则文件名照原样留着（可带空格、中文），读文件那一步再补后缀。
+            text_rules=str(d.get("text_rules") or "").strip(),
         )
         if spec.nl_max_tokens and spec.nl_min_tokens > spec.nl_max_tokens:
             raise ConfigError(

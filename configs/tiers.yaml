@@ -190,8 +190,8 @@ limits:
 # ---------------------------------------------------------------------------
 # 抽样配额（标注规范 v0.2 §1–§3）
 #
-# 只做"从候选 manifest 里按配额挑 id"：不下载、不解码、不打标。输入是每个
-# 来源已经导出的候选清单（jsonl / parquet），输出是选中的那些行 + 一份记账。
+# 就一件事：表里每个来源要多少条，从那份清单里挑多少条。挑法 = 稳定随机
+# （同一个 seed 跑几次都是同一批）。不下载、不解码、不打标。
 #
 # 用法：
 #   tagger sample --profile monet \
@@ -199,23 +199,25 @@ limits:
 #       --input monet/coyo=work/cand/coyo.parquet \
 #       --out work/sampled/monet.jsonl --report-out work/sampled/monet.json
 #
-# 配额是**筛选/去重前的计划上限**：实际数量受可用、质量线、近重复影响，
-# 报告里 selected 与 quota_original 的差额才是该补的地方。
+# 清单直接用数据集自己的 parquet 即可（只读 id/source 两列）。
 # ---------------------------------------------------------------------------
 sample:
   active: monet              # 不给 --profile 时用这一组
-  seed: 42                   # 随机段与长尾段的排序种子；换它 = 换一批
-  min_score: 0.0             # 质量线：低于它的候选不参与选样（§2 的最低质量过滤）
-  dedupe: true               # 同 cluster 只留分数最高的一条（§2）
-  allow_borrow: true         # 缺额允许跨来源补齐，但 quota_original 不改（§2）
-  mix: {quality: 0.60, tail: 0.25, random: 0.15}   # §2 的初始策略，审计后可调
-  # 候选清单的列名。换数据集只改这里，不用改代码；空串 = 这份清单没有该列。
+  seed: 42                   # 换它 = 换一批
+  allow_borrow: true         # 某来源不够时用别的来源补，但 quota_original 不改
+  # ---- 下面三条是可选的，默认关 ----
+  # 规范里写明是"初始可测试策略，需抽样审计后定稿"，而且都会改变样本分布，
+  # 所以默认不启用；想用就显式打开（或命令行 --min-score / --mix / --dedupe）。
+  min_score: 0.0             # 质量线；0 = 不过滤
+  mix: false                 # 60/25/15 分层；false = 纯随机
+  dedupe: false              # 同近重复簇只留最高分
+  # 清单的列名。换数据集只改这里，不用改代码；空串 = 这份清单没有该列。
   columns:
     id: id
     source: source
-    score: aesthetic_jasperai     # MONET 的美学分；别的来源按 profile 覆盖
-    cluster: sscd_cluster_id      # 近重复簇；没有就留空，等于不去重
-    stratum: ""                   # 可选的稀有题材/内容类别列
+    score: aesthetic_jasperai     # 只在使用 min_score / mix 时才会读
+    cluster: sscd_cluster_id      # 只在 dedupe: true 时才会读
+    stratum: ""                   # 只在 mix: true 时才会读
   profiles:
     monet:
       quota_total: 30000000
@@ -235,8 +237,8 @@ sample:
         fine-t2i/synthetic_original_prompt_random_resolution: 230000
         fine-t2i/synthetic_original_prompt_square_resolution: 181576
       columns:
-        score: ""              # 这份清单没有美学分：不设质量线
-        cluster: ""
+        score: ""              # 这份清单没有美学分
+        cluster: ""            # 也没有近重复簇
 
 # ---------------------------------------------------------------------------
 # 分包读写
@@ -315,12 +317,12 @@ output:
   # 改它等于改产出分布：它会进缓存指纹，中英混批时靠质检 signals 里的 lang
   # 字段分辨。写 0 就退回全英文。
   caption_zh_ratio: 0.25
-  # 额外要求模型抄录图中文字（规范 v0.2 §6），产物落 `visible_text` 字段：
-  #   [{text_exact, language, script, legibility, bbox?}]
-  # 开 = 每张图的回复多一段 <VISIBLE_TEXT> JSON；关 = 省这部分 token，
-  # 但训练侧就拿不到"图里到底写了什么字"，只剩 caption 里的引号。
-  # §8 把这一项列成验收必填字段，除非整批明确不要，否则别关。
-  visible_text: true
+  # 图中文字规则用哪一份：`prompts/` 下的文件名（不带 .md）。规则本身是
+  # markdown，主创要改措辞（字体风格、认不准别猜、引号不许加注音）直接编辑
+  # 文件即可，不用动代码。
+  # 空串 = 这批不带图中文字约束（caption 只说画面，不描述文字）。
+  # ★换了文件就是换了指令：指纹与 provenance 会跟着变，两批不能混用。
+  text_rules: 图中文字规则
 
 # ---------------------------------------------------------------------------
 # tag 反推（CPU 侧分类头，与 GPU 上的 VLM 并行跑）

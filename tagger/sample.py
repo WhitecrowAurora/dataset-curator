@@ -1,18 +1,24 @@
-"""按配额从候选集里选样（标注规范 v0.2 §1–§3）。
+"""按配额从候选集里挑 id（标注规范 v0.2 §1–§3）。
 
-这一层只管"从候选里选哪些 id"，不读图、不打标、不去 HF 拉数据。规范要求的
-是**先给每个来源建候选 manifest**，再在 manifest 上做筛选——所以输入的每一行
-是一条约候选记录，输出是选中的那些行（原样带回，再加两列记账）。
+**这一层只做一件事：按表里的配额，从每个来源挑够数。**
 
-三件事刻意分成三个纯函数：
-    resolve_quotas  配额规划：quota_original / quota_final，缺额跨来源补齐
-    dedupe_clusters 近重复去重：同簇只留分数最高的一条
-    pick            分层选样：60% 质量加权 / 25% 长尾保底 / 15% 均匀随机
+    MONET 要 3000 万，表里写好了：laion 1030 万、coyo 660 万、
+    commoncatalog-cc-by 500 万、megalith10m 430 万、cc12m 378.72 万、
+    diffusion-aesthetic-4k 1.28 万。每个来源的候选清单给进来，
+    各自挑够自己的定额，完事。
 
-为什么不把它们做成一遍流式：
-    "同簇留最高分"需要看到整批才知道谁最高；"按配额补齐"需要先知道每个来源
-    实际可用多少。两遍读 manifest 是规范自己的流程（先建 manifest 再筛选），
-    比在流里近似要诚实得多。
+挑哪些？**稳定随机**：`hash(seed, source, id)` 排序取前 N。同一份候选、
+同一个 seed，跑几次都是同一批；换个 seed 就是另一批。不按文件顺序取。
+
+可选开关（默认全关，都是"初始可测试策略"级别的东西，不是必需）：
+
+    min_score   质量线，低于它的候选不参与。默认 0 = 不过滤。
+    mix         60/25/15 分层。默认关 = 均匀随机。
+    dedupe      同 sscd_cluster_id 只留最高分。默认关。
+
+★为什么默认全关：这三条在规范里写明是"初始可测试策略，需抽样审计后定稿"，
+  而它们都会改变样本分布（质量线砍掉尾部、分层改变题材构成、去重让某些
+  来源在不知不觉中少一截）。默认开启等于替主创决定了分布——想用就显式开。
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 # 候选行里被"规范化"出来的键。加下划线前缀是为了不和源列撞名——
 # MONET 的列里有 `id`、`source`、`aesthetic_jasperai`，直接用它们当内部键
@@ -32,16 +38,18 @@ _SCORE = "_score"
 _CLUSTER = "_cluster"
 _STRATUM = "_stratum"
 
+# 一份清单里至少要能找到的两列。其余（分数/近重复簇/题材）只在开了对应的
+# 可选开关时才需要——不开就不读，候选清单里没有这些列也照样能跑。
 DEFAULT_COLUMNS = {
     "id": "id",
     "source": "source",
-    "score": "score",
+    "score": "",
     "cluster": "",
     "stratum": "",
 }
 
-# 分层配比。规范 §2 写的是"60% 质量加权 / 25% 稀有题材保底 / 15% 均匀随机"，
-# 并注明这是"初始可测试策略，需抽样审计后定稿"——所以它必须是配置项。
+# 分层配比：60% 按分数取头部 / 25% 稀有题材保底 / 15% 均匀随机。
+# 只在 `mix` 开着时用；关着的时候是纯均匀随机。
 DEFAULT_MIX = (0.60, 0.25, 0.15)
 
 
@@ -55,17 +63,23 @@ class SampleSpec:
 
     # 来源 → 计划条数。来源名就是 manifest 里 source 列的取值。
     quotas: dict[str, int] = field(default_factory=dict)
-    # 配额的合计（如 MONET 3000 万）。给了就校验，不等只警告不拦——
-    # 规范 §8 要求合计"必须"准确，但拦死会让人改不了单个来源试跑。
+    # 配额的合计（如 MONET 3000 万）。给了就校验；只警告不拦——
+    # 拦死会让人没法单独试跑一个来源。
     quota_total: int = 0
-    mix: tuple[float, float, float] = DEFAULT_MIX
     seed: int = 42
-    # 合格线：低于它的候选不参与选样（规范 §2"所有分支都必须通过最低质量过滤"）。
+    # ---- 以下四个是可选开关，默认全关 ----
     min_score: float = 0.0
-    dedupe: bool = True
+    mix: bool = False
+    mix_ratio: tuple[float, float, float] = DEFAULT_MIX
+    dedupe: bool = False
     # 缺额是否允许跨来源补齐（规范 §2 允许，但要记 quota_original/final）。
     allow_borrow: bool = True
     columns: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_COLUMNS))
+
+    @property
+    def needs_score(self) -> bool:
+        """这次要不要读分数列。"""
+        return bool(self.min_score) or self.mix
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None,
@@ -73,7 +87,7 @@ class SampleSpec:
         d = d or {}
         # 多组配额：MONET 3000 万与 Fine-T2I 100 万是两个独立交付物，配额表
         # 不能混在一个 quotas 里（合计算谁的都是错的）。所以允许分 profile，
-        # 顶层放公共项（mix/seed/columns），profile 里放 quota_total + quotas。
+        # 顶层放公共项，profile 里放 quota_total + quotas。
         profiles = d.get("profiles")
         if isinstance(profiles, dict) and profiles:
             name = (profile or str(d.get("active") or "")).strip()
@@ -87,11 +101,12 @@ class SampleSpec:
             merged = {k: v for k, v in d.items() if k != "profiles"}
             over = dict(profiles[name] or {})
             if isinstance(over.get("columns"), dict):
-                # columns 做深合并：profile 通常只想改 score/cluster 两列，
+                # columns 做深合并：profile 通常只想改一两列，
                 # 整段替换会把 id/source 一起丢掉（那份清单就直接不能用了）。
                 over["columns"] = {**(d.get("columns") or {}), **over["columns"]}
             merged.update(over)
             d = merged
+
         quotas: dict[str, int] = {}
         raw = d.get("quotas") or {}
         if not isinstance(raw, dict):
@@ -103,19 +118,24 @@ class SampleSpec:
                 raise SampleError(
                     f"sample.quotas[{key!r}] 不是整数：{value!r}") from exc
 
-        mix_raw = d.get("mix") or {}
+        # mix 可以写 true/false（开关）或 {quality,tail,random}（开了并给比例）。
+        mix_raw = d.get("mix", False)
         if isinstance(mix_raw, dict):
-            mix = (float(mix_raw.get("quality", DEFAULT_MIX[0])),
-                   float(mix_raw.get("tail", DEFAULT_MIX[1])),
-                   float(mix_raw.get("random", DEFAULT_MIX[2])))
-        else:
-            seq = list(mix_raw) or list(DEFAULT_MIX)
+            mix_on = True
+            ratio = (float(mix_raw.get("quality", DEFAULT_MIX[0])),
+                     float(mix_raw.get("tail", DEFAULT_MIX[1])),
+                     float(mix_raw.get("random", DEFAULT_MIX[2])))
+        elif isinstance(mix_raw, (list, tuple)):
+            mix_on = True
+            seq = list(mix_raw)
             if len(seq) != 3:
-                raise SampleError("sample.mix 要么是 {quality,tail,random}，"
-                                  "要么是三个数（质量/长尾/随机）")
-            mix = tuple(float(x) for x in seq)  # type: ignore[assignment]
-        if any(x < 0 for x in mix) or abs(sum(mix) - 1.0) > 1e-6:
-            raise SampleError(f"sample.mix 三项必须非负且合计为 1，收到 {mix}")
+                raise SampleError("sample.mix 给三个数时是 质量/长尾/随机")
+            ratio = tuple(float(x) for x in seq)  # type: ignore[assignment]
+        else:
+            mix_on = _flag(mix_raw, False)
+            ratio = DEFAULT_MIX
+        if any(x < 0 for x in ratio) or abs(sum(ratio) - 1.0) > 1e-6:
+            raise SampleError(f"sample.mix 三项必须非负且合计为 1，收到 {ratio}")
 
         columns = dict(DEFAULT_COLUMNS)
         if isinstance(d.get("columns"), dict):
@@ -126,10 +146,11 @@ class SampleSpec:
         return cls(
             quotas=quotas,
             quota_total=max(0, int(d.get("quota_total", 0) or 0)),
-            mix=mix,
             seed=int(d.get("seed", 42)),
             min_score=float(d.get("min_score", 0.0) or 0.0),
-            dedupe=_flag(d.get("dedupe"), True),
+            mix=mix_on,
+            mix_ratio=ratio,  # type: ignore[arg-type]
+            dedupe=_flag(d.get("dedupe"), False),
             allow_borrow=_flag(d.get("allow_borrow"), True),
             columns=columns,
         )
@@ -206,20 +227,26 @@ class SampleResult:
 
 def read_candidates(path: str | Path, spec: SampleSpec,
                     source: str = "") -> list[dict]:
-    """读一份候选 manifest（jsonl / parquet），把配置的列规范化成内部键。
+    """读一份候选清单（jsonl / parquet），只读实际用得到的列。
 
-    只保留"内部键 + 原始行"：输出时原样带回，是为了让下游拿得到 url/宽高/
-    许可这些筛选依据，而不是只剩一个 id 又要回去查一次。
+    parquet 走 `columns=` 只拉需要的几列：MONET 的元数据 parquet 里还有图片
+    缩略图和好几个 Caption 列，整表读进来是几十倍的浪费。
 
-    `source` 是兜底来源名：manifest 里没有 source 列（很多导出就是没有）时
-    用它，否则所有行会落进同一个空字符串分组，配额表里的来源一个都对不上。
+    `source` 是兜底来源名：清单里没有 source 列（很多导出就是没有）时用它，
+    否则所有行会落进同一个空字符串分组，配额表里的来源一个都对不上。
     """
     p = Path(path)
     if not p.is_file():
-        raise SampleError(f"候选 manifest 不存在: {p}")
+        raise SampleError(f"候选清单不存在: {p}")
     cols = spec.columns
-    wanted = [cols[k] for k in ("id", "source", "score", "cluster", "stratum")
-              if cols.get(k)]
+    wanted = [cols[k] for k in ("id", "source") if cols.get(k)]
+    if spec.needs_score and cols.get("score"):
+        wanted.append(cols["score"])
+    if spec.dedupe and cols.get("cluster"):
+        wanted.append(cols["cluster"])
+    if spec.mix and cols.get("stratum"):
+        wanted.append(cols["stratum"])
+    wanted = list(dict.fromkeys(wanted))
 
     if p.suffix == ".parquet":
         try:
@@ -232,7 +259,7 @@ def read_candidates(path: str | Path, spec: SampleSpec,
             raise SampleError(
                 f"{p} 缺少列 {missing}；当前 sample.columns 指到这里没有的列。"
                 f"实际列：{names[:12]}{'…' if len(names) > 12 else ''}")
-        table = pq.read_table(str(p), columns=list(dict.fromkeys(wanted)))
+        table = pq.read_table(str(p), columns=wanted)
         raw_rows: Iterable[dict] = table.to_pylist()
     else:
         def _iter_jsonl() -> Iterator[dict]:
@@ -258,23 +285,25 @@ def read_candidates(path: str | Path, spec: SampleSpec,
 def _normalize(row: dict, spec: SampleSpec) -> dict | None:
     cols = spec.columns
 
-    def pick(key: str) -> str:
+    def take(key: str) -> str:
         name = cols.get(key) or ""
         value = row.get(name) if name else ""
         return "" if value is None else str(value)
 
-    ident = pick("id").strip()
+    ident = take("id").strip()
     if not ident:
-        return None                      # 没有 id 的行无法记账，也无法去重
+        return None                      # 没有 id 的行无法记账
     rec = dict(row)
     rec[_ID] = ident
-    rec[_SOURCE] = pick("source").strip()
-    try:
-        rec[_SCORE] = float(row.get(cols.get("score") or "") or 0.0)
-    except (TypeError, ValueError):
-        rec[_SCORE] = 0.0
-    rec[_CLUSTER] = pick("cluster").strip()
-    rec[_STRATUM] = pick("stratum").strip()
+    rec[_SOURCE] = take("source").strip()
+    rec[_SCORE] = 0.0
+    if spec.needs_score:
+        try:
+            rec[_SCORE] = float(row.get(cols.get("score") or "") or 0.0)
+        except (TypeError, ValueError):
+            rec[_SCORE] = 0.0
+    rec[_CLUSTER] = take("cluster").strip() if spec.dedupe else ""
+    rec[_STRATUM] = take("stratum").strip() if spec.mix else ""
     return rec
 
 
@@ -287,8 +316,9 @@ def resolve_quotas(available: dict[str, int], quotas: dict[str, int],
     """定每个来源的计划数与实际目标数。
 
     返回 (每来源 (quota_original, quota_final), 借入量, 警告)。
-    规则（规范 §2）：
-      - 可用不足就按可用削顶，差额记 shortfall；
+
+    规则就是规范 §2 那一句：
+      - 可用不足就按可用削顶；
       - 缺额可跨来源补齐，按各来源的**余量比例**分，余数给余量最大的；
       - 补进来的量记在 borrowed 上，quota_original 不动——这样事后能分清
         "计划就是这个数"和"这个数是凑出来的"。
@@ -341,21 +371,20 @@ def resolve_quotas(available: dict[str, int], quotas: dict[str, int],
                if s and s not in quotas and available.get(s, 0) > 0]
     if unknown:
         warnings.append(
-            f"{len(unknown)} 个来源在 manifest 里有数据但没配额（不会被选中）："
+            f"{len(unknown)} 个来源在清单里有数据但没配额（不会被选中）："
             f"{', '.join(unknown[:5])}{' …' if len(unknown) > 5 else ''}")
 
     return {s: (original[s], final[s]) for s in all_sources}, borrowed, warnings
 
 
-# ------------------------------------------------------------------ 去重
+# ------------------------------------------------------------------ 可选：去重
 
 
 def dedupe_clusters(rows: Sequence[dict]) -> tuple[list[dict], int]:
-    """同一近重复簇只留分数最高的一条（跨来源）。
+    """同一近重复簇只留分数最高的一条（跨来源）。**默认不启用。**
 
-    `sscd_cluster_id` 这类簇是"同一张图的变体"的代理。留最高分不是"最好的
-    那张图"（簇内可能是不同裁剪），而是"最像我们要的那张"——规范 §2 写的是
-    "只保留质量更高且来源可追踪的版本"，质量分是唯一可比的量。
+    对应规范 §2 的"同一 sscd_cluster_id 原则上不重复入选"。开了就要有分数列，
+    否则"最高分"退化成按 id 取字典序，留哪条是随机的。
     """
     best: dict[str, dict] = {}
     for row in rows:
@@ -388,19 +417,22 @@ def _stable_key(spec: SampleSpec, row: dict) -> bytes:
 
 
 def pick(rows: Sequence[dict], n: int, spec: SampleSpec) -> list[dict]:
-    """从一组候选里选 n 条：质量/长尾/随机三段配额。
+    """从一组候选里挑 n 条。
 
-    ★质量段用"按分数排序取前 n_q"，不是按分数做加权随机。理由：
-      加权随机要两遍扫描 + 累加分布（3000 万条上很贵），而它的收益是
-      "次优样本也有机会"——这件事已经由随机段的 15% 承担了。排序给的是
-      确定、可复现、能一句话解释的结果。
+    默认（均匀随机）：按 `hash(seed, source, id)` 排序取前 n。可复现、
+    不依赖输入顺序、不需要分数列——这就是"从每个文件夹里抽够数"。
+    开了 `mix` 才走 60/25/15 三段。
     """
     if n <= 0 or not rows:
         return []
     if len(rows) <= n:
         return list(rows)
 
-    q_share, t_share, _ = spec.mix
+    if not spec.mix:
+        ranked = sorted(rows, key=lambda r: _stable_key(spec, r))
+        return list(ranked[:n])
+
+    q_share, t_share, _ = spec.mix_ratio
     n_q = min(n, int(round(n * q_share)))
     n_t = min(n - n_q, int(round(n * t_share)))
 
@@ -444,7 +476,7 @@ def pick(rows: Sequence[dict], n: int, spec: SampleSpec) -> list[dict]:
             if not progressed:
                 break
 
-    # 3) 随机段：剩下的按稳定哈希排序取。可复现，且不依赖输入顺序。
+    # 3) 随机段：剩下的按稳定哈希排序取。
     if len(chosen) < n:
         rest = [r for r in rows if (r[_SOURCE], r[_ID]) not in chosen]
         rest.sort(key=lambda r: _stable_key(spec, r))
@@ -459,28 +491,23 @@ def pick(rows: Sequence[dict], n: int, spec: SampleSpec) -> list[dict]:
 # ------------------------------------------------------------------ 总流程
 
 
-def select(by_source: dict[str, Sequence[dict]], spec: SampleSpec,
+def select(by_source: Mapping[str, Sequence[dict]], spec: SampleSpec,
            *, dedupe: bool | None = None) -> SampleResult:
-    """按来源分组选样。by_source 是 `{source: 候选行}`。
-
-    ★去重放在选样**之前**：先选后去重会把某个来源的配额悄悄打掉一截，
-    报告里的 selected 却还是原数——对不上账，且比例会被去重强度带偏。
-    """
+    """按来源分组选样。by_source 是 `{source: 候选行}`。"""
     use_dedupe = spec.dedupe if dedupe is None else dedupe
-    errors: list[str] = []
 
     # 过滤合格线 + 收集可用量
     qualified: dict[str, list[dict]] = {}
     available: dict[str, int] = {}
     for source, rows in by_source.items():
         available[source] = len(rows)
-        ok = [r for r in rows if r[_SCORE] >= spec.min_score]
-        qualified[source] = ok
+        qualified[source] = [r for r in rows if r[_SCORE] >= spec.min_score]
 
     quotas, borrowed, warnings = resolve_quotas(available, spec.quotas,
                                                 allow_borrow=spec.allow_borrow)
 
-    # 全局去重（跨来源），逐来源统计被剔掉多少
+    # 去重要在选样**之前**：先选后去重会把某个来源的配额悄悄打掉一截，
+    # 报告里的 selected 却还是原数——对不上账。
     removed_by_source = {s: 0 for s in qualified}
     if use_dedupe:
         flat = [r for rows in qualified.values() for r in rows]
@@ -493,7 +520,7 @@ def select(by_source: dict[str, Sequence[dict]], spec: SampleSpec,
 
     report: list[SourceReport] = []
     picked: list[dict] = []
-    # 报告要覆盖配额表里的每一个来源：某个来源这次一条候选都没有（manifest
+    # 报告要覆盖配额表里的每一个来源：某个来源这次一条候选都没有（清单
     # 缺文件/路径写错），必须显示成 0 而不是从表里消失——"消失"看起来像
     # 这个来源不在计划里，而它其实欠着几百万条。
     for source in sorted(set(available) | set(spec.quotas)):
@@ -529,8 +556,6 @@ def select(by_source: dict[str, Sequence[dict]], spec: SampleSpec,
             f"实际选中 {actual} 条，与 quota_total {spec.quota_total} 差 "
             f"{actual - spec.quota_total:+d} 条（候选不足或质量过滤所致）")
 
-    for err in errors:
-        warnings.append(err)
     return SampleResult(rows=picked, report=report, warnings=warnings)
 
 

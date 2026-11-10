@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -466,6 +467,10 @@ class CenterRunRequest(BaseModel):
     interval: int | None = None
     extra_args: str | None = None
     cmd_template: str | None = None
+    # 长驻等待：开了就是"挂在线上等人派活"，关掉是"手上的干完就停"
+    wait: bool | None = None
+    idle_timeout: float | None = None    # 配 wait：连续多少秒没活就自己收工（0 = 一直等）
+    max_packages: int | None = None      # 本次最多交付多少片（0 = 不限）
 
 
 # ---------------------------------------------------------------- 环境信息
@@ -2746,6 +2751,11 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def center_state() -> dict:
         return CENTER.snapshot()
 
+    @app.get("/api/center/status")
+    def center_brief() -> dict:
+        # 顶栏的灯用这个：只读本地身份，不去问远端（见 Center.brief 的注释）。
+        return CENTER.brief()
+
     @app.post("/api/center/login")
     def center_login(req: CenterLoginRequest) -> dict:
         try:
@@ -2758,6 +2768,13 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def center_start(req: CenterRunRequest) -> dict:
         try:
             return CENTER.start(**req.model_dump(exclude_none=True))
+        except CenterError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/center/logout")
+    def center_logout() -> dict:
+        try:
+            return CENTER.logout()
         except CenterError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -2776,13 +2793,40 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     async def _spa_fallback(request, exc):       # noqa: ANN001 - Starlette 签名
         path = request.url.path
         if exc.status_code != 404 or path.startswith(("/api", "/ws")):
-            return JSONResponse({"detail": exc.detail},
-                                status_code=exc.status_code)
+            # headers 必须原样带上：比如 405 会带 Allow，丢了浏览器和 curl 都看不出
+            # "这个路径存在但方法不对"，只会以为它不存在。
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code,
+                                headers=getattr(exc, "headers", None))
         index = dist / "index.html"
         if index.is_file():
             return FileResponse(index)
         return JSONResponse({"detail": "界面还没构建：先跑 npm run build"},
                             status_code=404)
+
+    @app.exception_handler(RequestValidationError)
+    async def _bad_body(request, exc):           # noqa: ANN001 - Starlette 签名
+        """请求体校验失败说人话，别提 ctx/input。
+
+        FastAPI 默认把 `! model_dump 里的 ValueError(...)` 原样塞进 422 的 ctx，
+        前端写错一个字段看到的是 `Value error, 数字不能是 NaN [type=value_error,
+        input_value=nan, input_type=float]` —— 而前端只显示 detail，于是整页只剩
+        一行看不懂的英文。这里摘出我们自己抛的那句，其余转成字段名+原因。
+        """
+        problems = []
+        for err in exc.errors():
+            loc = ".".join(str(x) for x in err.get("loc", ()) if x != "body")
+            msg = err.get("msg") or "格式不对"
+            # "Value error, 真正的说明" → 只留后半句
+            if msg.startswith("Value error, "):
+                msg = msg[len("Value error, "):]
+            if err.get("type") == "json_invalid":
+                problems.append("请求体不是合法的 JSON")
+            elif not loc:
+                problems.append(msg)
+            else:
+                problems.append(f"{loc}：{msg}")
+        return JSONResponse({"detail": "；".join(problems) or "请求格式不对"},
+                            status_code=422)
 
     if (dist / "index.html").is_file():
         app.mount("/", StaticFiles(directory=str(dist), html=True), name="ui")

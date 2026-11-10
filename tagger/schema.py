@@ -34,7 +34,6 @@ class Provenance:
     model_revision: str | None
     precision: str           # bf16 / fp8 / int4
     max_pixels: int
-    prompt_ver: str
     temperature: float
     seed: int | None
     vllm_version: str | None
@@ -42,8 +41,10 @@ class Provenance:
     device: str              # 设备名，用于定位异常批次
     # ---- 以下字段实际产物里早就有，清单以前漏了。没有默认值的话，
     # 读回真实产物会在多余键上报 TypeError。
+    prompt_ver: str = ""     # 已停用：prompt 不再分版本号，改看 prompt_sha。
+                             # 留着是为了读回旧产物（它们写了这个键）。
     prompt_sha: str = ""     # 完整指令的 sha256 前 12 位；AB 变体常只差一句话，
-                             # prompt_ver 分不出来，靠它回答"这句 tag 是哪套指令逼出来的"
+                             # prompt_sha 才回答得了"这句 tag 是哪套指令逼出来的"
     variant: str = ""        # AB 实验变体名，未启用时为空
     tag_backend: str = ""    # tag 由谁出（wd-eva02 / onnx / vlm），只进 tag 产物
     tag_precision: str = ""  # tag 后端的精度，与上面的 precision（VLM 的）分开记

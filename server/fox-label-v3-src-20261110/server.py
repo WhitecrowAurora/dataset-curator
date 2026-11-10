@@ -1452,14 +1452,18 @@ def cmd_repo_remove(args) -> int:
 
 def cmd_serve(args) -> int:
     store = Store(args.data_dir)
-    if getattr(args, "server_id", None):
-        c = store.conn()
-        c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('server_id',?)", (args.server_id,))
-        c.close()
+    # 顺序要紧：先确认库存在、再建表、最后才写 server_id。
+    # 原来写 server_id 在前面，store.conn() 会顺手把一个空 db 建出来，
+    # 于是 INSERT 打到还没建的 meta 表上（no such table: meta），
+    # 而且那个空文件会让下次启动跳过"尚未初始化"的检查，时好时坏。
     if not store.db_path.exists():
         print("尚未初始化，请先运行 server.py repo add", file=sys.stderr)
         return 2
     store.init_schema()
+    if getattr(args, "server_id", None):
+        c = store.conn()
+        c.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('server_id',?)", (args.server_id,))
+        c.close()
     srv = FoxServer((args.host, args.port), store)
     repos = repo_rows(store)
     print(f"fox-label 服务已启动: http://{args.host}:{args.port}")

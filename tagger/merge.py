@@ -125,7 +125,7 @@ class MergeStats:
     # "读不动的坏文件"和"多出来的好数据"搅在同一个计数里。
     extra_ids: list[str] = field(default_factory=list)
     by_artist: dict[str, dict[str, int]] = field(default_factory=dict)
-    # 各溯源维度的取值分布（prompt_ver / model_id / tag_backend）。
+    # 各溯源维度的取值分布（prompt_sha / model_id / tag_backend）。
     # 出现两种以上取值，说明这批数据是不同配置混出来的。
     provenance: dict[str, dict[str, int]] = field(default_factory=dict)
 
@@ -215,10 +215,10 @@ def _id_from_filename(name: str) -> str:
 # 不放 provenance：那一份是"模型参数对账"用的，混进业务字段会让续跑校验
 # 和人工读日志都变模糊。
 _META_FIELDS = ("caption_language", "annotation_model", "annotation_version",
-                "source_revision", "tags_original", "visible_text")
-# 这两个字段是列表，不能走 str()：`str(["a"])` 会写成 "['a']"，下游 json.loads
+                "source_revision", "tags_original")
+# 这个字段是列表，不能走 str()：`str(["a"])` 会写成 "['a']"，下游 json.loads
 # 拿到的是字符串而不是字符串列表。
-_LIST_FIELDS = ("tags_original", "visible_text")
+_LIST_FIELDS = ("tags_original",)
 
 
 def _annotation_meta_of(obj: object) -> dict:
@@ -471,7 +471,7 @@ def collect(
 # 而且会把"这个成员只交了 NL"误报成"溯源缺失"。
 TAG_ONLY_DIMS = frozenset({"tag_backend", "tag_precision", "tag_preprocess"})
 
-PROVENANCE_DIMS = ("prompt_ver", "model_id", "tag_backend", "tag_precision",
+PROVENANCE_DIMS = ("prompt_sha", "model_id", "tag_backend", "tag_precision",
                    "tag_preprocess", "variant")
 
 
@@ -820,11 +820,6 @@ def build_rows(
             "annotation_model": str(meta.get("annotation_model") or ""),
             "annotation_version": str(meta.get("annotation_version") or ""),
             "source_revision": str(meta.get("source_revision") or ""),
-            # 规范 §8 要求这一列逐行存在（可为空）。存 JSON 字符串的理由同
-            # pack.py：每条的字段集不同（bbox 可选），list<struct> 会让
-            # parquet 的 schema 在第二行就冲突。
-            "visible_text": json.dumps(list(meta.get("visible_text") or []),
-                                       ensure_ascii=False),
         }
 
 

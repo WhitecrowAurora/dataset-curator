@@ -47,9 +47,27 @@ DEFAULTS = {
     "interval": 120,                # 心跳秒；0 = 用服务端建议值
     "extra_args": "",               # 追加给 tagger client 的参数（高级）
     "cmd_template": "",             # 非空则完全覆盖自动拼的命令（高级）
+    # 长驻等待：池子空了不退出，隔一会儿再问。开着才像"挂在线上等人派活"；
+    # 关着就是"把手上的干完就停"，页面上会直接从运行中变成已停止。
+    "wait": True,
+    "idle_timeout": 0,              # 配 wait：连续这么多秒没活就自己收工（0 = 一直等）
+    "max_packages": 0,              # 本次最多交付多少片，够了就停（0 = 不限）
 }
 
 LOG_LINES = 400
+
+# 这几个键清空没有意义（清掉只会让下一次启动必然失败），空串一律当"没填"。
+_NON_EMPTY = {"server", "user_id", "tag_url", "out_dir", "mode"}
+
+MODES = ("both", "tag", "nl")
+
+
+def _num(val, default: float = 0.0) -> float:
+    """配置里的数字可能被手改成垃圾值，转不动就当 0，别让点「开始」变成 500。"""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
 
 
 class CenterError(RuntimeError):
@@ -89,8 +107,18 @@ class Center:
     def save_config(self, **kw) -> dict:
         cfg = self.config()
         for key in DEFAULTS:
-            if key in kw and kw[key] is not None:
-                cfg[key] = kw[key]
+            if key not in kw:
+                continue
+            val = kw[key]
+            if val is None:
+                continue
+            # 空串当"没填"。页面把输入框清空（或表单还没灌进草稿）时不该把
+            # 配置清成空——`tag_url` 变成空串，build_cmd 会拼出 `--url ""`，
+            # worker 跑起来必然失败，而报错里只看得到"请求失败"。
+            # extra_args / cmd_template 的空是有意义的（清空），不在此列。
+            if key in _NON_EMPTY and isinstance(val, str) and not val.strip():
+                continue
+            cfg[key] = val
         self.cfg_path.parent.mkdir(parents=True, exist_ok=True)
         self.cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
                                  encoding="utf-8")
@@ -114,6 +142,9 @@ class Center:
         env["FOXLABEL_WORKER_CONFIG"] = str(self.worker_cfg)
         env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONUNBUFFERED"] = "1"
+        # 子进程的 print 走 locale 编码（Windows 上是 cp936），而管道那头我们
+        # 按 UTF-8 解 —— 不钉死这一项，页面日志里的中文全是"�"。
+        env["PYTHONIOENCODING"] = "utf-8"
         return env
 
     # ------------------------------------------------------------ 登录
@@ -131,8 +162,18 @@ class Center:
                 "--server", server, "--user-id", user_id]
         if secret.strip():
             argv += ["--secret", secret.strip()]
-        proc = subprocess.run(argv, cwd=str(ROOT), env=self._env(),
-                              capture_output=True, text=True, timeout=60)
+        try:
+            # encoding 必须和 _env 里的 PYTHONIOENCODING 对齐：子进程按 UTF-8 写，
+            # 这边却按 locale(cp936) 读，中文会解码失败或变成乱码。
+            proc = subprocess.run(argv, cwd=str(ROOT), env=self._env(),
+                                  capture_output=True, text=True, timeout=60,
+                                  encoding="utf-8", errors="replace")
+        except subprocess.TimeoutExpired as exc:
+            # 不捕获的话这里冒到 HTTP 层就是 500，页面只说"服务器错误"，
+            # 而真实原因（地址填错、网络黑洞）谁都看不出来。
+            raise CenterError("登录超时（60s 没有应答）：检查地址和网络") from exc
+        except OSError as exc:
+            raise CenterError(f"起不了 worker：{exc}") from exc
         for line in (proc.stdout or "").splitlines():
             self._push(f"[login] {line}")
         if proc.returncode != 0:
@@ -143,6 +184,22 @@ class Center:
         # 身份换了，旧看板已经不是这台设备的事，别让缓存继续显示上一个人的租约。
         self._board_cache = None
         return self.identity()
+
+    def logout(self) -> dict:
+        """断开：忘掉本机的设备身份，地址和姓名留着。
+
+        删的是 worker.json（device_id + secret）。center.json 里那份配置不动，
+        这样重连只要再点一次「连接」，不用把地址重新抄一遍。
+        """
+        with self._lock:
+            if self.running:
+                raise CenterError("正在跑，先停止再断开")
+            try:
+                self.worker_cfg.unlink(missing_ok=True)
+            except OSError as exc:
+                raise CenterError(f"删不掉身份文件：{self.worker_cfg}（{exc}）") from exc
+            self._board_cache = None
+        return self.snapshot()
 
     # ------------------------------------------------------------ 跑
     def build_cmd(self, cfg: dict | None = None) -> str:
@@ -164,45 +221,84 @@ class Center:
         )
 
     def start(self, **kw) -> dict:
+        # 快照放在锁外：snapshot 会去问一次调度中心（连不上最长 6s），
+        # 持锁做这件事会把收日志的线程一起堵住，日志全堆在管道里。
         with self._lock:
-            if self.running:
-                return self.snapshot()
-            cfg = self.save_config(**kw) if kw else self.config()
-            ident = self.identity()
-            if not ident.get("server"):
-                raise CenterError("还没连过：先填地址和姓名点「连接」")
-            Path(cfg["out_dir"]).mkdir(parents=True, exist_ok=True)
-            argv = [sys.executable, "-m", "tagger.fox_worker", "run",
-                    "--out", cfg["out_dir"], "--cmd", self.build_cmd(cfg)]
-            if cfg.get("interval"):
-                interval = float(cfg["interval"])
+            if not self.running:
+                cfg = self.save_config(**kw) if kw else self.config()
+                ident = self.identity()
+                if not ident.get("server"):
+                    raise CenterError("还没连过：先填地址和姓名点「连接」")
+                mode = str(cfg.get("mode") or "")
+                if mode not in MODES:
+                    # mode 是直接拼进命令行的，白名单是唯一的把关处。
+                    raise CenterError(f"产出模式只能是 {' / '.join(MODES)}，现在是 {mode!r}")
+                try:
+                    Path(cfg["out_dir"]).mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    # 盘符不存在 / 没权限是最常见的操作错误，得说清是哪个目录。
+                    raise CenterError(f"产物目录建不出来：{cfg['out_dir']}（{exc}）") from exc
+                argv = [sys.executable, "-m", "tagger.fox_worker", "run",
+                        "--out", cfg["out_dir"], "--cmd", self.build_cmd(cfg)]
+                interval = _num(cfg.get("interval"))
                 if interval > 0:
-                    argv += ["--interval", str(interval)]
-            self._push(f"[center] 启动：{' '.join(argv)}")
-            self._proc = subprocess.Popen(
-                argv, cwd=str(ROOT), env=self._env(), stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                errors="replace", bufsize=1)
-            self._started_at = time.time()
-            self._last_rc = None
-            threading.Thread(target=self._pump, args=(self._proc,),
-                             name="center-log", daemon=True).start()
-            return self.snapshot()
+                    argv += ["--interval", f"{interval:g}"]
+                # 长驻等待：池子空了不退出，隔一会儿再问。页面上点一次「开始」就
+                # 一直挂着等派工，而不是干完手上的就变成「已停止」。
+                if cfg.get("wait"):
+                    argv.append("--wait")
+                idle = _num(cfg.get("idle_timeout"))
+                if idle > 0:
+                    argv += ["--idle-timeout", f"{idle:g}"]
+                max_pkgs = int(_num(cfg.get("max_packages")))
+                if max_pkgs > 0:
+                    argv += ["--max-packages", str(max_pkgs)]
+                self._push(f"[center] 启动：{' '.join(argv)}")
+                try:
+                    self._proc = subprocess.Popen(
+                        argv, cwd=str(ROOT), env=self._env(), stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                        errors="replace", bufsize=1)
+                except OSError as exc:
+                    raise CenterError(f"worker 起不来：{exc}") from exc
+                self._started_at = time.time()
+                self._last_rc = None
+                threading.Thread(target=self._pump, args=(self._proc,),
+                                 name="center-log", daemon=True).start()
+        return self.snapshot()
 
-    def stop(self) -> dict:
+    def stop(self, report: bool = True) -> dict:
+        """终止子进程。report=False 用在进程退出的路径上：那条路上没人看快照，
+        而取快照要多等一次远端 HTTP。"""
         with self._lock:
             proc = self._proc
-            if proc is None:
-                return self.snapshot()
-            self._push("[center] 停止：发 SIGTERM，worker 会归还手上的租约")
+            if proc is not None:
+                # 先把引用摘掉：收日志的线程随后收尾时不再认领它，退出码由这里记。
+                self._proc = None
+                self._push("[center] 停止：发 SIGTERM，worker 会归还手上的租约")
+        if proc is not None:
+            # 终止过程**不持锁**：wait 期间收日志的线程要继续读管道，否则子进程
+            # 输出一多就会写满管道缓冲区，双双卡到超时。
+            rc = self._terminate(proc)
+            with self._lock:
+                self._last_rc = rc
+                # 租约已经还回去了，别让看板继续显示上一轮的派工。
+                self._board_cache = None
+        return self.snapshot() if report else {}
+
+    def _terminate(self, proc: subprocess.Popen) -> int | None:
+        try:
+            proc.terminate()
+            return proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            self._push("[center] 15s 没退出，强杀（包会在 TTL 到期后自动回池）")
+            proc.kill()
             try:
-                proc.terminate()
-                proc.wait(timeout=15)
+                # kill 之后必须再 wait：否则句柄挂着（Windows 上尤其），
+                # 而且这一轮的退出码就没人记了。
+                return proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self._push("[center] 15s 没退出，强杀（包会在 TTL 到期后自动回池）")
-                proc.kill()
-            self._proc = None
-            return self.snapshot()
+                return None
 
     def _pump(self, proc: subprocess.Popen) -> None:
         """收 stdout。页面靠它看进度，别在这里做任何会抛的事。"""
@@ -210,11 +306,18 @@ class Center:
             for line in proc.stdout or []:
                 self._push(line.rstrip("\n"))
         finally:
+            # 用 wait() 而不是 poll()：管道读到头时进程往往还没被回收，
+            # poll() 会返回 None —— 退出码就丢了，页面「上次退出码」永远空白，
+            # worker 崩了也看不出来。
+            try:
+                rc = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                rc = proc.poll()
             with self._lock:
                 if self._proc is proc:
-                    self._last_rc = proc.poll()
+                    self._last_rc = rc
                     self._proc = None
-                    self._push(f"[center] 进程结束，退出码 {proc.returncode}")
+                    self._push(f"[center] 进程结束，退出码 {rc}")
 
     def _push(self, line: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -226,6 +329,38 @@ class Center:
     def running(self) -> bool:
         proc = self._proc
         return proc is not None and proc.poll() is None
+
+    def brief(self) -> dict:
+        """顶栏那盏灯：**此刻能不能连上调度中心**，不是"以前登上过没有"。
+
+        linked 只看本地身份文件（存过就一直为真，总机关了也一样），所以灯不能
+        用它——那样总机停了灯还绿着，等于没提示。online 才是灯要的那个答案。
+
+        超时压到 2.5s：这个请求每 8 秒来一发，等 6 秒会把顶栏的"没连上"延后
+        好一会儿才显示出来，而人在等着看灯。
+        """
+        ident = self.identity()
+        linked = bool(ident.get("server") and ident.get("user_id")
+                      and ident.get("device_id"))
+        online = False
+        reason = ""
+        if linked:
+            got = self._status_call(timeout=2.5)
+            if got is None:
+                online, reason = False, "连不上调度中心：检查网络或总机是否在跑"
+            elif got[0] == 401:
+                online, reason = False, "凭据失效：让管理员重签 secret"
+            elif got[0] != 200:
+                online, reason = False, f"调度中心返回 HTTP {got[0]}"
+            else:
+                online = True
+        return {
+            "linked": linked,
+            "online": online,
+            "running": self.running,
+            "user_id": ident.get("user_id") or "",
+            "reason": reason,
+        }
 
     def board(self) -> dict:
         """只读看板：直接问调度中心要这台设备的租约。**不触发派工**。
@@ -240,11 +375,16 @@ class Center:
         self._board_cache = (time.time(), data)
         return data
 
-    def _board_fetch(self) -> dict:
+    def _status_call(self, timeout: float) -> tuple[int, dict] | None:
+        """拿本机凭据打一次只读的 `/api/v1/status`。
+
+        返回 (状态码, 内容)；连都没连上（网络层）返回 None。
+        没登录过也返回 None —— 调用方自己用 identity 区分"没配"与"连不上"。
+        """
         ident = self.identity()
         server = ident.get("server") or self.config().get("server")
         if not (server and ident.get("user_id") and ident.get("device_id")):
-            return {"ok": False, "reason": "还没连接"}
+            return None
         try:
             body = json.loads(self.worker_cfg.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -254,14 +394,23 @@ class Center:
                               json={"user_id": body.get("user_id"),
                                     "device_id": body.get("device_id"),
                                     "secret": body.get("secret")},
-                              timeout=6.0)
-        except httpx.HTTPError as exc:
-            return {"ok": False, "reason": f"连不上调度中心：{type(exc).__name__}"}
-        if resp.status_code == 401:
+                              timeout=timeout)
+        except httpx.HTTPError:
+            return None
+        return resp.status_code, (resp.json() if resp.content else {})
+
+    def _board_fetch(self) -> dict:
+        ident = self.identity()
+        if not (ident.get("server") and ident.get("user_id") and ident.get("device_id")):
+            return {"ok": False, "reason": "还没连接"}
+        got = self._status_call(timeout=6.0)
+        if got is None:
+            return {"ok": False, "reason": "连不上调度中心：检查网络或总机是否在跑"}
+        code, data = got
+        if code == 401:
             return {"ok": False, "reason": "凭据失效：让管理员重签 secret，再填一次"}
-        if resp.status_code != 200:
-            return {"ok": False, "reason": f"HTTP {resp.status_code}"}
-        data = resp.json() if resp.content else {}
+        if code != 200:
+            return {"ok": False, "reason": f"HTTP {code}"}
         data["ok"] = True
         return data
 
@@ -281,7 +430,7 @@ class Center:
 
     def shutdown(self) -> None:
         try:
-            self.stop()
+            self.stop(report=False)   # 退出路径上没人看快照，别再等一次远端
         except Exception:      # noqa: BLE001 - 退出路径上不许再抛
             pass
 

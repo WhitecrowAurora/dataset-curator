@@ -948,10 +948,11 @@ def cmd_split(args: argparse.Namespace) -> int:
 
 
 def cmd_sample(args: argparse.Namespace) -> int:
-    """按配额从候选 manifest 里选样（规范 v0.2 §1–§3）。
+    """按配额从候选清单里挑 id（规范 v0.2 §1–§3）。
 
-    输入是**已经导出的候选清单**，不是 HF 仓库：拉数据、解码、过滤分辨率
-    都是上游的事。这一层只负责配额与记账——换数据集只改配置，不改代码。
+    只做一件事：表里每个来源要多少条，就从那份清单里挑多少条。
+    输入是候选清单（jsonl / parquet），不是 HF 仓库——拉数据、解码、
+    过滤分辨率都是上游的事。
     """
     from .sample import (SampleError, read_candidates, select, write_report,
                          write_selection)
@@ -963,30 +964,35 @@ def cmd_sample(args: argparse.Namespace) -> int:
     except SampleError as exc:
         raise ConfigError(str(exc)) from exc
 
-    # 命令行覆盖配置。放在采样之前，且每一项都单独判 None：
-    # 0 是合法值（min_score=0 就是不要质量线），不能用 `or` 兜。
+    # 命令行覆盖配置。每一项单独判 None：0 是合法值（min_score=0 就是
+    # 不要质量线），不能用 `or` 兜。
     if args.seed is not None:
         spec.seed = int(args.seed)
     if args.min_score is not None:
         spec.min_score = float(args.min_score)
     if args.quota_total is not None:
         spec.quota_total = max(0, int(args.quota_total))
-    if args.no_dedupe:
-        spec.dedupe = False
+    if args.dedupe:
+        spec.dedupe = True
     if args.no_borrow:
         spec.allow_borrow = False
-    if args.mix:
+    if args.mix is not None:
+        spec.mix = True
         parts = [p.strip() for p in str(args.mix).replace("/", ",").split(",")
                  if p.strip()]
-        if len(parts) != 3:
-            raise ConfigError("--mix 要给三个数：质量,长尾,随机（如 0.6,0.25,0.15）")
-        try:
-            mix = tuple(float(p) for p in parts)
-        except ValueError as exc:
-            raise ConfigError(f"--mix 里有非数字：{args.mix!r}") from exc
-        if abs(sum(mix) - 1.0) > 1e-6:
-            raise ConfigError(f"--mix 三项合计必须是 1，收到 {sum(mix):.3f}")
-        spec.mix = mix  # type: ignore[assignment]
+        if not parts:
+            pass                          # --mix 不带值 = 用默认比例 60/25/15
+        elif len(parts) != 3:
+            raise ConfigError("--mix 可以不带值（用 60/25/15），"
+                              "或给三个数：质量,长尾,随机")
+        else:
+            try:
+                ratio = tuple(float(p) for p in parts)
+            except ValueError as exc:
+                raise ConfigError(f"--mix 里有非数字：{args.mix!r}") from exc
+            if abs(sum(ratio) - 1.0) > 1e-6:
+                raise ConfigError(f"--mix 三项合计必须是 1，收到 {sum(ratio):.3f}")
+            spec.mix_ratio = ratio  # type: ignore[assignment]
 
     if not spec.quotas:
         raise ConfigError(
@@ -2107,7 +2113,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp_artists.set_defaults(func=cmd_artists)
 
     sp_sample = sub.add_parser(
-        "sample", help="按配额从候选 manifest 里选样（规范 v0.2 §1–§3）")
+        "sample", help="按配额从候选清单里挑 id（规范 v0.2 §1–§3）")
     sp_sample.add_argument("--tiers", default=DEFAULT_TIERS)
     sp_sample.add_argument("--profile", default=None,
                            help="配额分组（tiers.yaml 的 sample.profiles）；"
@@ -2121,13 +2127,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp_sample.add_argument("--seed", type=int, default=None,
                            help="换它 = 换一批样本（同 seed 必得同一批）")
     sp_sample.add_argument("--min-score", type=float, default=None, dest="min_score",
-                           help="质量线；低于它的候选不参与选样")
+                           help="质量线；低于它的候选不参与（默认不过滤）")
     sp_sample.add_argument("--quota-total", type=int, default=None, dest="quota_total",
                            help="校验配额合计与实际选中数")
     sp_sample.add_argument("--mix", default=None,
-                           help="质量,长尾,随机 三段比例，如 0.6,0.25,0.15")
-    sp_sample.add_argument("--no-dedupe", action="store_true", dest="no_dedupe",
-                           help="不做近重复去重（同 cluster 不再只留一条）")
+                           help="开启 60/25/15 分层（可给 质量,长尾,随机 三项比例）")
+    sp_sample.add_argument("--dedupe", action="store_true", dest="dedupe",
+                           help="同近重复簇只留最高分（需要清单有簇列与分数列）")
     sp_sample.add_argument("--no-borrow", action="store_true", dest="no_borrow",
                            help="缺额不从其他来源补，各来源严格按自己的可用量")
     sp_sample.set_defaults(func=cmd_sample)

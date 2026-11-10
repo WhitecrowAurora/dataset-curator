@@ -449,6 +449,15 @@ class PackOptions:
     # 而不是把 q 调高。想保留原始字节就设成 non_jpeg / never。
     reencode_mode: str = "always"
 
+    # 清除图片元数据（规范 v0.2 §5 最后一条："任何处理的图像内包含元数据必须清除"）。
+    #
+    # 重编码的路径本来就不带元数据（Pillow 只写像素），所以这个开关只为
+    # **不重编码**的那部分工作：`non_jpeg` 时原样搬运的 JPEG、`never` 时的全部。
+    # 关掉它没有正当理由——留着 EXIF 的 GPS/设备号、ComfyUI 的生成参数，
+    # 交付出去就是隐私和"这批图是 AI 生成的"双重泄漏。留着开关只为出问题
+    # 时能一键排除（比如某批图删掉 ICC 后下游报颜色不对）。
+    strip_metadata: bool = True
+
     @classmethod
     def from_dict(cls, d: dict) -> "PackOptions":
         from .config import ConfigError
@@ -509,6 +518,7 @@ class PackOptions:
             jpeg_quality=quality,
             jpeg_subsampling=subsampling,
             reencode_mode=mode,
+            strip_metadata=_as_flag(d.get("strip_metadata"), True),
         )
 
     @property
@@ -522,6 +532,21 @@ class PackOptions:
         if "zip" in self.formats:
             out.append(".zip")
         return tuple(out)
+
+
+def _as_flag(value: object, default: bool) -> bool:
+    """yaml/表单里的布尔开关。None = 默认值。
+
+    `bool("false")` 是 True——直接套 bool() 会让"显式关掉"变成"开着"，
+    而这种错只在跑完一批后看产物才现形。
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() not in ("", "0", "false", "no", "off", "none")
 
 
 def _is_jpeg(data: bytes) -> bool:
@@ -570,6 +595,139 @@ def transcode_to_jpeg(data: bytes, quality: int, subsampling: int = 0) -> bytes:
         out.save(buf, "JPEG", quality=quality, subsampling=subsampling,
                  optimize=False)
     return buf.getvalue()
+
+
+def strip_metadata(data: bytes) -> bytes:
+    """去掉图片容器里的元数据段，像素不动（规范 v0.2 §5 最后一条）。
+
+    ★为什么"重编码就已经清掉了"不够：`reencode_mode` 可以是 `non_jpeg` 或
+      `never`，那两档是**原字节直搬**，于是 EXIF（GPS、设备序列号）、PNG 的
+      tEXt/iTXt（ComfyUI 的完整生成参数）、XMP（编辑历史）会原样进交付包。
+      而这些正是最容易带出隐私和"这张图是 AI 生成的"痕迹的部分。
+
+    ★为什么不走 Pillow 的 save：重新编码一次等于再压一道（体积、伪影），
+      而这里要的只是删掉几个段。JPEG 按段重写，PNG/WebP 走容器级处理。
+
+    认不出的格式原样返回：宁可没清掉，也不要为了一条规则把图弄坏——
+    调用方会在归档检查里报出来（见 metadata_report）。
+    """
+    if len(data) < 4:
+        return data
+    if data[:2] == b"\xff\xd8":
+        return _strip_jpeg(data)
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return _strip_png(data)
+    return data
+
+
+def _strip_jpeg(data: bytes) -> bytes:
+    """JPEG：丢掉 APPn（除 APP0/JFIF 与 APP14/Adobe）和 COM 段。
+
+    保留 APP0 与 APP14 是有意的：前者承载 JFIF 的密度信息，后者是 CMYK 图的
+    色彩变换标记，删掉会让解码器把颜色解错（图上不会有提示，只是颜色不对）。
+    APP1 是 EXIF/XMP，APP2 是 ICC 与 MPF，APP13 是 Photoshop 的 IPTC——
+    这些才是要清的。ICC 一起丢：交付的是 sRGB 语义的 JPEG，留着别人的色彩
+    配置文件只会让下游对同一张图算出两种颜色。
+    """
+    out = bytearray(data[:2])
+    i = 2
+    n = len(data)
+    while i + 4 <= n:
+        if data[i] != 0xFF:
+            # 段结构与预期不符（坏文件/非标准）：从这里到结尾原样带走，
+            # 不做"猜着重同步"——那会吐出比原文件更坏的字节。
+            out += data[i:]
+            break
+        marker = data[i + 1]
+        # 填充字节（0xFF 0xFF…）与 SOI/EOI/TEM 没有长度字段
+        if marker in (0xFF, 0xD8, 0x01):
+            out += data[i:i + 2]
+            i += 2
+            continue
+        if marker == 0xD9:
+            out += data[i:i + 2]
+            i += 2
+            break
+        seg_len = int.from_bytes(data[i + 2:i + 4], "big")
+        if seg_len < 2:
+            out += data[i:]
+            break
+        end = min(n, i + 2 + seg_len)
+        keep = not (
+            # APP1..APP15，但 APP14（Adobe）要留：它标记 CMYK 的变换方式
+            (0xE1 <= marker <= 0xEF and marker != 0xEE)
+            or marker == 0xFE
+        )
+        if keep:
+            out += data[i:end]
+        i = end
+        if marker == 0xDA:          # SOS：之后是熵编码数据，遇到就整体带走
+            out += data[i:]
+            break
+    return bytes(out)
+
+
+def _strip_png(data: bytes) -> bytes:
+    """PNG：只留必要块，去掉 tEXt/zTXt/iTXt/eXIf/tIME 等文本与元数据块。
+
+    白名单而不是黑名单：PNG 的块类型是私有的、可扩展的（C2PA 的 caBX、
+    ComfyUI 的私有块都往里塞），黑名单永远漏。留下的是解码必需（IHDR/PLTE/
+    IDAT/IEND/tRNS）与色彩管理必需（gAMA/sRGB/cHRM/iCCP/pHYs）的那几类。
+    """
+    keep = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"sRGB",
+            b"cHRM", b"iCCP", b"pHYs", b"bKGD", b"sBIT", b"hIST"}
+    out = bytearray(data[:8])
+    i = 8
+    n = len(data)
+    while i + 8 <= n:
+        length = int.from_bytes(data[i:i + 4], "big")
+        ctype = data[i + 4:i + 8]
+        end = i + 12 + length
+        if end > n:
+            break
+        if ctype in keep:
+            out += data[i:end]
+        if ctype == b"IEND":
+            break
+        i = end
+    return bytes(out)
+
+
+def metadata_report(data: bytes) -> str:
+    """这张图里还留着什么元数据。空串 = 干净。
+
+    ★返回**具体是哪种**而不是 bool：`strip_metadata` 认不出的格式会原样
+    返回，如果这里只回 False，那种情况看起来和"清干净了"一模一样——而它们
+    正好是两个相反的事实。抽检报"unknown"时该去补那一条分支。
+
+    只看 JPEG 的 EXIF/XMP/IPTC/ICC 与 PNG 的文本块：这两类占了实际遇到的
+    绝大多数，而 WebP/AVIF 的元数据要到容器层解析，判错的代价（误报整批
+    不合格）比漏报大。
+    """
+    if data[:2] == b"\xff\xd8":
+        head = data[: 64 * 1024]     # EXIF/XMP 段都在文件头，不必扫全图
+        for marker, name in ((b"Exif\x00\x00", "exif"),
+                             (b"http://ns.adobe.com/xap", "xmp"),
+                             (b"Photoshop 3.0", "iptc"),
+                             (b"ICC_PROFILE", "icc")):
+            if marker in head:
+                return name
+        return ""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        i, n = 8, min(len(data), 256 * 1024)
+        while i + 8 <= n:
+            length = int.from_bytes(data[i:i + 4], "big")
+            ctype = data[i + 4:i + 8]
+            if ctype in (b"tEXt", b"zTXt", b"iTXt", b"eXIf"):
+                return f"png:{ctype.decode('ascii')}"
+            if ctype == b"IEND":
+                return ""
+            i += 12 + length
+        return ""
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        # WebP 的元数据在 RIFF 的 EXIF/XMP 块里，块头就是四字节标识。
+        return "webp:exif" if b"EXIF" in data[:4096] else ""
+    return "unknown"
 
 
 @dataclass(slots=True)
@@ -724,6 +882,10 @@ class Packer:
             head, _, tail = posix.rpartition("/")
             base = (Path(tail).stem or tail) + ".jpg"
             flat_name = f"{head}/{base}" if head else base
+        elif self.options.strip_metadata:
+            # 不重编码的条目（non_jpeg 的原 JPEG、never 的全部）原字节直搬，
+            # 元数据会跟着走。这里只删段、不动像素，见 strip_metadata。
+            image_bytes = strip_metadata(image_bytes)
 
         key = flat_name.rsplit(".", 1)[0]
         w = int(meta.get("width") or 0)
@@ -784,12 +946,6 @@ class Packer:
                 "artist_source": str(meta.get("artist_source") or ""),
                 "caption": nl,
                 "tag": tag_text,
-                # 存 JSON 字符串而不是 list<struct>：每条记录的字段集不一样
-                # （有的带 bbox、有的没有），pyarrow 会按第一行的 struct 建
-                # schema，第二行多一个键就直接写不进去。字符串列没这个问题，
-                # 下游 json.loads 一次即可。
-                "visible_text": json.dumps(meta.get("visible_text") or [],
-                                           ensure_ascii=False),
             })
 
         if "zip" in self.options.formats:
@@ -920,8 +1076,6 @@ class Packer:
                                       type=pa.string()),
             "caption": pa.array([r["caption"] for r in rows], type=pa.string()),
             "tag": pa.array([r["tag"] for r in rows], type=pa.string()),
-            "visible_text": pa.array([r["visible_text"] for r in rows],
-                                     type=pa.string()),
         })
         path = self.out_dir / f"{self._base()}.parquet"
         tmp = path.with_suffix(".parquet.tmp")

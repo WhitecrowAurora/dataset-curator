@@ -56,6 +56,10 @@ CONFIG = Path(os.environ.get("FOXLABEL_WORKER_CONFIG")
 
 EXIT_OK, EXIT_USAGE, EXIT_AUTH, EXIT_DOWNLOAD, EXIT_LEASE, EXIT_TASK = 0, 2, 3, 4, 5, 6
 
+# --wait 长驻时，池子空了隔多久再问一次。30s 是"人能接受的反应延迟"和
+# "不把服务端当轮询靶子"之间的折中：派人的人一般不会在 10 秒内就急着看结果。
+WAIT_POLL = 30
+
 
 def die(code: int, msg: str) -> None:
     print(f"[X] {msg}", file=sys.stderr)
@@ -178,6 +182,12 @@ def cmd_login(args) -> int:
     leases = res.get("leases") or []
     print(f"派工   : {len(leases)} 个" + (f"（{leases[0]['kind']} {leases[0]['package']}）"
                                          if leases else "（当前池子空）"))
+    # 握手会顺带派工（服务端 assign 无条件执行），但 login 只是登记身份、不打算
+    # 开工。不还回去的话这一片要闲置到 TTL 到期，这期间别的设备领不到它——
+    # 表现就是"有人点了连接但没开炼，池子却少了一片"。
+    if leases:
+        release_unused(cfg, leases)
+        print(f"（已归还刚派来的 {len(leases)} 片：只登记身份，不开工）")
     return EXIT_OK
 
 
@@ -452,12 +462,9 @@ def release_unused(cfg: dict, leases: list[dict], keep: set[str] | None = None) 
             log(f"[warn] 归还租约失败（不影响已交付的数据）：{e}")
 
 
-def cmd_run(args) -> int:
-    cfg = load_cfg()
-    interval = args.interval or float(cfg.get("beat_interval") or 120)
-    out_dir = Path(args.out) if args.out else Path.cwd() / "fox-work"
-
-    # 握手：顺带把这台机器已有的产出报上去，服务端会优先把同一片派回来
+def _claim(cfg: dict, interval: float) -> list[dict]:
+    """握一次手，把派到手上的租约取回来。空列表 = 池子空。"""
+    # 顺带把这台机器已有的产出报上去，服务端会优先把同一片派回来
     try:
         hs = api(cfg, "/api/v1/handshake",
                  {"client_ver": VERSION, "local_pkgs": cfg.get("have") or []}, retries=2)
@@ -470,22 +477,59 @@ def cmd_run(args) -> int:
         save_cfg(cfg)
     log(f"身份 {cfg['user_id']} / 设备 {cfg['device_id']}　"
         f"服务端 {cfg.get('server_id')}　心跳 {interval:.0f}s")
+    return hs.get("leases") or []
 
-    leases = hs.get("leases") or []
-    if not leases:
-        log("服务端暂无派工（池子空了或配额已满）")
-        return EXIT_OK
-    log("派工：" + "、".join(f"{l['kind']}:{l['package']}" for l in leases))
 
-    held: list[dict] = list(leases)
-    try:
-        return _run_loop(cfg, args, interval, out_dir, leases, held)
-    finally:
-        release_unused(cfg, held)
+def cmd_run(args) -> int:
+    cfg = load_cfg()
+    interval = args.interval or float(cfg.get("beat_interval") or 120)
+    out_dir = Path(args.out) if args.out else Path.cwd() / "fox-work"
+
+    # 本次已交付的片数。--max-packages 按它停手；计数用可变容器是为了
+    # 让 _run_loop 能就地加，不用改它的返回值（那里已经有 6 种退出路径）。
+    done = {"n": 0}
+    last_work = time.time()
+
+    while True:
+        leases = _claim(cfg, interval)
+        if not leases:
+            log("服务端暂无派工（池子空了或配额已满）")
+            if not args.wait:
+                return EXIT_OK
+            if args.idle_timeout and time.time() - last_work >= args.idle_timeout:
+                log(f"已经 {args.idle_timeout:.0f}s 没有派工，收工")
+                return EXIT_OK
+            # 长驻等待：不退出，隔一会儿再问。这一轮没有心跳要维持（手上没租约），
+            # 所以纯粹是等，不会占着服务端的任何资源。
+            nap = WAIT_POLL
+            if args.idle_timeout:
+                # 别睡过头：--idle-timeout 比轮询间隔短的时候要能准时收工
+                nap = max(1.0, min(WAIT_POLL,
+                                   args.idle_timeout - (time.time() - last_work)))
+            log(f"{nap:.0f}s 后再看（Ctrl-C 结束）")
+            time.sleep(nap)
+            continue
+
+        log("派工：" + "、".join(f"{l['kind']}:{l['package']}" for l in leases))
+        held: list[dict] = list(leases)
+        try:
+            rc = _run_loop(cfg, args, interval, out_dir, leases, held, done)
+        finally:
+            release_unused(cfg, held)
+        last_work = time.time()
+
+        if not args.wait:
+            return rc
+        # 认证失效 / 租约丢失 / 任务失败：再等下去也是同样的结果，直接退出
+        if rc != EXIT_OK:
+            return rc
+        if args.max_packages and done["n"] >= args.max_packages:
+            log(f"已达本次配额 {args.max_packages} 片，收工")
+            return EXIT_OK
 
 
 def _run_loop(cfg: dict, args, interval: float, out_dir: Path,
-              leases: list[dict], held: list[dict]) -> int:
+              leases: list[dict], held: list[dict], done: dict) -> int:
     while leases:
         active = next((l for l in leases if l["kind"] == "active"), None)
         if active is None:
@@ -527,7 +571,13 @@ def _run_loop(cfg: dict, args, interval: float, out_dir: Path,
             log(f"[X] 本次失败：{detail}")
             return EXIT_TASK
         log(f"已交付 {active['package']}")
+        done["n"] += 1
         if args.once:
+            release_unused(cfg, res.get("leases") or [])
+            return EXIT_OK
+        if args.max_packages and done["n"] >= args.max_packages:
+            # 配额到了就停手，别把服务端刚派来的下一片揣着——还回去让它给别人。
+            log(f"已达本次配额 {args.max_packages} 片，收工")
             release_unused(cfg, res.get("leases") or [])
             return EXIT_OK
         leases = res.get("leases") or []
@@ -557,6 +607,12 @@ def main() -> int:
     a.add_argument("--out", default=None, help="工作目录（默认 ./fox-work）")
     a.add_argument("--interval", type=float, default=None, help="心跳间隔秒（默认取服务端建议值）")
     a.add_argument("--once", action="store_true", help="只处理一个包就退出")
+    a.add_argument("--wait", action="store_true",
+                   help=f"常驻等派工：池子空了不退出，每 {WAIT_POLL}s 再问一次（默认干完就退）")
+    a.add_argument("--idle-timeout", type=float, default=0,
+                   help="配合 --wait：连续这么多秒没有派工就退出（0 = 一直等）")
+    a.add_argument("--max-packages", type=int, default=0,
+                   help="本次最多交付多少片，够了就退出并归还多派的（0 = 不限）")
     a.add_argument("--no-download", action="store_true", help="跳过下载（协调层演练）")
     a.add_argument("--cmd", default=None,
                    help="干活的命令模板，可用 {shard} {package} {out} {lease}")

@@ -42,7 +42,8 @@ from .local_tag import TagItem, artifact_path, read_artifact
 from .naming import archive_name, make_image_id, normalize_ext, sanitize
 from .storage.discovery import check_stopped
 from .pack import (ContainerReader, InputItem, PackOptions, PackState, Packer,
-                   container_stem, discover_inputs, sha256_of_file)
+                   container_stem, discover_inputs, metadata_report,
+                   sha256_of_file)
 
 # 封包一次预取多少条。太小等于没并行，太大把转码后的图堆在内存里。
 _PACK_WINDOW_FACTOR = 4
@@ -478,6 +479,11 @@ class PackReport:
     # 非空 = 中途停下的原因（用户停止 / 硬件保护熔断）。调用方据此把任务
     # 状态落成 stopped，而不是"0 条写入但一切正常"。
     stopped: str = ""
+    # 元数据抽检（规范 v0.2 §5）：抽了多少条、其中还有几条残留着元数据。
+    # 非零 dirty 说明清除没生效（多半是 prepare 走了不经 strip 的分支），
+    # 要当作缺陷看，而不是"少量噪声"。
+    meta_checked: int = 0
+    meta_dirty: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -616,6 +622,11 @@ def pack_items(
                 except Exception:     # noqa: BLE001 - 订阅方的 bug 不该打断封包
                     pass
 
+    # 元数据抽检的账。limit 只抽前 5000 条：`metadata_report` 对 JPEG 只读
+    # 文件头 64KB，但 3000 万条全扫仍是不必要的开销；前 5000 条足够证明
+    # 「这条链路确实清干净了」，剩下的交给 verify 抽样。
+    metadata = {"checked": 0, "limit": 5000, "dirty": []}
+
     def flush_window(pool: ThreadPoolExecutor, window: list[tuple[TagItem, dict]]) -> None:
         prepared = list(pool.map(lambda kw: _prepare_safe(packer, kw),
                                  [kw for _, kw in window]))
@@ -636,6 +647,17 @@ def pack_items(
                         pass
                 log(f"封包失败 {item.image_id}: {error}")
                 continue
+            # 元数据抽检（规范 v0.2 §5）。放在这里而不是 prepare 里：写盘是
+            # 串行的，抽检跟着串行就不会和 worker 抢 CPU；而目录条目（没图
+            # 的 rel_path）本来就该跳过——`_kw` 的 image_bytes 空时不判。
+            if metadata["checked"] < metadata["limit"] and _kw.get("image_bytes"):
+                metadata["checked"] += 1
+                left = metadata_report(bytes(sample.image_bytes))
+                if left:
+                    metadata["dirty"].append(f"{item.image_id}:{left}")
+                if metadata["checked"] % 500 == 0:
+                    log(f"元数据抽检 {metadata['checked']} 条，"
+                        f"残留 {len(metadata['dirty'])} 条")
             before = len(packer.sealed)
             packer.write(sample)
             since_seal.append(item.image_id)
@@ -726,9 +748,6 @@ def pack_items(
                     "width": w,
                     "height": h,
                     "tags": payload.get("tags") or [],
-                    # 图中文字（规范 v0.2 §6）：结构化抄录，不是 OCR 猜字。
-                    # 空数组也要带——"这张没字"和"这版没跑"不能混成同一个空值。
-                    "visible_text": payload.get("visible_text") or [],
                     "rating": payload.get("rating") or {},
                     "tag_backend": payload.get("tag_backend") or "",
                     "provenance": payload.get("provenance") or {},
@@ -766,6 +785,14 @@ def pack_items(
         except Exception as exc:      # noqa: BLE001 - 收尾失败不该盖住主错误
             log(f"封包收尾失败：{type(exc).__name__}: {exc}")
         reader.close()
+
+    report.meta_checked = metadata["checked"]
+    report.meta_dirty = list(metadata["dirty"])
+    if report.meta_dirty:
+        log(f"[警告] 元数据抽检 {report.meta_checked} 条里有 "
+            f"{len(report.meta_dirty)} 条仍带元数据（前 5 条："
+            f"{'、'.join(report.meta_dirty[:5])}）。规范 v0.2 §5 要求清除，"
+            f"这通常意味着封包走了不经 strip_metadata 的分支。")
     return report
 
 

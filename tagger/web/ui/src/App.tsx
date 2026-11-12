@@ -24,7 +24,7 @@ import { readProgressInterval, writeProgressInterval } from './lib/prefs'
 import { AppShell } from './layout/AppShell'
 import type { NavItem } from './layout/Sidebar'
 import { NewJob } from './pages/NewJob'
-import { RunJob } from './pages/RunJob'
+import { ResidentJobs } from './components/ResidentJobs'
 import { Results } from './pages/Results'
 import { History as HistoryPage } from './pages/History'
 import { Stats } from './pages/Stats'
@@ -41,6 +41,7 @@ import { Center } from './pages/Center'
 import { GlobalProgress } from './components/GlobalProgress'
 import { SelfCheckDialog } from './components/SelfCheckDialog'
 import { ResumeBanner } from './components/ResumeBanner'
+import { RetryFailedButton } from './components/RetryFailedButton'
 import { ActivityNotice } from './components/ActivityNotice'
 
 // 手写 hash 路由：七个页面、零依赖，比引 react-router 更省事也更不容易踩版本。
@@ -176,7 +177,7 @@ export default function App() {
       label: '调度中心',
       icon: <Waypoints size={15} />,
       active: route.name === 'center',
-      hint: '连上总机领分片打标；开始/停止与租约看板都在这一页',
+      hint: '自动领分片打标，看派工与租约',
       onClick: () => go('/center'),
     },
     {
@@ -191,7 +192,7 @@ export default function App() {
       label: '部署自检',
       icon: <ShieldCheck size={15} />,
       active: selfCheckOpen,
-      hint: '装完点一下：逐项验证环境、目录与服务，并真跑一张图',
+      hint: '逐项验证环境、目录与服务，真跑一张图',
       onClick: () => setSelfCheckOpen(true),
     },
     {
@@ -199,7 +200,7 @@ export default function App() {
       label: '依赖检测',
       icon: <Package size={15} />,
       active: route.name === 'deps',
-      hint: '逐个查看依赖装没装、版本对不对，可单独装卸',
+      hint: '查看依赖与版本，可单独装卸',
       onClick: () => go('/deps'),
     },
     {
@@ -207,7 +208,7 @@ export default function App() {
       label: '模型管理',
       icon: <Layers size={15} />,
       active: route.name === 'models',
-      hint: '增删可选模型（NL 的 Qwen-VL / tag 分类头）',
+      hint: '管理 NL 模型与 tag 分类头',
       onClick: () => go('/models'),
     },
     {
@@ -215,7 +216,7 @@ export default function App() {
       label: '分片下载',
       icon: <Download size={15} />,
       active: route.name === 'downloads',
-      hint: '提前把 HF 仓库的分片备到本地，打标时直接命中',
+      hint: '提前把仓库分片备到本地',
       onClick: () => go('/downloads'),
     },
     {
@@ -223,7 +224,7 @@ export default function App() {
       label: '打标管理',
       icon: <Merge size={15} />,
       active: route.name === 'tag-manage',
-      hint: '把多个 json 合成一个单体 json（tag/nl 按图配对、字段取并集）',
+      hint: '多个 json 合成一个，tag/nl 按图配对',
       onClick: () => go('/tag-manage'),
     },
     {
@@ -231,7 +232,7 @@ export default function App() {
       label: '冲突与决策',
       icon: <GitCompareArrows size={15} />,
       active: route.name === 'conflicts',
-      hint: '同一张图两份不同内容（换模型 / 新旧版本）：逐条对比后决定留哪份',
+      hint: '同一张图多份产物时逐条定留哪份',
       onClick: () => go('/conflicts'),
     },
     {
@@ -255,7 +256,7 @@ export default function App() {
       label: '统计',
       icon: <ChartSpline size={15} />,
       active: route.name === 'stats',
-      hint: '通过率 / 失败率 / 质检分的分桶趋势',
+      hint: '通过率、失败率与质检分趋势',
       onClick: () => go('/stats'),
     },
     {
@@ -304,9 +305,16 @@ export default function App() {
   return (
     <AppShell
       items={items}
+      actions={
+        // 放在导航下方、状态行上方：它是"对上一个任务的动作"，不是页面。
+        // 目标任务取最近的那个（lastJobId），与「查看结果」同一个来源——
+        // 用户刚跑完的那批，失败项就在它手里。
+        <RetryFailedButton key={lastJobId} jobId={lastJobId || ''} onStarted={openJob} />
+      }
       health={health}
       center={center}
       onOpenCenter={() => go('/center')}
+      onOpenDeps={() => go('/deps')}
       theme={theme}
       onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
       footer={
@@ -371,15 +379,14 @@ export default function App() {
       {route.name === 'downloads' && <Downloads />}
       {route.name === 'tag-manage' && <TagManage />}
       {route.name === 'conflicts' && <Conflicts />}
-      {route.name === 'run' && (
-        <RunJob
-          jobId={route.id}
-          onResults={() => go(`/results/${route.id}`)}
-          onNew={() => go('/')}
-        />
-      )}
+      <ResidentJobs
+        jobId={route.name === 'run' ? route.id : null}
+        onResults={(id) => go(`/results/${id}`)}
+        onNew={() => go('/')}
+        onRestarted={openJob}
+      />
       {route.name === 'results' && (
-        <Results jobId={route.id} onBack={() => go(`/run/${route.id}`)} />
+        <Results key={route.id} jobId={route.id} onBack={() => go(`/run/${route.id}`)} />
       )}
       {route.name === 'history' && (
         <HistoryPage

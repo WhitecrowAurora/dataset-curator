@@ -23,6 +23,16 @@ export type JobSpec = {
   /** 预处理方式（resize / none） */
   preprocess?: string
   device: string
+  /**
+   * 多卡 tag 设备清单。空 = 回落到 `device`。
+   * 每张卡各加载一份权重，所以这是"用几张卡跑 tag"的声明。
+   */
+  tag_devices?: string[]
+  /**
+   * 多卡分工：'batch' = 一个包在跑、每批等分给各卡；'pack' = N 个包同时跑、
+   * 一个包完整归一张卡。只影响多卡。
+   */
+  tag_mode?: string
   precision: string
   batch: number
   threshold: number | null
@@ -63,6 +73,8 @@ export type JobSpec = {
   caption_zh_ratio?: number
   /** 用哪份 NL 提示词（prompt/<名字>.json 的名字）；空 = 内置那份 */
   prompt_id?: string
+  /** 多选提示词（顺序即拼接顺序）：`file:<名字>` 成品，`rule:<名字>` 规则片段 */
+  prompt_parts?: string[]
   seed: number | null
   /** 同一张图跨运行累计失败多少次后跳过；0 = 不限制 */
   max_failures: number
@@ -105,6 +117,8 @@ export type JobSpec = {
   hf_conns: number
   /** 空 = 用全局代理 */
   hf_proxy: string
+  /** 分片缓存目录；空 = run/hf-cache（与下载页共用一份缓存） */
+  hf_cache: string
   /** 给产物留的磁盘余量（GB），0 = 自动 */
   hf_reserve_gb: number
   // 产物形态（vlm 引擎默认 parquet：回传页传的就是它）
@@ -329,6 +343,13 @@ export type Defaults = {
   model_dir: string
   models_dir: string
   device: string
+  /**
+   * 「设备」可勾选的清单，按本机实际卡数由后端生成（auto / cuda:0..N-1 / cpu）。
+   * 前端不自己拼这张表：页面不该知道这台机器有几张卡。
+   */
+  devices?: string[]
+  /** 多卡分工：batch = 批内切分（默认），pack = 每卡一个包 */
+  tag_mode?: string
   precision: string
   batch: number
   /** 预处理：resize / none 之类，后端按字符串解析 */
@@ -343,6 +364,8 @@ export type Defaults = {
   vllm_tiers: VllmTierOption[]
   /** NL 服务来源（local / openai / anthropic…），各带默认地址 */
   vlm_providers: VlmProviderOption[]
+  /** 记住过的 HF 令牌（脱敏 + 绑定的仓库）。null = 没有存档 */
+  hf_saved: { repo: string; token_masked: string } | null
   /** 硬件保护阈值（tiers.yaml 的 limits 段），用户未改时的参考值 */
   guard: Record<string, number>
   /** 质检判定的默认分（页面上的"0 = 用配置的 3.4"就是它） */
@@ -403,12 +426,32 @@ export type VllmTierOption = {
   note: string
 }
 
+/** 顶栏那一行 torch 档位提示。
+ *
+ *  ok     = 已装的正是推荐档
+ *  switch = 该换档（装错了 / 版本与清单不符），需要人动手
+ *  cpu    = 没有可用的 CUDA 版（没卡、驱动太老、探测失败）
+ */
+export type TorchHint = {
+  status: 'ok' | 'switch' | 'cpu'
+  /** 例如 "8.9（40 系，Ada）" */
+  arch: string
+  /** 本机推荐档：cu126 / cu130；cpu 状态下为空 */
+  target: string
+  /** 当前实际装的档：cu126 / cu130 / cpu；读不出时为空 */
+  current: string
+  /** 为什么该换，直接显示给用户 */
+  reason: string
+}
+
 export type Health = {
   ok: boolean
   version: string
   python: string
   platform: string
   gpus: string[]
+  /** 顶栏的 torch 档位提示；老后端没有这个字段时为 undefined */
+  torch_hint?: TorchHint
   ui_built: boolean
   running_job: string | null
 }
@@ -418,9 +461,26 @@ export type FsListing = {
   parent: string
   images: number
   zips: { name: string; path: string; bytes: number }[]
+  /** 只在请求时给了 `exts` 才有：当前层匹配这些扩展名的文件 */
+  files?: { name: string; path: string; bytes: number }[]
   dirs: { name: string; path: string; images: number; zips: number }[]
-  /** 所有盘符（只有 Windows 有；别的系统为空数组） */
+  /** 可切换的根：Windows 是盘符，Linux/macOS 是常见挂载点（/data、/mnt 等） */
   drives: { path: string; label: string }[]
+  /** 请求的路径没落到原位、被回退到了这个目录（不存在或指了个文件） */
+  fell_back_to?: string
+}
+
+/**
+ * 「打开文件夹」的结果。
+ *
+ * 服务端机器可能没有图形界面（SSH 上的 Linux、容器），那时窗口根本弹不出来。
+ * 这不是错误，但也不能假装成功——所以后端把路径一并回传，由页面摆出来让人
+ * 自己复制。opened=false 时只看 detail + path。
+ */
+export type RevealResult = {
+  path: string
+  opened: boolean
+  detail: string
 }
 
 // ---- vLLM 服务（NL 模式的前置）
@@ -1141,6 +1201,8 @@ export type LlamaRuntime = {
   total: number
   error: string
   source: string
+  /** 装完跑的 --version 验活结果；没装过/没验过是 null */
+  smoke: { ok: boolean; detail: string } | null
   /** 当前平台有没有官方预编译包（macOS 没有，只能自己编译） */
   supported: boolean
   platform: string
@@ -1242,6 +1304,8 @@ export type DepItem = {
   supported?: boolean
   /** 只支持哪些平台，展示用：["linux"] */
   platforms?: string[]
+  /** 必须同版本配对的那个包（torch ↔ torchvision）；空 = 无配对 */
+  torch_peer?: string
 }
 
 /** 批量动作里的一项。单包动作也有一条，前端统一按列表画 */
@@ -1280,11 +1344,29 @@ export type DepGroup = {
   total: number
 }
 
+/** 可选的一档 torch 轮子。页面只做推荐与标注，装哪一档由用户选。 */
+export type DepTorchOption = {
+  /** auto / cu130 / cu126 / cpu */
+  key: string
+  label: string
+  /** 对应的 PyTorch 索引地址（auto 时是后端算出的本机推荐值） */
+  index: string
+  note: string
+  /** 本机能不能用这一档：false = 装了也跑不起来（置灰但可见） */
+  ok: boolean
+  /** 本机推荐：不是"必须"，只是默认勾上的那个 */
+  recommended: boolean
+  /** ok=false 的原因，或 ok=true 但"能用不必用"的提醒 */
+  reason: string
+}
+
 export type DepState = {
   python: string
   torch_index: string
   /** torch 走 CPU 版时的原因（驱动太老 / 读不出驱动）；空 = 正常走 CUDA */
   torch_note: string
+  /** 可选档位（含本机推荐）。只推荐不强制：装的时候按用户选的走 */
+  torch_options?: DepTorchOption[]
   summary: {
     total: number
     ok: number
@@ -1419,6 +1501,19 @@ export type CenterLease = {
   progress?: Record<string, unknown>
 }
 
+/** 全池还剩多少（不涉及任何包名，谁都能看）。 */
+export type PoolParts = {
+  total: number
+  done: number
+  /** 还没交付的片数 */
+  remaining: number
+  /** 其中还缺 tag 的片数 */
+  missing_tag: number
+  /** 其中还缺 NL 的片数 */
+  missing_nl: number
+  repos?: { repo: string; missing_tag: number; missing_nl: number }[]
+}
+
 /** 只读看板。ok=false 时 reason 说人话，其余字段可能没有。 */
 export type CenterBoard = {
   ok: boolean
@@ -1426,6 +1521,8 @@ export type CenterBoard = {
   status?: string
   tier?: string
   leases?: CenterLease[]
+  /** 老服务端没有这项 → undefined，顶部不显示余量而不是显示 0 */
+  parts?: PoolParts
 }
 
 export type CenterConfig = {
@@ -1433,6 +1530,11 @@ export type CenterConfig = {
   user_id: string
   tag_url: string
   mode: string
+  /**
+   * 派工倾向：'' 不挑 / tag / nl 只接缺这侧的片 / pref-tag / pref-nl 优先这侧。
+   * 与 mode（能产哪几侧）是两件事：倾向只影响服务端排序，不改变本机产出。
+   */
+  parts_pref: string
   out_dir: string
   interval: number
   extra_args: string
@@ -1442,6 +1544,10 @@ export type CenterConfig = {
   idle_timeout: number
   /** 本次最多交付多少片（0 = 不限） */
   max_packages: number
+  /** 分片下载并发连接数（1 = 单流；worker 侧上限 16） */
+  download_conns: number
+  /** 每片开工前测速选最快的 CDN 边缘 IP（v4/v6 都测） */
+  cdn_probe: boolean
 }
 
 export type CenterIdentity = {
@@ -1590,13 +1696,64 @@ export type PromptDoc = {
 /** 可提交的内容字段（新建/保存都只认这几个） */
 export type PromptBody = Pick<PromptDoc, 'prompt' | 'prompt_zh' | 'system' | 'note'>
 
+/** `prompts/*.md` 里的一份规则片段（选择器的「规则片段」分组） */
+export type PromptRule = {
+  id: string
+  name: string
+  /** 这份文件里有哪些节：TAG / CAPTION / CAPTION_ZH / TEXT / ... */
+  sections: string[]
+  chars: number
+  path: string
+}
+
 /** 新建时的初始内容 = 内置提示词在当前配置下的样子 */
 export type PromptTemplate = Pick<PromptDoc, 'prompt' | 'prompt_zh' | 'system'>
+
+/**
+ * tag 分类头的显存估算（`/api/tag-vram`）。
+ *
+ * level 三档对应页面三种颜色，语义不是"会不会崩"：
+ *   ok / tight 正常；over 表示超了可用显存——**不一定会失败**，驱动可能把
+ *   溢出的部分放到主机内存，代价是吞吐掉一个数量级（pixai 用 tf32 跑出
+ *   4.6s/张就是这么来的）。所以 over 也必须明确红出来。
+ */
+export type TagVram = {
+  ok: boolean
+  reason?: string
+  estimate_gb?: number
+  total_gb?: number
+  /** 此刻空闲量；nvidia-smi 拿不到时为 null */
+  free_gb?: number | null
+  /** 实际用来比较的预算（free 拿不到时按总量八折） */
+  budget_gb?: number
+  level?: 'ok' | 'tight' | 'over' | 'cpu'
+  advice?: string
+  gpu?: string
+}
 
 export const api = {
   health: () => json<Health>('/api/health'),
   defaults: () => json<Defaults>('/api/defaults'),
-  fs: (path: string) => json<FsListing>(`/api/fs?path=${encodeURIComponent(path)}`),
+  tagVram: (p: {
+    backend: string
+    precision: string
+    batch: number
+    device?: string
+  }) => {
+    const qs = new URLSearchParams({
+      backend: p.backend,
+      precision: p.precision,
+      batch: String(p.batch),
+    })
+    if (p.device) qs.set('device', p.device)
+    return json<TagVram>(`/api/tag-vram?${qs}`)
+  },
+  /** `exts` 给了就额外列出这些扩展名的文件（"目录或单个文件"的输入框用）。 */
+  fs: (path: string, exts?: string[]) => {
+    const qs = new URLSearchParams({ path })
+    if (exts && exts.length) qs.set('exts', exts.join(','))
+    return json<FsListing>(`/api/fs?${qs}`)
+  },
   preview: (params: PreviewParams) => {
     const qs = new URLSearchParams()
     qs.set('path', params.path)
@@ -1623,7 +1780,10 @@ export const api = {
   createJob: (spec: Partial<JobSpec>) =>
     json<Snapshot>('/api/jobs', { method: 'POST', body: JSON.stringify(spec) }),
   // ---- NL 提示词文件（仓库根 prompt/*.json）。名字就是文件名，走 query 传。
-  prompts: () => json<{ dir: string; items: PromptItem[] }>('/api/prompts'),
+  prompts: () =>
+    json<{ dir: string; items: PromptItem[]; rules: PromptRule[]; rules_dir: string }>(
+      '/api/prompts',
+    ),
   /** 新建时的初始内容 = 内置提示词在当前配置下的样子 */
   promptTemplate: () => json<PromptTemplate>('/api/prompts/template'),
   prompt: (id: string) =>
@@ -1643,7 +1803,7 @@ export const api = {
     system?: string
     note?: string
   }) => json<PromptDoc>('/api/prompts', { method: 'POST', body: JSON.stringify(body) }),
-  revealPrompts: () => json<{ path: string }>('/api/prompts/reveal', { method: 'POST' }),
+  revealPrompts: () => json<RevealResult>('/api/prompts/reveal', { method: 'POST' }),
   /**
    * 新建任务页记住的东西，两份：
    * `form` 页面 state 快照（填一项存一项，中途关掉也不丢）；
@@ -1701,6 +1861,11 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ strategy, overwrite }) },
     ),
   listJobs: () => json<{ jobs: Snapshot[] }>('/api/jobs'),
+  /** 清空历史列表。只删记录，不动产物与正在跑的任务。 */
+  clearHistory: () =>
+    json<{ removed: number; kept: number; cleared_live: number }>('/api/history', {
+      method: 'DELETE',
+    }),
   job: (id: string) => json<Snapshot>(`/api/jobs/${id}`),
   events: (id: string, after: number) =>
     json<{ events: JobEvent[]; snapshot: Snapshot }>(`/api/jobs/${id}/events?after=${after}`),
@@ -1839,6 +2004,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ repo, token, revision, format, proxy }),
     }),
+
+  /** 记住 / 忘记 HF 令牌。token 传空 = 删掉存档。存档绑仓库，换仓库不自动沿用。 */
+  saveHfToken: (payload: { token: string; repo: string; remember: boolean }) =>
+    json<{ saved: { repo: string; token_masked: string } | null }>('/api/hf/token', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   downloads: () => json<DownloadsState>('/api/downloads'),
   downloadsCached: (repo: string) =>
     json<{ repo: string; files: { filename: string; bytes: number }[] }>(
@@ -1966,6 +2138,24 @@ export const api = {
   /** 续跑一个已停下的任务：同参数重开，已打完的图自动跳过（返回新任务） */
   restart: (id: string) =>
     json<Snapshot>(`/api/jobs/${id}/restart`, { method: 'POST' }),
+  /**
+   * 只重打上一轮失败的图（返回新任务）。
+   *
+   * 与 restart 的差别在分母：restart 是整片重来、已完成靠产物跳过，进度条
+   * 会从 0 涨到整片张数；这里只做 failures.jsonl 里的 id，分母就是失败数。
+   * 仍失败的样本后端会剔除出分母（excused.jsonl），不会永久卡住分片。
+   */
+  retryFailed: (id: string) =>
+    json<Snapshot>(`/api/jobs/${id}/retry-failed`, { method: 'POST' }),
+
+  /**
+   * 失败账本摘要：待重试 / 已剔除 / 产物目录。
+   * 口径是 failures 减去 excused（同一张图可能两头都有记录）。
+   */
+  jobFailureBook: (id: string) =>
+      json<{ failed: number; excused: number; todo: number; out_dir: string; status: JobStatus }>(
+      `/api/jobs/${id}/failure-book`,
+    ),
   // ---- 跨重启的续做（暂停/停止后关过程序）
   llamaStatus: () => json<LlamaRuntime>('/api/llama'),
 
@@ -1977,6 +2167,9 @@ export const api = {
 
   cancelLlamaInstall: () =>
     json<LlamaRuntime>('/api/llama/install/cancel', { method: 'POST' }),
+
+  /** 一段可以直接粘给 AI 的排错报告。自动修不下去时，用户手里得有现场。 */
+  llamaReport: () => json<{ text: string }>('/api/vllm/report'),
 
   // 存档只回脱敏值：浏览器永远拿不到明文密钥。
 
@@ -2014,7 +2207,7 @@ export const api = {
     }),
 
   revealLocalDir: (kind: string, key: string) =>
-    json<{ path: string }>('/api/models/reveal', {
+    json<RevealResult>('/api/models/reveal', {
       method: 'POST',
       body: JSON.stringify({ kind, key }),
     }),
@@ -2102,10 +2295,19 @@ export const api = {
 
   deps: () => json<DepState>('/api/deps'),
 
-  depAction: (name: string, action: 'install' | 'uninstall' | 'reinstall') =>
-    json<DepState>(`/api/deps/${encodeURIComponent(name)}/${action}`, {
-      method: 'POST',
-    }),
+  /** torchVariant 只对 torch / torchvision 有意义（cu130 / cu126 / cpu），
+   *  空 = 按后端推荐。只推荐不强制：页面选了哪一档就装哪一档。 */
+  depAction: (
+    name: string,
+    action: 'install' | 'uninstall' | 'reinstall',
+    torchVariant?: string,
+  ) =>
+    json<DepState>(
+      `/api/deps/${encodeURIComponent(name)}/${action}${
+        torchVariant ? `?torch_variant=${encodeURIComponent(torchVariant)}` : ''
+      }`,
+      { method: 'POST' },
+    ),
   /** 装上所有缺失的包（不动版本不符的，那等于降级） */
 
   depInstallMissing: () => json<DepState>('/api/deps/install-missing', { method: 'POST' }),
@@ -2215,6 +2417,8 @@ export const api = {
   centerStart: (payload: {
     tag_url?: string
     mode?: string
+    /** 派工倾向：'' 不挑 / tag / nl 只接这侧 / pref-tag / pref-nl 优先这侧 */
+    parts_pref?: string
     out_dir?: string
     interval?: number
     extra_args?: string
@@ -2222,6 +2426,8 @@ export const api = {
     wait?: boolean
     idle_timeout?: number
     max_packages?: number
+    download_conns?: number
+    cdn_probe?: boolean
   }) => json<CenterState>('/api/center/start', { method: 'POST', body: JSON.stringify(payload) }),
   centerStop: () => json<CenterState>('/api/center/stop', { method: 'POST' }),
   /** 断开：忘掉本机设备身份（地址和姓名留着，重连不用重填） */

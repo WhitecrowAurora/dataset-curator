@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
+from . import tmpdir
+
 # 逐图产物的两种后缀（与 client.TAG_SUFFIX / NL_SUFFIX 保持同一口径）。
 TAG_SUFFIX = "-tag.json"
 NL_SUFFIX = "-nl.json"
@@ -504,7 +506,9 @@ def _merge_batched(
             pass
     est_rows = max(1, total_bytes // AVG_RECORD_BYTES)
     buckets = max(2, min(MAX_BUCKETS, -(-est_rows // max(1, batch_size))))
-    work = Path(tempfile.mkdtemp(prefix="tagmerge-"))
+    # 合并要按桶切文件，一份 30M 量级的输入会写出几百 MB 的中间文件，
+    # 落系统盘 %TEMP% 容易把 C 盘写满（详见 tmpdir）。
+    work = Path(tempfile.mkdtemp(prefix="tagmerge-", dir=tmpdir.ensure()))
     names: set[str] = set()
     try:
         handles: list = []

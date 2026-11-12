@@ -61,6 +61,10 @@ class Record:
     image_id: str
     caption: str = ""
     tag: str = ""
+    # 非空 = 这一条是"确定无产物"的剔除记录（输入无效 / 重试仍失败）。
+    # 它来自产物 jsonl 里的 excluded 行，见 artifacts.excluded_row。
+    # 有它就不该算进 missing_ids，否则几张坏图就能把整批合并判成失败。
+    excluded: dict = field(default_factory=dict)
     src_files: list[str] = field(default_factory=list)
     # 产物里自带的路径（HF 模式才有）。为空时由 build_rows 按配置拼。
     image_path: str = ""
@@ -71,6 +75,10 @@ class Record:
     # 里，是为了让下游一句 SQL 就能筛语言、模型版本、来源 revision。
     # 用 dict 而不是五个字段：以后文档加字段不用再改 Record 的构造点。
     meta: dict[str, object] = field(default_factory=dict)
+    # 元数据按 kind 分开存。meta 是"最后写入者覆盖"的并集，
+    # 逐键 update 会让「被拒绝版本独有的键」残留：实测正文取了 B、
+    # artist 却还是 A 的。分开存、生成时再合成，两侧才不会互相掏空。
+    meta_by_kind: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -136,6 +144,9 @@ class MergeStats:
     shard_coverage: list[ShardCoverage] = field(default_factory=list)
     # 落在所有分包区间之外的 id：说明分发表与实际产物对不上。
     unassigned_ids: list[str] = field(default_factory=list)
+    # 已声明剔除（输入无效 / 重试仍失败）的 id。它们的结论写在产物 jsonl 的
+    # excluded 行里，所以不计入 missing_ids、也不该让整批判失败。
+    excluded: object = field(default_factory=SpillList)
 
     @property
     def whole_missing_shards(self) -> list[ShardCoverage]:
@@ -168,6 +179,11 @@ class MergeStats:
             lines.append(f"缺 tag     : {len(self.missing_tag)}")
         if self.empty_content:
             lines.append(f"内容为空   : {len(self.empty_content)}")
+        if self.excluded:
+            # 单独一行且不进 failed：它们是"确认无产物"，混进缺失里会让人
+            # 以为是漏做，进而去重跑那些本来就打不出来的图。
+            lines.append(f"已剔除     : {len(self.excluded)}"
+                         "（输入无效 / 重试仍失败，不算缺失）")
         if self.duplicates:
             lines.append(f"内容冲突   : {len(self.duplicates)} 个 id（同一 id 两份不同内容）")
         if self.idempotent_repeats:
@@ -215,10 +231,13 @@ def _id_from_filename(name: str) -> str:
 # 不放 provenance：那一份是"模型参数对账"用的，混进业务字段会让续跑校验
 # 和人工读日志都变模糊。
 _META_FIELDS = ("caption_language", "annotation_model", "annotation_version",
-                "source_revision", "tags_original")
+                "source_revision", "tags_original",
+                # 画师三键：产物顶层就带着（tag/nl 各一份）。不挑出来的话，
+                # 合并产物里只剩 caption 里的 @前缀 可解析——那是文本，不是字段。
+                "artist", "artist_tag", "artist_source", "artists")
 # 这个字段是列表，不能走 str()：`str(["a"])` 会写成 "['a']"，下游 json.loads
 # 拿到的是字符串而不是字符串列表。
-_LIST_FIELDS = ("tags_original",)
+_LIST_FIELDS = ("tags_original", "artists")
 
 
 def _annotation_meta_of(obj: object) -> dict:
@@ -295,7 +314,8 @@ def _iter_shard_records(root: Path) -> Iterator[tuple[str, str, str, str, dict, 
     tag / nl 两个字段存的是与 json 文件完全相同的 payload 字符串，见
     artifacts.py；两种分片的行结构一致，所以这里只写一份解析。
     """
-    from .artifacts import find_artifacts, iter_artifact_rows, parse_payload
+    from .artifacts import (find_artifacts, is_excluded_row, iter_artifact_rows,
+                            parse_payload)
 
     for path in find_artifacts(root):
         try:
@@ -303,6 +323,13 @@ def _iter_shard_records(root: Path) -> Iterator[tuple[str, str, str, str, dict, 
             # 只说"这个文件里重复了"等于没说。
             for idx, row in enumerate(iter_artifact_rows(path)):
                 fallback = str(row.get("image_id") or "")
+                if is_excluded_row(row):
+                    # 剔除行没有 payload，走不了下面的解析；单独折成 kind="x"，
+                    # 让 collect 把它记成 Record.excluded 而不是当成"没产出"。
+                    yield (fallback, "excluded", "", "", {},
+                           {"excluded": dict(row.get("excluded") or {})},
+                           f"{path}#{idx}")
+                    continue
                 for kind in ("tag", "nl"):
                     obj = parse_payload(kind, str(row.get(kind) or ""))
                     if obj is None:
@@ -403,6 +430,19 @@ def collect(
                 rec = Record(image_id=image_id)
                 records[image_id] = rec
 
+            if kind == "excluded":
+                # 剔除记录：只记标记，不参与 tag/nl 的内容比较——它本来就没有
+                # 内容。同一个 id 若真的另有成功产出（重试救回来了），那条会走
+                # 正常分支填上 tag/nl，两边共存不冲突。
+                meta = dict(meta or {})
+                info = dict(meta.get("excluded") or {})
+                if info and not rec.excluded:
+                    rec.excluded = info
+                rec.src_files.append(source)
+                if not info:
+                    stats.unreadable.append(f"{source}: 剔除记录缺原因，已忽略")
+                continue
+
             key = (image_id, kind)
             prev = filled.get(key)
             if prev is not None:
@@ -429,6 +469,8 @@ def collect(
                 # 溯源字段跟着内容走：tag/nl 两份都带同一份值，先读到哪份用哪份。
                 # 被拒的版本不覆盖（与 prov 同一个处置），否则"批了 A 却记着 B 的
                 # 模型版本"。
+                # 元数据跟着**被采纳的那一版**走：按 kind 整体替换。
+                rec.meta_by_kind[kind] = dict(meta)
                 rec.meta.update(meta)
             if kind == "tag":
                 rec.tag = value
@@ -670,7 +712,15 @@ def check(
         want = SpillMap()
         for image_id in expected_ids:
             want[image_id] = True
-        stats.missing_ids = SpillList(i for i in want if i not in records)
+        # 缺失 = 应产出但没有正常内容、而且**不是**已声明剔除的那些。
+        # 不扣掉剔除项的话，几张输入无效的坏图就能让整批合并判失败——
+        # 而它们的结论早就写在 excluded 行里了，那是"了结"不是"缺交"。
+        missing: list[str] = []
+        for i in want:
+            if i in records:
+                continue
+            missing.append(i)
+        stats.missing_ids = SpillList(missing)
         stats.missing_ids.sort()
         stats.extra_ids = SpillList(i for i in records if i not in want)
         stats.extra_ids.sort()
@@ -689,7 +739,14 @@ def check(
     stats.empty_content = SpillList()
     stats.complete = 0
 
+    stats.excluded = SpillList()
     for image_id, rec in records.items():
+        if rec.excluded and not rec.tag and not rec.caption:
+            # 已声明剔除：没有内容是对的，不是"内容为空"。计一份单独的数，
+            # 让管理员看得见"这批里有多少张是确认无产物的"，而不是让它们
+            # 混进 empty_content 里去污染"模型是不是坏了"的判断。
+            stats.excluded.append(image_id)
+            continue
         ok = True
         if want_nl and not rec.caption:
             stats.missing_nl.append(image_id)
@@ -805,7 +862,19 @@ def build_rows(
     ordered = records.sorted_items() if isinstance(records, SpillMap) else (
         (key, records[key]) for key in sorted(records))
     for image_id, rec in ordered:
-        meta = rec.meta or {}
+        # tag 侧优先：它是"图 → 标签"的确定性产物；nl 只补 tag 缺的键。
+        meta: dict = dict(rec.meta_by_kind.get("nl") or {})
+        meta.update(rec.meta_by_kind.get("tag") or {})
+        if not meta:
+            meta = rec.meta or {}
+        # 画师声明做两套形态，供校验器与下游直接比对：
+        #   artists      —— 逐字原名列表（不含 @）
+        #   artist_tags  —— @形态列表，与 tags_final 里的画师条目同口径
+        # 老产物只有单个 artist / artist_tag，这里统一兜底成列表，
+        # 免得校验器再去猜「这一行声明了几个画师」。
+        _artists = [str(a) for a in (meta.get("artists") or []) if str(a).strip()]
+        if not _artists and str(meta.get("artist") or "").strip():
+            _artists = [str(meta["artist"])]
         yield {
             "image_id": image_id,
             # HF 模式下产物自带 image_path（hf://datasets/<repo>/<shard>#<key>），
@@ -820,6 +889,13 @@ def build_rows(
             "annotation_model": str(meta.get("annotation_model") or ""),
             "annotation_version": str(meta.get("annotation_version") or ""),
             "source_revision": str(meta.get("source_revision") or ""),
+            # 画师：合并产物里也留独立字段。空值写空串而不是省略键，
+            # 理由同上——各行键集合不同会让 parquet 转换直接失败。
+            "artist": str(meta.get("artist") or ""),
+            "artist_tag": str(meta.get("artist_tag") or ""),
+            "artist_source": str(meta.get("artist_source") or ""),
+            "artists": _artists,
+            "artist_tags": [a if a.startswith("@") else f"@{a}" for a in _artists],
         }
 
 

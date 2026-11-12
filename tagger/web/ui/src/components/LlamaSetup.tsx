@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Download, RefreshCw, TriangleAlert } from 'lucide-react'
+import { Check, Copy, Download, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { api, type LlamaRuntime } from '../lib/api'
 import { ProgressBar } from './ui/ProgressBar'
@@ -35,6 +35,7 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
   const [acting, setActing] = useState(false)
   const [error, setError] = useState('')
   const [manual, setManual] = useState('')
+  const [reportCopied, setReportCopied] = useState(false)
 
   // 回调放 ref：父组件传的是内联箭头函数，把它写进依赖会让轮询
   // 每次重渲染都重启一遍定时器（表现是进度条一顿一顿地不动）。
@@ -91,6 +92,23 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
     }
   }
 
+  /** 自动修不下去时的最后一条路：把现场整段交给 AI。
+   *
+   * 之所以不在页面上再堆"再试一次""换个版本"的按钮：能自动判的这里都判了
+   * （cudart 缺失、架构不符、驱动太老），剩下的组合我们没法穷举。与其让
+   * 用户在一堆按钮里猜，不如给他一段足够让 AI 一次说清的信息。
+   */
+  const copyReport = async () => {
+    try {
+      const { text } = await api.llamaReport()
+      await navigator.clipboard.writeText(text)
+      setReportCopied(true)
+      window.setTimeout(() => setReportCopied(false), 2500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   if (!snap) return null
 
   const pct = snap.total ? Math.min(100, (snap.done / snap.total) * 100) : 0
@@ -121,23 +139,44 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
   }
 
   if (snap.installed) {
+    // 装完验活没过：文件在，但 --version 起不来（缺 dll / 架构不符）。
+    // 这时候还说"已就绪"就是撒谎，用户会在半小时后才撞上。
+    const bad = snap.smoke && !snap.smoke.ok
     return (
-      <div className="flex items-center justify-between gap-2 border-b border-lx py-2">
-        {/* 原来是 11px 灰字挤在行里，等于没说：这一行的作用就是让人一眼
-            确认"引擎能起来"，状态必须比周围的输入项更醒目。 */}
-        <StatusChip tone="success" icon={<Check size={12} />}>
-          llama.cpp 已就绪{snap.version ? ` · ${snap.version}` : ''}
-        </StatusChip>
-        <button
-          type="button"
-          className="lx-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-1 text-[11px]"
-          disabled={acting}
-          onClick={() => void run('', true)}
-          title={`重装到 ${snap.install_root}`}
-        >
-          <RefreshCw size={11} />
-          重装
-        </button>
+      <div className="border-b border-lx py-2">
+        <div className="flex items-center justify-between gap-2">
+          {/* 原来是 11px 灰字挤在行里，等于没说：这一行的作用就是让人一眼
+              确认"引擎能起来"，状态必须比周围的输入项更醒目。 */}
+          <StatusChip tone={bad ? 'warning' : 'success'}
+                      icon={bad ? <TriangleAlert size={12} /> : <Check size={12} />}>
+            {bad
+              ? `llama.cpp 装上了但起不来${snap.version ? ` · ${snap.version}` : ''}`
+              : `llama.cpp 已就绪${snap.version ? ` · ${snap.version}` : ''}`}
+          </StatusChip>
+          <button
+            type="button"
+            className="lx-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-1 text-[11px]"
+            disabled={acting}
+            onClick={() => void run('', true)}
+            title={`重装到 ${snap.install_root}`}
+          >
+            <RefreshCw size={11} />
+            重装
+          </button>
+        </div>
+        {bad && (
+          <>
+            <ErrorBox text={snap.smoke?.detail || '--version 起不来'} className="mt-1.5" />
+            <button
+              type="button"
+              className="lx-btn-ghost mt-1.5 inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px]"
+              onClick={() => void copyReport()}
+            >
+              {reportCopied ? <Check size={12} /> : <Copy size={12} />}
+              {reportCopied ? '已复制，去粘给 AI' : '复制排错信息'}
+            </button>
+          </>
+        )}
       </div>
     )
   }
@@ -189,7 +228,23 @@ export function LlamaSetup({ onInstalled }: { onInstalled?: () => void }) {
       </details>
 
       {(snap.error || error) && (
-        <ErrorBox text={error || snap.error} className="mt-1.5" />
+        <>
+          <ErrorBox text={error || snap.error} className="mt-1.5" />
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="lx-btn-ghost inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px]"
+              onClick={() => void copyReport()}
+            >
+              {reportCopied ? <Check size={12} /> : <Copy size={12} />}
+              {reportCopied ? '已复制，去粘给 AI' : '复制排错信息'}
+            </button>
+            <span className="text-[10.5px] leading-relaxed text-lx-dim">
+              页面能自动判断的都判断过了。剩下的组合（资产改名、驱动版本、杀软删 dll）
+              没法穷举——复制这段发给 AI，里面带着路径、dll 清单、驱动与日志末尾。
+            </span>
+          </div>
+        </>
       )}
     </div>
   )

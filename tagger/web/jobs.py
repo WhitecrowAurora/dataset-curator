@@ -29,6 +29,7 @@ tar/zip 都不支持追加——边打边封意味着改一个参数就要把模
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -36,13 +37,18 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
+from .. import pack_parallel
 from ..artist import ArtistRule
-from ..cpu_tagger import TaggerUnavailable, build_backend, resolve_device
+from ..cpu_tagger import (TAG_BATCH_MAX, TaggerUnavailable,
+                          build_tag_backend_lanes, build_tag_backends,
+                          resolve_devices)
 from ..guard import ResourceGuard
 from ..local_tag import TagItem, TagStats, read_artifact, tag_items
 from ..nl_api import default_base as api_default_base
 from ..nl_api import normalize_provider
+from ..nl_api import resolve_hf_token
 from ..pack import PackOptions
 from ..pipeline import (MemberReader, PackReport, PackSpaceError, Plan,
                         estimate_job_bytes, existing_ancestor, free_bytes,
@@ -233,6 +239,57 @@ def _hf_proxy(explicit: str) -> str:
         return ""
 
 
+# 分片缓存目录的保留值：页面勾「与产物目录同盘」时传这个哨兵，见 _resolve_hf_cache。
+CACHE_BESIDE_OUT = "@out"
+
+
+def _prompt_parts(spec: "JobSpec") -> list[str]:
+    """多选提示词 → 规范化的 parts 列表（空 = 走内置生成）。
+
+    `prompt_parts` 优先；只填了单选的 `prompt_id` 时等价于只有一个 `file:`，
+    旧快照/旧表单不用迁移。
+    """
+    raw = [str(x).strip() for x in (spec.prompt_parts or ()) if str(x).strip()]
+    if raw:
+        return raw
+    pid = str(getattr(spec, "prompt_id", "") or "").strip()
+    return [f"file:{pid}"] if pid else []
+
+
+def _part_kind(part: str) -> str:
+    kind, sep, _ = str(part).partition(":")
+    return kind if sep else "file"
+
+
+def _part_name(part: str) -> str:
+    _, sep, name = str(part).partition(":")
+    return name if sep else str(part)
+
+
+def _resolve_hf_cache(spec: "JobSpec") -> str | None:
+    """把表里的 `hf_cache` 解析成真正传给客户端的目录；None = 用默认缓存。
+
+    `@out`（页面那个「与产物目录同盘」）= **同一块盘上的固定目录**
+    （out_dir 的父目录下的 `hf-cache`），不是 out_dir 本身。差一步很关键：
+    缓存是按仓库共享的（「分片下载」页提前下好的片要能直接命中），而 out_dir
+    是一任务一份——塞进 out_dir 里等于每个任务各下一份，删产物时还会连缓存
+    一起带走，500 GB 的分片能白下好几遍。
+    """
+    raw = str(getattr(spec, "hf_cache", "") or "").strip()
+    if raw != CACHE_BESIDE_OUT:
+        return raw or None
+    out_text = str(getattr(spec, "out_dir", "") or "").strip()
+    if not out_text:
+        # 产物目录都没填，"同一块盘"无从谈起；别把缓存甩到盘根去。
+        return None
+    out = Path(out_text)
+    try:
+        base = out.expanduser().resolve().parent
+    except OSError:                      # 盘符不存在：按字面父目录算，不阻断建任务
+        base = out.parent
+    return str(base / "hf-cache")
+
+
 def _effective_char_bounds(spec: "JobSpec") -> tuple[float, float]:
     """表单覆盖 + 配置默认 → 实际生效的 (最短, 最长) 字符数。
 
@@ -316,7 +373,19 @@ class JobSpec:
     out_dir: str = ""
     backend: str = "wd-eva02"
     model_dir: str = ""
+    # 单值设备。多卡用下面的 `tag_devices`；这里保留是为了让旧快照/旧方案
+    # 仍然能续做（它们只有这一个字段）。
     device: str = "auto"
+    # 多卡设备清单（cuda:0 / cuda:1 / ...）。空 = 回落到 `device`。
+    # 每张卡各加载一份权重，所以这是"用几张卡跑 tag"的显式声明，
+    # 不是"机器有几张卡"。
+    tag_devices: list[str] = field(default_factory=list)
+    # 多卡怎么分工：
+    #   batch（默认）= 一个包在跑，每凑一批等分给各卡（包少图多时最快）
+    #   pack        = N 个包同时跑，一个包完整归一张卡（包多时最快，也更好定位）
+    # 没有设备指纹上的差别，但产出的**顺序**会不同，出问题时要能一眼看出用的
+    # 是哪一种——所以写进产物 provenance。
+    tag_mode: str = "batch"
     precision: str = "bf16"
     batch: int = 4
     # pil = CPU 缩放/归一化；tensor = 缩放/归一化上卡（解码仍在 CPU）。
@@ -411,6 +480,10 @@ class JobSpec:
     # 按 caption_chars / 比例生成。文件内容整段替换内置提示词，provenance 里
     # 记 prompt 文本的 sha，所以改名不影响"这批数据同不同源"。
     prompt_id: str = ""
+    # 多选提示词（顺序即拼接顺序）：`file:<名字>` = 成品，`rule:<名字>` =
+    # `prompts/*.md` 的规则片段（按当前 mode/语言渲染后追加在成品后面）。
+    # 非空时优先于 prompt_id；两者都空 = 走内置生成。
+    prompt_parts: list[str] | None = None
     seed: int | None = None
     # 同一张图跨运行累计失败多少次后跳过。0 = 不限制。
     # 这个数不复用会出问题：一张必然失败的图每次重跑都要重试 3 次，
@@ -466,12 +539,22 @@ class JobSpec:
     hf_conns: int = 4
     # HF 请求走的代理。空 = 用设置里的全局代理（与下载页共用一份）
     hf_proxy: str = ""
+    # 分片缓存目录。空 = run/hf-cache（程序目录下，与下载页共用同一份缓存）。
+    # 填了就换盘：分片动辄 1~2 GB/片，工作盘经常比产物盘小得多。
+    hf_cache: str = ""
     # 给产物留的磁盘余量（GB）；0 = 自动（最大分片的 30%，不少于 2 GB）
     hf_reserve_gb: float = 0.0
 
     # 结果缓存：同图同参直接复用上次产出（重跑/换输出目录才划算，默认关）
     cache: bool = False
     cache_max_gb: float = 8.0
+
+    # 只重试失败项（「重试失败」按钮）。True 时这一趟的输入不是整个目录，
+    # 而是上一轮 failures.jsonl 里列出的 image_id：已完成的不必再扫一遍，
+    # 进度条的分母也是"失败数"而不是"整片张数"。
+    # 仍失败的按 output.retry_failed_rounds 剔除出分母（写 excused.jsonl），
+    # 不再是"永远留在失败账里，整个分片永远完不成"。
+    retry_failed: bool = False
 
     # ---- 产物形态。本地默认 jsonl：一包一文件，回传时一人发自己的那份。
 
@@ -517,6 +600,16 @@ class JobSpec:
         base = src.name if src.is_dir() else (src.stem or src.name)
         return src.parent / f"{base}-tags"
 
+    def tag_device_list(self) -> list[str]:
+        """设备清单。`tag_devices` 优先，空则回落到单值 `device`。
+
+        为什么不让调用方各自判断：本地引擎与 VLM 引擎是两条代码路径，
+        "旧快照只有 device"这条兼容规则写两遍迟早写歪一处，表现成
+        "VLM 任务用上了 3 张卡，同样的设置本地任务只用了 1 张"。
+        """
+        picked = [str(d).strip() for d in (self.tag_devices or []) if str(d).strip()]
+        return picked or [self.device or "auto"]
+
     def backend_thresholds(self) -> dict[str, float] | None:
         """滑条（threshold）与按类别阈值（thresholds）合并成 build_backend 的入参。"""
         merged = {str(k): float(v) for k, v in (self.thresholds or {}).items()}
@@ -545,12 +638,16 @@ class JobSpec:
         - artist_inject：改的是 .tag/.nl 文本内容（同 id 不同内容）。
         两类都会让旧分片"看起来已完成、实际对不上"，所以一起进指纹。
         """
-        return {
+        naming = {
             "artist": bool(self.artist),
             "artist_depth": int(self.artist_depth or 0),
             "seq_width": int(self.seq_width),
             "artist_inject": bool(self.artist and self.artist_inject),
         }
+        # 两个开关相同时产物与旧版本一致，沿用断点，避免重复封包。
+        if self.artist and self.artist_inject != self.artist_inject_tags:
+            naming["artist_inject_tags"] = bool(self.artist_inject_tags)
+        return naming
 
     def artist_rule(self, *, prefix: str = "@", aliases_path: str | None = None,
                     table: str | None = None,
@@ -598,6 +695,38 @@ def _count_lines(path: Path) -> int:
     except OSError:
         return 0
     return n
+
+
+def _id_set(path: Path) -> set[str]:
+    """从一本 jsonl 账里取 image_id 集合（坏行跳过，账不存在就是空）。"""
+    out: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(obj, dict):
+                    iid = str(obj.get("image_id") or "").strip()
+                    if iid:
+                        out.add(iid)
+    except OSError:
+        pass
+    return out
+
+
+def _excluded_ids(out_dir: Path) -> set[str]:
+    """已确认不会有打标产物的图，封包时从"应产出"里排除。
+
+    两本账各管一类，都不是"漏做了"：
+      skipped.jsonl —— 输入无效（< min_image_bytes 的纯色图），入口就跳过
+      excused.jsonl —— 重试后仍失败、已从分母剔除的坏样本
+    ★不从 failures.jsonl 取：那本是追加账，重试成功的图也在里面，按它排除
+      会把真正打好的产物漏出训练包。
+    """
+    return (_id_set(Path(out_dir) / "skipped.jsonl")
+            | _id_set(Path(out_dir) / "excused.jsonl"))
 
 
 def _append_fine_row(job_id: str, row: list[int]) -> None:
@@ -657,11 +786,16 @@ class Job:
         # 已经落盘的桶数：满桶立刻追加，最后不满的一桶等终态再补（见 _flush_fine）
         self._fine_saved = 0
         self._lock = threading.Lock()
+        self._persist_lock = threading.Lock()
         self.stop_flag = threading.Event()
         # 暂停：与 stop_flag 分开两个标志，因为语义完全不同——stop 是"收工"，
         # pause 是"原地不动，等我回来"。合成一个的话，恢复时无法区分
         # "用户想继续"和"用户只是没按停止"。
         self.pause_flag = threading.Event()
+        # 任务线程是否已经走到收尾（_run 的 finally 里、持 self._lock 置位）。
+        # pause()/resume() 都在同一把锁里判它，否则"线程刚散、状态刚被置成
+        # paused"这种交错会留下一个没人跑却占着任务位的任务（见 pause 里注释）。
+        self.thread_done = False
 
     # ---- 事件流
 
@@ -708,6 +842,11 @@ class Job:
                 row[3] += 1
             elif kind == "blacklisted":
                 row[4] += 1
+            elif kind == "excused":
+                # 剔除的样本算"已结算"，但**不算失败**：它已经从分母里扣掉了，
+                # 记进 failed 会让统计页的失败率永远含着一批"确定救不回来"的图，
+                # 曲线再也降不到 0，看起来像模型一直没好。
+                row[3] += 1
             else:
                 row[5] += 1
             if score is not None:
@@ -1087,9 +1226,12 @@ class Job:
         }
 
     def _failure_index(self) -> dict[str, dict]:
-        """failures.jsonl → {image_id: 最后一条}。
+        """failures.jsonl → {image_id: 最后一条}，只留**现在还失败**的。
 
         失败账跨运行累计（同一 id 每次失败追加一行），取最后一条才是当前状态。
+        `resolved: true` 是 client 在重试成功/被跳过后追加的冲销行；旧失败行
+        不会删，所以不按最后一条过滤的话，「只看失败」页会永远显示一批早就
+        打好的图，还带着一条 error 为空的怪记录。
         """
         path = Path(self.out_dir) / "failures.jsonl"
         latest: dict[str, dict] = {}
@@ -1110,7 +1252,7 @@ class Job:
                         latest[image_id] = obj
         except OSError:
             return {}
-        return latest
+        return {k: v for k, v in latest.items() if not v.get("resolved")}
 
     def _failure_total(self) -> int:
         """失败图数量（去重后）。按文件签名缓存，翻页不会反复读失败账。"""
@@ -1256,6 +1398,10 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        # 续做记录占住的运行锁（job_id → FileLock）。`resume_last()` 检查记录
+        # 时就把它拿在手上，交接给 _run 一直持到收尾，别的进程这段时间连
+        # "能不能继续"都判不出来——见 storage/resume.py 的 claim()。
+        self._resume_locks: dict[str, object] = {}
         # 盘上的历史：进程没了之后还能把列表画出来。启动读一次进内存，
         # 之后每次落盘顺带更新——否则每个列表请求都要扫一遍目录。
         from . import history as history_store
@@ -1294,6 +1440,35 @@ class JobManager:
                          for k, h in hist if k not in seen]
         merged.sort(key=lambda s: float(s.get("created") or 0), reverse=True)
         return merged[:limit]
+
+    def clear_history(self) -> dict:
+        """清空「历史任务」列表里那些已经结束的记录，返回删了几条。
+
+        **不动正在跑的任务**：pending / running / paused 的还在写产物，从
+        列表里抹掉只会让人以为任务丢了；而且它们的快照还会被 `_persist`
+        立刻写回来，删了等于做了个空动作。
+
+        内存里的 `self._history` 与盘上一起清：只清盘的话，本次进程下次拉
+        列表还会从内存那份旧字典里读出来，用户看到"点了清空没反应"，直到
+        重启才消失。
+        """
+        from . import history as history_store
+
+        with self._lock:
+            running = {str(j.id) for j in self._jobs.values()
+                       if j.status in ("pending", "running", "paused")}
+            # 已结束的活任务也要移出内存表。`all_snapshots` 是"先取 _jobs 再
+            # 合并历史"，只清历史的话，跑了一整天的进程里列表照样塞满——用户
+            # 看到的就是"点了清空没反应"。
+            finished = [k for k, j in self._jobs.items() if str(j.id) not in running]
+            for k in finished:
+                self._jobs.pop(k, None)
+            kept = {k: v for k, v in self._history.items() if k in running}
+            self._history = kept
+
+        removed = history_store.clear(keep=set(kept))
+        return {"removed": removed, "kept": len(kept),
+                "cleared_live": len(finished)}
 
     def snapshot_of(self, job_id: str) -> dict | None:
         """单条详情。内存里没有就去历史里找——历史页点开旧任务不能 404。"""
@@ -1379,16 +1554,17 @@ class JobManager:
         """
         from . import history as history_store
 
-        if job.status in ("done", "stopped", "failed"):
-            self._flush_fine(job)
-        try:
-            snap = job.snapshot()
-        except Exception:                  # noqa: BLE001 - 快照坏了也不该炸任务
-            return
-        with self._lock:
-            self._history[str(snap.get("id") or "")] = snap
-        # 磁盘写在锁外：别让一次慢 IO 卡住所有列表请求。
-        history_store.save(snap)
+        # 同任务从取快照到写盘串行；查询与其他任务不等这次 IO。
+        with job._persist_lock:
+            if job.status in ("done", "stopped", "failed"):
+                self._flush_fine(job)
+            try:
+                snap = job.snapshot()
+            except Exception:              # noqa: BLE001
+                return
+            with self._lock:
+                self._history[str(snap.get("id") or "")] = snap
+            history_store.save(snap)
 
     def running(self) -> Job | None:
         # paused 也算"占着位子"：它随时可能被唤醒接着往同一个 out_dir 写，
@@ -1462,19 +1638,34 @@ class JobManager:
                     f"质检：最短字符数（{lo}）不能大于最长字符数（{hi}）")
             # 选中的提示词文件必须真的在：跑进线程才报的话，页面已经显示
             # "运行中"再变成"失败"，人会以为是自己模型/服务的问题。
-            pid = str(spec.prompt_id or "").strip()
-            if pid:
-                from .. import prompts as prompt_files
+            from .. import prompts as prompt_files
 
-                try:
-                    prompt_files.load(pid)
-                except prompt_files.PromptError as exc:
-                    raise ValueError(str(exc)) from exc
+            parts = _prompt_parts(spec)
+            if parts:
+                if not any(_part_kind(p) != "rule" for p in parts):
+                    # 只有规则片段 = 拿几节条款顶掉整份指令，产出规格（长度、
+                    # 数量、格式）会一起丢，模型只能自己猜。宁可建任务时就拒。
+                    raise ValueError(
+                        "提示词至少要选一份成品（prompt/ 里的 json）；"
+                        "规则片段（prompts/*.md）是追加在成品后面的。")
+                for p in parts:
+                    if _part_kind(p) == "rule":
+                        continue          # 片段渲染时才读，读不到只是少一段
+                    try:
+                        prompt_files.load(_part_name(p))
+                    except prompt_files.PromptError as exc:
+                        raise ValueError(str(exc)) from exc
             plan = None
         else:
             if not spec.input_dir:
                 raise ValueError("本地任务必须填输入目录（input_dir）；HF 仓库输入请选 VLM 引擎")
             rule, aliases = _artist_context(spec)
+            # ★artist_table 必须一起给：`/api/preview` 一直是查表算名字的，
+            # 建任务这边漏传过——于是预览里是表里的 `ban_syou-000001.jpg`，
+            # 实际跑出来按目录名兜底成了 `alice-000001.jpg`。表没配时
+            # ArtistTable 自己就是 inactive，plan_inputs 会照旧走目录名。
+            from ..artist import ArtistTable
+
             plan = plan_inputs(
                 spec.input_dir,
                 recursive=spec.recursive,
@@ -1487,6 +1678,7 @@ class JobManager:
                 seq_width=spec.seq_width,
                 artist_rule=rule,
                 aliases=aliases,
+                artist_table=ArtistTable(rule.table),
             )
             if not plan.items:
                 raise ValueError(f"{spec.input_dir} 里没有找到图片（支持 "
@@ -1550,8 +1742,17 @@ class JobManager:
             raise ValueError(
                 "当前引擎不支持暂停（本地分类头按块推理，停下来等同于重跑）。"
                 "要中断请用停止——已完成的图同样不会重打。")
-        job.pause_flag.set()
-        job.status = "paused"
+        with job._lock:
+            # ★判定与置位放进同一把锁：线程刚好在收尾时，它和这里谁先拿到锁
+            # 决定结果。线程先拿 → thread_done=True，这里直接拒（那一轮已经
+            # 跑完了，没有"挂起"可言）；这里先拿 → 线程收尾时看到 paused，
+            # 由它把状态收口成 stopped。少了这一步，就会出现"状态写着暂停、
+            # 实际没有任何线程"的任务位——create() 之后一直报"已有任务在跑"，
+            # 而 resume() 叫醒的是一个不存在的循环。
+            if job.status != "running" or job.thread_done:
+                return False
+            job.pause_flag.set()
+            job.status = "paused"
         job.push("log", message="已暂停：在途的几张打完就停，产物都在盘上")
         self._save_resume(job, "paused")
         self._persist(job)
@@ -1564,10 +1765,16 @@ class JobManager:
         进程没了就没有 Job 对象可以"继续"，只能拿参数重建一个。
         """
         job = self.get(job_id)
-        if job is None or job.status != "paused":
+        if job is None:
             return False
-        job.pause_flag.clear()
-        job.status = "running"
+        with job._lock:
+            # thread_done 而状态还是 paused 的，是旧版本留下的坑（也可能是
+            # 收尾时被硬杀）：叫醒它只会得到一个永远 running 的空壳，
+            # 这一轮已经跑完了，如实拒绝比假装继续好。
+            if job.status != "paused" or job.thread_done:
+                return False
+            job.pause_flag.clear()
+            job.status = "running"
         job.push("log", message="已继续")
         self._persist(job)
         return True
@@ -1596,12 +1803,66 @@ class JobManager:
                 spec = JobSpec(**{k: v for k, v in saved.items() if k in known})
             except TypeError as exc:
                 raise ValueError(f"这条历史记录与当前版本不兼容：{exc}") from exc
-            job = self.create(spec)
-            self.start(job)
-            return job
-        if old.status in ("pending", "running", "paused"):
-            raise RuntimeError("这个任务还在跑，直接在运行页点「继续」就行，不用重开")
-        job = self.create(replace(old.spec))     # create 内部会再判一次"已有任务在跑"
+        else:
+            if old.status in ("pending", "running", "paused"):
+                raise RuntimeError("这个任务还在跑，直接在运行页点「继续」就行，不用重开")
+            spec = old.spec
+        job = self.create(replace(spec, force=False, max_failures=0))
+        # 先保存新任务再退休旧续做记录；补齐成功后不能再提示旧的失败任务。
+        self._save_resume(job, "stopped")
+        self._clear_resume(job_id)
+        self.start(job)
+        return job
+
+    def retry_failed(self, job_id: str) -> Job:
+        """只重打上一轮失败的图（左侧栏「重试失败」按钮）。
+
+        与 `restart` 的区别只有一个字段，但界面上完全是两件事：
+          restart      = 整批重来，已完成靠产物跳过（份额没变，分母是整片）
+          retry_failed = 只做 failures.jsonl 里的 id（分母就是那几十张）
+
+        为什么要独立一个入口：整片重跑在 6000 张/片时，为了那 80 张失败要先
+        扫完整个目录，而且进度条从 0 开始涨到 6000 才停——用户看到的是"又跑
+        一遍"，会以为按钮没生效。
+
+        仍失败的样本按 `output.retry_failed_rounds` 剔除出分母（excused.jsonl），
+        分片因此可以"有条件完成"，不会再被几张坏图永久卡住。
+        """
+        old = self.get(job_id)
+        if old is not None and old.status in ("pending", "running", "paused"):
+            raise RuntimeError("这个任务还在跑，等它停下再重试失败项")
+        if old is not None:
+            spec = old.spec
+            out_dir = old.out_dir
+        else:
+            with self._lock:
+                snap = self._history.get(job_id)
+            if snap is None:
+                raise ValueError("任务不存在")
+            saved = snap.get("spec") or {}
+            known = set(JobSpec.__dataclass_fields__)
+            try:
+                spec = JobSpec(**{k: v for k, v in saved.items() if k in known})
+            except TypeError as exc:
+                raise ValueError(f"这条历史记录与当前版本不兼容：{exc}") from exc
+            out_dir = Path(str(snap.get("out_dir") or spec.out_dir or ""))
+        # 先确认真的有失败项：没有就直接拒绝，不要建一个空任务让用户等。
+        from ..client import load_excused_ids, load_failed_ids
+
+        fails = load_failed_ids(out_dir / "failures.jsonl")
+        excused = load_excused_ids(out_dir / "excused.jsonl")
+        todo = set(fails) - excused
+        if not todo:
+            raise ValueError(
+                f"没有需要重试的失败项（{out_dir}/failures.jsonl）"
+                + (f"；另有 {len(excused)} 张已剔除的坏样本不会再试" if excused else ""))
+        job = self.create(replace(spec, out_dir=str(out_dir),
+                                  force=False, max_failures=0,
+                                  retry_failed=True))
+        job.push("log", message=(f"只重试失败项：{len(todo)} 张"
+                                 f"（仍失败则从分母剔除，明细进 excused.jsonl）"))
+        self._save_resume(job, "retry-failed")
+        self._clear_resume(job_id)
         self.start(job)
         return job
 
@@ -1657,19 +1918,39 @@ class JobManager:
 
         没有"接着上次那个线程"这回事——进程重启后线程早没了。重建出来的
         是新任务，已经打完的图靠有效产物跳过，所以效果仍是续做。
+
+        ★记录在这里就用 `claim()` 读：挑中哪条、占住哪把锁是一件事。早先
+        走的是 `wanted_resume()`（只读判定，探一次锁就放掉），两个进程能先后
+        通过同一个检查，然后各起一个任务往同一个 out_dir 里打——同一批图
+        打两遍，分片重复追加。锁一直持到 _run 收尾（见 self._resume_locks）。
         """
-        data = self.wanted_resume()
+        from ..storage.resume import claim
+
+        data, held = claim(RESUME_PATH)
         if data is None:
-            raise ValueError("没有可继续的任务（run/resume.json 不存在或产物目录已删）")
+            raise ValueError(
+                "没有可继续的任务（run/resume.json 不存在、产物目录已删，"
+                "或者另一个进程正在跑它）")
         try:
             spec = JobSpec(**data["spec"])
         except TypeError as exc:
+            held.close()
             raise ValueError(f"续做记录与当前版本不兼容：{exc}") from exc
         previous = self.get(str(data.get("job_id") or ""))
         if previous is not None:
             spec = replace(spec, api_key=previous.spec.api_key,
                            hf_token=previous.spec.hf_token)
-        job = self.create(spec)          # 里面会重扫输入、算 plan、校验空间
+        # 明确继续时允许补做此前累计失败的图片；不重算成功产物。
+        spec = replace(spec, force=False, max_failures=0)
+        try:
+            job = self.create(spec)      # 里面会重扫输入、算 plan、校验空间
+        except BaseException:
+            # 建不起来（已有任务在跑、参数不兼容）就立刻放锁：留着的话这条
+            # 记录会被一个根本不存在的手持者永久锁死。
+            held.close()
+            raise
+        with self._lock:
+            self._resume_locks[job.id] = held
         self._save_resume(job, "stopped")
         self._clear_resume(str(data.get("job_id") or ""))
         self.start(job)
@@ -1680,7 +1961,13 @@ class JobManager:
     def _run(self, job: Job) -> None:
         spec = job.spec
         from ..storage.resume import running_lock
-        active_resume = running_lock(RESUME_PATH, job.id)
+        # 续做任务在 resume_last() 里就已经把锁拿住了，这里必须**接着用同一把**
+        # 而不是再开一个句柄：Windows 的字节锁按句柄算，同一进程重开一个去抢
+        # 就是自己等自己（线程永久卡在 acquire 上，任务位也就再也放不掉）。
+        with self._lock:
+            active_resume = self._resume_locks.pop(job.id, None)
+        if active_resume is None:
+            active_resume = running_lock(RESUME_PATH, job.id)
         job.status = "running"
         job.started = time.time()
         self._persist(job)
@@ -1702,28 +1989,84 @@ class JobManager:
                 return
             job.phase = "tag"
             job.push("phase", phase="tag", message="开始打标")
-            backend = _build_backend(spec)
-            job.push("log", message=f"加载后端 {backend.name}（{spec.precision}"
-                                     f"，batch={spec.batch}"
-                                     f"，{getattr(backend, 'preprocess', 'pil')} 预处理）…")
-            backend.load()
-            job.model_id = str(getattr(backend, "model_id", "") or "")
-            job.push("log", message=f"后端就绪：{len(job.items)} 张待处理")
+            devices = resolve_devices(spec.tag_device_list())
+            groups = pack_parallel.group_by_pack(job.items) if len(devices) > 1 else []
+            # 包级并行的前提是"包比卡多"：包不够时 N 条 lane 会抢同一个包，
+            # 既没有并行度，还要多加载几份权重。这种情况退回批内切分并说明。
+            use_pack = (str(spec.tag_mode or "batch") == "pack"
+                        and len(devices) > 1 and len(groups) >= 2)
+            if str(spec.tag_mode or "batch") == "pack" and not use_pack:
+                job.push("log", message=(
+                    f"包级并行不适用（{len(devices)} 张卡 / {len(groups)} 个包），"
+                    f"本次按批内切分跑"))
 
-            # 把 job.stats 直接交给引擎原地累加：HTTP 线程随时能读到实时计数，
-            # 不必等任务结束才有一份"结账版"。
-            tag_items(
-                backend, job.items, out_dir=job.out_dir, force=spec.force,
-                on_progress=lambda kind, item, extra, st: self._on_item(job, kind, item, extra),
-                should_stop=job.stop_flag.is_set, stats=job.stats,
-                read_bytes=job.reader.read, guard=guard,
-            )
+            if use_pack:
+                lanes = min(len(devices), len(groups))
+                splits = pack_parallel.split_by_weight(
+                    groups, lanes, weight=lambda g: len(g[1]))
+                backends = _build_backend_lanes(spec, lanes)
+                job.push("log", message=(
+                    f"包级并行：{lanes} 条 lane，每卡一个包"
+                    f"（{len(groups)} 个包 / {len(job.items)} 张）"))
+                for idx, be in enumerate(backends):
+                    job.push("log", message=(
+                        f"加载后端 #{idx} {be.name}（{spec.precision}，"
+                        f"{getattr(be, 'device', '?')}，包 "
+                        f"{len(splits[idx])} 个）…"))
+                    be.load()
+                job.model_id = str(getattr(backends[0], "model_id", "") or "")
+                parts = [TagStats() for _ in backends]
+
+                def _lane(i: int, halt) -> None:
+                    # 每条 lane 自己开 WorkIndex / sink（tag_items 内部按 out_dir
+                    # 自建），彼此只通过盘上文件锁协调——与"多进程跑同一个产物
+                    # 目录"完全一样，所以不需要新造协调协议。
+                    for _name, items in splits[i]:
+                        if halt.is_set() or job.stop_flag.is_set():
+                            return
+                        tag_items(
+                            backends[i], items, out_dir=job.out_dir,
+                            force=spec.force,
+                            on_progress=lambda kind, item, extra, st: self._on_item(
+                                job, kind, item, extra),
+                            should_stop=job.stop_flag.is_set, stats=parts[i],
+                            read_bytes=job.reader.read, guard=guard,
+                        )
+
+                try:
+                    pack_parallel.run_lanes(lanes, _lane)
+                finally:
+                    # 中止时也要把已跑完的计数结进 UI，否则界面上是 0 完成而
+                    # 盘上其实已经有一批产物——那种不对称最容易被当成数据丢了。
+                    pack_parallel.merge_tag_stats(job.stats, parts)
+            else:
+                backend = _build_backend(spec)
+                job.push("log", message=f"加载后端 {backend.name}（{spec.precision}"
+                                         f"，batch={spec.batch}"
+                                         f"，{getattr(backend, 'preprocess', 'pil')} 预处理）…")
+                backend.load()
+                job.model_id = str(getattr(backend, "model_id", "") or "")
+                job.push("log", message=f"后端就绪：{len(job.items)} 张待处理")
+
+                # 把 job.stats 直接交给引擎原地累加：HTTP 线程随时能读到实时计数，
+                # 不必等任务结束才有一份"结账版"。
+                tag_items(
+                    backend, job.items, out_dir=job.out_dir, force=spec.force,
+                    on_progress=lambda kind, item, extra, st: self._on_item(job, kind, item, extra),
+                    should_stop=job.stop_flag.is_set, stats=job.stats,
+                    read_bytes=job.reader.read, guard=guard,
+                )
 
             stopped = job.stats.stopped or job.stop_flag.is_set() or bool(job.stats.busy)
             if stopped:
                 job.status = "stopped"
                 self._save_resume(job, "stopped")
                 job.push("log", message="打标已中止：不封包（半批数据不该进下游）")
+            elif job.stats.failed:
+                job.status = "failed"
+                job.error = (f"打标仍有 {job.stats.failed} 张失败，必须补齐后才能封包；"
+                             "继续任务会跳过已有成功图片，只补做缺失结果")
+                job.push("log", message=job.error)
             else:
                 # 先封包再落 "done"：轮询方一看到 done 就该能读到完整分片，
                 # 否则会在 .tmp 还没 rename 的时候拿到空的 packs。
@@ -1739,6 +2082,21 @@ class JobManager:
             job.status = "failed"
             job.error = f"{type(exc).__name__}: {exc}"
         finally:
+            with job._lock:
+                job.thread_done = True
+                # ★"暂停"的前提是线程里那个循环还活着、还读得到 pause_flag。
+                # 线程走到这里就再没人读了：状态必须收口，否则任务位被一条
+                # 已经死掉的线程永久占着（create() 一直报"已有任务在跑"，
+                # resume() 也只是把空壳状态改回 running）。这一轮既然已经
+                # 跑完，就按"已停止"记账——参数留在 resume.json 里，能续做。
+                was_paused = job.status == "paused"
+                if was_paused:
+                    job.status = "stopped"
+                    job.pause_flag.clear()
+            if was_paused:
+                job.push("log", message=(
+                    "暂停时这一轮已经跑完：任务按「已停止」收尾，"
+                    "点「继续」会重建一批、已完成的图照样跳过"))
             job.current = ""
             job.ended = time.time()
             job.push("job_finished", status=job.status, error=job.error,
@@ -1747,11 +2105,14 @@ class JobManager:
             self._persist(job)
             # 后端持有几百 MB 权重与 CUDA 上下文，任务结束就放手，
             # 否则连跑三个任务会占着三份显存不放。
-            # 跑完/失败的记录没有"继续"的必要，删掉；暂停与停止的留着。
-            # 失败也删：同一份参数再跑一次大概率还是同样的错，让页面反复
-            # 提示"继续"只会把人往同一个坑里带。
-            if job.status in ("done", "failed"):
+            # 只有完整成功才清除；失败保留参数与断点，成功图片不会重打。
+            if job.status == "done":
                 self._clear_resume(job.id)
+            elif job.status == "failed":
+                self._save_resume(job, "failed")
+            elif was_paused:
+                # 上面那条路没有写过续做记录（正常停止在收尾前就写过了）。
+                self._save_resume(job, "stopped")
             active_resume.close()
             del backend
             job.reader.close()
@@ -1791,7 +2152,7 @@ class JobManager:
         接进快照。重试升级/失败黑名单/断点续做/guard 熔断全在主流程里。"""
         import argparse
 
-        from ..client import run_client
+        from ..client import ClientStats, run_client
         from ..config import DEFAULT_TIERS, load_ops, load_tier_table
 
         spec = job.spec
@@ -1821,25 +2182,9 @@ class JobManager:
         ops = load_ops(table)
         # run_client 的 keep/阈值只从配置读，命令行没有对应开关；web 把
         # 表单里的覆盖注进 tagging 段，等价于"替用户改一份临时配置"。
-        if spec.keep_categories or spec.thresholds:
-            tagging = dict(ops.tagging or {})
-            if spec.keep_categories:
-                tagging["keep_categories"] = list(spec.keep_categories)
-            if spec.thresholds:
-                tagging["thresholds"] = {str(k): float(v)
-                                         for k, v in spec.thresholds.items()}
-            ops = replace(ops, tagging=tagging)
+        ops = _apply_tagging_overrides(ops, spec)
 
-        # 画师名在 VLM 路径里来自数据本身（parquet 的 artist 列 / webdataset
-        # 的目录名），不像本地引擎那样从路径反推。配置里的 enabled 是给
-        # 命令行兜底的默认值，而"这次要不要把 @画师 写进 .nl/.tag 文本"
-        # 是用户当次的选择——不覆盖的话，页面上那个开关就是摆设。
-        artist_cfg = dict(ops.artist or {})
-        artist_cfg["enabled"] = bool(spec.artist)
-        artist_cfg["inject_caption"] = bool(spec.artist and spec.artist_inject)
-        # NL 与 TAG 是两个开关、两条训练输入，只搬其中一个等于另一个永远是默认值。
-        artist_cfg["inject_tags"] = bool(spec.artist and spec.artist_inject_tags)
-        ops = replace(ops, artist=artist_cfg)
+        ops = _apply_artist_overrides(ops, spec)
 
         # 质检线同理：配置里是一套保守默认，页面上调过就以表单为准。
         # 这三项都直接影响"每张图打几次"，是 30M 量级下最贵的旋钮之一。
@@ -1919,13 +2264,28 @@ class JobManager:
         backend_name = vlm_backend_for(mode, spec.backend)
         provider = spec_provider(spec)
 
-        # 提示词文件在真正开跑时现读一次：从建任务到线程启动之间用户可能刚
-        # 编辑过，页面显示的和实际发出去的对不上是最难查的那类问题。
-        prompt_doc = None
-        if str(spec.prompt_id or "").strip():
+        # 提示词在真正开跑时现读一次：从建任务到线程启动之间用户可能刚编辑过，
+        # 页面显示的和实际发出去的对不上是最难查的那类问题。
+        # 多选（成品 + 规则片段）也在这里拼成一段文本：client 只认整段指令，
+        # 拼接放在这一层，客户端和 CLI 完全不用知道"多选"这回事。
+        parts = _prompt_parts(spec)
+        prompt_text = ""
+        prompt_zh_text = ""
+        system_text = ""
+        prompt_name = ""
+        if parts:
             from .. import prompts as prompt_files
 
-            prompt_doc = prompt_files.load(spec.prompt_id)
+            prompt_text, prompt_zh_text, system_text = prompt_files.compose(
+                parts, mode=mode, text_rules=ops.output_spec().text_rules)
+            prompt_name = "+".join(p if not p.startswith("file:") else p[5:]
+                                   for p in parts)
+        if prompt_text and not prompt_zh_text and float(
+                getattr(spec, "caption_zh_ratio", 0.0) or 0.0) > 0:
+            # 与 CLI 同口径：自定义提示词没写中文版就该说出来，不然跑完才发现
+            # "比例明明设了 30%，一条中文都没有"。
+            job.push("log", message=f"提示词「{prompt_name}」没有中文版，"
+                                    f"本次 caption_zh_ratio 不生效（全出英文）")
 
         args = argparse.Namespace(
             # HF 输入与本地分片二选一（create 已校验）；shard=None 时
@@ -1967,10 +2327,10 @@ class JobManager:
             caption_zh_ratio=float(getattr(spec, "caption_zh_ratio", 0.0) or 0.0),
             # 提示词文件：空串 = 用内置生成的那份。中文/系统提示词一起带上，
             # 三个都空时 run_client 的行为与改造前完全一致。
-            prompt_text=prompt_doc.prompt if prompt_doc else "",
-            prompt_zh_text=prompt_doc.prompt_zh if prompt_doc else "",
-            system_text=prompt_doc.system if prompt_doc else "",
-            prompt_name=prompt_doc.id if prompt_doc else "",
+            prompt_text=prompt_text,
+            prompt_zh_text=prompt_zh_text,
+            system_text=system_text,
+            prompt_name=prompt_name,
             tier="", variant="", seed=spec.seed,
             quiet=True, use_file_url=bool(spec.use_file_url),
             failures=None, stats_json=None,
@@ -1981,20 +2341,28 @@ class JobManager:
             tag_backend=backend_name,
             tag_model=spec.model_repo or None,
             tag_model_dir=spec.model_dir or None,
-            tag_device=spec.device or "auto",
+            # 多卡用逗号串传（CLI 的 --tag-device 支持该写法），
+            # 这样 run_client 只需要一条解析路径。
+            tag_device=",".join(spec.tag_device_list()),
             tag_precision=spec.precision,
-            tag_batch=max(1, int(spec.batch or 1)),
+            # 批大小前端是 1..100 的滑动条，但存档/手打/旧快照都可能塞进
+            # 更大的数（或 0/负数）。上限必须在这里也夹一次：服务端不夹的话
+            # 一个 999 会直接变成 CUDA OOM，而报错点离"谁填的"很远。
+            tag_batch=max(1, min(TAG_BATCH_MAX, int(spec.batch or 1))),
             tag_preprocess=str(spec.preprocess or "pil"),
             artifact_format=str(spec.artifact_format or "jsonl"),
             parquet_rows=int(spec.parquet_rows or 2000),
             hf_repo=spec.hf_repo or "",
-            hf_token=spec.hf_token or "",
+            # 用户没填就取存档，**且只在仓库对得上时**取（见
+            # nl_api.resolve_hf_token）。放在这里而不是让前端把明文回填进
+            # 表单：存档留在后端，浏览器就始终拿不到明文。
+            hf_token=resolve_hf_token(spec.hf_repo or "", spec.hf_token or ""),
             hf_revision=spec.hf_revision or "main",
             hf_files=list(spec.hf_files or []),
             # 空串 = 按实际格式挑后缀。写死 "*.parquet" 时，只有 tar 的仓库
             # 会被过滤成 0 个分片，报出来是"没有可处理的 .tar"，很难对上号。
             hf_pattern="",
-            hf_cache=None, hf_shards=0, hf_keep=False,
+            hf_cache=_resolve_hf_cache(spec), hf_shards=0, hf_keep=False,
             hf_format=str(spec.hf_format or "auto"),
             hf_prefetch=max(0, int(spec.hf_prefetch or 0)),
             hf_conns=max(1, min(16, int(spec.hf_conns or 1))),
@@ -2037,6 +2405,14 @@ class JobManager:
             elif kind == "blacklisted":
                 job.push("item", image_id=task.image_id, ok=False,
                          error="连续失败达到上限，本批拉黑跳过", tags=[])
+            elif kind == "excused":
+                # 重试后仍失败、已从分母剔除。界面上要**看得见它去哪了**：
+                # 只从"失败"里消失、不给一行说明，用户会以为它悄悄被丢了。
+                job.push("item", image_id=task.image_id, ok=False, excused=True,
+                         error=("重试后仍失败，已剔除出分母"
+                                + (f"：{getattr(outcome, 'error', '')}"
+                                   if getattr(outcome, "error", "") else "")),
+                         tags=[])
             elif kind == "busy":
                 job.push("item", image_id=task.image_id, ok=False,
                          error="其他进程正在处理，续做时会重新核对", tags=[])
@@ -2051,11 +2427,86 @@ class JobManager:
             f"  {spec_api_base(spec) if provider else spec.url}"
             f"  模型 {spec.vlm_model}  产物 {spec.artifact_format}"
             + (f"  HF 仓库 {spec.hf_repo}" if spec.hf_repo else "  本地分片输入")))
-        code = run_client(args, ops, table, on_progress=hook,
-                          should_stop=job.stop_flag.is_set,
-                          paused=job.pause_flag.is_set,
-                          on_log=lambda message: job.push("log", message=message),
-                          guard=guard)
+        def _one_run(lane_args, lane_hook) -> int:
+            return run_client(lane_args, ops, table, on_progress=lane_hook,
+                              should_stop=job.stop_flag.is_set,
+                              paused=job.pause_flag.is_set,
+                              on_log=lambda message: job.push("log", message=message),
+                              guard=guard,
+                              # 「重试失败」那一趟：只做 failures.jsonl 里的 id，
+                              # 仍失败则剔除出分母（轮数取配置 retry_failed_rounds）。
+                              only_failed=bool(spec.retry_failed),
+                              retry_budget=(ops.output_spec().retry_failed_rounds
+                                            if spec.retry_failed else 0))
+
+        devices = resolve_devices(spec.tag_device_list())
+        # 包级并行只在"本地分片输入 + 本地推理服务"下成立：
+        #   - HF 仓库的分片是流式拉的，一包几个 GB，按包分给多卡只会让下载和
+        #     算力互相等，那不是并行而是互相拖；
+        #   - 外部 API 没有"每张卡一个服务地址"这回事，找不出 N 个端点。
+        lane_packs: list[Path] = []
+        if (str(spec.tag_mode or "batch") == "pack"
+                and len(devices) > 1 and not normalize_provider(spec_provider(spec))):
+            from ..client import classify_local_inputs
+
+            try:
+                pq, sh = classify_local_inputs(list(getattr(args, "shard", None) or []))
+                lane_packs = [Path(p) for p in (pq + sh)]
+            except Exception:            # noqa: BLE001 - 判不出来就当不适用
+                lane_packs = []
+        use_pack = len(lane_packs) >= 2
+
+        if str(spec.tag_mode or "batch") == "pack" and not use_pack:
+            job.push("log", message=(
+                f"包级并行不适用（{len(devices)} 张卡 / {len(lane_packs)} 个可分的包），"
+                f"本次按批内切分跑"))
+
+        if use_pack:
+            lane_urls = list(multi_urls) or [str(getattr(args, "url", "") or "")]
+            lanes = min(len(devices), len(lane_packs))
+            groups = pack_parallel.split_by_weight(
+                lane_packs, lanes,
+                weight=lambda p: p.stat().st_size if p.is_file() else 0)
+            job.push("log", message=(
+                f"包级并行：{lanes} 条 lane，每卡一个包"
+                f"（{len(lane_packs)} 个包，NL 服务 {len(lane_urls)} 个）"))
+            codes = [0] * lanes
+            captured: list = [None] * lanes
+
+            def _lane(i: int, halt) -> None:
+                if halt.is_set():
+                    return
+                # 每条 lane 一份参数：输入、服务地址、tag 卡各自独立。
+                # 其余（ops/table/guard/out_dir）共用——产物目录必须同一个，
+                # 否则封包阶段会漏掉别的 lane 写的部分。
+                lane_args = copy.copy(args)
+                lane_args.shard = [str(p) for p in groups[i]]
+                lane_args.url = lane_urls[i % len(lane_urls)]
+                lane_args.urls = []
+                lane_args.tag_device = devices[i]
+                if hasattr(lane_args, "tag_devices"):
+                    lane_args.tag_devices = [devices[i]]
+
+                def lane_hook(kind, task, outcome, stats, _i=i) -> None:
+                    # run_client 内部自建 ClientStats，只能从这里拿到引用。
+                    captured[_i] = stats
+                    hook(kind, task, outcome, stats)
+
+                job.push("log", message=(
+                    f"lane #{i}: {groups[i][0].name if groups[i] else '-'} 等 "
+                    f"{len(groups[i])} 个包 → {devices[i]}"))
+                codes[i] = _one_run(lane_args, lane_hook)
+
+            pack_parallel.run_lanes(lanes, _lane)
+            code = next((c for c in codes if c), 0)
+            # 结账：各 lane 的 stats 求和后覆盖 job.client_stats，
+            # 后面的 busy/failed 判定读的才是全局数，而不是最后写进来的那条。
+            merged = ClientStats()
+            pack_parallel.merge_client_stats(
+                merged, [s for s in captured if s is not None])
+            job.client_stats = merged
+        else:
+            code = _one_run(args, hook)
         if job.stop_flag.is_set():
             job.status = "stopped"
             job.push("log", message="已停止：产物与断点都在盘上，重跑可续做")
@@ -2078,14 +2529,27 @@ class JobManager:
         job.pack_started = time.time()
         job.push("phase", phase="pack",
                  message=f"开始封包（{'/'.join(options.formats)}）")
+        # 两本"合法无产物"的账：输入无效被跳过（skipped.jsonl）、重试仍失败
+        # 被剔除（excused.jsonl）。它们没有产物是**结论**不是故障，封包时不能
+        # 算作"缺产物"，否则 `skipped_missing > 0` 会把任务标成 failed，
+        # 几张坏图就卡住整批——正是「重试失败」这条线要解决的问题。
+        # 从磁盘读而不靠打标阶段的事件：两个引擎各自有 hook，跨重启后事件
+        # 也没了，账本才是唯一一直存在的东西。
+        excluded = _excluded_ids(job.out_dir)
+        if excluded:
+            job.push("log", message=(
+                f"封包排除 {len(excluded)} 张已确认无产物的图"
+                f"（输入无效 / 重试后剔除）"))
         try:
             report = pack_items(
                 job.items, job.out_dir, options,
+                excluded_ids=excluded,
                 layout=spec.layout,
                 reader=job.reader,
                 model_id=job.model_id,
                 artist_prefix=_artist_context(spec)[0].prefix,
                 inject_artist=bool(spec.artist and spec.artist_inject),
+                inject_artist_tags=bool(spec.artist and spec.artist_inject_tags),
                 naming=spec.naming_fingerprint(),
                 on_sample=lambda item: self._on_pack_sample(job, item),
                 on_skip=lambda item, why: self._on_pack_skip(job, item, why),
@@ -2124,6 +2588,10 @@ class JobManager:
             job.push("log", message=f"封包未完成：{report.stopped}")
         elif job.stop_flag.is_set():
             job.status = "stopped"
+        elif report.failed or report.skipped_missing or report.total != len(job.items):
+            job.status = "failed"
+            job.error = (f"封包未补齐：失败 {report.failed} 条，缺产物 "
+                         f"{report.skipped_missing} 条；继续任务会补做未封成功的图片")
 
     # ---- 回调
 
@@ -2146,7 +2614,7 @@ class JobManager:
         else:
             job.push("item", image_id=item.image_id, ok=False,
                      error=str(extra)[:200], tags=[])
-        # 本地引擎没有重试也没有质检分：attempts 恒为 1，全落"首过"
+        # 本地引擎不提供逐图尝试次数与质检分，按最终结算记录计数。
         job.note_item(kind)
 
     def _on_pack_sample(self, job: Job, item: TagItem) -> None:
@@ -2158,13 +2626,14 @@ class JobManager:
 
     def _on_pack_skip(self, job: Job, item: TagItem, why: str) -> None:
         """封包阶段被跳过的条目。三种原因分开计数：界面上"跳过"的含义
-        必须能区分"上次已封过"和"这张根本没打出标"。"""
+        必须能区分"上次已封过"、"已确认无产物"和"这张根本没打出标"。"""
         job.current = item.image_id
         if not job.pack_first:
             job.pack_first = time.time()
-        if why == "done":
+        if why in ("done", "excluded"):
             job.pack_skipped += 1
-            job.push("pack_item", image_id=item.image_id, ok=True, skipped=True)
+            job.push("pack_item", image_id=item.image_id, ok=True, skipped=True,
+                     excluded=(why == "excluded"))
         elif why == "missing":
             job.pack_missing += 1
             job.push("pack_item", image_id=item.image_id, ok=False, missing=True)
@@ -2213,12 +2682,73 @@ def _artist_context(spec: JobSpec) -> tuple[ArtistRule, dict[str, str]]:
     return rule, aliases
 
 
+def _apply_tagging_overrides(ops: Any, spec: JobSpec) -> Any:
+    """把表单里的 keep / 阈值覆盖注进 `ops.tagging`，返回新的 ops。
+
+    run_client 的 keep/阈值只从配置读，命令行没有对应开关；web 走"替用户改
+    一份临时配置"这条路。抽成纯函数是为了能单测——它埋在 `_run_vlm` 里时，
+    验证"滑条到底有没有生效"只能靠真跑一个 VLM 任务。
+
+    ★两处曾经都漏了：
+
+      1. 只看 `spec.thresholds`（按类别阈值），不看 `spec.threshold`（滑条）。
+         于是"只拖了滑条"时条件为假、整段不进，滑条在 VLM 任务里完全无效。
+         现在统一用 `backend_thresholds()`，它已经把两者合并。
+      2. `tagging["thresholds"] = {...}` 是**整体替换**，会把 tiers.yaml 里
+         按类别调好的值（例：character: 0.5）抹掉。用户只想改一个类别，结果
+         其他类别集体退回默认口径。现在改成合并。
+    """
+    overrides = spec.backend_thresholds()
+    if not spec.keep_categories and not overrides:
+        return ops
+    tagging = dict(ops.tagging or {})
+    if spec.keep_categories:
+        tagging["keep_categories"] = list(spec.keep_categories)
+    if overrides:
+        merged = {str(k): float(v)
+                  for k, v in (tagging.get("thresholds") or {}).items()}
+        merged.update(overrides)
+        tagging["thresholds"] = merged
+    return replace(ops, tagging=tagging)
+
+
+def _apply_artist_overrides(ops: Any, spec: JobSpec) -> Any:
+    """把表单里的画师选择注进 `ops.artist`，返回新的 ops。
+
+    抽成纯函数是为了能单测——它埋在 `_run_vlm` 里时，验证"填了画师表到底
+    有没有生效"只能真跑一个 VLM 任务，而那要几分钟加一个 HF 仓库。
+
+    两条路径各有入口，但"用户在表单上选了什么"必须只有一份解释：
+
+      - `enabled` / `inject_caption` / `inject_tags`：三项都直接来自表单。
+        配置里的是给命令行兜底的默认值，不覆盖的话页面上的开关就是摆设。
+      - `table`：**表单填了就用表单的，空才回落配置**。与 `_artist_context`
+        同口径（那里给本地引擎用）。
+
+    ★`table` 曾经漏在这里，后果很难查：表单里的画师表地址正确、三个开关
+      全开，产物 `artist` 却全空。原因是 `ArtistTable(None)` 直接不查表，
+      而 HF parquet 里通常没有 `artist` 列，两条来源同时断掉，日志里一个
+      字都不提。本地引擎走 `_artist_context` 是对的，只有 VLM 路径中招，
+      于是现象看起来像"画师注入整个坏了"，而不是"画师表没被用上"。
+    """
+    artist_cfg = dict(ops.artist or {})
+    artist_cfg["enabled"] = bool(spec.artist)
+    artist_cfg["inject_caption"] = bool(spec.artist and spec.artist_inject)
+    # NL 与 TAG 是两个开关、两条训练输入，只搬其中一个等于另一个永远是默认值。
+    artist_cfg["inject_tags"] = bool(spec.artist and spec.artist_inject_tags)
+    # 空串（= 用户清空了表单）才回落到配置里那份，不是无条件覆盖。
+    table = (spec.artist_table or "").strip()
+    if table:
+        artist_cfg["table"] = table
+    return replace(ops, artist=artist_cfg)
+
+
 def _build_backend(spec: JobSpec):
-    backend = build_backend(
+    backend = build_tag_backends(
         spec.backend,
+        devices=resolve_devices(spec.tag_device_list()),
         model=spec.model_repo or None,
         model_dir=spec.model_dir or None,
-        device=resolve_device(spec.device or "auto"),
         precision=spec.precision,
         batch_size=max(1, int(spec.batch or 1)),
         preprocess=spec.preprocess or "pil",
@@ -2229,6 +2759,31 @@ def _build_backend(spec: JobSpec):
     if backend is None:
         raise ValueError("本地打标必须选一个 tag 后端（不能是 none）")
     return backend
+
+
+def _build_backend_lanes(spec: JobSpec, limit: int):
+    """包级并行用的后端清单：一张卡一份，**不包装**。
+
+    与 `_build_backend` 的唯一区别就是最后不套 MultiDeviceTagBackend——
+    包级并行要求"一条 lane 只认自己那张卡"，套上包装器会让每条 lane 又去
+    抢所有卡。
+    """
+    objs = build_tag_backend_lanes(
+        spec.backend,
+        devices=resolve_devices(spec.tag_device_list()),
+        limit=limit,
+        model=spec.model_repo or None,
+        model_dir=spec.model_dir or None,
+        precision=spec.precision,
+        batch_size=max(1, int(spec.batch or 1)),
+        preprocess=spec.preprocess or "pil",
+        keep=list(spec.keep_categories) if spec.keep_categories else None,
+        thresholds=spec.backend_thresholds(),
+        verbose=False,
+    )
+    if not objs or any(o is None for o in objs):
+        raise ValueError("本地打标必须选一个 tag 后端（不能是 none）")
+    return objs
 
 
 # 进程级单例。多 worker 跑 uvicorn 时这里会各存一份——本地单用户场景下

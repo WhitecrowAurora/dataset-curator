@@ -22,7 +22,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react'
-import { api, type DepItem, type DepState } from '../lib/api'
+import { api, type DepItem, type DepState, type DepTorchOption } from '../lib/api'
 import { PageHeader, SectionPanel, SheetHead, StatusChip, type StatusTone } from '../components/ui/launcher'
 import { ErrorBox } from '../components/ui/controls'
 
@@ -54,17 +54,28 @@ function DepRow({
   item,
   busy,
   pending,
+  torchOptions,
+  torchVariant,
+  onTorchVariant,
   onAct,
 }: {
   item: DepItem
   /** 有 pip 在跑时全表禁用：两个 pip 同时改 site-packages 会互相拆台 */
   busy: boolean
   pending: string
+  /** 只有 torch / torchvision 这两行会收到 */
+  torchOptions?: DepTorchOption[]
+  torchVariant: string
+  onTorchVariant: (key: string) => void
   onAct: (name: string, action: 'install' | 'uninstall' | 'reinstall') => void
 }) {
   const status = STATUS[item.status] ?? STATUS.missing
   const mine = pending.startsWith(`${item.name}:`)
   const disabled = busy || mine
+  const variant = torchOptions?.find((v) => v.key === torchVariant) ?? torchOptions?.find((v) => v.recommended)
+  // 用户选了本机跑不起来的那一档：仍允许装（只推荐不强制），但按钮前要把
+  // 后果说清——不然又是一个"装完每张图都报 no kernel image"。
+  const blockedVariant = !!variant && !variant.ok
 
   return (
     <div className="lx-sheet-row flex flex-wrap items-center gap-x-4 gap-y-2 px-[18px] py-2.5 md:px-7">
@@ -117,6 +128,63 @@ function DepRow({
               item.note || ''
             )}
           </div>
+          {/* torch 的轮子按 CUDA 版本分目录、各自只编了一部分 sm_xxx：
+              50 系（CC 12.0+）必须 cu130，cu126 跑起来是 no kernel image。
+              这里只做推荐与标注——装哪一档由人定，页面不替他决定。 */}
+          {torchOptions && torchOptions.length > 0 && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-lx-muted">
+              <span className="text-lx-dim">轮子档位</span>
+              {torchOptions.map((v) => {
+                const active = (variant?.key ?? 'auto') === v.key
+                return (
+                  <button
+                    key={v.key}
+                    type="button"
+                    disabled={disabled}
+                    title={`${v.note}${v.reason ? `\n\n${v.reason}` : ''}`}
+                    onClick={() => onTorchVariant(v.key)}
+                    className={[
+                      'rounded-full border px-2 py-px transition-colors',
+                      active
+                        ? 'border-lx-accent text-lx-accent'
+                        : v.ok
+                          ? 'border-lx text-lx-dim hover:text-lx'
+                          : 'border-lx text-lx-dim/60 line-through',
+                    ].join(' ')}
+                  >
+                    {v.label}
+                    {v.recommended && <span className="ml-1 text-[9.5px]">推荐</span>}
+                    {!v.ok && <span className="ml-1 text-[9.5px]">本机不可用</span>}
+                  </button>
+                )
+              })}
+              {variant?.key !== 'auto' && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  className="text-[10px] text-lx-dim underline-offset-2 hover:underline"
+                  onClick={() => onTorchVariant('auto')}
+                >
+                  恢复自动
+                </button>
+              )}
+            </div>
+          )}
+          {blockedVariant && (
+            <div className="mt-0.5 text-[10px] leading-relaxed text-lx-warning">
+              {variant.reason || '这一档在本机用不了，装了也跑不起来'}
+            </div>
+          )}
+          {/* torch 与 torchvision 是同一套 ABI 编的，版本和档位都必须一致。
+              只重装其中一个，pip 会因为依赖关系把另一个换掉，或者留下档位不
+              一致的组合（import 时报 undefined symbol，看不出是档位选错）。
+              后端已经会自动带上配对的那个，这里把这件事说在点击之前。 */}
+          {item.torch_peer && (
+            <div className="mt-0.5 text-[10px] leading-relaxed text-lx-dim">
+              与 <span className="font-mono">{item.torch_peer}</span> 版本配套，
+              点「安装」「重装」会把另一个一起装好（卸载不受影响）
+            </div>
+          )}
         </div>
       </div>
 
@@ -176,6 +244,9 @@ export function Deps() {
   const [pending, setPending] = useState('')
   const [loading, setLoading] = useState(false)
   const [showLog, setShowLog] = useState(true)
+  // 选中的 torch 轮子档位：'' / 'auto' = 按本机推荐。只对这一页的 torch 两行
+  // 生效，不写进配置——它是"这一次装哪个轮子"的选择，不是全局口径。
+  const [torchVariant, setTorchVariant] = useState('auto')
   const logRef = useRef<HTMLPreElement>(null)
 
   const load = useCallback(async (quiet = false) => {
@@ -222,16 +293,29 @@ export function Deps() {
     // 装缺失的包不拦（那是纯加分），另外两个必须让人确认一次。
     if (action !== 'install') {
       const what = action === 'uninstall' ? '卸载' : '卸载后按清单重装'
+      // 配对提示要写进弹窗：重装 torch 会连 torchvision 一起卸装，不说清
+      // 白的话，用户看到批量列表多出一行会以为哪里点错了。
+      const peer =
+        action === 'reinstall'
+          ? state?.groups.flatMap((g) => g.items).find((r) => r.name === name)?.torch_peer ?? ''
+          : ''
+      const extra = peer
+        ? `\n\n注意：${name} 与 ${peer} 必须同版本配套，会一并重装（先 ${peer} 后 ${name}）。`
+        : ''
       const ok = window.confirm(
         `${what} ${name}？\n\n` +
-          '这会直接改动 env\\python 里的依赖。如果版本与清单不符，"重装"会把清单要求的版本装回来。',
+          '这会直接改动 env\\python 里的依赖。如果版本与清单不符，"重装"会把清单要求的版本装回来。' +
+          extra,
       )
       if (!ok) return
     }
     setPending(`${name}:${action}`)
     setError(null)
     try {
-      setState(await api.depAction(name, action))
+      // torch 两行带上用户选的档位；其余包的 torch_variant 后端会忽略。
+      const item = state?.groups.flatMap((g) => g.items).find((r) => r.name === name)
+      const variant = item?.torch_index ? torchVariant : ''
+      setState(await api.depAction(name, action, variant))
       setShowLog(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -326,7 +410,7 @@ export function Deps() {
         icon={<PackageCheck size={17} />}
         eyebrow={state?.python ? `装到 ${state.python}` : '读清单中'}
         title="依赖检测"
-        description="可对任意包单独装、卸、重装。"
+        description="可对单个包装卸或重装。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -559,6 +643,9 @@ export function Deps() {
                     item={item}
                     busy={!!running}
                     pending={pending}
+                    torchOptions={item.torch_index ? state?.torch_options : undefined}
+                    torchVariant={torchVariant}
+                    onTorchVariant={setTorchVariant}
                     onAct={(name, action) => void act(name, action)}
                   />
                 ))}
@@ -580,7 +667,21 @@ export function Deps() {
         {state?.torch_index ? (
           <>
             <br />
-            torch / torchvision 走 PyTorch 索引：<span className="font-mono">{state.torch_index}</span>
+            {torchVariant && torchVariant !== 'auto' ? (
+              <>
+                已选轮子档位：
+                <span className="font-mono">
+                  {state.torch_options?.find((v) => v.key === torchVariant)?.index ?? state.torch_index}
+                </span>
+                （点 torch 那一行的「档位」可换回自动）
+              </>
+            ) : (
+              <>
+                torch / torchvision 走 PyTorch 索引：
+                <span className="font-mono">{state.torch_index}</span>
+                （本机推荐；页面只给建议，换档位在 torch 那一行）
+              </>
+            )}
           </>
         ) : null}
         {/* 退到 CPU 版时必须说清为什么：页面上一切正常，只是慢十倍，

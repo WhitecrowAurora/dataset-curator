@@ -293,7 +293,8 @@ def image_block(provider: str, image: ImageBlob) -> dict:
 
 def build_payload(provider: str, *, model: str, system: str, prompt: str,
                   image: ImageBlob, temperature: float, top_p: float,
-                  max_tokens: int, seed: int | None) -> dict:
+                  max_tokens: int, seed: int | None,
+                  repeat_penalty: float = 0.0) -> dict:
     """按方言组装请求体。不要在这里写鉴权——那是 client 的默认头。"""
     if provider == "anthropic":
         payload = {
@@ -323,6 +324,14 @@ def build_payload(provider: str, *, model: str, system: str, prompt: str,
     }
     if seed is not None:
         payload["seed"] = seed
+    # 重复惩罚是 llama.cpp 的扩展字段，默认不发（vLLM 形状必须逐字不变，
+    # 多一个字段老服务会 400）。只有本地引擎显式配了才带上。
+    #
+    # 为什么需要它：文字密集的图上模型会陷进 "xxx_text_composition,
+    # xxx_text_layout, xxx_text_color, xxx_text_font, xxx_text_style" 的
+    # 死循环，把 max_tokens 吃干、caption 一个字都不出（实测 h5 关闭时 4/6 失败）。
+    if repeat_penalty and repeat_penalty > 0 and not provider:
+        payload["repeat_penalty"] = float(repeat_penalty)
     return payload
 
 
@@ -404,8 +413,13 @@ def saved_path() -> Path:
 
 
 def load_saved() -> dict:
-    """→ {"providers": {name: {"base": str, "key": str}}, "prices": {...}}"""
-    empty: dict = {"providers": {}, "prices": {}}
+    """→ {"providers": {...}, "prices": {...}, "hf_token": str, "hf_repo": str}
+
+    `hf_token` / `hf_repo` 是后加的：以前这个文件只放 API 密钥，HF 令牌
+    哪里都不存（`ui_form` 的注释说"有专门的存档"，实际并没有），于是每次
+    新建 HF 任务都得重新粘一次。见 `store_hf_token`。
+    """
+    empty: dict = {"providers": {}, "prices": {}, "hf_token": "", "hf_repo": ""}
     p = saved_path()
     if not p.is_file():
         return empty
@@ -420,6 +434,9 @@ def load_saved() -> dict:
     return {
         "providers": providers if isinstance(providers, dict) else {},
         "prices": prices if isinstance(prices, dict) else {},
+        # 老文件没有这两个键：空串 = 没存过，与"存了个空字符串"同义。
+        "hf_token": str(raw.get("hf_token") or "").strip(),
+        "hf_repo": str(raw.get("hf_repo") or "").strip(),
     }
 
 
@@ -475,6 +492,71 @@ def saved_for(provider: str) -> dict:
         return {}
     return {"base": str(entry.get("base") or ""),
             "key": str(entry.get("key") or "")}
+
+
+# --------------------------------------------------------------- HF 令牌存档
+#
+# 与 API 密钥同一个文件、同一套落盘形态（明文 + chmod 600），因为理由一样：
+# 用户已经接受"密钥明文存本机"，HF 令牌没有理由更保守。之前它是唯一不存的
+# 一个，代价是每个私有仓库都要重新粘一次。
+#
+# ★存的时候连**仓库名**一起存，取的时候要求仓库对得上。这一条不是洁癖：
+#   私有仓库 A 的 read 令牌被自动带进公共仓库 B 的请求里，就是把令牌交给了
+#   一个与它无关的仓库方。API 密钥那边早就有同样的约束（见
+#   `resolve_credentials` 里的 `same_base`），这里照抄。
+
+
+def saved_hf() -> dict:
+    """→ {"repo": str, "token": str}；没存过就是空 dict（与 saved_for 同口径）。"""
+    data = load_saved()
+    token = str(data.get("hf_token") or "").strip()
+    if not token:
+        return {}
+    return {"repo": str(data.get("hf_repo") or "").strip(), "token": token}
+
+
+def mask_hf(hf: dict | None = None) -> str:
+    """脱敏值，页面只拿得到这个。"""
+    entry = saved_hf() if hf is None else hf
+    return mask_key(str(entry.get("token") or ""))
+
+
+def store_hf_token(token: str, repo: str = "") -> dict:
+    """记住 / 忘记 HF 令牌。token 传空 = 删掉存档（连仓库名一起删）。
+
+    **只记仓库名、不记分支**：分支（main / 某个 revision）不是凭据，它已经
+    存在 `ui-form.json` 里，跟着表单恢复就够；把它也塞进这里，会出现"存档
+    里的分支压过用户刚改的分支"这种看不出原因的行为。
+    """
+    data = load_saved()
+    text = str(token or "").strip()
+    data["hf_token"] = text
+    data["hf_repo"] = str(repo or "").strip() if text else ""
+    save_saved(data)
+    return data
+
+
+def resolve_hf_token(repo: str, token: str = "") -> str:
+    """显式给的优先；否则用存档，**且只在仓库对得上时**用。
+
+    仓库对不上就返回空串，让请求以匿名身份发——私有仓库会得到 401/403，
+    那个报错至少指向"没有读权限"，比"拿了别人的令牌去问"清楚得多。
+    """
+    given = str(token or "").strip()
+    if given:
+        return given
+    saved = saved_hf()
+    if not saved:
+        return ""
+    saved_repo = str(saved.get("repo") or "").strip()
+    want = str(repo or "").strip()
+    # 存档里没记仓库（老文件/手工改过）时**不用**：宁可让用户重贴一次，
+    # 也不能把一把来历不明的令牌发出去。
+    if not saved_repo or not want:
+        return ""
+    if saved_repo.lower() != want.lower():
+        return ""
+    return str(saved.get("token") or "").strip()
 
 
 # ------------------------------------------------------------------ 连通性探测

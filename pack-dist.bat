@@ -158,6 +158,13 @@ if errorlevel 8 goto copy_failed
 robocopy "%ROOT%\devtools" "%STAGE%\devtools" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto copy_failed
 
+rem MCP server for the receiver's own AI assistant. Pure stdlib Python, so it
+rem needs no extra wheels in install.bat -- just ship the folder.
+if exist "%ROOT%\mcp" (
+    robocopy "%ROOT%\mcp" "%STAGE%\mcp" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
+    if errorlevel 8 goto copy_failed
+)
+
 if exist "%ROOT%\configs" (
     robocopy "%ROOT%\configs" "%STAGE%\configs" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
     if errorlevel 8 goto copy_failed
@@ -242,7 +249,8 @@ for %%F in (install.bat install.sh tagger.cmd tagger.sh run-web.cmd run-web.sh) 
 rem HANDOFF.md lives in devtools\ (it is shipped there by the devtools copy
 rem above). It used to be listed here as a root file, which silently did
 rem nothing -- "if exist" hides a moved file, so that entry was dead.
-for %%F in (requirements-embedded.txt requirements-tag.txt pyproject.toml prune-env.bat pack-dist.bat pack-readme.txt) do (
+rem agent.md is the AI-facing guide that goes with the mcp\ folder above.
+for %%F in (requirements-embedded.txt requirements-tag.txt pyproject.toml prune-env.bat pack-dist.bat pack-readme.txt agent.md) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
 )
 
@@ -262,6 +270,11 @@ rem Read-me for the receiver; renamed so it sorts to the top in Explorer.
 if exist "%ROOT%\pack-readme.txt" (
     copy /y "%ROOT%\pack-readme.txt" "%STAGE%\README-FIRST.txt" >nul
 )
+
+rem tmp\ is this machine's scratch (extracted archives, sqlite spills, child
+rem process caches -- see tagger\tmpdir.py). It is recreated on first use, so
+rem shipping it only adds whatever junk happened to be lying around.
+if exist "%STAGE%\tmp" rd /s /q "%STAGE%\tmp" 2>nul
 
 rem ---------------------------------------------------------------- zip
 where tar >nul 2>nul
@@ -335,7 +348,7 @@ echo.
 echo   Always included: vendor\llama-convert (GGUF convert script, ~2MB)
 echo                    prompt\ (NL prompt presets, one .json per preset)
 echo.
-echo  Always excluded: models\ work\ run\ .pytest_cache node_modules
+echo  Always excluded: models\ work\ run\ tmp\ .pytest_cache node_modules
 echo                   env\python\Lib\site-packages (unless pruned and -WithEnv)
 echo                   runtime\llama.cpp\.download (raw zips, 570MB)
 echo.

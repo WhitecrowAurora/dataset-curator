@@ -255,6 +255,39 @@ def wait_ready(
     )
 
 
+def _spawn_error_text(binary: str, exc: OSError) -> str:
+    """Popen 失败时说清"是哪一层出的错"。
+
+    Windows 上三种典型混在一起：
+    - WinError 2：exe 或它依赖的 dll 找不到（路径看着没错，就是缺 dll）
+    - WinError 193 / 0xc1：下的是别的架构的包（arm64 包在 x64 上）
+    - 没有报错但 0.2 秒退出：日志里通常什么都没有
+    这个函数只负责把原文和现场（exe 路径、同目录 dll 数、日志位置）拼上，
+    怎么修交给用户或 AI 判断。
+    """
+    exe = Path(str(binary))
+    lines = [f"启动失败：{type(exc).__name__}: {exc}",
+             f"可执行文件：{binary}（存在={exe.is_file()}）"]
+    # Linux 上是 .so，而且缺库的报错不是"路径写错"而是
+    # "error while loading shared libraries"——同目录列出 .so 才看得出缺哪一个。
+    lib_glob = "*.dll" if os.name == "nt" else "*.so*"
+    try:
+        if exe.parent.is_dir():
+            libs = sorted(p.name for p in exe.parent.glob(lib_glob))
+            lines.append(f"同目录库({len(libs)})：{', '.join(libs[:20]) or '无'}")
+    except OSError:
+        pass
+    low = str(exc).lower()
+    if "winerror 2" in low or "cannot find the file" in low:
+        lines.append(
+            "这个错误码在 Windows 上**也可能是缺 dll**，不是路径写错。"
+            "CUDA 版 llama.cpp 要配同版本的 cudart：到「NL 服务」页重装一次，"
+            "或改用 CPU/Vulkan 版。")
+    elif "winerror 193" in low or "不是有效的 win32" in low or "not a valid win32" in low:
+        lines.append("这是架构不符（下成了 arm64 / 32 位的包），重下对应 x64 的压缩包。")
+    return "\n".join(lines)
+
+
 def start_server(
     profile: RunProfile,
     *,
@@ -305,8 +338,21 @@ def start_server(
         # 只能用一张卡：CUDA_VISIBLE_DEVICES 必须在进程启动前定，-ngl 99
         # 会把整份权重放到此时唯一可见的那张卡上。
         child_env = dict(os.environ)
-        if device_index:
+        # ★两个坑，都在真机上踩得到：
+        #   1) `if device_index:` 把 **0 号卡**当成了"没指定"——父进程自己带着
+        #      CUDA_VISIBLE_DEVICES=2 时，本该用物理 0 号卡的 worker 会继承 2 号，
+        #      于是多卡面板按 0 号记端口/显存，实际跑在 2 号上。
+        #   2) device_index 是**物理卡号**（multi_gpu 传的是 nvidia-smi 的 index），
+        #      但子进程的 CUDA_VISIBLE_DEVICES 也按物理号解释，所以直接写是对的；
+        #      要防的是"本进程已经被限过卡"——那时子进程里物理号 + 继承的可见集
+        #      会二次过滤，最终那张卡可能根本不可见。
+        # 做法：先清掉继承值，再写目标卡，保证子进程只看得到这一张。
+        if device_index is not None:
             child_env["CUDA_VISIBLE_DEVICES"] = str(device_index)
+        # Linux 动态链接器不看 exe 同目录的 .so；验活（llama_runtime.smoke_test）
+        # 和这里必须共用同一份环境，否则装完那次 --version 先报缺 libcudart.so.*。
+        from . import llama_runtime
+        child_env = llama_runtime.server_env(cmd[0], child_env)
     else:
         check_environment()
         cmd = build_command(profile, port=port, data_root=data_root,
@@ -324,16 +370,30 @@ def start_server(
     print(f"[tagger] 服务日志: {Path(log_path).resolve()}")
 
     print(f"[tagger] 启动: {' '.join(cmd)}")
-    process = subprocess.Popen(
-        cmd,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        # 独立进程组，便于整组回收
-        start_new_session=(platform.system() != "Windows"),
-        env=child_env,
-    )
+    if resolved == "llamacpp":
+        # 显式回显"实际生效的槽位数"和"实际用哪张卡"。以前只有命令行里那串
+        # `-np N` 能看出来，用户传了 --max-num-seqs 12 却在日志里找不到它，
+        # 就以为参数没生效（Bug 1 的报告正是这么来的）。
+        print(f"[tagger] 槽位: {slots_used}（-np）  "
+              f"卡: {(child_env or {}).get('CUDA_VISIBLE_DEVICES', '继承环境')}")
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            # 独立进程组，便于整组回收
+            start_new_session=(platform.system() != "Windows"),
+            env=child_env,
+        )
+    except OSError as exc:
+        # ★"exe 存在"和"exe 能起"是两件事。dll 缺失时 Windows 抛的是
+        # WinError 2「系统找不到指定的文件」——同一个错误码，指向的却是**依赖
+        # 的 dll**，不是 exe 本身。以前这里直接漏出去（或被上层翻成"找不到
+        # llama-server"），用户按字面去核对路径，怎么都对。
+        log_file.close()
+        raise ConfigError(_spawn_error_text(cmd[0], exc)) from exc
 
     handle = ServerHandle(process=process, base_url=base_url, port=port,
                           profile=profile,

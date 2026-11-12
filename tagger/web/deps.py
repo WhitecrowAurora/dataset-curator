@@ -53,46 +53,201 @@ VERIFY_TIMEOUT = 60
 # torch 的轮子不在 PyPI。有 N 卡装 CUDA 版，没有就 CPU 版——装错了不会报错，
 # 只会慢十倍，然后用户以为"这软件就这么慢"。
 #
-# ★这里的 cuXXX 必须与 requirements-tag.txt 里实测的那套（torch 2.14.1+cu126）
-#   对齐。PyTorch 的索引是**按 CUDA 版本分目录、各自只放自己那份**：cu124 目录
-#   最高只到 2.6.0，拿它去装钉死的 2.14.1 会直接 `No matching distribution found`，
-#   也就是页面上点「安装」必然失败——和 Windows 上点 vllm 是同一类毛病。
+# ★这里的 cuXXX 必须与 requirements-tag.txt 里记的那套对齐。PyTorch 的索引是
+#   **按 CUDA 版本分目录、各自只放自己那份**：cu124 目录最高只到 2.6.0，拿它去
+#   装 2.14.1 会直接 `No matching distribution found`，也就是页面上点「安装」
+#   必然失败——和 Windows 上点 vllm 是同一类毛病。
 #   测试 `test_torch_索引贴着清单里实测的_cuda_版本` 守着这条不漂。
 TORCH_INDEX_GPU = "https://download.pytorch.org/whl/cu126"
 TORCH_INDEX_CPU = "https://download.pytorch.org/whl/cpu"
+
+# 50 系（Blackwell，CC 12.0+）必须走 cu130：cu126 的轮子只编译到 sm_90，
+# 老架构靠 PTX JIT 还能兜住，sm_120 跨了大版本 JIT 兜不住，实跑报
+# "no kernel image is available for execution on the device"。
+# 代价是 cu130 要求驱动 >= 580：驱动不够的老卡仍留在 cu126，绝不整体换档
+# （换了会让一批 55x/56x 驱动的机器从"能用"变成 import 就报驱动版本不足）。
+TORCH_INDEX_BLACKWELL = "https://download.pytorch.org/whl/cu130"
+TORCH_CUDA_MIN_BLACKWELL = (13, 0)
 
 # cu126 的轮子要求驱动支持 CUDA 12.6。驱动太老时 pip 照样装得上，要到
 # `import torch` 才报 "CUDA driver version is insufficient"——页面一片绿、
 # 一跑打标才炸，是最难查的那类失败。所以装之前先问一句 nvidia-smi。
 TORCH_CUDA_MIN = (12, 6)
+# Blackwell 的硬件下限：CC 12.0 起才是 50 系（含 5090 / RTX PRO 6000 / GB 系列）。
+_BLACKWELL_CC = (12, 0)
+# Turing（20 系 / T4 / Quadro RTX）：CC 7.5。见 torch_plan 里的显式分支——
+# CUDA 13 把 7.5 定成**最低门槛**（砍的是 7.5 之前），cu130 里确有 sm_75 内核，
+# 所以 Turing 只是"能装但不该装"，不是装不了。
+_TURING_CC = (7, 5)
 
 # nvidia-smi 要起进程（Windows 上约一百毫秒），而依赖页在 pip 跑的时候每秒
 # 拉一次快照：缓存一分钟，别把轮询变成进程风暴。
 _DRIVER_TTL_S = 60.0
 _driver_cache: tuple[float, tuple[int, int] | None] | None = None
+# 显卡架构探测单独缓存：query_gpus() 也起进程，和驱动版本一样不能跟着轮询跑。
+_CC_TTL_S = 60.0
+_cc_cache: tuple[float, tuple[int, int] | None] | None = None
 
 
 def _driver_cuda() -> tuple[int, int] | None:
-    """驱动支持的最高 CUDA 版本（nvidia-smi 表头那句）。没卡/读不出来时 None。"""
+    """驱动支持的最高 CUDA 版本。没卡/读不出来时 None。
+
+    ★两条路，**先读表头、再查表**（顺序是调换过的，见下方 1/2 与实现里的
+      注释）。历史上踩过的坑，都是实测反馈回来的：
+
+      1. 早先只解析文本，而**nvidia-smi 的文本是本地化的**：中文系统上表头
+         写作 `CUDA 版本: 11.8`，英文正则 `CUDA Version:` 一个字符都对不上，
+         于是页面把有卡的机器当成没卡、直接按 CPU 版装（2080 Ti 那位用户）。
+         修法是改成"问 nvidia-smi 要驱动号，再查表换算"，格式与语言无关。
+      2. 但查表**必然漏档**——表是人手抄的分界点。驱动 595.79 表头写 13.2，
+         表里最高只到 580→13.0，于是被算成 13.0；2080 Ti 的 610→13.3 同理。
+         漏档不影响装哪一档（都 ≥12.6，都走 cu126），但**把版本号说错**，
+         用户拿它跟 nvidia-smi 对照只会更困惑。
+         所以现在的顺序是：表头（驱动自己算的，总是精确）→ 查表（兜底）。
+
+    表头解析**中英文标签都认**，见 `_driver_cuda_from_text`。
+    """
     global _driver_cache
     now = time.time()
     if _driver_cache is not None and now - _driver_cache[0] < _DRIVER_TTL_S:
         return _driver_cache[1]
     ver: tuple[int, int] | None = None
+    smi = _smi_path()
+    # ★先读表头，再退回查表。顺序是调换过的，理由值得记住：
+    #
+    #   nvidia-smi 表头那个 "CUDA Version" 是**驱动自己算出来的**，总是精确；
+    #   而 `_DRIVER_CUDA_TABLE` 是人手抄的分界点，**必然漏档**。开发机上就撞到
+    #   过：驱动 595.79 表头写 13.2，查表却因为表里只有 580→13.0 而算成 13.0。
+    #   2080 Ti 那位 610→13.3 是同一类缺口，只是那次先被发现了。
+    #
+    #   漏档不影响装哪一档（13.0 / 13.2 / 13.3 都 ≥12.6，都走 cu126），但会
+    #   让页面显示一个和 nvidia-smi 对不上的版本号。用户拿这个数字去排查时，
+    #   只会更困惑——这比"少显示一个信息"糟得多。
+    #
+    #   查表不再是主路，只作为"表头解析不出来"时的兜底（老驱动表格格式变了、
+    #   或者本地化把标签翻了）。
+    if smi:
+        ver = _driver_cuda_from_text(smi)
+        if ver is None:
+            try:
+                out = subprocess.run(
+                    [smi, "--query-gpu=driver_version", "--format=csv,noheader"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=8,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if out.returncode == 0:
+                    first = (out.stdout or "").strip().splitlines()
+                    ver = _cuda_from_driver(first[0].strip()) if first else None
+            except (OSError, subprocess.SubprocessError):
+                ver = None
+    _driver_cache = (now, ver)
+    return ver
+
+
+def _smi_path() -> str | None:
+    """nvidia-smi 的路径。`shutil.which` 在 Windows 上查不到 System32 时
+    还有 `hardware._find_nvidia_smi` 那几个固定位置兜底——那边已经有一份了，
+    这里复用，别再抄一遍路径表。"""
+    exe = shutil.which("nvidia-smi")
+    if exe:
+        return exe
+    try:
+        from ..hardware import _find_nvidia_smi
+
+        return _find_nvidia_smi()
+    except Exception:                         # noqa: BLE001 - 探测失败当没有
+        return None
+
+
+# 驱动号 → 能跑的最高 CUDA。nvidia-smi 表头那个 "CUDA Version" 就是这张表的
+# 产物，所以不必去解析它。只列分界点，返回不超过它的最高一档。
+#
+# ★分界用 nvidia-smi 表里**实测出现的** "驱动/表头" 组合（见下方注释），
+#   不靠估。
+#
+# 表只要"不漏档"就够，具体那档差 0.1 无所谓：torch_plan 只拿它跟 12.6 / 13.0
+# 两条线比大小，13.0 和 13.3 走的是同一条路（都是"够新，装 cu126"）。缺一档的
+# 真实后果是**页面把驱动版本号说错**，用户按错的版本号去排查会很困惑——2080 Ti
+# 那位用户就是驱动 610 / CUDA 13.3，以前被显示成 13.0。
+_DRIVER_CUDA_TABLE: tuple[tuple[int, tuple[int, int]], ...] = (
+    (610, (13, 3)),     # 610.x → CUDA 13.3（2080 Ti 用户实测：驱动 610 / CUDA 13.3）
+    (580, (13, 0)),     # 580.x → CUDA 13.0，50 系必需
+    (570, (12, 8)),     # 572.x → CUDA 12.8
+    (560, (12, 6)),     # 561.x → CUDA 12.6：**cu126 轮子的下限**，别漏这一档
+    (550, (12, 4)),     # 551.x → CUDA 12.4
+    (545, (12, 3)),
+    (535, (12, 2)),     # 536.x → CUDA 12.2
+    (530, (12, 1)),
+    (525, (12, 0)),
+    (520, (11, 8)),
+    (510, (11, 6)),
+    (495, (11, 5)),
+    (470, (11, 4)),
+    (450, (11, 0)),
+)
+
+
+def _cuda_from_driver(driver: str) -> tuple[int, int] | None:
+    """`472.12` → (11, 4)。读不出主版本号时 None。"""
+    m = re.match(r"(\d+)\.", str(driver or "").strip())
+    if not m:
+        return None
+    major = int(m.group(1))
+    for floor, cuda in _DRIVER_CUDA_TABLE:
+        if major >= floor:
+            return cuda
+    # 比表里最老的还老：给它最低那一档，让下游按"驱动太老"给出升驱动的提示，
+    # 而不是当成"读不出来"退 CPU（两者对用户说的话不一样）。
+    return _DRIVER_CUDA_TABLE[-1][1]
+
+
+def _driver_cuda_from_text(smi: str | None) -> tuple[int, int] | None:
+    """退路：解析 nvidia-smi 的**表格输出**。中英文标签都认。"""
+    if not smi:
+        return None
     try:
         out = subprocess.run(
-            ["nvidia-smi"],
+            [smi],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=8,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", out.stdout or "")
-        if m:
-            ver = (int(m.group(1)), int(m.group(2)))
     except (OSError, subprocess.SubprocessError):
-        ver = None
-    _driver_cache = (now, ver)
-    return ver
+        return None
+    for line in (out.stdout or "").splitlines():
+        # 英文 "CUDA Version: 13.2"；中文 "CUDA 版本: 11.8"
+        m = re.search(r"CUDA\s*(?:Version|版本)\s*[:：]\s*(\d+)\.(\d+)", line)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _gpu_cc() -> tuple[int, int] | None:
+    """本机第一张卡的 compute capability。没卡/读不出来时 None。
+
+    为什么要看架构而不是只数显存：torch 的轮子是按 CUDA 版本分目录编的，而
+    每个目录编了哪些 sm_xxx 不一样。cu126 那份实测只到 sm_90——40 系(8.9)还
+    能靠 PTX JIT 兜住，50 系(12.0)兜不住，实跑必然报 no kernel image。
+    取第一张**可见**卡：resolve_profile 的调用方现在都走 visible_gpus，
+    这里若仍按物理序取第一张，选轮子（sm_xx）与选分档就可能落在两张架构
+    不同的卡上——装出来的 wheel 跑不了正在用的那张。
+    """
+    global _cc_cache
+    now = time.time()
+    if _cc_cache is not None and now - _cc_cache[0] < _CC_TTL_S:
+        return _cc_cache[1]
+    cc: tuple[int, int] | None = None
+    try:
+        from ..hardware import visible_gpus
+
+        gpus = visible_gpus()
+        if gpus:
+            cc = gpus[0].compute_cap
+    except Exception:                         # noqa: BLE001 - 探测失败按"不知道"处理
+        cc = None
+    _cc_cache = (now, cc)
+    return cc
 
 
 def torch_plan() -> tuple[str, str]:
@@ -102,20 +257,268 @@ def torch_plan() -> tuple[str, str]:
     来。照装的话 pip 成功、页面显示"已装"，直到第一次打标才报驱动版本不足——
     用户没有任何线索能把两句联系起来。退到 CPU 版至少是"能跑、只是慢"，
     再把"为什么慢、怎么变快"写在页面上。
+
+    三档顺序是"先看架构，再看驱动"：
+      1. 50 系（CC >= 12.0）→ cu130。这一档换 CUDA 版本不是优化而是必需，
+         cu126 在 sm_120 上根本没有 kernel；
+      2. Turing（CC 7.5，20 系 / T4）→ 固定 cu126。**显式分支，不靠"掉到
+         兜底恰好对"**：Turing 用户的驱动通常很新（R580 是 LTS），驱动号会
+         映射到 CUDA 13，但 cu130 对 7.5 只是"能跑"——sm_75 内核在，可它
+         本来就缺 TF32/bf16，换大版本运行时只有额外开销，而 20/30/40 系的
+         实测基准全在 cu126 上。所以架构优先于驱动号：驱动再新也留 cu126。
+      3. 其余 N 卡 → cu126（本机实测能跑，40/30 系都在这个目录里）；
+      4. 无卡 / 驱动读不出 → CPU。
+    第 1 档驱动不够时**不降回 cu126**——那等于装一个必然 no kernel image 的
+    组合，看着"装了 CUDA 版"，一跑就炸。直接退 CPU 并把"升驱动"说清。
+
+    ★Turing 的驱动下限同样必须满足：cu126 要驱动支持 CUDA 12.6（约 560+）。
+      R580 分支覆盖到 7.5 之前，所以只要用户驱动是新的，这一条不会拦住他；
+      真正停在 47x~55x 的 Turing 机器仍然退 CPU，并在页面上写明"升到 12.6"。
     """
-    if not shutil.which("nvidia-smi"):
+    if not shutil.which("nvidia-smi") and not _smi_path():
         return TORCH_INDEX_CPU, ""
     cuda = _driver_cuda()
+    cc = _gpu_cc()
     if cuda is None:
         return TORCH_INDEX_CPU, (
             "有显卡，但没读出驱动的 CUDA 版本，先按 CPU 版装（打标会慢十倍）；"
-            "驱动装好之后点一次「重装」就会换成 CUDA 版")
+            "驱动装好之后点一次「重装」就会换成 CUDA 版。"
+            "（诊断：NVIDIA 面板里那个「CUDA 版本」是多少？"
+            "或者在命令行跑 nvidia-smi 看能不能出表）")
+    if cc is not None and cc >= _BLACKWELL_CC:
+        if cuda < TORCH_CUDA_MIN_BLACKWELL:
+            return TORCH_INDEX_CPU, (
+                f"{cc[0]}.{cc[1]} 的卡（50 系）需要 cu130 版 torch，而驱动只支持 "
+                f"CUDA {cuda[0]}.{cuda[1]}；cu126 在 sm_120 上没有 kernel，"
+                f"装了也是跑一张报一次错。先按 CPU 版装（慢十倍），把驱动升到 "
+                f"CUDA {TORCH_CUDA_MIN_BLACKWELL[0]}.{TORCH_CUDA_MIN_BLACKWELL[1]} "
+                f"（580 以上）后点「重装」")
+        return TORCH_INDEX_BLACKWELL, ""
     if cuda < TORCH_CUDA_MIN:
         return TORCH_INDEX_CPU, (
             f"驱动只支持 CUDA {cuda[0]}.{cuda[1]}，cu126 版 torch 装上了 import 也会报"
             f"驱动版本不足，所以走 CPU 版（慢十倍）；想用显卡把驱动升到 CUDA "
             f"{TORCH_CUDA_MIN[0]}.{TORCH_CUDA_MIN[1]} 以上")
+    if cc is not None and cc >= _TURING_CC:
+        # Turing 到这里是明确的"就用 cu126"，不写也能靠最后的 return 拿到同样的
+        # 值——但那样一来，将来谁把兜底改成别的档（比如按驱动号跟着升 cu130），
+        # 20 系就会在无人察觉的情况下被换掉。这一支是给它钉的桩。
+        return TORCH_INDEX_GPU, ""
     return TORCH_INDEX_GPU, ""
+
+
+# ---------------------------------------------------------------- torch 变体
+#
+# 上面是**本机推荐**；这一节是给页面列出的**可选清单**。两者分开是因为
+# "推荐哪个"和"允许装哪些"不是一回事：5090 上推荐 cu130，但用户明确要装
+# cu126 比对产出时不该被拦。所以页面只做标注（推荐 / 可用 / 不建议），
+# 点「重装」时按用户选的那一档真装——**只推荐，不强制**。
+#
+# 为什么不能随便装一个：cuXXX 决定 wheel 里编了哪些 sm_xxx。cu126 实测只到
+# sm_90（40 系靠 PTX JIT 兜住），50 系是 sm_120，必须 cu130。装错了不是慢，
+# 是每张图都报 "no kernel image is available"。
+TORCH_VARIANTS: tuple[dict[str, Any], ...] = (
+    {"key": "auto", "index": "", "label": "自动（按本机显卡）",
+     "min_cuda": (), "note": "按显卡架构与驱动自动挑一档，绝大多数情况选它就对了。"},
+    {"key": "cu130", "index": TORCH_INDEX_BLACKWELL, "label": "CUDA 13.0（cu130）",
+     "min_cuda": TORCH_CUDA_MIN_BLACKWELL,
+     "note": "50 系（CC 12.0+）**必须**用这一档：cu126 的轮子没有 sm_120 内核，"
+             "装上每张图都报 no kernel image。要求驱动 580 以上。"
+             "注意 cu130 是 13.x 系列的目录名，不代表只能用 13.0。"},
+    {"key": "cu126", "index": TORCH_INDEX_GPU, "label": "CUDA 12.6（cu126）",
+     "min_cuda": TORCH_CUDA_MIN,
+     "note": "20 / 30 / 40 系统一推荐（torch 2.14.1+cu126 就是实测那套）。"
+             "40 系（8.9）在这里有原生内核；改用 cu130 反而没有 8.9 内核、"
+             "只能靠 PTX JIT，启动更慢。50 系装它会缺内核。"},
+    {"key": "cpu", "index": TORCH_INDEX_CPU, "label": "CPU 版",
+     "min_cuda": (), "note": "不要求显卡，打标速度约慢十倍；只用来验证或排障。"},
+)
+
+
+# torch 与 torchvision 是**同一套 ABI 编出来的**：版本必须配套（2.14.1 ↔
+# 0.29.1），CUDA 档位也必须一致。单独重装其中一个会同时踩两个坑：
+#
+#   1. pip 看到 torchvision==0.29.1 要求 torch==2.14.1 时，会把刚装好的
+#      torch 换回它自己挑的版本——用户以为"我重装了 torch"，实际装回去的是
+#      torchvision 拉的那个；
+#   2. 档位不一致（torch 是 cu126、torchvision 是 cu130）时 import 报
+#      "undefined symbol"，报错指向的是一串 C++ 符号名，与"档位选错"毫无
+#      字面关系，用户基本无从下手。
+#
+# 所以点其中一个的「安装 / 重装」，另一个自动跟上。这是**页面行为**，不是
+# 隐式魔法：批量列表里会多出一行、日志里会写清为什么要带上它，用户看得见。
+# 「卸载」不连带——收拾半死不活的环境时，能单独拆一个反而是需要的。
+_TORCH_PEER = {"torch": "torchvision", "torchvision": "torch"}
+
+# 配对处理时的固定顺序：**torchvision 在前**。理由见 `_with_torch_siblings`：
+# 反过来会让装 torch 的那一步被 torchvision 的依赖约束牵着走，可能把刚下的
+# 那一档轮子换掉。
+_TORCH_ORDER = ("torchvision", "torch")
+
+
+def _arch_name(cc: tuple[int, int] | None) -> str:
+    """CC → 人话（"8.9（40 系）"）。页面提示要让人一眼认出自己那张卡。
+
+    按**区间**判而不是"≥ 某档"：`>= (8, 9)` 会把 9.0（Hopper / H100）也说成
+    40 系。这里只用于展示文案，判错不至于装错，但把 H100 叫成"40 系"同样会
+    让人不再相信页面上其他话。
+    """
+    if cc is None:
+        return "未知架构"
+    major, minor = cc
+    tag = ""
+    if major >= 12:
+        tag = "（50 系，Blackwell）"
+    elif major == 9:
+        tag = "（Hopper）"
+    elif major == 8:
+        if minor == 9:
+            tag = "（40 系，Ada）"
+        elif minor in (6, 7):
+            tag = "（30 系，Ampere）"
+        elif minor == 0:
+            tag = "（A100，Ampere）"
+    elif major == 7:
+        if minor >= 5:
+            tag = "（20 系，Turing）"
+    return f"{cc[0]}.{cc[1]}{tag}"
+
+
+def _variant(key: str) -> dict[str, Any] | None:
+    for v in TORCH_VARIANTS:
+        if v["key"] == key:
+            return v
+    return None
+
+
+def torch_index_for(key: str | None = None) -> str:
+    """某个变体对应的索引地址。空 / auto = 按本机推荐；认不出的键按 auto。"""
+    v = _variant(str(key or "auto").strip().lower())
+    if v is None or v["key"] == "auto":
+        return torch_plan()[0]
+    return str(v["index"])
+
+
+def torch_options() -> list[dict[str, Any]]:
+    """给页面的 torch 变体清单，每个带上"在本机能不能用"的结论。
+
+    页面据此把不可用的那些**置灰但可见**（而不是藏起来）：用户知道 50 系
+    还有 cu130 这回事，比看见一条莫名其妙的 no kernel image 报错强。
+    """
+    rec, rec_note = torch_plan()
+    # 与 torch_plan 用同一个判据（_smi_path 带 System32 兜底）：一边认有卡、
+    # 一边认没卡的话，页面会推荐 cu126 却把所有档位标成"本机不可用"。
+    has_card = bool(_smi_path())
+    cuda = _driver_cuda() if has_card else None
+    cc = _gpu_cc() if has_card else None
+    out: list[dict[str, Any]] = []
+    for v in TORCH_VARIANTS:
+        key = str(v["key"])
+        min_cuda: tuple[int, int] = v["min_cuda"] or ()
+        index = rec if key == "auto" else str(v["index"])
+        reason = ""
+        ok = True
+        if key == "auto":
+            reason = rec_note or (f"本机推荐 {index.rsplit('/', 1)[-1]}"
+                                  if index != TORCH_INDEX_CPU else "本机推荐 CPU 版")
+        elif key in ("cu126", "cu130"):
+            need = (13, 0) if key == "cu130" else TORCH_CUDA_MIN
+            if cuda is None:
+                ok = False
+                reason = "没读到驱动版本（nvidia-smi 不可用）"
+            elif cuda < need:
+                ok = False
+                reason = (f"驱动只支持 CUDA {cuda[0]}.{cuda[1]}，"
+                          f"这一档要 {need[0]}.{need[1]} 以上")
+            # 架构与驱动的方向相反：cu130 在非 Blackwell 上"能装但不必要"，
+            # cu126 在 Blackwell 上"装得上但跑不了"。前者只是不建议，后者禁用。
+            if ok and key == "cu126" and cc is not None and cc >= _BLACKWELL_CC:
+                ok = False
+                reason = (f"本机是 {cc[0]}.{cc[1]}（50 系），cu126 的轮子没有 "
+                          f"sm_120 内核，跑起来会报 no kernel image")
+            if ok and key == "cu130" and cc is not None and cc < _BLACKWELL_CC:
+                # Turing 要单独说清"不是缺内核，是没必要"：它的用户驱动往往很新，
+                # 容易以为"新驱动当然配新 CUDA"。cu130 里确实有 sm_75 的内核
+                # （CUDA 13 砍的是 7.5 **之前**），只是 7.5 本身没有 TF32/bf16，
+                # 换大版本运行时只有开销，而实测基准都在 cu126 上。
+                if cc >= _TURING_CC:
+                    reason = (f"本机是 {cc[0]}.{cc[1]}（Turing），cu130 能跑但没有必要："
+                              f"它同样编了 sm_75，可 20 系没有 TF32/bf16，换版本只有开销。"
+                              f"cu126 才是实测口径")
+                else:
+                    reason = (f"本机是 {cc[0]}.{cc[1]}，cu130 能用但没有必要；"
+                              f"cu126 才是实测口径")
+        out.append({
+            "key": key,
+            "label": v["label"],
+            "index": index,
+            "note": v["note"],
+            "ok": ok,
+            "recommended": key == "auto" or (key != "auto" and index == rec),
+            "reason": reason,
+        })
+    return out
+
+
+def torch_hint() -> dict[str, Any]:
+    """顶部栏那一行提示：本机该用哪一档、当前装的对不对。
+
+    为什么不直接写死一张"20/30/40→cu126、50→cu130"的表：档位规则在
+    `torch_plan()` 里已经有一份，再抄一份到提示里，两处迟早打架——顶栏说
+    cu130、依赖页说 cu126，用户不知道该信哪个。这里**从同一份数据推导**，
+    规则只存在一处。
+
+    返回的 status 只有三种，前端按它选颜色：
+      ok      已装的就是推荐档，一切正常
+      switch  装错了/该换档，需要用户动手（带 reason）
+      cpu     没有 CUDA 版可用（没卡、驱动太老、或探测失败）
+    """
+    if not _smi_path():
+        return {"status": "cpu", "arch": "未检测到显卡", "target": "",
+                "current": "", "reason": "未检测到 NVIDIA 显卡，走 CPU 版"}
+    rec, rec_note = torch_plan()
+    cuda = _driver_cuda()
+    cc = _gpu_cc()
+    arch = _arch_name(cc)
+    rec_key = rec.rstrip("/").rsplit("/", 1)[-1] or "cpu"   # cu126 / cu130 / cpu
+    target = "" if rec == TORCH_INDEX_CPU else rec_key
+
+    # 当前实际装的是哪一档：读 torch 自己的编译版本，比"猜用户点了什么"可靠
+    installed = installed_version("torch") or ""
+    cur = ""
+    if installed:
+        m = re.search(r"\+(cu\d+|cpu)$", installed)
+        cur = m.group(1) if m else ("cpu" if "+cpu" in installed else "")
+
+    if rec == TORCH_INDEX_CPU:
+        return {"status": "cpu", "arch": arch, "target": "", "current": cur,
+                "reason": rec_note or "没有可用的 CUDA 版，走 CPU 版"}
+    # 版本不符(mismatch)时也说一句：装的档位对、但版本号不是清单里那个，
+    # 同样值得让人看见，属于"该动手"而不是"一切正常"。
+    if cur and cur == target:
+        ver_state = ""
+        if installed and not _satisfied(f"torch=={_spec_version('torch')}", installed):
+            ver_state = "版本与清单不一致，建议重装"
+        if ver_state:
+            return {"status": "switch", "arch": arch, "target": target,
+                    "current": cur, "reason": ver_state}
+        return {"status": "ok", "arch": arch, "target": target,
+                "current": cur, "reason": ""}
+    reason = rec_note or (f"本机建议装 {target} 版" if target else "")
+    if cur:
+        reason = f"当前装的是 {cur}，" + (reason or f"建议换成 {target}")
+    return {"status": "switch", "arch": arch, "target": target,
+            "current": cur, "reason": reason}
+
+
+def _spec_version(name: str) -> str:
+    """从清单里取"钉死的那个版本号"（`torch==2.14.1` → `2.14.1`）。"""
+    for it in load_items():
+        if it.name.lower() == name.lower():
+            m = re.search(r"==\s*([\w.\-+]+)", it.spec)
+            if m:
+                return m.group(1)
+    return ""
 
 # 分发名 → 导入名。清单里写的是 pip 名，而 `import` 用的是另一套名字，
 # 少了这张表，页面会把装好的 Pillow 误报成"缺失"。
@@ -157,6 +560,17 @@ class Item:
     # Windows 上 pip 会装出一个缺 C 扩展的壳，import 时报
     # `No module named 'vllm_C_stable_libtorch'`，而且会把钉死的 torch 换掉。
     platforms: tuple[str, ...] = ()
+    # 用户显式选的 torch 档位（cu130 / cu126 / cpu）。空 = 按本机推荐走。
+    # 只对 torch_index=True 的条目有意义，其余包不看它。
+    torch_variant: str = ""
+    # 与它**必须同版本配对**的包（torch ↔ torchvision）。点其中一个的安装/
+    # 重装，另一个会被自动带上——见 `_with_torch_siblings` 的理由。
+    torch_peer: str = ""
+
+    @property
+    def peers_with(self) -> str:
+        """自动连带处理的另一个包名；空 = 无从属关系。只对 torch 两行有意义。"""
+        return self.torch_peer if self.torch_index else ""
 
     @property
     def supported(self) -> bool:
@@ -236,6 +650,7 @@ def _parse(path: Path, group: str) -> list[Item]:
             group=group,
             torch_index=name.lower() in ("torch", "torchvision"),
             platforms=_platforms_of(name),
+            torch_peer=_TORCH_PEER.get(name.lower(), ""),
         ))
     return out
 
@@ -275,6 +690,7 @@ def load_extras() -> dict[str, list[Item]]:
                 note=EXTRA_NOTES.get(extra, ""),
                 torch_index=name.lower() in ("torch", "torchvision"),
                 platforms=_platforms_of(name),
+                torch_peer=_TORCH_PEER.get(name.lower(), ""),
             ))
         if items:
             out[extra] = items
@@ -340,6 +756,9 @@ def describe(item: Item) -> dict[str, Any]:
         # 而不是让用户点了「安装」再收获一个 import 失败。
         "supported": item.supported,
         "platforms": list(item.platforms),
+        # 必须同版本配对的那个包（torch ↔ torchvision）。前端据此在行内写一句
+        # "与 torch 配套，点重装会一起装"，避免用户只点一个之后以为没生效。
+        "torch_peer": item.peers_with,
     }
 
 
@@ -370,6 +789,9 @@ class DepManager:
         # "现在这个进程所在的环境"，重启后本来就可能变。
         self.verify: dict[str, dict[str, Any]] = {}
         self.verify_at = 0.0
+        # 下一轮要写进日志开头的一句话（"torch 与 torchvision 已一并处理"）。
+        # 用"挂起"而不是直接 _emit：_start_many 会重置 log，直接写会被冲掉。
+        self._pending_note = ""
 
     # ---------------------------------------------------------------- 查询
 
@@ -450,6 +872,9 @@ class DepManager:
             # 走 CPU 版时的原因（驱动太老 / 读不出驱动）：页面底部照实说一句，
             # 否则用户只会觉得"装了显卡还这么慢"。
             "torch_note": torch_note,
+            # 可选档位（含"本机推荐"那一档）。只推荐不强制：页面可以让人
+            # 换一档再装，装的时候按他选的走。
+            "torch_options": torch_options(),
             "summary": {
                 "total": len(rows),
                 "ok": sum(1 for r in rows if r["status"] == "ok"),
@@ -499,25 +924,97 @@ class DepManager:
 
     # ---------------------------------------------------------------- 动作
 
-    def install(self, name: str) -> dict[str, Any]:
+    def install(self, name: str, *, torch_variant: str = "") -> dict[str, Any]:
         item = self._find(name)
         if not item.supported:
             raise ValueError(
                 f"{item.name} 只支持 {' / '.join(item.platforms)}，"
                 f"当前系统（{sys.platform}）装上也是坏的")
-        return self._start_many("install", [item])
+        return self._start_many("install", self._with_torch_siblings([item]),
+                                torch_variant=torch_variant)
 
     def uninstall(self, name: str) -> dict[str, Any]:
         # 卸载不设平台限制：装错了的（比如 Windows 上的 vllm）本来就该能卸掉。
+        # 也**不**连带 torchvision ↔ torch：拆环境时能单独卸一个是有用的，
+        # 而且卸完再装一遍本来就是修 ABI 不匹配的常规手段。
         return self._start_many("uninstall", [self._find(name)])
 
-    def reinstall(self, name: str) -> dict[str, Any]:
+    def reinstall(self, name: str, *, torch_variant: str = "") -> dict[str, Any]:
         item = self._find(name)
         if not item.supported:
             raise ValueError(
                 f"{item.name} 只支持 {' / '.join(item.platforms)}，"
                 f"当前系统（{sys.platform}）装上也是坏的")
-        return self._start_many("reinstall", [item])
+        return self._start_many("reinstall", self._with_torch_siblings([item]),
+                                torch_variant=torch_variant)
+
+    def _with_torch_siblings(self, items: list[Item]) -> list[Item]:
+        """给 torch / torchvision 补上它必须配对的那一个，返回处理顺序。
+
+        为什么必须成对：torch 与 torchvision 是同一套 ABI 编出来的，版本和
+        CUDA 档位都得一致。只重装一个会——pip 为了让 torchvision 的依赖成立而
+        把 torch 换回它自己挑的版本、或留下档位不一致的组合，后者 import 时报
+        "undefined symbol: _ZN3c10..."，字面上完全看不出是"档位选错"。详见
+        `_TORCH_PEER` 的注释。
+
+        **顺序有讲究：先 torchvision、后 torch。** 反过来的话，装 torch 的
+        那一步 pip 会去满足 torchvision 的 `torch==x.y.z` 约束，可能把刚下的
+        cu126 轮子换成别的档位；先装 torchvision 时它依赖的 torch 还没装，
+        pip 会按 --index-url 一并装好，随后再装 torch 就是同一档位的覆盖安装，
+        结果是确定的。
+
+        顺序是**固定的**，不随"用户点的是哪一个"变化：点 torchvision 时才去
+        拉 torch，若按"配对的那个放前面"排，就成了先 torch 后 torchvision，
+        恰好踩上面那个坑。
+
+        只在调用方**没有**同时点名两者时才补：用户自己勾了两个包（批量动作）
+        就按他给的顺序来，不重复插入。
+        """
+        pool = {it.name.lower(): it for it in load_items()}
+        named = {it.name.lower() for it in items}
+        # 按固定的"先 torchvision 后 torch"排：_TORCH_ORDER 里的下标，其余保持
+        # 用户给的相对顺序（用大偏移，避免和它们混在一起）。
+        def rank(it: Item) -> int:
+            key = it.name.lower()
+            return _TORCH_ORDER.index(key) if key in _TORCH_ORDER else len(_TORCH_ORDER)
+
+        wanted: list[Item] = []
+        seen: set[str] = set()
+        for it in items:
+            peer = it.peers_with
+            if not peer or peer in named:
+                continue                    # 用户自己点了两个，别再插
+            other = pool.get(peer)
+            if other is not None and other.name.lower() not in seen:
+                wanted.append(other)
+                seen.add(other.name.lower())
+        for it in items:
+            if it.name.lower() not in seen:
+                wanted.append(it)
+                seen.add(it.name.lower())
+        if len(wanted) > len(items):
+            added = [it.name for it in wanted if it.name.lower() not in named]
+            self._note_peer([x.name for x in wanted])
+            wanted.sort(key=rank)
+        return wanted
+
+    def _note_peer(self, names: list[str]) -> None:
+        """在日志开头写清"为什么多装了一个"，别让用户以为是页面抽风。
+
+        要把**两个包名都写全**。之前只拼了"被补上的那个"，于是点 torchvision
+        时文案成了"torch 与 torch 必须配对"，反而更让人糊涂。
+        """
+        if not names:
+            return
+        # 文案里的名字按展示习惯排（torch 在前），与**执行顺序**（torchvision
+        # 在前）是两回事：执行顺序是 pip 约束决定的，这句话是给人读的。
+        _show = ("torch", "torchvision")
+        shown = sorted(names, key=lambda n: _show.index(n.lower())
+                       if n.lower() in _show else len(_show))
+        self._pending_note = (
+            f"{' 与 '.join(shown)} 必须同版本配对，已一并处理"
+            f"（单独重装其中一个会把另一个换掉，或留下档位不一致导致 import 报"
+            f" undefined symbol）。只卸不装时可单独操作。")
 
     # ---- 批量动作
 
@@ -606,13 +1103,27 @@ class DepManager:
             raise ValueError(f"包名不合法：{name}")
         return Item(name=name, spec=name, group="optional", note="手动指定")
 
-    def _start_many(self, action: str, items: list[Item]) -> dict[str, Any]:
+    def _start_many(self, action: str, items: list[Item], *,
+                    torch_variant: str = "") -> dict[str, Any]:
         """所有动作的唯一入口：一个包和一批包走同一条路。
 
         分开写两份循环只会让"单包装好了、批量却没落日志"这类偏差活下来。
         """
+        # 选定的 torch 档位钉进 Item 上挂着的那份副本里：线程跑的时候用的
+        # 就是这一份，不再去读全局状态（否则轮询一刷新就可能换档）。
+        key = str(torch_variant or "").strip().lower()
+        if key and key != "auto":
+            if _variant(key) is None:
+                raise ValueError(f"没有这个 torch 档位：{torch_variant}")
+            items = [Item(**{**it.__dict__, "torch_variant": key}) for it in items]
+        # 挂起的那句话属于本轮，取走后立刻清空：留着会被下一个不相关的动作
+        # 再写一遍，变成误导。
+        note, self._pending_note = self._pending_note, ""
         with self._lock:
             if self.status == "running":
+                # 状态是 running 就直接拒，此时不能把 note 丢掉——它等着本轮
+                # 真正开跑时用。放回去。
+                self._pending_note = note
                 raise RuntimeError("上一个任务还没结束，等它跑完或先取消")
             self.status = "running"
             self.action = action
@@ -622,6 +1133,9 @@ class DepManager:
             self.exit_code = None
             self.log = []
             self._cancel = False
+            if note:
+                # 写在 log 重置之后：之前写会被上一行清掉。
+                self.log.append(note)
             self.batch = [{"name": it.name, "status": "pending", "detail": ""}
                           for it in items]
             self._token += 1
@@ -701,7 +1215,9 @@ class DepManager:
             self._emit(f"—— {item.name} 卸载完成，开始重装 ——")
         args = ["install", "--no-warn-script-location", item.spec]
         if item.torch_index:
-            index, note = torch_plan()
+            # 用户选了档位就按他选的装（只推荐、不强制）；没选才走本机推荐。
+            index = torch_index_for(item.torch_variant)
+            note = "" if item.torch_variant else torch_plan()[1]
             args += ["--index-url", index]
             self._emit(f"（torch 系列走 PyTorch 索引：{index}）")
             if note:

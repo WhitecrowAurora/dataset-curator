@@ -16,17 +16,27 @@
 #
 #  用法：
 #    ./install.sh                    常规安装（已装过就只补缺的）
+#    bash install.sh                 没执行位时（Windows 打的包解压后常见）
 #    ./install.sh --force            删掉 env/linux 重建
 #    ./install.sh --offline          从 env/initialization/wheels 离线安装
 #    ./install.sh --skip-tag         不装打标运行时（只打包 / 跑 NL）
 #    ./install.sh --no-llama         不装 llama.cpp（llama-server，约 570MB）
 #    ./install.sh --no-tests         装完不跑测试
 #    ./install.sh --python python3.12    指定解释器
+#    ./install.sh --torch-index cpu  手动指定 torch 索引（cpu / cu126 / cu130 或完整 URL）
+#
+#  torch 版本默认按显卡自动选：50 系且驱动 580+ → cu130；Turing/Ampere/Ada
+#  且驱动够新 → cu126；没卡或驱动太老 → cpu。分档与 install.bat 一致。
 # ===========================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+
+# Windows 打出来的 zip 不带 POSIX 执行位，解到 Linux 上三个 .sh 都是 0644。
+# 用 bash install.sh 进来时顺手补齐，装完 ./tagger.sh / ./run-web.sh 直接可用。
+# 改的是用户自己解压出来的文件，不需要 sudo；只读/noexec 挂载上失败也不该挡安装。
+chmod +x "$ROOT"/*.sh 2>/dev/null || true
 
 VENV="$ROOT/env/linux"
 REQ="$ROOT/requirements-embedded.txt"
@@ -37,12 +47,14 @@ RUN_TESTS=1
 SKIP_TAG=0
 SKIP_LLAMA=0
 PYTHON_BIN="${PYTHON:-}"
+TORCH_INDEX="${TORCH_INDEX:-}"
 
 die() { printf '\n [错误] %s\n' "$*" >&2; exit 1; }
 note() { printf ' %s\n' "$*"; }
 
 usage() {
     # 直接打印文件头的注释块，省得维护两份用法说明（它们一定会分叉）。
+    # 范围跟着文件头走：加一行用法就要同步改这里，否则 --help 会漏最后几行。
     sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^#//; s/^ //'
     exit 0
 }
@@ -55,6 +67,8 @@ while [ $# -gt 0 ]; do
         --no-llama)   SKIP_LLAMA=1 ;;
         --no-tests)   RUN_TESTS=0 ;;
         --python)     shift || die "--python 后面要跟解释器路径"; PYTHON_BIN="${1:-}" ;;
+        --torch-index) shift || die "--torch-index 后面要跟 cpu / cu126 / cu130 或完整 URL"
+                      TORCH_INDEX="${1:-}" ;;
         -h|--help)    usage ;;
         *)            die "未知参数: $1（--help 看用法）" ;;
     esac
@@ -153,7 +167,66 @@ fi
 # 默认 tag 后端是 pixai，要 torch / transformers / timm。缺了它第一次跑打标
 # 就报 "tag 后端不可用"，而那句话以前只能让人自己去猜该装什么。
 # 失败不算致命：打包与 NL 不碰 torch，不该因为一个依赖就连 CLI 都用不了。
+#
+# ★torch 不能直接 `pip install -r requirements-tag.txt`：PyPI 上的 torch 是
+#   **CPU 版**，CUDA 版只在 PyTorch 自己的索引里。以前这里就是这么装的，于是
+#   装完 install.sh 的 Linux 机器（哪怕插着 A100）拿到的是 CPU 版 torch，跑到
+#   打标才发现慢十倍，而且没有任何提示。现在按包名把清单劈成两批，torch /
+#   torchvision 走探测出来的索引，其余照旧走普通源。
 TAGREQ="$ROOT/requirements-tag.txt"
+
+torch_index_auto() {
+    # 分档口径与 Windows（devtools/setup_embedded_env.ps1）和网页依赖页
+    # （tagger/web/deps.py 的 torch_plan）保持一致，三处别各写各的。
+    #
+    # 为什么不解析 nvidia-smi 表头的 "CUDA Version:"：那是**本地化**文本，
+    # 中文系统写 "CUDA 版本:"，英文正则一个字符都对不上，结果被当成"读不出
+    # 驱动"退到 CPU 版——这正是 2080 Ti 用户反馈的那个坑。改用 --query-gpu
+    # 要纯数字，与语言无关。
+    command -v nvidia-smi >/dev/null 2>&1 || { echo cpu; return; }
+
+    local drv cc drv_major cc_major cuda_major
+    drv="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null \
+        | head -n1 | tr -d '[:space:]')"
+    cc="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+        | head -n1 | tr -d '[:space:]')"
+
+    drv_major="${drv%%.*}"
+    case "$drv_major" in ''|*[!0-9]*) drv_major=0 ;; esac
+    cc_major="${cc%%.*}"
+    case "$cc_major" in ''|*[!0-9]*) cc_major=-1 ;; esac
+
+    if [ "$drv_major" -eq 0 ]; then
+        note "      有显卡但没读出驱动版本，先装 CPU 版（打标会慢十倍）" >&2
+        echo cpu; return
+    fi
+
+    # 驱动号 → 最高 CUDA major（与 deps.py 的 _DRIVER_CUDA_TABLE 同源）
+    if   [ "$drv_major" -ge 560 ]; then cuda_major=12
+    elif [ "$drv_major" -ge 525 ]; then cuda_major=12
+    elif [ "$drv_major" -ge 470 ]; then cuda_major=11
+    else cuda_major=0
+    fi
+
+    if [ "$cc_major" -ge 12 ]; then
+        # 50 系：只有 cu130 有 sm_120 内核。cu130 要求驱动 580+
+        if [ "$drv_major" -lt 580 ]; then
+            note "      50 系（CC $cc）要 cu130，而驱动 $drv 不够（需 580+）；先用 CPU 版" >&2
+            echo cpu; return
+        fi
+        echo cu130; return
+    fi
+
+    if [ "$cuda_major" -lt 12 ]; then
+        note "      驱动 $drv 只支持 CUDA 11.x，cu126 版 import 会报驱动版本不足；改装 CPU 版" >&2
+        echo cpu; return
+    fi
+    # Turing / Ampere / Ada 一律 cu126。20 系（CC 7.5）不因为驱动新就升 cu130：
+    # CUDA 13 砍的是 7.5 之前，sm_75 内核在，但 7.5 没有 TF32/bf16，换大版本
+    # 只有开销，而 20/30/40 系的实测基准全在 cu126 上。
+    echo cu126
+}
+
 if [ "$SKIP_TAG" -eq 1 ]; then
     note "[3.5/5] 跳过打标运行时（--skip-tag）"
 elif [ ! -f "$TAGREQ" ]; then
@@ -162,13 +235,41 @@ elif "$PY" -c 'import torch, transformers, timm' >/dev/null 2>&1; then
     note "[3.5/5] 打标运行时已就绪"
 else
     note "[3.5/5] 安装打标运行时（约 2.5 GB，仅首次）"
-    if [ "$OFFLINE" -eq 1 ] && [ -d "$WHEELS" ]; then
-        "$PY" -m pip install --disable-pip-version-check -q \
-            --no-index --find-links "$WHEELS" -r "$TAGREQ" \
-            || note "      没装完；打标会失败，打包/NL 不受影响"
+    # 按包名劈清单：torch/torchvision 走 PyTorch 索引，其余走原来源。
+    TORCHEQ="$(mktemp)"
+    OTHEREQ="$(mktemp)"
+    trap 'rm -f "$TORCHEQ" "$OTHEREQ"' EXIT
+    grep -E '^(torch|torchvision)([^A-Za-z0-9_.-]|$)' "$TAGREQ" >"$TORCHEQ" || true
+    grep -Ev '^(torch|torchvision)([^A-Za-z0-9_.-]|$)' "$TAGREQ" >"$OTHEREQ" || true
+
+    if [ -n "${TORCH_INDEX:-}" ]; then
+        case "$TORCH_INDEX" in
+            # 允许简写：--torch-index cu126 比整条 URL 好敲，也不容易写错域名
+            http://*|https://*) TIDX="$TORCH_INDEX" ;;
+            *) TIDX="https://download.pytorch.org/whl/$TORCH_INDEX" ;;
+        esac
     else
-        "$PY" -m pip install --disable-pip-version-check -q -r "$TAGREQ" \
-            || note "      没装完；打标会失败，打包/NL 不受影响"
+        TIDX="$(torch_index_auto)"
+        case "$TIDX" in
+            cpu) TIDX="https://download.pytorch.org/whl/cpu" ;;
+            *)   TIDX="https://download.pytorch.org/whl/$TIDX" ;;
+        esac
+    fi
+
+    if [ "$OFFLINE" -eq 1 ] && [ -d "$WHEELS" ]; then
+        note "      torch 来源: 本地 wheel（$WHEELS）"
+        "$PY" -m pip install --disable-pip-version-check -q \
+            --no-index --find-links "$WHEELS" -r "$TORCHEQ" \
+            || note "      torch 没装完；打标会失败，打包/NL 不受影响"
+    else
+        note "      torch 来源: $TIDX"
+        "$PY" -m pip install --disable-pip-version-check -q \
+            --index-url "$TIDX" -r "$TORCHEQ" \
+            || note "      torch 没装完；打标会失败，打包/NL 不受影响"
+    fi
+    if [ -s "$OTHEREQ" ]; then
+        "$PY" -m pip install --disable-pip-version-check -q -r "$OTHEREQ" \
+            || note "      其余依赖没装完；打标会失败，打包/NL 不受影响"
     fi
 fi
 
@@ -200,11 +301,23 @@ PY
 "$PY" -m tagger.cli --help >/dev/null || die "tagger.cli 起不来，检查 $SITE/_tagger_repo.pth 是否指向仓库根"
 
 # --------------------------------------------------------------- 测试
-if [ "$RUN_TESTS" -eq 1 ]; then
-    note "[5/5] 跑测试（安全网，约 2 秒）"
-    "$PY" -m pytest -q || die "测试没通过，环境有问题。可先看：$PY -m pytest -x"
-else
+# 判据不能只有"用户没给 --no-tests"：`/tests` 在 .gitignore 里，直接 git
+# clone 的源码树没有它；`pack-dist.bat -NoTests` 打的包也没有。这两种情况下
+# pytest 以退出码 5（收集到 0 个用例）结束，被 set -e 当成"环境坏了"，
+# 于是装到最后一步报安装失败——而其实什么都是好的。
+if [ "$RUN_TESTS" -ne 1 ]; then
     note "[5/5] 跳过测试（--no-tests）"
+elif [ ! -d "$ROOT/tests" ]; then
+    note "[5/5] 没有 tests/ 目录（源码树或 -NoTests 包），跳过测试"
+else
+    note "[5/5] 跑测试（安全网，约 2 秒）"
+    rc=0
+    "$PY" -m pytest -q || rc=$?
+    if [ "$rc" -eq 5 ]; then
+        note "      tests/ 里没有用例，跳过"
+    elif [ "$rc" -ne 0 ]; then
+        die "测试没通过，环境有问题。可先看：$PY -m pytest -x"
+    fi
 fi
 
 echo
@@ -219,5 +332,5 @@ echo " 模型权重是另一件事：打开界面「模型管理」下载对应�
 echo "   # vLLM 只跑 Linux（本机有 NVIDIA 卡时）："
 echo "   $PY -m pip install vllm"
 echo
-echo " 提示：文件从 Windows 拷过来时可能没有执行位，先 chmod +x install.sh tagger.sh"
+echo " 三个 .sh 的执行位已在开头补齐；若解压到 noexec 挂载点，改用 bash run-web.sh"
 echo

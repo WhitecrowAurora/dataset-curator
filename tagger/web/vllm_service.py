@@ -130,12 +130,14 @@ class VllmService:
     @staticmethod
     def _probe_capability(engine: str) -> tuple[bool, str]:
         try:
-            from ..hardware import query_gpus
+            from ..hardware import visible_gpus, visible_gpus_error
             from ..nl_engine import check_engine
 
             check_engine(engine)
-            if not query_gpus():
-                return False, "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）"
+            if not visible_gpus():
+                # 区分"环境变量指错了"与"真没卡"：前者的修法完全不同。
+                return False, (visible_gpus_error()
+                               or "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）")
         except ConfigError as exc:
             return False, str(exc)
         except Exception as exc:          # noqa: BLE001 - 体检失败不该让页面报错
@@ -209,12 +211,13 @@ class VllmService:
                              f"vLLM 请选 BF16 / FP8 / W4A16。"}
         try:
             from ..config import DEFAULT_TIERS, load_tier_table, resolve_profile
-            from ..hardware import query_gpus
+            from ..hardware import visible_gpus, visible_gpus_error
 
-            gpus = query_gpus()
+            gpus = visible_gpus()
             if not gpus:
                 return {"ok": False,
-                        "error": "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）"}
+                        "error": visible_gpus_error()
+                        or "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）"}
             p = resolve_profile(
                 load_tier_table(DEFAULT_TIERS), gpus[0],
                 model_override=model or None,
@@ -523,6 +526,9 @@ class VllmService:
              overrides: dict | None = None) -> None:
         handle = None
         overrides = overrides or {}
+        # 失败分支要判断"是不是 llama.cpp"，但那时 engine 可能还没赋值
+        # （在 check_engine 就抛了）。先按入参算一份。
+        engine_hint = normalize_engine(overrides.get("engine"))
 
         def current() -> bool:
             """这一轮还作数吗。stop() 或新一轮 start() 会把令牌换掉。"""
@@ -530,16 +536,20 @@ class VllmService:
 
         try:
             from ..config import DEFAULT_TIERS, load_tier_table, resolve_profile
-            from ..hardware import query_gpus
+            from ..hardware import visible_gpus, visible_gpus_error
+            from .. import nl_engine as nl_engine_mod
             from ..model_loader import (fingerprint_env, probe_version,
                                         start_server, wait_ready)
             from ..nl_engine import check_engine
 
             engine = normalize_engine(overrides.get("engine"))
             check_engine(engine)
-            gpus = query_gpus()
+            # 必须是 visible_gpus：这台进程自己设了 CUDA_VISIBLE_DEVICES 时
+            # 服务跑在选中那张卡上，分档/槽位也必须按它算（见 Bug 2）。
+            gpus = visible_gpus()
             if not gpus:
-                raise ConfigError("没有检测到 NVIDIA 显卡（nvidia-smi 不可用）")
+                raise ConfigError(visible_gpus_error()
+                                  or "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）")
             profile = resolve_profile(
                 load_tier_table(DEFAULT_TIERS), gpus[0],
                 model_override=overrides.get("model"),
@@ -582,7 +592,19 @@ class VllmService:
             if self._stop_flag.is_set() or not current():
                 raise _Cancelled()
             # wait=False 的分支不填版本号，这里补一次，指纹里才有 vllm_version。
-            handle.vllm_version = probe_version(handle.base_url, engine)
+            #
+            # ★两个引擎的版本口径不同，必须分开探：vLLM 有 /version，
+            #   llama-server 没有，构建号在 /props 的 build_info 里。
+            #   这里以前写成 probe_version(base_url, engine) 多传了一个参数，
+            #   而 model_loader.probe_version 只收一个——**服务明明起来了，
+            #   这行一抛 TypeError 就被下面的 except 翻成 failed 并把进程杀掉**，
+            #   页面上显示的是一个跟配置、显卡都无关的 "TypeError: probe_version()
+            #   takes 1 positional argument but 2 were given"。只在启动成功之后
+            #   才走到这行，所以启动就崩的机器反而看不到。
+            if engine == "llamacpp":
+                handle.vllm_version = nl_engine_mod.probe_version(handle.base_url)
+            else:
+                handle.vllm_version = probe_version(handle.base_url)
             fp = fingerprint_env(handle)
             FINGERPRINT_PATH.parent.mkdir(parents=True, exist_ok=True)
             FINGERPRINT_PATH.write_text(
@@ -617,6 +639,33 @@ class VllmService:
                     self.error = f"{type(exc).__name__}: {exc}"
             if current():
                 self._append_log(f"启动失败：{self.error}")
+                if handle is None and engine_hint == "llamacpp":
+                    # 进程压根没建出来（缺 dll / 架构不符）：服务日志里只会
+                    # 有我们这一行，用户不用去翻文件。report_text() 会把
+                    # 「怎么修」顺带说清。
+                    self._append_log(self.report_text())
+
+    def report_text(self) -> str:
+        """一段可以直接粘给 AI 的排错报告。
+
+        为什么要有这个：llama.cpp 能不能自动跑起来，取决于官方资产名、显卡
+        驱动、cudart 是否配套这些我们没法穷举的组合。真起不来时，用户手上
+        不该只有"启动失败"四个字和一句"再装一次"——那只能换来一封邮件。
+        把判断需要的现场一次性打出来，用户复制走就能拿到可行步骤。
+        """
+        from ..llama_runtime import diagnose_text
+
+        snap = self.snapshot()
+        lines = ["【tagger NL 服务启动失败】",
+                 f"引擎: {snap.get('engine') or '?'}",
+                 f"状态: {snap.get('status')}  错误: {snap.get('error') or '（无）'}",
+                 f"地址: {snap.get('url')}",
+                 f"服务日志: {Path(self.log_path)}"]
+        tail = self._tail(30)
+        if tail:
+            lines += ["", "---- 日志末尾 ----", *tail]
+        lines += ["", diagnose_text()]
+        return "\n".join(lines)
 
     def _tail(self, lines: int = TAIL_LINES) -> list[str]:
         try:

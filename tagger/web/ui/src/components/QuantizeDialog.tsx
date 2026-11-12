@@ -12,10 +12,11 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, Download, ExternalLink, Loader2, TriangleAlert, X } from 'lucide-react'
+import { CheckCircle2, Download, ExternalLink, FolderOpen, Loader2, TriangleAlert, X } from 'lucide-react'
 import { api, type DepState, type QuantState, type QuantTaskState } from '../lib/api'
 import { StatusChip } from './ui/launcher'
 import { ErrorBox } from './ui/ErrorBox'
+import { useFolderPicker } from './FolderPicker'
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -43,7 +44,7 @@ function vramHint(gb: number | null): string {
   //   safetensors），Q4_K_M 是 llama.cpp 的 GGUF 文件。这句文案以前写成
   //   "建议量化到 Q4（W4A16）"，直接把人导向"压完 AWQ 却被告知缺 gguf"。
   if (gb === null) {
-    return 'W4A16 是 vLLM 的 4bit（safetensors）；llama.cpp 要省显存得压 GGUF 的 Q4_K_M。'
+    return 'W4A16 给 vLLM 用；llama.cpp 要省显存得压 GGUF 的 Q4_K_M。'
   }
   const v = Math.round(gb)
   if (v >= 24) return `本机 ${v}G：F16 / FP8 都能整卡装下，不必量化。`
@@ -91,6 +92,7 @@ export function QuantizeDialog({
   const [installing, setInstalling] = useState(false)
   // 只为了在选择量化档位时给一句"你这张卡该选哪个"，用完即弃。
   const [vramGb, setVramGb] = useState<number | null>(null)
+  const folder = useFolderPicker()
 
   useEffect(() => {
     if (!open) return
@@ -382,9 +384,8 @@ export function QuantizeDialog({
                       )}
                       {!installing && deps?.job?.status === 'failed' && (
                         <p className="text-[11px] text-lx-danger">
-                          安装失败，上面日志的最后几行就是原因。也可以命令行
+                          安装失败，原因见上面日志。也可手动跑
                           <code className="mx-1 font-mono">pip install &quot;tagger[quantize]&quot;</code>
-                          再试。
                         </p>
                       )}
                     </div>
@@ -422,12 +423,22 @@ export function QuantizeDialog({
                 <div className="space-y-2.5">
                   <label className="block">
                     <span className="mb-1 block text-[11px] text-lx-muted">产物目录（必须在 models/ 之内）</span>
-                    <input
-                      className="lx-input font-mono text-xs"
-                      value={outDir}
-                      onChange={(e) => setOutDir(e.target.value)}
-                      spellCheck={false}
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        className="lx-input font-mono text-xs"
+                        value={outDir}
+                        onChange={(e) => setOutDir(e.target.value)}
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="lx-btn-ghost shrink-0 px-2.5"
+                        onClick={() => folder.pick(outDir || undefined, setOutDir)}
+                        aria-label="浏览产物目录"
+                      >
+                        <FolderOpen size={14} />
+                      </button>
+                    </div>
                   </label>
                   <label className="block">
                     <span className="mb-1 block text-[11px] text-lx-muted">量化算法</span>
@@ -549,6 +560,7 @@ export function QuantizeDialog({
                 ) : null
               )}
             </footer>
+            {folder.dialog}
           </motion.div>
         </motion.div>
       )}

@@ -2938,7 +2938,7 @@ token 走 `HF_TOKEN` 环境变量，**不进 ArtistRule**（那字段会进任�
 | 前端字段 | vLLM | llama.cpp |
 |---|---|---|
 | 上下文长度 | `--max-model-len` | 只当每槽上限，且被 `CTX_PER_SLOT=3072` 截断 |
-| max_num_seqs | `--max-num-seqs` | 不生效（等价物是 `-np` 槽位） |
+| max_num_seqs | `--max-num-seqs` | 等价于 `-np`（2026-11-12 起，见 §36；此前是假生效） |
 | max_num_batched_tokens | `--max-num-batched-tokens` | 不生效（llama-server 的 `-b/-ub` 是另一套口径，未接） |
 | 显存占比 | `--gpu-memory-utilization` | **没有这个语义**：显存只能靠槽位/上下文/KV 量化间接控 |
 | 槽位 slots | 传了会被后端直接拒绝 | `-np` |
@@ -3163,3 +3163,222 @@ python worker.py run --cmd "python -m tagger.cli client --shard \"{shard}\" --ou
 
 **校验**：`tests/test_cli.py` 13 条通过（新增 2 条：`--progress-file` 可选开关、
 进度文件键名与节流/收尾）。全量 pytest 见本轮结果。
+
+
+## 38. 2026-11-12：pixai 补批处理 + tf32（默认后端的性能缺口）
+
+**起因**：默认 tag 后端是 pixai（`configs/tiers.yaml` 的 `tagging.backend`），
+但它跑的是三个后端里**最差的一条路径**——wd-eva02 身上的每一层优化它都没有：
+
+| 优化 | wd-eva02 | pixai（改前） |
+|---|---|---|
+| `_predict_many` 攒批 | 有 | **无** → 落到基类逐张循环 |
+| tf32 开关 | 有（`_load` 里调） | **无** → `allow_tf32` 保持 PyTorch 默认 False |
+| 解码预取 / CUDA Graph | 有 | 无 |
+
+第二行是硬伤：PyTorch 1.12 起 `cuda.matmul.allow_tf32` 默认 False，只有
+`WDEva02Tagger._load` 会打开它。选 pixai 时 tensor core 全程闲置。
+再叠加分辨率——pixai 是 1008²/patch14 = 5184 token，eva02 是 448² = 1024 token，
+注意力按平方算是 25 倍——"pixai 稍慢"这个印象其实被低估了。
+
+**改动**（`tagger/cpu_tagger.py`）：
+
+1. `_apply_precision_flags()` 从 `WDEva02Tagger` **上移到 `TagBackend`**：
+   它只碰 torch 全局量，与"哪个后端"无关。`device` 只有子类存，所以用
+   `getattr(self, "device", "cpu")` 取；CPU 上恒为 False。
+   ★docstring 里记了一条隐患：这是**进程级**开关，将来若在一张卡上同时挂
+   两个不同精度的后端，后加载的那份说了算。
+2. `PixAITagger._load` 在建好 pipeline 之后调它（device 此时才确定）。
+3. `PixAITagger._predict_many`：一次喂多张。**必须把 `batch_size=` 一起传给
+   pipeline**——它的默认值是 1，即使喂 list 也会在内部逐张循环。少了这个参数，
+   代码看起来像批处理而吞吐一点不变，是"改了没效果"里最难查的一类。
+4. bf16 对 pixai **降级为 tf32**（`_bf16_downgraded` 在 `__init__` 里判定，
+   所以进指纹、能被单测断言）。理由：bf16 的本义是权重也转半精度，而 pixai
+   走 trust_remote_code 的自定义管线，权重转换没实测过；静默转半精度可能让
+   远端代码某层 dtype 不匹配，错误埋在 pipeline 内部、表现成"这张图 tag 少了"。
+   降级后权重仍 fp32（零漂移），只是打开了 tensor core。
+5. 批内一张坏图**不再带走整批**：批量调用抛异常时退回逐张重跑（单张仍抛）。
+   `tag_batch` 可到 16，一次异常原本会让执行器把 16 个 future 全判失败。
+6. 顺手拆出 `_threshold_arg()` / `_flatten()`，单张与批量共用同一套口径。
+
+**口径没变的部分**：阈值语义、keep_categories 过滤、`max_tags` 截断、结果
+排序与四舍五入都在基类 `predict_batch` 里，批/单张两条路产出一字不差
+（`test_pixai_batch_matches_single_image_path` 守着）。
+
+**校验**：`pytest tests -q` → **全绿（exit 0）**。`tests/test_cpu_tagger.py`
+新增 11 条（该文件 41 → 52）：批只发一次调用且带 `batch_size`、批量与单张同结果、坏图回退、
+单张不回退、阈值三种形态、keep 过滤、decode/forward 拆分、tf32 只在 GPU 开、
+fp32 恒关、bf16 降级、工厂透传 batch。`read_lints` 0 诊断。
+
+**还没做（下一步）**：多卡共卡。现状 `client.py` 的 `service_urls` 虽已支持
+多卡 NL，但 `tag_backend` 是**同一个对象**发给所有 client（`client.py:3155`），
+后端内部有全局锁——tag 完全不随卡数扩展；且 `resolve_device("auto")` 恒回
+`cuda:0`。要动的是「每个 client 各建一份后端、绑自己的卡」，不是调度器。
+
+
+## 39. 2026-11-12：tag 多卡（每卡一份权重，按批等分）+ WebUI 设备多选
+
+**目标形态**：不是"多卡推同一张图"（张量并行），而是**数据并行**——每张卡各
+加载一份 tag 权重，各自负责自己的图，滚动往前推。
+
+**为什么不做"卡数动态调度"**：之前讨论过"偶数卡 NL/tag 各半、先跑完的去帮忙"，
+按实测成本比（VLM 1~3 s/张 vs tag 17~40 ms/张，1:50~1:150）算下来，50/50 的
+起点会让 tag 那张卡在整批 97% 的时间空转；而"改派一张卡去跑 NL"要重新加载
+8B 权重（30~60 s + 5~7 G 显存）。共卡（tag 和 NL 挤同一张卡，只吃 1~2% 算力）
+不用做这件事就拿到同样结果，所以先做共卡。
+
+**后端**（`tagger/cpu_tagger.py`）：
+
+1. `resolve_devices(pref)` → 设备清单。接受 `None/"auto"`、`"cpu"`、
+   `"cuda:0,cuda:1"`、`["cuda:0","cuda:1"]`，去重保序。
+   ★`auto` **不铺满所有卡**：多一张卡就多一份权重（显存 + 启动时间），
+   而"机器有几张卡"和"我想拿几张跑 tag"是两件事，铺满必须显式点名。
+   ★显式写了不存在的 `cuda:N` 时在这里就报错（"这台机器只有 2 张卡"），
+   而不是让它一路走到 `model.to()` 得到 "Invalid device ordinal"。
+2. `MultiDeviceTagBackend`：**不是** `TagBackend` 的子类，不加载权重、不碰
+   torch，只做切分/派活/对位。name/model_id/precision/preprocess/thresholds/
+   keep/max_tags 全部转发第一份——这几项在多卡之间**必须一致**，否则同一张图
+   会随"落在哪张卡"而变，属于产物层面无法归因的污染。
+   - 用**线程**不用进程：模型对象不可 pickle（transformers pipeline），
+     Windows 只能 spawn（每卡多付一次 import torch + 读权重）；torch 前向在
+     C++ 侧执行时释放 GIL，线程之间不互相抢占。
+   - **连续等分**而不是轮转：同一张卡的图在内存里连续，wd-eva02 的解码预取
+     才能跨块生效；拼回来"按段序接上"就是原顺序（调用方靠位置对回 image_id）。
+   - 空段不派活：图比卡少时不会给后面的卡发一次 0 张的调用。
+   - `batch_size` 报的是**整批**容量（每卡 × 卡数）：`local_tag._chunk_size`
+     拿它算一次取多少图，报单卡值会让每张卡只分到 1/N，把攒批收益折掉。
+3. `build_tag_backends(backend, devices=...)`：单卡（或无 devices）直接返回
+   `build_backend` 的原实例——**多卡是多出来的一层，不是新口径**。
+
+**接线**：
+
+- `client.run_client`：`resolve_devices` → `build_tag_backends`；退出时补一句
+  `tag_backend.close()`（包装器自带线程池，`client.close()` 关不到它，漏了
+  会在退出时挂着 N 个空转线程）。
+- `web/jobs.py`：`_build_backend` 与 `_run_vlm` 都走 `spec.tag_device_list()`，
+  兼容规则只写一处（旧快照只有 `device`）。VLM 引擎把清单拼成逗号串传给
+  `--tag-device`，CLI 只有一条解析路径。
+- `web/app.py`：`/api/defaults` 新增 `devices`，按**本机实际卡数**生成
+  （`auto` + `cuda:0..N-1` + `cpu`）。写死 cuda:0/cuda:1 的结果是 3 卡机器选不到
+  第三张，用户会以为"程序不支持多卡"。
+- 前端：`ChoiceMulti`（新控件，aria-pressed 的勾选清单，不是 radio；`auto`/`cpu`
+  与具体卡互斥，且不允许清空到零）。设备从单选变多选，批大小的 help 在多卡下
+  改成"每张卡各 N 张，一次共 N×卡 张"。
+
+**注意（部署侧）**：共卡要求同一张 GPU 上能同时放下 NL 服务与 tag 权重。
+llama.cpp 按需分配，没问题；**vLLM 默认 `gpu_memory_utilization=0.9`**，
+24 G 卡只剩 2.4 G，pixai fp32（486M ≈ 2 G）+ 1008² 的激活可能不够——真在
+vLLM 上开多卡前，先把该值降到 ~0.85。
+
+**校验**：`pytest tests -q` → **全绿（exit 0）**。新增 `tests/test_tag_multi_device.py`
+16 条（设备解析 6、切分 1、分发 5、工厂 3、JobSpec 兼容 1）；`tsc --noEmit` 0 错误，
+`npm run build` 通过。web 侧 4 个测试文件的 monkeypatch 目标同步改为
+`build_tag_backends` / `resolve_devices`（原来打的是已删掉的 `build_backend` /
+`resolve_device`）。
+
+**仍未做**：真实数字。仓库至今没有 pixai-on-GPU 的 ms/张（只有 CPU 的 16 s），
+多卡到底能快多少、共卡对 NL 的干扰有多大，都要实测；测出来再决定要不要
+把 tag 挪到专门的卡上（那时才轮到调度器）。
+
+
+## 40. 2026-11-12：包级并行（每张卡各吃一个封包）+ WebUI 切换
+
+**两种多卡分工**（`JobSpec.tag_mode`，默认 `batch`，与加开关之前完全一致）：
+
+| | 含义 | 适合 |
+|---|---|---|
+| `batch` | **一个**包在跑，每凑一批等分给各卡（`MultiDeviceTagBackend`） | 包少图多 |
+| `pack` | **N 个**包同时跑，一个包完整归一张卡 | 包多；日志能按卡定位 |
+
+批内切分在后端层（只回答"一批怎么算"）；包级并行是调度（回答"谁先拿下一个
+包"），跨 NL / tag 两条线，所以单独一层：`tagger/pack_parallel.py`。
+
+**lane 之间不共享任何可变状态**：各自一个后端、一个 WorkIndex、一个 sink、
+一份 stats。协调全靠盘上已有的跨进程机制——WorkIndex 每实例独立 sqlite 连接
++ 文件锁、`failures.jsonl` 的文件锁、jsonl 按"包名 + 进程号"分片。这套东西
+本来就在支撑"几十个分包跑同一个产物目录"，所以**没有新造协调协议**，也就
+不存在"漏图 / 重复落盘"这类新失败模式。唯一共享的是 `MemberReader`——它本来
+就带锁（打标线程与 HTTP 缩略图线程并发读同一个包），直接复用。
+
+**调度层**（`pack_parallel.py`）：
+- `group_by_pack`：zip/tar 成员按 `source` 归包；散图按父目录归堆（散图目录
+  因此会退化成 1 个包，由调用方判断要不要退回批内切分）。
+- `split_by_weight`：**LPT**（重的先放、每次给最轻的 lane）。不用轮转——包体积
+  差 10 倍很常见，轮转会让某条 lane 收尾时还剩一个大包，其余全空转，墙钟由
+  最慢那条决定，等于把 N 卡退回 1 卡。包比卡少时后面的 lane 拿到空列表。
+- `run_lanes`：线程池 + `halt` 事件。任一条抛异常（含 `Stopped`）就置 halt，
+  其余在**下一个包边界**停手（Python 没有安全的杀线程手段，且这与 guard /
+  停止按钮的既有语义一致），最后把第一条异常原样上抛——`Stopped` 被吞掉的话，
+  点停止会显示成"任务失败"。
+- `merge_tag_stats` / `merge_client_stats`：**绝对求和**而不是累加（刷新进度会
+  多次调用，累加会让完成数越跑越多）；`wall_ms` 取 max（并行下加起来不是墙钟）。
+
+**接线**：
+- 本地引擎：`_build_backend_lanes` 每卡一份**不包装**的后端（套上
+  MultiDeviceTagBackend 会让每条 lane 又去抢所有卡）；线程内各自 `tag_items`
+  （它自己按 out_dir 开 WorkIndex + sink）。`job.stats` 在 `finally` 里合并，
+  中止时界面也不会显示"0 完成而盘上已有产物"。
+- VLM 引擎：每条 lane 一份 `copy.copy(args)`，只改 `shard`（分包）、`url`
+  （只留主地址、清空 `urls`）、`tag_device`。其余（ops/table/guard/out_dir）
+  共用——产物目录必须同一个，否则封包会漏掉别的 lane 写的部分。
+  `run_client` 内部自建 ClientStats，只能从 hook 拿引用，跑完再合并。
+- 适用范围：**本地分片输入 + 本地推理服务**。HF 仓库分片是流式拉的（一包几个
+  GB，按包分给多卡只会让下载和算力互相等），外部 API 也没有"每卡一个端点"这
+  回事——这两种情况自动回落 batch 并在日志里说明。
+- 兜底：包数 < 2、卡数 < 2 都自动回落 batch，同样写一行日志。
+
+**WebUI**：Tag 面板新增「多卡分工」（批内切分 / 每卡一个包），选卡数 < 2 时置灰。
+`/api/defaults` 新增 `tag_mode`（读 `tagging.mode`）。旧方案/旧快照没有该字段
+一律回落 batch。
+
+**校验**：`pytest tests -q` → **全绿（exit 0）**；新增 `tests/test_pack_parallel.py`
+12 条（分组 2、LPT 2、并发中止 2、统计合并 3、后端清单 2、JobSpec 1）。
+`tsc --noEmit` 0 错误，`npm run build` 通过。
+
+**注意**：包级并行的收益取决于"包数 ≥ 卡数"和"NL 服务每卡一个"。若只有 1 个
+`--url`，N 条 lane 会挤在同一个服务上，NL 那侧仍是串行——这时 batch 反而更好。
+
+## 41. 2026-11-12：用户报的两个 serve bug（槽位参数无效 / 选错卡）
+
+来自真实工单（一台 smi 顺序为 [GTX1050, V100, V100]、用 CUDA_VISIBLE_DEVICES=2
+选卡的机器）。两条都是真 bug，且都属于"看起来生效、其实没生效"那一类。
+
+### 41.1 --max-num-seqs 对 llama.cpp 完全无效
+
+链路：_load_profile → esolve_profile(max_num_seqs_override=) → 只落到
+profile.max_num_seqs（vLLM 命令行与指纹用）→ 而 
+l_engine.build_command 的
+-np 只认 slots_override，cmd_serve 又没传它。于是用户传 12，日志里仍是
+按显存推的 2。
+
+修法（不是"再透传一个参数"，而是让两个引擎共用一个用户输入）：
+
+- TierSpec / RunProfile 加 slots 字段；esolve_profile 的取值顺序是
+  **分档表 slots > 用户覆盖 > 分档 max_num_seqs**，即 --max-num-seqs 12
+  在 llama.cpp 上也得到 12。分档表写 slots: 则优先（那是给 llama.cpp 单调的）。
+- 
+l_engine.slot_plan 取值顺序：override（多卡每卡并发）> profile.slots
+  > SLOT_TIERS 显存推算。
+- cmd_serve 透传 --slots（新参数，优先于 --max-num-seqs），并说明优先级。
+- 启动日志新增一行 [tagger] 槽位: N（-np）  卡: ...：以前只有命令行里那串
+  -np N 能看出来，用户找不到自己传的数就以为没生效。
+
+### 41.2 primary_gpu() 不看 CUDA_VISIBLE_DEVICES
+
+query_gpus() 列的是 nvidia-smi 的**物理序**，CUDA 认的是环境变量重映射后的
+**设备序**。两者不一致时（很常见），分档、槽位、精度全都按错的那张卡算：
+4GB 卡 → (0.0, 2) 档 → 2 个槽位，而模型实际跑在 16GB 上，能力只用掉 1/6。
+
+- 新增 hardware.visible_gpus()：按 CUDA_VISIBLE_DEVICES 过滤并**保持列表顺序**
+  （2,1 时第一张是 2 号）；ll/空 = 全部；UUID 与拼错的号跳过；全对不上才退回
+  全部（宁可给个能跑的档，也不报"没有显卡"）。primary_gpu() 改为基于它。
+- 所有 query_gpus()[0] 的判断点改走 isible_gpus()：cli._load_profile、
+  cmd_guard、llm_service.plan、llm_service.start、_probe_capability。
+  多卡面板（multi_gpu）**仍然**用 query_gpus：它要列出物理卡让人挑。
+
+**口径**：CUDA_VISIBLE_DEVICES 里写的是 **nvidia-smi 的 index**（这也是用户
+踩坑的地方——他以为要写 torch 的序号）。子进程隔离沿用原做法：start_server
+把自己看到的这张卡的物理 index 写进子进程环境，子进程眼里它变成 0。
+
+**校验**：pytest tests/test_serve_slots_gpu.py 11 条（槽位 4、选卡 7）；
+真实分档表上 --max-num-seqs 12 → slots=12 → -np 12。

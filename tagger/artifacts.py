@@ -138,6 +138,37 @@ def _row(image_id: str, tag: dict | None, nl: dict | None) -> dict:
     }
 
 
+# 剔除/跳过行的标记键。有它、且 tag/nl 都为空 = "这张确定为无产物"。
+#
+# 为什么必须写进 jsonl 而不是只记在本机账本里：产物最终是"所有人上传到同一个
+# FTP、服务器把所有分片 jsonl 合成一个整体文件"。合成之后本机那些
+# skipped.jsonl / excused.jsonl 早就不知道去哪台机器了，只有跟着这行一起走，
+# 合并侧才回答得出"这张不是漏做，是输入无效"。
+EXCLUDED_KEY = "excluded"
+
+
+def excluded_row(image_id: str, kind: str, reason: str = "") -> dict:
+    """一条"确定为无产物"的记录。kind 取 skipped / excused / excluded。
+
+    tag/nl 留空串是刻意的：下游所有"有内容才算产出"的判定都维持原样，
+    不会把一张没有标注的图当成有标注。识别只靠 EXCLUDED_KEY。
+    """
+    return {
+        "image_id": str(image_id),
+        "tag": "",
+        "nl": "",
+        "ts": time.time(),
+        EXCLUDED_KEY: {"kind": str(kind or "excluded"),
+                       "reason": str(reason or "")[:200]},
+    }
+
+
+def is_excluded_row(row: object) -> bool:
+    """这一行是不是"确定无产物"的剔除记录。"""
+    return isinstance(row, dict) and bool(row.get("image_id")) and \
+        isinstance(row.get(EXCLUDED_KEY), dict)
+
+
 @dataclass
 class ParquetSink:
     """按行攒、按片落。行数到了就写一个分片，写完立刻原子替换。"""
@@ -231,7 +262,10 @@ class JsonlSink:
     def __post_init__(self) -> None:
         self.out_dir = Path(self.out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        if self.stem and not self.writer:
+        # ★定名只看 stem，不能"有 writer 就退成编号分片"：MultiShardSink 恰好
+        #   同时传 stem 和 writer（见 _sink_for），旧写法会让"一包一文件"退化，
+        #   且 _path 恒为 None，files() 的 glob 与实际落名对不上。
+        if self.stem:
             self._path = self._named_path(safe_stem(self.stem))
         else:
             self._seq = 0 if self.writer else _next_seq(self.out_dir, JSONL_SUFFIX)
@@ -260,6 +294,12 @@ class JsonlSink:
         # shard 只有"一包一文件"的 MultiShardSink 用；单文件 sink 忽略它。
         # 参数留着是为了让调用点不必分成两套写法。
         self._rows.append(_row(image_id, tag, nl))
+        if len(self._rows) >= max(1, self.rows_per_file):
+            self.flush()
+
+    def append_row(self, row: dict) -> None:
+        """直接塞一整行（剔除记录用）。走同一个缓冲区，顺序和落盘方式都不变。"""
+        self._rows.append(dict(row))
         if len(self._rows) >= max(1, self.rows_per_file):
             self.flush()
 
@@ -378,9 +418,16 @@ class MultiShardSink:
         return sum(s.pending for s in self._by_shard.values())
 
     def files(self) -> list[Path]:
-        if self.writer:
-            return sorted(self.out_dir.glob(f"{ARTIFACT_PREFIX}*-{self.writer}-*{JSONL_SUFFIX}"))
-        return [s.path for s in self._by_shard.values() if s.path is not None]
+        """本 sink 落过的文件。
+
+        优先用真实路径（sink 自己知道写到哪），glob 只是兜底：早先按
+        `artifacts-*-{writer}-*` 去 glob，但 `_stem_for` 从不把 writer 拼进
+        文件名，那条模式永远匹配不到，等于这个接口恒返回空。
+        """
+        live = [s.path for s in self._by_shard.values() if s.path is not None]
+        if live:
+            return sorted(live)
+        return sorted(self.out_dir.glob(f"{ARTIFACT_PREFIX}*{JSONL_SUFFIX}"))
 
     def _stem_for(self, key: str) -> str:
         stem = shard_stem(key)
@@ -416,6 +463,21 @@ class MultiShardSink:
             self._current = key
         self._sink_for(key).add(image_id, tag, nl)
 
+    def add_excluded(self, image_id: str, kind: str, reason: str = "",
+                     shard: str = "") -> None:
+        """把一条剔除/跳过记录写进**这个包自己的**文件。
+
+        走 MultiShardSink 而不是回退到单文件 sink：合并时按分片对账，剔除行
+        必须和它所属分片的产出待在一起，否则"这一包少了 5 张"永远对不上。
+        """
+        key = str(shard or "")
+        if key != self._current:
+            prev = self._by_shard.get(self._current)
+            if prev is not None:
+                prev.flush()
+            self._current = key
+        self._sink_for(key).append_row(excluded_row(image_id, kind, reason))
+
     def flush(self) -> None:
         for sink in self._by_shard.values():
             sink.flush()
@@ -435,9 +497,9 @@ def is_artifact_jsonl(path: Path) -> bool:
 def is_artifact(path: Path) -> bool:
     """是不是本项目的产物分片（任一形态）。
 
-    靠前缀 + 后缀双重判定：目录里还有 failures.jsonl / manifest.jsonl /
-    数据集自己的 *.parquet，它们没有 image_id 字段，误收进来只会变成
-    "读到一半报错"或者"一堆读不了的文件"。
+    靠前缀 + 后缀双重判定：目录里还有 failures.jsonl / excused.jsonl /
+    manifest.jsonl / 数据集自己的 *.parquet，它们没有 image_id 字段，误收进来
+    只会变成"读到一半报错"或者"一堆读不了的文件"。
     """
     return path.name.startswith(ARTIFACT_PREFIX) and path.suffix in (
         ARTIFACT_SUFFIX, JSONL_SUFFIX)
@@ -528,9 +590,26 @@ def _payload_done(kind: str, raw: object) -> bool:
                  or (bool(backend) and backend != "vlm" and obj.get("tags") == [])))
 
 
-def _row_done(row: object) -> bool:
-    return (isinstance(row, dict) and bool(row.get("image_id"))
-            and any(_payload_done(kind, row.get(kind)) for kind in ("tag", "nl")))
+def _row_done(row: object, require: str | None = None) -> bool:
+    """这条记录算不算"做完了"。
+
+    require=None 是历史口径：**任一侧**有有效产物就算做过。它服务的是普通续跑
+    （"这张别重做"），那时不挑侧是对的。
+
+    只补一侧时必须传 require（"tag" / "nl"）：派工说这一片要补 tag，而本地只有
+    NL 产物，按任一侧口径会判成做完、整片跳过，tag 永远补不上——这正是分项
+    账本会被"看起来跑了"骗过去的地方。
+    """
+    if not (isinstance(row, dict) and bool(row.get("image_id"))):
+        return False
+    if is_excluded_row(row):
+        # 剔除行是"这张已经下过结论了"，续跑不该再捞它出来重打——那正是
+        # excused.jsonl 的语义。不认它的话，每次重开任务都会把这些脏图
+        # 再跑一遍、再失败一遍。
+        return True
+    if require in ("tag", "nl"):
+        return _payload_done(require, row.get(require))
+    return any(_payload_done(kind, row.get(kind)) for kind in ("tag", "nl"))
 
 
 def load_done_ids(out_dir: str | Path, *, fmt: str = "all") -> set[str]:

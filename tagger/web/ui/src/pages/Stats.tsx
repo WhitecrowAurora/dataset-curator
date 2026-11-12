@@ -173,7 +173,7 @@ export function Stats() {
         icon={<ChartSpline size={17} />}
         eyebrow="质检趋势"
         title="统计"
-        description="按完成顺序看通过率、失败率与质检分走势（质检分仅 NL 任务）。"
+        description="通过率、失败率与质检分走势"
         badges={stats && <StatusChip tone={status.tone}>{status.label}</StatusChip>}
         actions={
           <div className="flex items-center gap-2">
@@ -229,14 +229,14 @@ export function Stats() {
           <OverviewFigure
             label="平均质检分"
             value={avgScore === null ? '—' : avgScore.toFixed(2)}
-            note={t.score_n > 0 ? `${fmtCount(t.score_n)} 张有分` : 'VLM 任务才有'}
+            note={t.score_n > 0 ? `${fmtCount(t.score_n)} 张有分` : '仅 NL 任务'}
           />
         </OverviewFigureRow>
       )}
 
       <SectionPanel
         title="趋势"
-        description="每条线是桶内占比（质检分走右轴 1~5）；X 轴是完成顺序，不是时间。"
+        description="桶内占比，质检分走右轴；X 轴是完成顺序"
         trailing={
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
@@ -283,7 +283,7 @@ export function Stats() {
         <div className="flex flex-col gap-3">
           {jobs.length === 0 ? (
             <div className="flex h-40 items-center justify-center text-xs text-lx-dim">
-              还没有任务：先去「新任务」跑一批，这里才有趋势可看
+              还没有任务
             </div>
           ) : (
             <>
@@ -310,7 +310,7 @@ export function Stats() {
               )}
               {stats?.fallback && (
                 <p className="text-xs text-lx-muted">
-                  这个任务是统计功能上线前跑的：只有整体汇总，没有逐桶趋势。
+                  该任务没有逐桶趋势数据
                 </p>
               )}
             </>

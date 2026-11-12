@@ -1,0 +1,642 @@
+{
+  "load-final": {
+    "id": "9b36917a74f9",
+    "status": "done",
+    "phase": "pack",
+    "error": "",
+    "counts": {
+      "total": 3000,
+      "done": 3000,
+      "skipped": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 3000
+    },
+    "started": 1794377127.4489243,
+    "ended": 1794377293.701673,
+    "pack": {
+      "enabled": true,
+      "total": 3000,
+      "packed": 3000,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 3000,
+      "bytes": 8288344,
+      "rate_per_s": 944.59,
+      "formats": [
+        "parquet"
+      ],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": [
+        {
+          "name": "pack-w-00000.parquet",
+          "count": 500,
+          "bytes": 1381391,
+          "sha256": "a9e76a9772cf299269dba8ea8484e71fe7488e77f92eae15f1ef5e94138757ac"
+        },
+        {
+          "name": "pack-w-00001.parquet",
+          "count": 500,
+          "bytes": 1381391,
+          "sha256": "fbc42eee524ae03347756c2b18c9c42b6ecc9ca5047826ab52ca592a814eaf85"
+        },
+        {
+          "name": "pack-w-00002.parquet",
+          "count": 500,
+          "bytes": 1381390,
+          "sha256": "fd3730a0b6bfd5643e0abaf17f0bdf4f2a546bfd6ee2b032b65fb90ea8520b92"
+        },
+        {
+          "name": "pack-w-00003.parquet",
+          "count": 500,
+          "bytes": 1381391,
+          "sha256": "7f60ffbcda7a088fbd02ac6d67d8b663ae05478215f387ea8b9860cee46b7558"
+        },
+        {
+          "name": "pack-w-00004.parquet",
+          "count": 500,
+          "bytes": 1381390,
+          "sha256": "6693534c19433fe03ea6272d48bfc62c3cde4c97ca725030745723229333e9c5"
+        },
+        {
+          "name": "pack-w-00005.parquet",
+          "count": 500,
+          "bytes": 1381391,
+          "sha256": "9c77df0e613bdd637d8483fafe5477af56fdd0f2b619942202aeef8b0084c83f"
+        }
+      ]
+    }
+  },
+  "retry-failed": {
+    "id": "9b568dc3dfc0",
+    "status": "failed",
+    "phase": "tag",
+    "error": "打标仍有 2 张失败，必须补齐后才能封包；继续任务会跳过已有成功图片，只补做缺失结果",
+    "counts": {
+      "total": 8,
+      "done": 6,
+      "skipped": 0,
+      "failed": 2,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 8
+    },
+    "started": 1794377373.3969266,
+    "ended": 1794377378.4325166,
+    "pack": {
+      "enabled": true,
+      "total": 8,
+      "packed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 0,
+      "bytes": 0,
+      "rate_per_s": 0.0,
+      "formats": [
+        "parquet",
+        "zip"
+      ],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": []
+    }
+  },
+  "retry-final": {
+    "id": "ed817208550e",
+    "status": "done",
+    "phase": "pack",
+    "error": "",
+    "counts": {
+      "total": 8,
+      "done": 2,
+      "skipped": 6,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 8
+    },
+    "started": 1794377420.333653,
+    "ended": 1794377425.28067,
+    "pack": {
+      "enabled": true,
+      "total": 8,
+      "packed": 8,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 8,
+      "bytes": 1184140,
+      "rate_per_s": 12.73,
+      "formats": [
+        "parquet",
+        "zip"
+      ],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": [
+        {
+          "name": "pack-w-00000.zip",
+          "count": 4,
+          "bytes": 281019,
+          "sha256": "1ca1c8a000be442f5fa1e38882e7b5f80ce3a6f6d9a0897cbfeba5300317f856"
+        },
+        {
+          "name": "pack-w-00000.parquet",
+          "count": 4,
+          "bytes": 276166,
+          "sha256": "69efbf816adef04822654e069c27b355553544ac08cf9180bf9890093197055a"
+        },
+        {
+          "name": "pack-w-00001.zip",
+          "count": 4,
+          "bytes": 316392,
+          "sha256": "b566df70aa258de5e3ef26614bb99cfded1a56185de4723e7386a4d14d906fd1"
+        },
+        {
+          "name": "pack-w-00001.parquet",
+          "count": 4,
+          "bytes": 310563,
+          "sha256": "7ace6f00db347c7586a0c00b72970ce53e71a67809003deab33d7cb82ae576bd"
+        }
+      ]
+    }
+  },
+  "fixed-retry-final": {
+    "id": "8aea3e90a695",
+    "status": "done",
+    "phase": "pack",
+    "error": "",
+    "counts": {
+      "total": 4,
+      "done": 1,
+      "skipped": 3,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 4
+    },
+    "started": 1794379006.9452484,
+    "ended": 1794379011.5258799,
+    "pack": {
+      "enabled": true,
+      "total": 4,
+      "packed": 4,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 4,
+      "bytes": 557186,
+      "rate_per_s": 14.7,
+      "formats": [
+        "parquet",
+        "zip"
+      ],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": [
+        {
+          "name": "pack-w-00000.zip",
+          "count": 4,
+          "bytes": 281020,
+          "sha256": "5f2afbbcb502847a6b81a8491dc1121006906dc16b0e579a4f0b6790efbce295"
+        },
+        {
+          "name": "pack-w-00000.parquet",
+          "count": 4,
+          "bytes": 276166,
+          "sha256": "69efbf816adef04822654e069c27b355553544ac08cf9180bf9890093197055a"
+        }
+      ]
+    }
+  },
+  "nl-final": {
+    "id": "9da0775251be",
+    "status": "done",
+    "phase": "tag",
+    "error": "",
+    "counts": {
+      "total": 3,
+      "done": 3,
+      "skipped": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 3
+    },
+    "started": 1794377908.7047918,
+    "ended": 1794377916.4158628,
+    "pack": {
+      "enabled": true,
+      "total": 3,
+      "packed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 0,
+      "bytes": 0,
+      "rate_per_s": 0.0,
+      "formats": [
+        "parquet",
+        "zip"
+      ],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": []
+    }
+  },
+  "nl-cache-final": {
+    "id": "8fb752d9e988",
+    "status": "done",
+    "phase": "tag",
+    "error": "",
+    "counts": {
+      "total": 3,
+      "done": 3,
+      "skipped": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 3
+    },
+    "started": 1794378629.3643134,
+    "ended": 1794378629.7689843,
+    "pack": {
+      "enabled": false,
+      "total": 0,
+      "packed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 0,
+      "bytes": 0,
+      "rate_per_s": 0.0,
+      "formats": [],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": []
+    }
+  },
+  "nl-corrupt-final": {
+    "id": "cec9aed6b33c",
+    "status": "done",
+    "phase": "tag",
+    "error": "",
+    "counts": {
+      "total": 3,
+      "done": 3,
+      "skipped": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 3
+    },
+    "started": 1794378725.994485,
+    "ended": 1794378728.125103,
+    "pack": {
+      "enabled": false,
+      "total": 0,
+      "packed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 0,
+      "bytes": 0,
+      "rate_per_s": 0.0,
+      "formats": [],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": []
+    }
+  },
+  "archive-verification": {
+    "files": 6,
+    "rows": 3000,
+    "unique_ids": 3000,
+    "image_decode_verified": 3000,
+    "tag_column_nonempty": 3000,
+    "elapsed_s": 166.25274872779846
+  },
+  "browser-checks": {
+    "evidence": [
+      {
+        "check": "resident_same_dom_scroll",
+        "scroll": 106,
+        "after": 106
+      },
+      {
+        "check": "search_resets_offset",
+        "pass": true
+      },
+      {
+        "check": "size_resets_offset",
+        "pass": true
+      },
+      {
+        "check": "failed_filter",
+        "pass": true
+      }
+    ],
+    "errors": []
+  },
+  "results-switch": {
+    "passed": true,
+    "from": "1cbda72f83b7",
+    "to": "06f54ea012b6",
+    "errors": []
+  },
+  "poll": {
+    "polls": 11,
+    "terminal_stopped_polling": true,
+    "switch_while_running": true,
+    "errors": [],
+    "job": {
+      "id": "1cbda72f83b7",
+      "status": "done",
+      "counts": {
+        "total": 128,
+        "done": 128,
+        "skipped": 0,
+        "failed": 0,
+        "blacklisted": 0,
+        "busy": 0,
+        "settled": 128
+      }
+    }
+  },
+  "nl-merge": {
+    "expected": 3,
+    "complete": 3,
+    "missing_n": 0,
+    "failed": false,
+    "written": 3
+  },
+  "datasets": {
+    "count": 3000,
+    "distinct_sources": 20,
+    "sources": [
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00013-975910706.png",
+        "original": [
+          2048,
+          2048
+        ],
+        "test": [
+          640,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00034-373614367.png",
+        "original": [
+          2048,
+          2048
+        ],
+        "test": [
+          640,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00038-600126283.png",
+        "original": [
+          1248,
+          1824
+        ],
+        "test": [
+          438,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00083-2636599056.png",
+        "original": [
+          8192,
+          4608
+        ],
+        "test": [
+          640,
+          360
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00119-1435392957.png",
+        "original": [
+          2432,
+          1664
+        ],
+        "test": [
+          640,
+          438
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00775-3469890554.png",
+        "original": [
+          1536,
+          1536
+        ],
+        "test": [
+          640,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\00794-2048453106.png",
+        "original": [
+          1432,
+          1840
+        ],
+        "test": [
+          498,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\107908472.jpeg",
+        "original": [
+          1024,
+          1536
+        ],
+        "test": [
+          427,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\11-26_00038_.png",
+        "original": [
+          832,
+          1216
+        ],
+        "test": [
+          438,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\1287251703-Euler_A_SGMUniform-17-4.0-960x1408-2b347f759a_ef201fcb.webp",
+        "original": [
+          437,
+          639
+        ],
+        "test": [
+          437,
+          639
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\1579659839-Euler_A_SGMUniform-17-4.0-960x1408-2b347f759a_fc5e9ccc.png",
+        "original": [
+          1296,
+          1896
+        ],
+        "test": [
+          437,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\176004057-Euler_A_SGMUniform-17-4.0-960x1408-2b347f759a_96012105.webp",
+        "original": [
+          437,
+          639
+        ],
+        "test": [
+          437,
+          639
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\1773973940276_5104382000_k79ur.png",
+        "original": [
+          832,
+          1216
+        ],
+        "test": [
+          438,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\1774144469141_5104382000_ofbe2h.png",
+        "original": [
+          832,
+          1216
+        ],
+        "test": [
+          438,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\20241217_135539.jpg",
+        "original": [
+          1892,
+          4096
+        ],
+        "test": [
+          296,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\2025-06-14-165522_05-(獸)plantMilkModelSuite_flax_319760287.png",
+        "original": [
+          1792,
+          2304
+        ],
+        "test": [
+          498,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\2025-07-26-164759_waiNSFWIllustrious_v140_5036.png",
+        "original": [
+          2128,
+          2128
+        ],
+        "test": [
+          640,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\334a57fc-f9b9-441a-a607-abc03dccfc14.png",
+        "original": [
+          1152,
+          768
+        ],
+        "test": [
+          640,
+          427
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\5333a38c-a127-40eb-b5c7-e07fbd4a0889.png",
+        "original": [
+          768,
+          1152
+        ],
+        "test": [
+          427,
+          640
+        ]
+      },
+      {
+        "source": "H:\\lulynx-trainer\\sucai\\9JRJTC04R5TC0SFEJY8AEJK9M0.jpeg",
+        "original": [
+          832,
+          1216
+        ],
+        "test": [
+          438,
+          640
+        ]
+      }
+    ]
+  },
+  "runtime": {
+    "gpu": "RTX 4070 Ti SUPER 16GB",
+    "torch": "2.14.1+cu126",
+    "tag": "wd-eva02 BF16 batch16 PIL",
+    "nl": "Qwen3-VL-8B Q6_K + F16 mmproj, llama.cpp 0.9.0-dev build12188, slots1, context3072, max_pixels262144",
+    "tag_full_elapsed_s": 166.25274872779846,
+    "tag_full_images_s": 18.044814434387646,
+    "tag_decode_s": 22.964,
+    "tag_forward_s": 60.4,
+    "sampled_server_peak_ram_mib": 1421.8,
+    "observed_gpu_peak_mib": 10563,
+    "gpu_scope": "total display memory, includes background desktop; high sample during early batch workspace"
+  },
+  "final_checks": {
+    "pytest": "906 passed, 1 skipped in 110.24s after resume fixes",
+    "tsc": "passed",
+    "vite": "passed; index-BjiVDJ3W.js",
+    "diff_check": "passed",
+    "packaging_browser": "Supplementary data-packaging button automation timed out; no visual signoff for this page"
+  },
+  "limitations": [
+    "3000 entries repeat 20 sources resized to maximum 640px edge; not 3000 distinct original images or long-run 30M acceptance",
+    "NL tested production distribute -> real inference -> merge result workflow, not image-plus-NL re-pack; local TAG Parquet/ZIP fully read back",
+    "Artist-context cache separation and quote edge cases retain previous targeted tests; this run real model has artist disabled",
+    "Remote HF/team dispatch/upload and long-run restart/24h operation not tested",
+    "Previous full-suite history persistence one-off failure remains unconfirmed; two suites during acceptance passed"
+  ],
+  "acceptance_fixes": [
+    "restart saves replacement resume before retiring old recovery record",
+    "dismiss retires actual fallback resume selected by loader",
+    "local tag pause disabled; stop/restart remains supported"
+  ]
+}

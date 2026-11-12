@@ -280,8 +280,8 @@ export function GgufConvertDialog({
                     </p>
                   )}
                   <p className="mt-1 text-[11px] leading-relaxed">
-                    {localTiers.length > 0 ? '要重新压一份才需要原始权重' : '本地量化要用 transformers 格式的原始权重（safetensors）'}
-                    ——点这一行的「下载原始权重」下完再来。
+                    {localTiers.length > 0 ? '重新压一份才需要原始权重' : '本地量化需要 transformers 格式的原始权重'}
+                    ，点这一行的「下载原始权重」
                   </p>
                   {state.source.hint && (
                     <p className="mt-1 whitespace-pre-line break-all font-mono text-[10px] text-lx-dim">
@@ -295,9 +295,9 @@ export function GgufConvertDialog({
                 <div className="space-y-2.5">
                   <p>
                     源权重 <code className="font-mono text-lx">{fmtBytes(state.source.bytes)}</code>
-                    ，先转成 F16 GGUF，再压成目标档位。转换期间要占约
+                    ，先转 F16 GGUF 再压成目标档位。转换期间要占约
                     <span className="text-lx"> 两份模型大小 </span>
-                    的磁盘，跑完自动删掉中间的 F16。
+                    的磁盘。
                   </p>
                   <label className="block">
                     <span className="mb-1 block text-[11px] text-lx-muted">量化档位</span>

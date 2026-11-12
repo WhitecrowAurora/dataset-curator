@@ -2,7 +2,7 @@
 
 为什么要有这个东西
 ------------------
-用户在自己的机器上装完（解压 → install.bat → 双击 exe），出问题时的表现
+用户在自己的机器上装完（解压 → install.bat / ./install.sh → 启动），出问题时的表现
 高度相似：页面能打开，但一点开始就报错，而错误文本指向的往往不是真正的
 根因（比如"分片不存在"其实是环境里少了个包）。把 15 项检查排成一次自检，
 把"哪一环断了"直接摆出来，比让他贴日志快得多。
@@ -250,7 +250,8 @@ def _step_deps(cfg: dict) -> tuple[str, str]:
         except Exception:                       # noqa: BLE001
             missing.append(name)
     if missing:
-        return "fail", f"缺少：{', '.join(missing)}。跑 install.bat 重新装依赖"
+        installer = "install.bat" if os.name == "nt" else "./install.sh"
+        return "fail", f"缺少：{', '.join(missing)}。跑 {installer} 重新装依赖"
     return "pass", f"{len(mods)} 个关键依赖可用"
 
 

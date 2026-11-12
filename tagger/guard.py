@@ -131,9 +131,31 @@ class GuardState:
         )
 
 
+def _smi_path() -> str | None:
+    """nvidia-smi 在哪。
+
+    **不能只信 PATH**。Windows 上它常常没进 PATH；Linux 上在容器里、或者
+    从 cron / systemd / 非登录 shell 起来时，PATH 也可能被裁短。hardware 里
+    已经有一份带常见安装位置（含 /usr/bin、/usr/local/bin）的查找，这里复用
+    它，免得两处口径不一致。
+
+    以前这里只有 `shutil.which(...) or r"C:\\Windows\\System32\\nvidia-smi.exe"`
+    ——Linux 上 which 失败就拿着这个 Windows 路径去 Popen，OSError 被下面的
+    except 吞掉，GPU 读数恒 0，温度熔断和显存保护全部形同虚设，而且状态面板
+    上看不出"读不到"和"很凉快"的区别。
+    """
+    try:
+        from .hardware import _find_nvidia_smi
+    except Exception:                      # noqa: BLE001 - 探测不该拖垮守护线程
+        return shutil.which("nvidia-smi")
+    return _find_nvidia_smi()
+
+
 def _read_gpu() -> tuple[float, float, float]:
     """(利用率0-1, 温度°C, 显存已用GB)。读不到返回 0。"""
-    exe = shutil.which("nvidia-smi") or r"C:\Windows\System32\nvidia-smi.exe"
+    exe = _smi_path()
+    if not exe:
+        return 0.0, 0.0, 0.0
     try:
         out = subprocess.run(
             [exe, "--query-gpu=utilization.gpu,temperature.gpu,memory.used",

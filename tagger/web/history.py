@@ -29,6 +29,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ..storage.atomic import write_json
+
 # 测试要能把这个目录指到临时位置（与 TAGGER_RESUME_PATH 同一套做法）：
 # 不隔离的话，跑一次 pytest 就会往真实的 run/history 里塞假任务。
 _env = os.environ.get("TAGGER_HISTORY_DIR", "").strip()
@@ -52,11 +54,7 @@ def save(snapshot: dict[str, Any]) -> None:
     if not job_id:
         return
     try:
-        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-        p = _path(job_id)
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, p)
+        write_json(_path(job_id), snapshot)
     except OSError:
         pass
 
@@ -159,13 +157,29 @@ def _prune(items: list[dict[str, Any]]) -> None:
             pass
 
 
-def clear() -> None:
-    """清空历史（测试与"重置记录"用）。"""
+def clear(keep: set[str] | None = None) -> int:
+    """清空历史，返回删掉了几条快照。
+
+    `keep` 里的 id 不删：页面上那个「清空」按钮要能保住还在跑的任务——
+    它们的记录还在被 `_persist` 回写，删掉当场就会被重新写出来，而且用户
+    会以为"刚跑的任务丢了"。真正该清的是已经结束的那些。
+
+    快照和旁挂的 stats 一起删：只删快照会留下一堆没人认领的孤儿文件，
+    而"清空历史"这个动作的动机正是不要再占盘。
+    """
     if not HISTORY_DIR.is_dir():
-        return
+        return 0
+    skip = keep or set()
+    removed = 0
     for pattern in ("*.json", "*.stats.jsonl"):
         for p in HISTORY_DIR.glob(pattern):
+            # 两种文件名都以 id 开头：`<id>.json` / `<id>.stats.jsonl`
+            if p.name.split(".", 1)[0] in skip:
+                continue
             try:
                 p.unlink(missing_ok=True)
+                if pattern == "*.json":
+                    removed += 1
             except OSError:
                 pass
+    return removed

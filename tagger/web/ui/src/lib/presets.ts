@@ -107,7 +107,14 @@ export const usePresets = create<PresetsStore>((set, get) => ({
   async remove(name) {
     set({ busy: true })
     try {
-      set({ state: await api.deletePreset(name), busy: false, error: null })
+      // 删除给一句回执：删除按钮是常驻的（以前悬停才显形，没人发现），
+      // 点完没有任何反馈的话，用户会怀疑是不是没点中而不停重试。
+      set({
+        state: await api.deletePreset(name),
+        busy: false,
+        error: null,
+        note: `已删除「${name}」`,
+      })
     } catch (err) {
       set({ busy: false, error: errText(err) })
     }

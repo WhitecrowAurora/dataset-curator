@@ -46,7 +46,7 @@ from typing import Any, Callable
 
 import httpx
 
-from . import gguf_quant, llama_runtime
+from . import gguf_quant, llama_runtime, tmpdir
 from .config import ConfigError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -273,7 +273,8 @@ def ensure_tools(log: Callable[[str], None] | None = None, *,
         for name in ("conversion", "gguf-py"):
             shutil.rmtree(TOOLS_DIR / name, ignore_errors=True)
         script.unlink(missing_ok=True)
-        with tempfile.TemporaryDirectory() as tmp:
+        # dir=tmpdir.ensure()：源码包 37 MB，不能落在系统盘 %TEMP%（详见 tmpdir）。
+        with tempfile.TemporaryDirectory(dir=tmpdir.ensure()) as tmp:
             archive = Path(tmp) / "src.tar.gz"
             _download_source(archive, tag, say, _settings_proxy())
             with tarfile.open(archive, "r:gz") as tar:

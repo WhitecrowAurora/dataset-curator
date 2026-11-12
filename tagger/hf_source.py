@@ -38,8 +38,29 @@ from typing import Callable, Iterator, Mapping, Sequence
 
 import httpx
 
-HF_API = "https://huggingface.co/api/datasets"
-HF_RESOLVE = "https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}"
+HF_OFFICIAL = "https://huggingface.co"
+
+
+def _download_bases() -> list[str]:
+    """下载源候选：配置的镜像优先，官方兜底。
+
+    默认走 hf-mirror.com（见 config.DEFAULT_ENDPOINT），国内直连、不吃梯子
+    流量。但镜像**不代理登录态**，私有/门禁仓库在那边很可能直接 401——这时
+    回退官方，否则表现成"仓库明明存在却一直拒绝访问"，很难查。
+    """
+    from .config import download_endpoint
+
+    out: list[str] = []
+    for base in (download_endpoint(), HF_OFFICIAL):
+        base = str(base or "").rstrip("/")
+        if base and base not in out:
+            out.append(base)
+    return out
+
+
+def api_url(repo: str, *, revision: str = "main", base: str = "") -> str:
+    base = (base or _download_bases()[0]).rstrip("/")
+    return f"{base}/api/datasets/{repo}/tree/{revision}"
 
 # 分片缓存根目录（相对工作目录）。跨任务共享：下载页提前下好的分片，
 # 打标任务要能直接命中，所以不能放在某个任务的 out_dir 里。
@@ -151,56 +172,87 @@ def list_shards_sized(
     预取要用它算"这一片放不放得下"。`size` 缺失时给 0——那时只能退化成
     "下完再看"，不能拿 0 当"不需要空间"。
     """
-    url = f"{HF_API}/{repo}/tree/{revision}"
     headers = _auth(token)
-    params: dict | None = {"recursive": "true"}
+
+    def _list_one(base: str) -> list[tuple[str, int]]:
+        url = api_url(repo, revision=revision, base=base)
+        params: dict | None = {"recursive": "true"}
+        got: list[tuple[str, int]] = []
+        try:
+            with _client(proxy, timeout=timeout_s, follow_redirects=True) as c:
+                while url:
+                    r = c.get(url, headers=headers, params=params)
+                    if r.status_code == 401:
+                        # HF 对"不存在"也回 401（不泄露仓库是否存在），所以这条
+                        # 不能只写"要 token"：最常见的其实是名字写错或类型选错。
+                        raise HFError(
+                            f"{repo} 拒绝访问（401）。三种可能，按这个顺序查：\n"
+                            f"  1) 仓库名写错——要形如 org/name，不要带 https:// 前缀；\n"
+                            f"  2) 类型不对——这里是 **dataset** 仓库，model 仓库要换成对应的接口；\n"
+                            f"  3) 确实是私有/门禁仓库——填上读权限的 token"
+                            f"（huggingface-cli login，或用有 repo.content.read 的 token）。")
+                    if r.status_code == 404:
+                        raise HFError(
+                            f"{repo} 不存在（404）。确认是 datasets 仓库，且名字拼写对"
+                            f"（形如 org/name，不要带 https:// 前缀）。")
+                    r.raise_for_status()
+                    page = r.json()
+                    if not isinstance(page, list):
+                        raise HFError(
+                            f"{repo} 的 tree 返回结构不认识：{type(page).__name__}")
+                    got.extend(
+                        (str(e.get("path") or ""), int(e.get("size") or 0))
+                        for e in page if e.get("type") == "file")
+                    # httpx 已把 Link 头解析成 {rel: {"url": ...}}；next 指向
+                    # 同一资源就继续翻，没有 next（或指向别处）就收手。
+                    nxt = (r.links.get("next", {}).get("url") if r.links else None)
+                    if nxt and nxt.split("?")[0] == url.split("?")[0]:
+                        url, params = nxt, None
+                    else:
+                        url, params = None, None
+        except httpx.HTTPError as exc:
+            raise HFError(f"列分片失败：{type(exc).__name__}: {exc}") from exc
+        return got
+
     entries: list[tuple[str, int]] = []
-    try:
-        with _client(proxy, timeout=timeout_s, follow_redirects=True) as c:
-            while url:
-                r = c.get(url, headers=headers, params=params)
-                if r.status_code == 401:
-                    # HF 对"不存在"也回 401（不泄露仓库是否存在），所以这条
-                    # 不能只写"要 token"：最常见的其实是名字写错或类型选错。
-                    raise HFError(
-                        f"{repo} 拒绝访问（401）。三种可能，按这个顺序查：\n"
-                        f"  1) 仓库名写错——要形如 org/name，不要带 https:// 前缀；\n"
-                        f"  2) 类型不对——这里是 **dataset** 仓库，model 仓库要换成对应的接口；\n"
-                        f"  3) 确实是私有/门禁仓库——填上读权限的 token"
-                        f"（huggingface-cli login，或用有 repo.content.read 的 token）。")
-                if r.status_code == 404:
-                    raise HFError(
-                        f"{repo} 不存在（404）。确认是 datasets 仓库，且名字拼写对"
-                        f"（形如 org/name，不要带 https:// 前缀）。")
-                r.raise_for_status()
-                page = r.json()
-                if not isinstance(page, list):
-                    raise HFError(
-                        f"{repo} 的 tree 返回结构不认识：{type(page).__name__}")
-                entries.extend(
-                    (str(e.get("path") or ""), int(e.get("size") or 0))
-                    for e in page if e.get("type") == "file")
-                # httpx 已把 Link 头解析成 {rel: {"url": ...}}；next 指向
-                # 同一资源就继续翻，没有 next（或指向别处）就收手。
-                nxt = (r.links.get("next", {}).get("url") if r.links else None)
-                if nxt and nxt.split("?")[0] == url.split("?")[0]:
-                    url, params = nxt, None
-                else:
-                    url, params = None, None
-    except httpx.HTTPError as exc:
-        raise HFError(f"列分片失败：{type(exc).__name__}: {exc}") from exc
+    last_err: HFError | None = None
+    for base in _download_bases():
+        try:
+            entries = _list_one(base)
+            break
+        except HFError as exc:
+            last_err = exc
+            # 只有"拒绝访问"才换源：名字写错/类型选错，换到官方一样错。
+            msg = str(exc)
+            if "（401）" not in msg and "403" not in msg:
+                raise
+    else:
+        raise last_err or HFError(f"{repo} 列分片失败")
 
     glob_re = re.compile(re.escape(pattern).replace(r"\*", ".*") + r"$")
     return sorted(((p, n) for p, n in entries if glob_re.match(p)),
                   key=lambda kv: kv[0])
 
 
-def resolve_url(repo: str, filename: str, *, revision: str = "main") -> str:
-    return HF_RESOLVE.format(repo=repo, revision=revision, path=filename)
+def resolve_url(repo: str, filename: str, *, revision: str = "main",
+                base: str = "") -> str:
+    base = (base or _download_bases()[0]).rstrip("/")
+    return f"{base}/datasets/{repo}/resolve/{revision}/{filename}"
+
+
+def resolve_urls(repo: str, filename: str, *, revision: str = "main") -> list[str]:
+    """同一个文件的多个下载地址：配置的镜像在前，官方在后。
+
+    下载路径要能换源：镜像不代理登录态，私有仓库在那边会 401；而镜像不通时
+    官方又可能被墙。两边都得试，谁通走谁。
+    """
+    return [resolve_url(repo, filename, revision=revision, base=b)
+            for b in _download_bases()]
 
 
 def _probe_range(
-    url: str, headers: dict[str, str], timeout_s: int, proxy: str = ""
+    url: str, headers: dict[str, str], timeout_s: int, proxy: str = "",
+    alt: Sequence[str] = (),
 ) -> tuple[str, int, bool]:
     """探服务端认不认 Range，顺手拿直连地址与总大小。
 
@@ -208,26 +260,34 @@ def _probe_range(
     某些边缘节点上不回 Content-Length；而 206 的 `Content-Range` 里带着总长，
     一次就够。返回的 `direct` 是重定向后的最终地址——后续每段直接打它，
     省掉每段一次 302。
+
+    `alt` 是备选地址（官方站）。镜像常见两种失效：私有仓库 401、镜像本身
+    抽风；两种都换到下一个地址再试，全都不通才报错。
     """
     h = dict(headers)
     h["Range"] = "bytes=0-0"
-    try:
-        with _client(proxy, timeout=httpx.Timeout(timeout_s, connect=20.0),
-                     follow_redirects=True) as c:
-            with c.stream("GET", url, headers=h) as r:
-                if r.status_code in (401, 403):
-                    raise HFError(
-                        f"需要鉴权（HTTP {r.status_code}）。私有仓库要带 HF_TOKEN。")
-                r.raise_for_status()
-                direct = str(r.url)
-                if r.status_code == 206:
-                    cr = r.headers.get("content-range") or ""
-                    m = re.match(r"bytes\s+\d+-\d+/(\d+)", cr)
-                    return direct, int(m.group(1)) if m else 0, True
-                # 服务端忽略了 Range：整片返回，只能走单连接
-                return direct, int(r.headers.get("content-length") or 0), False
-    except httpx.HTTPError as exc:
-        raise HFError(f"探测下载地址失败：{type(exc).__name__}: {exc}") from exc
+    last: HFError | None = None
+    for candidate in (url, *alt):
+        try:
+            with _client(proxy, timeout=httpx.Timeout(timeout_s, connect=20.0),
+                         follow_redirects=True) as c:
+                with c.stream("GET", candidate, headers=h) as r:
+                    if r.status_code in (401, 403):
+                        last = HFError(
+                            f"需要鉴权（HTTP {r.status_code}）。私有仓库要带 HF_TOKEN。")
+                        continue
+                    r.raise_for_status()
+                    direct = str(r.url)
+                    if r.status_code == 206:
+                        cr = r.headers.get("content-range") or ""
+                        m = re.match(r"bytes\s+\d+-\d+/(\d+)", cr)
+                        return direct, int(m.group(1)) if m else 0, True
+                    # 服务端忽略了 Range：整片返回，只能走单连接
+                    return direct, int(r.headers.get("content-length") or 0), False
+        except httpx.HTTPError as exc:
+            last = HFError(f"探测下载地址失败：{type(exc).__name__}: {exc}")
+            continue
+    raise last or HFError("探测下载地址失败：没有可用的下载源")
 
 
 def _fetch_range(
@@ -298,6 +358,7 @@ def _download_segmented(
     verbose: bool,
     on_progress: "Callable[[int, int], None] | None",
     should_stop: "Callable[[], bool] | None",
+    alt: Sequence[str] = (),
 ) -> HFShard | None:
     """多连接分段下载。服务端不支持 Range 时返回 None，由调用方退回单连接。
 
@@ -311,7 +372,7 @@ def _download_segmented(
     """
     state_path = part.with_name(part.name + ".json")
     headers = _auth(token)
-    direct, total, ranged = _probe_range(url, headers, timeout_s, proxy)
+    direct, total, ranged = _probe_range(url, headers, timeout_s, proxy, alt)
     if not ranged or total <= 0:
         return None
 
@@ -485,7 +546,13 @@ def download_shard(
             return HFShard(repo=repo, filename=filename, path=final,
                            bytes=size, temporary=False)
 
-        url = url or resolve_url(repo, filename, revision=revision)
+        # 地址候选：配置的镜像在前、官方在后。分段下载会把 alt 一起带进探测，
+        # 镜像 401（私有仓库）或抽风时自动换到官方。
+        if url:
+            alts: list[str] = []
+        else:
+            _cands = resolve_urls(repo, filename, revision=revision)
+            url, alts = _cands[0], _cands[1:]
         part = final.with_name(final.name + ".part")
         state_path = part.with_name(part.name + ".json")
 
@@ -497,7 +564,7 @@ def download_shard(
                 repo=repo, filename=filename, url=url, part=part, final=final,
                 token=token, timeout_s=timeout_s, max_attempts=max_attempts,
                 conns=conns, proxy=proxy, verbose=verbose, on_progress=on_progress,
-                should_stop=should_stop)
+                should_stop=should_stop, alt=alts)
             if seg is not None:
                 return seg
             # 服务端不认 Range：清掉预分配的半成品，退回单连接从头下
@@ -608,6 +675,46 @@ def _client(proxy: str = "", **kwargs):
 # ------------------------------------------------------------------ parquet
 
 
+# 画师列的常见叫法。HF 上 danbooru 派生的数据集没有统一 schema：
+# 官方版叫 `artist`，各家魔改版常写 `author` / `creator` / `username` /
+# `uploader`（名字来自它们自己的上传后台），列表形态则叫 `artists`。
+#
+# ★这些必须**兜底**而不是写死一个。写死时的失败是彻底静默的：取不到画师
+#   → 产物 `artist` 字段空 → 用户看到"开关全开、画师表也填了，产物里却
+#   什么都没有"，而日志一个字都不提。和 `id_columns`、`_ref_tags_of` 是
+#   同一类问题，做法也照它们：按顺序找第一个有内容的。
+ARTIST_COLUMNS: tuple[str, ...] = (
+    "artist", "artists", "author", "creator", "username", "uploader",
+)
+
+
+def _row_artist(row: dict, columns: Sequence[str]) -> tuple[str, tuple[str, ...]]:
+    """(单值, 全部画师)。都对不上就是 `("", ())`，表示这一行没有画师信息。
+
+    列表形态（`artists`）保留全部：caption 里按设计只注入第一个（连写几个
+    `@` 会把绑定稀释掉），但产物 `artists` 字段要用来追溯，这里砍掉就找不
+    回来了。
+
+    空值形态不止 `None` / `""`：pandas 空单元格读出来是 `nan`，`str(nan)`
+    是字符串 "nan"，直接当名字用会让产物里出现一个叫 nan 的画师。
+    """
+    for col in columns:
+        val = row.get(col)
+        if val is None:
+            continue
+        if isinstance(val, (list, tuple)):
+            names = tuple(str(x).strip() for x in val
+                          if x is not None and str(x).strip()
+                          and str(x).strip().lower() not in ("nan", "none", "null"))
+            if names:
+                return names[0], names
+            continue
+        text = str(val).strip()
+        if text and text.lower() not in ("nan", "none", "null"):
+            return text, ()
+    return "", ()
+
+
 def iter_parquet_samples(
     source: str,
     *,
@@ -617,7 +724,8 @@ def iter_parquet_samples(
     shard: str = "",
     path_template: str = "{image_id}.jpg",
     id_columns: Sequence[str] = ("image_id", "id", "file_name", "path", "name", "key"),
-    artist_column: str = "artist",
+    artist_column: str = "",
+    artist_columns: Sequence[str] = ARTIST_COLUMNS,
     skip: int = 0,
 ) -> Iterator[dict]:
     """流式读一个 parquet 分片，逐行产出图片字节。
@@ -628,6 +736,10 @@ def iter_parquet_samples(
 
     和 sucai 那边是同一套机制（`load_dataset(..., streaming=True)`），
     区别只在它是给训练喂样本，这里是把样本变成打标队列。
+
+    画师列走 `artist_columns` 兜底（见 `ARTIST_COLUMNS`）：第三方的
+    danbooru 派生数据集列名不统一，写死一个 `artist` 会让画师静默丢失。
+    要精确指定就用 `artist_column`，它排在候选表最前面。
     """
     try:
         from datasets import load_dataset
@@ -668,8 +780,10 @@ def iter_parquet_samples(
             continue
         raw = _image_bytes(row.get(image_column), source=uri, row_index=idx)
         image_id = _row_image_id(row, id_columns, fallback=f"{stem}-{idx:06d}")
-        artist = str(row.get(artist_column) or "")
-        yield {
+        # 显式点名的那一列排最前：调用方说"就用 author"时不该被默认顺序盖过。
+        cols = ((artist_column,) + tuple(artist_columns)) if artist_column else artist_columns
+        artist, artists = _row_artist(row, cols)
+        out = {
             "image_id": image_id,
             "artist": artist,
             "data": raw,
@@ -677,6 +791,11 @@ def iter_parquet_samples(
                                                shard=stem, repo=repo),
             "row_index": idx,
         }
+        # 只有真的是多画师才带这个键：单画师时留空，下游 `_hf_task` 的
+        # `artists=()` 与"没有这一列"是同一种语义，不必多一个空元组。
+        if len(artists) > 1:
+            out["artists"] = list(artists)
+        yield out
 
 
 def _row_image_id(row: dict, columns: Sequence[str], *, fallback: str) -> str:

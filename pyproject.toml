@@ -16,9 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 # NL 推理引擎有两个，各自要装的东西完全不同：
 #   vllm     —— 只有 Linux / WSL2 能装（Windows 原生装不上），这里是它的 Python 包
-#   llamacpp —— 不需要任何 Python 依赖，只要一个 llama-server.exe
-#                （llama.cpp releases 的 Windows CUDA 包，或用 TAGGER_LLAMA_SERVER
-#                 指向它）。所以 Windows 成员机不需要装这个 extra。
+#   llamacpp —— 不需要任何 Python 依赖，只要一个 llama-server
+#                （llama.cpp releases 的预编译包：Windows 是 .zip、Linux 是
+#                 .tar.gz，`tagger llama install` 会自动挑并装到
+#                 runtime/llama.cpp；也可以用 TAGGER_LLAMA_SERVER 指向现成的一份）。
+#                 两个平台的成员机都不需要装这个 extra。
 serve = ["vllm>=0.9.0"]
 # parquet 是打包的默认输出格式（Packer.formats 默认 parquet）。
 # 写/复核用 pyarrow；**读**分片（本地或 HF）走 datasets 的 streaming——

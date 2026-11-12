@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   Ban,
@@ -17,7 +17,8 @@ import {
   Square,
   Wand2,
 } from 'lucide-react'
-import { useLive } from '../lib/store'
+import { createLiveStore } from '../lib/store'
+import { api } from '../lib/api'
 import { basename, fmtCount, fmtPct, fmtSeconds } from '../lib/format'
 import { PageHeader, SectionPanel, SheetHead, StatusChip, type StatusTone } from '../components/ui/launcher'
 import { ErrorBox } from '../components/ui/controls'
@@ -46,11 +47,16 @@ export function RunJob({
   jobId,
   onResults,
   onNew,
+  onRestarted,
 }: {
   jobId: string
   onResults: () => void
   onNew: () => void
+  onRestarted: (id: string) => void
 }) {
+  const [useLive] = useState(createLiveStore)
+  const [restarting, setRestarting] = useState(false)
+  const [restartError, setRestartError] = useState<string | null>(null)
   const { snap, events, connected, polling, error, attach, detach, stop, pause, resume } =
     useLive()
 
@@ -93,6 +99,19 @@ export function RunJob({
       : basename(snap.spec.input_dir) || '…'
     : '…'
 
+  async function retryMissing() {
+    setRestarting(true)
+    setRestartError(null)
+    try {
+      const next = await api.restart(jobId)
+      onRestarted(next.id)
+    } catch (err) {
+      setRestartError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRestarting(false)
+    }
+  }
+
   return (
     <div className="mx-auto lx-page-enter flex max-w-6xl flex-col gap-3.5">
       <PageHeader
@@ -129,6 +148,13 @@ export function RunJob({
         actions={
           finished ? (
             <>
+              {(snap?.status === 'failed' || snap?.status === 'stopped') && (
+                <button type="button" className="lx-btn-primary inline-flex items-center gap-1.5"
+                  disabled={restarting} onClick={() => void retryMissing()}>
+                  {restarting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                  {restarting ? '正在恢复…' : '继续补做'}
+                </button>
+              )}
               <button type="button" className="lx-btn-ghost inline-flex items-center gap-1.5" onClick={onNew}>
                 <RotateCcw size={14} /> 再跑一批
               </button>
@@ -155,11 +181,13 @@ export function RunJob({
                   type="button"
                   className="lx-btn-ghost inline-flex items-center gap-1.5"
                   onClick={() => void pause()}
-                  disabled={!snap || snap.phase === 'pack'}
+                  disabled={!snap || snap.spec.engine !== 'vlm' || snap.status !== 'running' || snap.phase === 'pack'}
                   title={
                     snap?.phase === 'pack'
-                      ? '封包阶段不能暂停：tar/zip 不支持追加，停下只会留下半成品'
-                      : '在途的几张打完就挂起，产物留在盘上'
+                      ? '封包阶段不能暂停，只能停止'
+                      : snap?.spec.engine !== 'vlm'
+                        ? '本地分类头不支持暂停，请用停止'
+                        : '在途的几张打完就挂起'
                   }
                 >
                   <Pause size={13} /> 暂停
@@ -178,12 +206,13 @@ export function RunJob({
         }
       />
 
+      {restartError && <ErrorBox error={restartError} title="恢复任务失败" />}
       {error && <ErrorBox error={error} title="进度推送中断" />}
       {polling && !connected && (
         <ErrorBox
           tone="warning"
           title="实时推送断开"
-          error="已退回每秒轮询：数据会慢一拍，但不会停。"
+          error="已退回每秒轮询，数据会慢一拍"
         />
       )}
       {snap?.status === 'failed' && <ErrorBox error={snap.error || '任务失败'} title="任务失败" />}
@@ -198,14 +227,14 @@ export function RunJob({
         <ErrorBox
           tone="warning"
           title="已暂停"
-          error="在途的几张打完就停住了，产物都在盘上。可以直接关掉打标器——下次打开会出现「继续上次任务」，从断点接着做，不重打。"
+          error="在途的几张打完就停住了，产物都在盘上。下次打开可从断点继续。"
         />
       )}
       {snap?.status === 'stopped' && (
         <ErrorBox
           tone="warning"
           title="已停止"
-          error="已算完的部分都落盘了，重新开始会自动跳过它们。停止的任务不封包——半批数据不该进下游。"
+          error="已算完的部分都落盘了，重新开始会自动跳过。停止的任务不封包。"
         />
       )}
       {snap?.status === 'done' && snap.spec.engine === 'local' && !snap.spec.pack && (
@@ -214,7 +243,7 @@ export function RunJob({
           <div className="min-w-0">
             <div className="text-sm font-semibold text-lx-accent">下一步</div>
             <p className="mt-1 text-xs text-lx-secondary">
-              tags 产物已就绪。到左侧「数据打包」页选「封包」，把它封成训练用分片。
+              tags 产物已就绪，可到「数据打包」页封包
             </p>
           </div>
         </div>
@@ -303,7 +332,7 @@ export function RunJob({
               <OverviewFigure
                 label="输入 token"
                 value={fmtCount(snap?.usage.prompt_tokens ?? 0)}
-                note={snap?.usage.cost != null ? '计费大头' : undefined}
+                note={snap?.usage.cost != null ? '主要开销' : undefined}
               />
             )}
             {(snap?.usage.rate_limited ?? 0) > 0 && (
@@ -318,7 +347,7 @@ export function RunJob({
               <OverviewFigure
                 label="估算费用"
                 value={snap.usage.cost.toFixed(3)}
-                note="按 nl_api.json 价目"
+                note="按配置价目"
               />
             )}
             <OverviewFigure label="平均每张" value={perImage} note="秒" />

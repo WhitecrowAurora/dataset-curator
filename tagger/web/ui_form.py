@@ -19,6 +19,12 @@ JobSpec 必须等用户点「开始打标」才存在，而"填一项记一项"�
 ----------
 `api_key` / `hf_token` 有专门的存档（`configs/nl_api.json`），没理由再抄一份明文
 到另一个文件里。两份都剔。
+
+★注意"专门的存档"指的是**用户勾了「记住」之后**那个存档，不是这里的替身：
+  - `api_key`  → `nl_api.store_key()`，按推理来源（openai / anthropic）分。
+  - `hf_token` → `nl_api.store_hf_token()`，**绑仓库**，换仓库不自动沿用。
+  没勾「记住」时口令只活在提交的那一次请求里，这里剔掉就是让它真的不落盘。
+  两者都是明文存储，与 `nl_api` 的其他密钥同级（`chmod 600` 仅限类 Unix）。
 """
 
 from __future__ import annotations

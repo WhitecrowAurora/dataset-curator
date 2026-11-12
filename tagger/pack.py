@@ -41,6 +41,7 @@ from typing import Iterable, Iterator
 
 from .archive import IMAGE_SUFFIXES, sha256_of
 from .storage.discovery import check_stopped, sorted_files
+from .storage.pack_state import PackState
 
 WORKDONE_NAME = ".packstate.jsonl"
 
@@ -366,48 +367,6 @@ def close_readers() -> None:
 
 
 # ------------------------------------------------------------------ 记忆
-
-
-class PackState:
-    """记录已完成条目，支持断点续做。
-
-    用追加式 jsonl 而不是整体重写：中断时最多丢最后一行，
-    而重写整个大文件在断电时会直接损坏状态。
-    """
-
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._done: set[str] = set()
-        self._load()
-
-    def _load(self) -> None:
-        if not self.path.is_file():
-            return
-        with self.path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    self._done.add(json.loads(line)["key"])
-                except (ValueError, KeyError):
-                    continue
-
-    def done(self, key: str) -> bool:
-        return key in self._done
-
-    def mark(self, key: str, **extra) -> None:
-        if key in self._done:
-            return
-        self._done.add(key)
-        rec = {"key": key, "ts": time.time(), **extra}
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-    @property
-    def count(self) -> int:
-        return len(self._done)
 
 
 # ------------------------------------------------------------------ 归档

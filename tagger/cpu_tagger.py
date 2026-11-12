@@ -17,6 +17,7 @@ GPU 那边每张 1~3 秒，CPU 这边同一时间把 tag 算完，谁也等不�
 --------
 pixai       pixai-labs/pixai-tagger-v1.0，transformers pipeline（trust_remote_code），
             30877 词表、1008² 输入。效果最好，但 486M 参数在 CPU 上偏慢。
+            默认后端，所以批处理与 tf32 也接了（见 PixAITagger._predict_many）。
 wd-eva02    ashen-sensored/wd-eva02-tagger-2026-canary，timm eva02_large 448²、
             16473 词表。CPU 上明显更快，是"CPU 跟不上就换它"的选项。
 cl-tagger-v2 cella110n/cl_tagger_v2（onnxruntime，v2_01a）。仓库需要 token，
@@ -60,9 +61,9 @@ class TaggerUnavailable(RuntimeError):
 
 
 def normalize_precision(value: str | None) -> str:
-    """把各种写法归一成 fp32 / tf32 / bf16。
+    """把各种写法归一成 fp32 / tf32 / bf16 / fp16。
 
-    三档的取舍（79 张真实素材、真权重、阈值 0.35 实测，详见
+    各档的取舍（79 张真实素材、真权重、阈值 0.35 实测，详见
     devtools/perf-baseline.md §10）：
         fp32  基线，零漂移。
         tf32  fp32 权重 + tensor core，79 张 **0 个 tag 真改判**、概率最大漂移
@@ -71,15 +72,44 @@ def normalize_precision(value: str | None) -> str:
               tag 里有 2 个真改判（脱离阈值 ±0.01 边界带）。
               这个数字对"抓训练集"是可接受的抖动，对"以后要归因的口径"不是，
               所以默认不开，要快的人自己开。
+        fp16  **只为 V100 这类没有 bf16 的卡存在**。Volta（sm_70）缺 bf16 的
+              硬件支持，但 fp16 tensor core 正是它的主力；对这群用户，
+              fp32 慢、bf16 跑不了，fp16 是唯一能吃到 tensor core 的选择。
+
+    ★fp16 与 bf16 的风险性质不同，不能当作"都是半精度"混为一谈：
+      fp16 只有 5 位指数（上界 65504），ViT 里的 softmax / LayerNorm 在
+      极端输入下有溢出成 inf 的风险；bf16 是 8 位指数、动态范围与 fp32 相同，
+      不会溢出，代价是尾数只有 7 位。所以 fp16 更要靠 tag 一致性校验兜底
+      ——"V100 上没有别的选择"不等于"不用验证"。
     """
     p = (value or "fp32").strip().lower()
-    if p in ("", "fp32", "float32", "off", "none"):
+    if p in ("", "fp32", "float32", "off", "none", "full"):
         return "fp32"
     if p in ("tf32", "tensorfloat32"):
         return "tf32"
     if p in ("bf16", "bfloat16"):
         return "bf16"
-    raise ValueError(f"未知精度 {value!r}，可选：fp32 / tf32 / bf16")
+    if p in ("fp16", "float16", "half"):
+        return "fp16"
+    raise ValueError(f"未知精度 {value!r}，可选：fp32 / tf32 / bf16 / fp16")
+
+
+def half_dtype(precision: str):
+    """precision 对应的半精度 torch dtype；fp32 / tf32 返回 None（不转权重）。
+
+    集中在一处，是因为"把权重和输入转成半精度"这件事散在四个地方
+    （pixai 的 pipeline、wd-eva02 的 _load、CUDA Graph 的静态输入、
+    每次前向的输入张量），漏掉任何一处都会变成"权重 fp16 输入 fp32"
+    的隐式提升，看着能跑，速度却没了一半。
+    """
+    import torch
+
+    p = normalize_precision(precision)
+    if p == "bf16":
+        return torch.bfloat16
+    if p == "fp16":
+        return torch.float16
+    return None
 
 
 @dataclass(slots=True)
@@ -120,6 +150,9 @@ class TagBackend(ABC):
 
     def __init__(self, *, keep: Sequence[str] = DEFAULT_KEEP,
                  thresholds: dict[str, float] | None = None,
+                 # 判别式模型的 top-N 上限，与配置的 output.tag_max_count **不是
+                 # 同一个东西**（那条是 VLM 生成 tag 的 token 预算），别试图统一。
+                 # 详见 build_backend 的同名参数。
                  max_tags: int = 160, verbose: bool = True,
                  precision: str = "fp32", batch_size: int = 1,
                  use_graph: bool = True, prefetch: bool = True,
@@ -175,6 +208,55 @@ class TagBackend(ABC):
         """
         return self.predict_batch([image])[0]
 
+    def rescore_last(self, index: int,
+                     thresholds: dict[str, float] | None) -> dict[str, float]:
+        """用上一次前向的分数快照，换一套阈值重筛第 index 张（不重跑前向）。
+
+        为什么不用 `predict_batch_with`：那个会真的再前向一遍。tag 与 VLM 是
+        并行起的，等 `tag_future.result()` 时才拿到分数；若此时发现"这张恰好
+        是被截断的那张"，为了换条线再烧一次前向毫无意义——分数就在手上。
+
+        取不到快照（后端不支持、或 index 越界）返回空 dict，调用方自己退回
+        到"直接放弃"。
+        """
+        probs = getattr(self, "last_probs", None)
+        if not probs or not (0 <= index < len(probs)):
+            return {}
+        saved_thr, saved_key = self.thresholds, self._plan_key
+        try:
+            self.thresholds = dict(thresholds or {})
+            self._plan_key = None
+            return self._filter(probs[index])
+        finally:
+            self.thresholds = saved_thr
+            self._plan_key = saved_key
+
+    def predict_batch_with(self, images: Sequence,
+                          thresholds: dict[str, float] | None
+                          ) -> list[TagPrediction]:
+        """临时换一套阈值再算一批，算完还原（保持顺序，与入参一一对应）。
+
+        为什么需要它：CPU 分类头是**确定性**的，同一张图重跑拿到的分数一个
+        不差。所以"tag 过少就再来一遍"必须实现成**对同一份分数换条判定线再
+        筛一次**，否则只是烧一遍前向换回同一份结果。
+
+        与 `predict_raw` 一样走 `_plan_override`，单 worker 执行器里不存在
+        并发改写；区别是这里保留后端自己的类别过滤（keep）与 max_tags。
+        """
+        self.load()
+        with self._lock:
+            saved_plan = self._plan_override
+            saved_thr = self.thresholds
+            try:
+                self.thresholds = dict(thresholds or {})
+                self._plan_key = None            # 逼 _filter_plan 按新阈值重建
+                self._plan_override = None
+                return self.predict_batch(list(images))
+            finally:
+                self._plan_override = saved_plan
+                self.thresholds = saved_thr
+                self._plan_key = None
+
     def predict_batch(self, images: Sequence) -> list[TagPrediction]:
         """一次算多张。
 
@@ -184,7 +266,7 @@ class TagBackend(ABC):
         才是 57.8 → 17.3 ms（3.3×）。**批处理的收益只在低精度下才真正
         兑现**，所以这两个参数必须能一起给。
 
-        不攒批的后端（pixai / onnx）走基类默认实现，等价于循环调用，
+        不攒批的后端（当前是 onnx）走基类默认实现，等价于循环调用，
         数值与 predict 逐张跑完全一致。
         """
         import time
@@ -245,6 +327,29 @@ class TagBackend(ABC):
             return float(self.thresholds[category])
         return float(self.thresholds.get("default", DEFAULT_THRESHOLD))
 
+    def _apply_precision_flags(self) -> None:
+        """tf32 的进程级开关。子类在模型上卡之后、第一次前向之前调用一次。
+
+        为什么非显式打开不可：PyTorch 1.12 起 `cuda.matmul.allow_tf32`
+        默认 False，Ampere 以上的 tensor core 全程闲置。对一个 fp32 的
+        分类头来说这不是小数——GEMM 本来可以走 tf32，白白多花近一倍时间，
+        而权重、输入、判定阈值一个字都没变（零漂移）。
+
+        ★这是**进程级**开关，不属于某个后端：同一进程里建两个不同精度的
+        后端时，后加载的那份决定全局值。当前每次运行只 build 一个后端
+        （见 build_backend 的调用点），所以不构成问题；将来要在一张卡上
+        同时挂两个后端，必须先想清楚这一条。
+
+        `device` 只有子类存（建后端时传进来的那张卡），基类没有，所以用
+        getattr 取。CPU 上恒为 False——那里没有 tensor core，开了只是自欺。
+        """
+        import torch
+
+        device = str(getattr(self, "device", "cpu") or "cpu")
+        on = self.precision in ("tf32", "bf16") and device != "cpu"
+        torch.backends.cuda.matmul.allow_tf32 = on
+        torch.backends.cudnn.allow_tf32 = on
+
     @staticmethod
     def _open_rgb(image):
         """接受 路径 / 文件对象 / bytes / PIL 图，统一回到 RGB 的 PIL 图。
@@ -270,6 +375,27 @@ class TagBackend(ABC):
         return image.convert("RGB")
 
 
+# ------------------------------------------------------------------ 本地目录
+
+# transformers 从目录加载时**必需**的几个文件。少一个就不是"一个模型目录"，
+# 传进去只会得到一句 "does not appear to have a file named config.json"，
+# 而这时按 HF 缓存加载反而是能跑的。
+_MODEL_REQUIRED = ("config.json", "preprocessor_config.json")
+# 权重：safetensors 或 pytorch_model.bin 二者其一即可（官方发的是 safetensors，
+# 但量化/转换出来的目录常常只有 bin）。
+_MODEL_WEIGHTS = ("*.safetensors", "pytorch_model.bin")
+
+
+def _missing_model_files(root: Path) -> list[str]:
+    """本地模型目录还缺哪些必需文件。空 = 够用了，可以完全离线加载。"""
+    if not root.is_dir():
+        return ["（目录不存在）"]
+    missing = [name for name in _MODEL_REQUIRED if not (root / name).is_file()]
+    if not any(next(iter(root.glob(pat)), None) for pat in _MODEL_WEIGHTS):
+        missing.append("model.safetensors")
+    return missing
+
+
 # ------------------------------------------------------------------ pixai
 
 
@@ -284,11 +410,36 @@ class PixAITagger(TagBackend):
     name = "pixai"
 
     def __init__(self, model_id: str = "pixai-labs/pixai-tagger-v1.0",
+                 model_dir: str | Path | None = None,
                  device: str = "cpu", **kw: Any):
         super().__init__(**kw)
         self.model_id = model_id
+        self.model_dir = Path(model_dir) if model_dir else None
         self.device = device
         self._pipe = None
+        # 上一次前向的全量分数（阈值 0 那份），供 rescore_last 降线重筛用。
+        # 只留最新一批：重筛永远针对"刚算完的那张图"，留着历史只会吃内存。
+        self.last_scores: list[dict[str, float]] | None = None
+        # bf16 真的按 bf16 加载权重（不再在构造阶段静默降级）。
+        #
+        # 以前这里是"看到 bf16 就改写成 tf32、权重仍 fp32"：保守本身没错，但它是
+        # **静默的**——配置里写 bf16、日志里只有一句"已按 tf32 跑"，实际跑的
+        # 是 fp32 权重的 GEMM。1008² / batch16 下 fp32 的激活与带宽开销接近翻倍，
+        # 而页面和指纹都看不出来（实测 pixai 单张 0.63s）。
+        #
+        # 现在改成"真加载 → 验证 → 失败才回落"：
+        #   * dtype 到底兼不兼容，由 _load 里一次冒烟前向当场回答，
+        #     而不是靠"没实测过"预判；
+        #   * 真回落时把 _precision_downgraded 置 True、precision 改回 tf32，
+        #     于是产物与指纹记录的仍是**实际执行**的精度。
+        #
+        # 名字不再叫 _bf16_*：现在半精度有两档（bf16 给 Ampere+，fp16 给
+        # V100 这类没有 bf16 的卡），回落逻辑对两者是同一条。
+        self._precision_downgraded = False
+        # 是否在每批之后额外再跑一次"阈值 0"的前向、留全量分数快照。
+        # 默认 False：那是**整整一倍**的前向开销，而它只服务于"降线重筛"。
+        # 不存快照时 client._rescore_at 会退回"重算那一张"，语义不变。
+        self.snapshot_scores = False
 
     def _load(self) -> None:
         try:
@@ -299,44 +450,340 @@ class PixAITagger(TagBackend):
                 "  pip install torch torchvision transformers timm"
             ) from exc
 
+        # ★权重下好了却"一直联网载入"的根因在这里：pipeline 收的是**仓库名**
+        #   时，transformers 每次加载都要先问一遍 hub（有没有新 revision），
+        #   国内这一步就卡在超时上——而用户明明已经在「模型管理」里把权重下到
+        #   了 models/<backend>/。所以只要那个目录真的完整，就传**绝对路径**，
+        #   transformers 见到目录会完全跳过网络。
+        #
+        #   判据必须"够了才用"：目录里只有半截文件时传目录，报的会是
+        #   "找不到 config"，而原本能靠缓存跑起来——所以没备齐就退回仓库名，
+        #   让 transformers 自己按缓存/网络来。
+        source: str = self.model_id
+        if self.model_dir is not None:
+            missing = _missing_model_files(self.model_dir)
+            if not missing:
+                source = str(self.model_dir.resolve())
+            elif self.verbose:
+                print(f"[tagger] {self.model_dir} 缺 {', '.join(missing)}，"
+                      f"改按仓库名 {self.model_id} 加载（会联网）", flush=True)
         kwargs: dict[str, Any] = {
-            "model": self.model_id,
-            "image_processor": self.model_id,
+            "model": source,
+            "image_processor": source,
             "trust_remote_code": True,
         }
         if self.device and self.device != "cpu":
             kwargs["device"] = self.device
         else:
             kwargs["device"] = -1
-        try:
-            self._pipe = pipeline(**kwargs)
-        except Exception as exc:  # noqa: BLE001 - 远端代码出错的花样太多
-            raise TaggerUnavailable(
-                f"加载 {self.model_id} 失败：{type(exc).__name__}: {exc}\n"
-                f"若网络受限，先手动下载：huggingface-cli download {self.model_id}"
-            ) from exc
+        self._pipe = self._build_pipeline(pipeline, kwargs, source)
+        if self._precision_downgraded and self.verbose:
+            print("[tagger] pixai 的半精度没落地（远端管线 dtype 不兼容），"
+                  "已回落 tf32：权重仍是 fp32。产物与指纹按 tf32 记。",
+                  flush=True)
+        # device 已经定下来了（pipeline 建好），此时设进程级 tf32 才对得上。
+        self._apply_precision_flags()
         if self.verbose:
-            print(f"[tagger] 已加载 {self.model_id}（{self.device}）", flush=True)
+            extra = f"，{self.precision}" if self.precision != "fp32" else ""
+            if self.batch_size > 1:
+                extra += f"，batch={self.batch_size}"
+            print(f"[tagger] 已加载 {self.model_id}（{self.device}{extra}）",
+                  flush=True)
+
+    # --------------------------------------------------------- 精度是否真落地
+
+    def _build_pipeline(self, pipeline, kwargs: dict[str, Any], source: str):
+        """按 precision 把 dtype 真的传进去，并**验证它确实生效**。
+
+        为什么必须验证而不是"传了就算"：`dtype=` 与 `torch_dtype=` 在不同
+        transformers 版本里叫法不同，传错时多数版本只是忽略关键字——构造成功、
+        按 fp32 加载、一声不吭。只判断"没抛异常"就会得出"半精度已生效"的错误
+        结论，而这正是这次排查里最难的一层（配置写 bf16、实测却是 fp32 权重）。
+
+        半精度失败有三条路径，都必须真回落并留痕：
+          * 关键字被忽略 / 远端把权重锁在 fp32 → 查实际 dtype 发现；
+          * 权重是半精度但前向炸了（某一层 dtype 不匹配）→ 冒烟前向发现；
+          * 设备是 CPU → 半精度在 CPU 上没有 tensor core，只会更慢。
+        """
+        import torch
+
+        want = half_dtype(self.precision)
+        if want is not None and str(self.device or "").lower() == "cpu":
+            # CPU 上不做转换：没有 tensor core，半精度只会更慢，而且
+            # torch 的部分 CPU 算子在 half 上会退回 fp32 再转换，白折腾。
+            self._note_half_fallback(f"设备是 {self.device}，半精度无收益")
+            want = None
+        if want is not None:
+            pipe = self._open_pipeline(pipeline, kwargs, want)
+            if pipe is not None:
+                actual = self._pipe_dtype(pipe)
+                if actual is not None and actual != want:
+                    self._note_half_fallback(f"权重实际是 {actual}")
+                else:
+                    try:
+                        self._smoke(pipe)
+                        return pipe
+                    except Exception as exc:      # noqa: BLE001 - 兜底回落
+                        self._note_half_fallback(
+                            f"前向失败 {type(exc).__name__}: {exc}")
+        return self._open_pipeline(pipeline, kwargs, torch.float32, required=True)
+
+    def _note_half_fallback(self, why: str) -> None:
+        self._precision_downgraded = True
+        self.precision = "tf32"
+        if self.verbose:
+            print(f"[tagger] pixai 半精度未生效（{why}），回落 tf32", flush=True)
+
+    @staticmethod
+    def _open_pipeline(pipeline, kwargs: dict[str, Any], dtype, *,
+                       required: bool = False):
+        """按 dtype 建 pipeline。`dtype` / `torch_dtype` 挨个试。
+
+        required=True 时失败会抛 TaggerUnavailable（fp32 这条是底线，
+        它建不起来就是真的装不了）；否则返回 None 让调用方走回落。
+        """
+        last: Exception | None = None
+        for key in ("dtype", "torch_dtype"):
+            try:
+                return pipeline(**kwargs, **{key: dtype})
+            except TypeError as exc:
+                last = exc          # 该版本不认这个关键字，换下一个
+                continue
+            except Exception as exc:  # noqa: BLE001 - 远端代码花样太多
+                last = exc
+                break
+        if not required:
+            return None
+        # 两个关键字都不被接受时，别因此判定"装不了"：不传 dtype 时
+        # transformers 自己按权重卡里的 dtype 加载，对 fp32 这条底线来说
+        # 等价于我们要的结果。真正装不起来才会在下面抛。
+        try:
+            return pipeline(**kwargs)
+        except Exception as exc:      # noqa: BLE001
+            raise TaggerUnavailable(
+                f"加载 {kwargs.get('model')} 失败：{type(exc).__name__}: {exc}\n"
+                f"若网络受限，先手动下载："
+                f"huggingface-cli download pixai-labs/pixai-tagger-v1.0") from exc
+
+    @staticmethod
+    def _pipe_dtype(pipe):
+        """pipeline 里那张模型实际用的 dtype。拿不到返回 None（不乱猜）。"""
+        import torch
+
+        model = getattr(pipe, "model", None)
+        if model is None:
+            return None
+        dtype = getattr(model, "dtype", None)
+        if isinstance(dtype, torch.dtype):
+            return dtype
+        try:
+            return next(model.parameters()).dtype
+        except (AttributeError, StopIteration, TypeError):
+            return None
+
+    def _smoke(self, pipe) -> None:
+        """用一张极小图真跑一次前向，验 bf16 的运行时兼容性。
+
+        构造期不报错、推理期才炸是这类 trust_remote_code 模型的典型表现
+        （某一层硬写了 .float() / 某个 buffer 是 fp32）。与其让第一批图在
+        半小时后出问题，不如启动时多花一次前向。
+        """
+        from PIL import Image
+
+        probe = Image.new("RGB", (64, 64), (127, 127, 127))
+        out = pipe(probe, batch_size=1)
+        if not isinstance(out, (dict, list)):
+            raise RuntimeError(f"冒烟返回了意外类型 {type(out).__name__}")
+
+    # -------------------------------------------------------------- 阈值/摊平
+
+    def _threshold_arg(self) -> float | dict[str, float] | None:
+        """阈值参数该长什么样。pipeline 认两种形态：数字（全体生效）或
+        {类别: 阈值} 的 dict（README 的口径）。
+
+        只配了 "default" 时必须给数字——把 "default" 当类别名塞进 dict 的
+        话 pipeline 认不出这一类，等于没设阈值，静默退回"全都要"。
+
+        ★但 pipeline 的 dict 形态**表达不了 default**，所以"default + 某个
+          类别"并存时，全局阈值在这里会被摘掉（只剩 {类别: 阈值}）。用户看到
+          的现象是：设了 0.6 的全局阈值，只有他点名的那一类按 0.6，其余类别
+          悄悄回到更宽的口径，而且换个后端（wd-eva02 走 _threshold_of）就对
+          不上。这个缺口在 `_has_orphan_default` + `_flatten` 里补，不在这里
+          硬塞 "default" 键。
+        """
+        if set(self.thresholds) == {"default"}:
+            return float(self.thresholds["default"])
+        return {k: v for k, v in self.thresholds.items() if k != "default"} or None
+
+    def _has_orphan_default(self) -> bool:
+        """是否存在"被 pipeline 丢掉的全局阈值"。
+
+        只有"既给了 default、又给了别的类别"才算：只给 default 时它会以数字
+        形态整个交给 pipeline，没丢；一个都没给时也没有可丢的。
+        """
+        return "default" in self.thresholds and len(self.thresholds) > 1
+
+    def _flatten(self, results: dict) -> dict[str, float]:
+        """{"general": {"1girl": 0.98}, ...} → {"1girl": 0.98, ...}
+
+        跨类别取 max 而不是"后写覆盖"：同一个 tag 理论上只属于一个类别，但
+        trust_remote_code 的返回值不保证不重叠；覆盖的结果会随 dict 顺序变，
+        等于让产出依赖一个没写进任何文档的实现细节。
+
+        ★pipeline 的 dict 阈值表达不了 "default"，所以"default + 类别阈值"
+          并存时全局那一档会被丢掉（见 `_threshold_arg`）。这里补一道二次
+          过滤：pipeline 已经砍过一轮，这一轮只可能**更严格**，不会放出
+          pipeline 没给的 tag，所以产出只会守着用户设的下限，不会变脏。
+
+          只在 `_has_orphan_default()` 为真时才启用：其他情况（没设阈值、
+          只设 default、只设类别）pipeline 那边已经精确处理过，这里再过滤
+          一遍等于用 0.35 覆盖 pipeline 自己的默认口径，反而会改变现有产出。
+        """
+        orphan = self._has_orphan_default()
+        out: dict[str, float] = {}
+        for category, table in (results or {}).items():
+            if self.keep and category not in self.keep:
+                continue
+            floor = self._threshold_of(category) if orphan else 0.0
+            for tag, score in table.items():
+                value = float(score)
+                if value < floor:
+                    continue
+                out[tag] = max(out.get(tag, 0.0), value)
+        return out
+
+    # -------------------------------------------------------------- 推理
+
+    def _full_scores(self, imgs: Sequence) -> list[dict[str, float]]:
+        """全量分数（阈值压到 0，pipeline 不再筛）。
+
+        为什么要这条额外通路：pipeline 一旦拿到阈值，返回的就是**已筛**的那批，
+        低分那部分在内部就被丢了，外面无从补。要"降一档再筛一次"，必须留下
+        未筛的全表。
+
+        ★传 threshold=0.0 而不是不传：不传时 pipeline 用它 `config.json` 里的
+          `tags_best_threshold` / `category_best_threshold`（逐 tag 标定过的，
+          不是个整数），一样是筛过的——那样"全量"是假的。
+
+        ★阈值已经低到 0 时不再留快照：那就等于把全部 tag 的分数存一份，
+          白占内存，而调用方拿它重筛也筛不出更多东西。
+        """
+        if not imgs or self._threshold_of("general") <= 0:
+            return []
+        try:
+            out = self._pipe([self._open_rgb(im) for im in imgs],
+                             batch_size=len(imgs), threshold=0.0)
+            payloads = out if isinstance(out, list) else [out]
+            if len(payloads) != len(imgs):
+                return []
+            return [self._flatten(p.get("results") if isinstance(p, dict) else {})
+                    for p in payloads]
+        except Exception:            # noqa: BLE001 - 快照是加分项，失败不拖垮产出
+            return []
+
+    def rescore_last(self, index: int,
+                     thresholds: dict[str, float] | None) -> dict[str, float]:
+        """用上一次前向的**全量**分数，换一套阈值重筛第 index 张。
+
+        `predict_batch_with` 会真的再前向一遍，而 tag 与 VLM 是并行起跑的：
+        等结果时才发现 tag 太少，分数其实就在手上，再算一遍纯属白烧。
+        快照由 `_predict_many` 在阈值 0 的那一次留下（见那边的说明）。
+        """
+        probs = getattr(self, "last_scores", None)
+        if not probs or not (0 <= index < len(probs)):
+            return {}
+        saved_thr, saved_key = self.thresholds, self._plan_key
+        try:
+            self.thresholds = dict(thresholds or {})
+            self._plan_key = None
+            return self._apply_thresholds(probs[index])
+        finally:
+            self.thresholds = saved_thr
+            self._plan_key = saved_key
+
+    def _apply_thresholds(self, scores: dict[str, float]) -> dict[str, float]:
+        """按当前阈值表筛全量分数（= pipeline 自己那套 mask 的等价实现）。
+
+        ★用 `>` 而不是 `>=`：pixai 的 `_forward` 里写的是 `prob_c > threshold_c`。
+          差一个等号，分数恰好等于阈值的那批 tag 会多出来，于是"重筛"与
+          "首轮"的结果对不上，看起来像重筛把 tag 变多了。
+        """
+        floor = self._threshold_of("general")
+        return {tag: value for tag, value in scores.items() if value > floor}
 
     def _predict_one(self, image) -> dict[str, float]:
         img = self._open_rgb(image)
-        # README 说 threshold 既可以是数字（全体生效），也可以是 {类别: 阈值} 的 dict。
-        # 只配了 "default" 时给数字——把 "default" 当类别名传进 dict 的话，
-        # pipeline 认不出这一类，等于没设阈值。
-        thr: float | dict[str, float] | None
-        if set(self.thresholds) == {"default"}:
-            thr = float(self.thresholds["default"])
-        else:
-            thr = ({k: v for k, v in self.thresholds.items() if k != "default"} or None)
-        results = self._pipe(img, threshold=thr)["results"] if thr \
-            else self._pipe(img)["results"]
-        out: dict[str, float] = {}
-        for category, table in results.items():
-            if self.keep and category not in self.keep:
-                continue
-            for tag, score in table.items():
-                out[tag] = max(out.get(tag, 0.0), float(score))
-        return out
+        thr = self._threshold_arg()
+        payload = (self._pipe(img, threshold=thr) if thr else self._pipe(img))
+        return self._flatten(payload["results"])
+
+    def _predict_one(self, image) -> dict[str, float]:
+        img = self._open_rgb(image)
+        thr = self._threshold_arg()
+        payload = (self._pipe(img, threshold=thr) if thr else self._pipe(img))
+        return self._flatten(payload["results"])
+
+    def _predict_many(self, images: Sequence) -> list[dict[str, float]]:
+        """一次喂多张。pixai 是 1008² / patch 14 的 ViT，单张就是 5184 个
+        token，攒批的收益比 wd-eva02（448²，1024 个 token）大得多。
+
+        为什么非覆写不可：基类默认是逐张 `_predict_one`，pipeline 每次只见
+        到一张图，前向的固定开销（kernel 发射、Python dispatch）会按张数
+        重复付。
+
+        ★必须把 `batch_size` 一起传进去：pipeline 的默认值是 1，即使喂一个
+        list 它也会**在内部逐张循环**。少了这个参数，代码看起来像做了批处理
+        而吞吐一点不变——"改了没效果"里最难查的那一类。
+
+        顺序必须与入参一一对应（execute 侧按位置对位回 image_id）。
+        """
+        import time
+
+        t0 = time.perf_counter()
+        imgs = [self._open_rgb(im) for im in images]
+        decode_ms = int((time.perf_counter() - t0) * 1000)
+        if not imgs:
+            self._split_ms = (0, 0)
+            return []
+
+        thr = self._threshold_arg()
+        call: dict[str, Any] = {"batch_size": len(imgs)}
+        if thr:
+            call["threshold"] = thr
+        tf0 = time.perf_counter()
+        try:
+            out = self._pipe(imgs, **call)
+        except Exception:            # noqa: BLE001 - 逐张重试，坏图不该带走整批
+            # 批里只要有一张解不开，整批都会抛。而 tag_batch 可以到 16，一次
+            # 异常会让执行器把 16 个 future 全部判失败——一张坏图毁掉 15 张好图。
+            # 退回逐张：坏的那张自己报错，其余照常出产。
+            if len(imgs) == 1:
+                raise
+            self._split_ms = (decode_ms,
+                              int((time.perf_counter() - tf0) * 1000))
+            return [self._predict_one(im) for im in imgs]
+        self._split_ms = (decode_ms, int((time.perf_counter() - tf0) * 1000))
+
+        # 单张时 pipeline 返回 dict，多张时返回 list。统一成 list——"长度为 1
+        # 的 list"两种形态都可能出现，调用方不该按长度分支。
+        payloads = out if isinstance(out, list) else [out]
+        if len(payloads) != len(imgs):
+            # 静默 zip 会把结果整体错位一格，产物里 tag 与图对不上且看不出来。
+            raise RuntimeError(
+                f"pixai 返回 {len(payloads)} 条，提交了 {len(imgs)} 张")
+        # 分数快照默认**不做**（见 __init__ 的 snapshot_scores）。
+        #
+        # 以前这里无条件调 _full_scores，等于每批图多跑一整遍 1008² ViT：
+        #   1. 那是第二次前向（阈值 0 那次），是实打实的 2×，不是"观测开销"；
+        #   2. 原注释说"和每张图都重跑一遍不是一个量级"——反过来了，
+        #      对 batch 里的每一张，它确实就是"多跑一遍"。
+        #
+        # 不做快照不丢功能：client._rescore_at 拿不到快照时会退回
+        # predict_batch_with 重算**那一张**，只有真的触发"降线救 tag 太少"
+        # 的少数图才付这笔钱，而不是全量图每张都付。
+        self.last_scores = self._full_scores(imgs) if self.snapshot_scores else None
+        return [self._flatten(p.get("results") if isinstance(p, dict) else {})
+                for p in payloads]
 
 
 # ------------------------------------------------------------------ wd-eva02
@@ -382,6 +829,10 @@ class WDEva02Tagger(TagBackend):
         self._last_ratings: list[dict[str, float]] = []
         # 非 None 时 _filter 改用这张表（predict_raw 用）
         self._plan_override: list[tuple[int, str, float]] | None = None
+        # 上一次前向的只读快照（恰好是被截断的那张时才会用）。
+        # 存的是按下标摊平的分数：重筛只需要"换条线扫一遍"，不需要 16473
+        # 个名字的字典。只留最新一批，内存占用与 batch 同阶。
+        self.last_probs: list[Sequence[float]] | None = None
 
     def _resolve_dir(self) -> Path:
         if self.model_dir is not None:
@@ -458,15 +909,17 @@ class WDEva02Tagger(TagBackend):
         #     是彻底的空转（模型和输入都留在 CPU），日志却照旧打印 "cuda:0"；
         #   · bf16 权重转换必须在 eval() 之后、加载完 transform 之前做完，
         #     放到前向里每张图转一遍等于白付一次 300M 元素的转换。
-        if self.precision == "bf16":
+        half = half_dtype(self.precision)
+        if half is not None:
             if self.device == "cpu":
-                # CPU 上 bf16 没有 tensor core，实测反而更慢；直接回落，
+                # CPU 上没有半精度的 tensor core，实测反而更慢；直接回落，
                 # 而不是让用户以为开了加速。
                 if self.verbose:
-                    print("[tagger] CPU 上 bf16 无收益，已回落 fp32", flush=True)
+                    print(f"[tagger] CPU 上 {self.precision} 无收益，已回落 fp32",
+                          flush=True)
                 self.precision = "fp32"
             else:
-                model = model.to(dtype=torch.bfloat16)
+                model = model.to(dtype=half)
         if self.device and self.device != "cpu":
             model = model.to(self.device)
         self._apply_precision_flags()
@@ -507,7 +960,9 @@ class WDEva02Tagger(TagBackend):
         if not torch.cuda.is_available():
             return
         try:
-            dtype = torch.bfloat16 if self.precision == "bf16" else torch.float32
+            # 静态输入必须和权重同 dtype：不一致的话图里固化的是隐式提升
+            # 之后那条路径，回放出来的速度和 eager 没区别。
+            dtype = half_dtype(self.precision) or torch.float32
             static_in = torch.zeros(self.batch_size, 3, img_size, img_size,
                                     device=self.device, dtype=dtype)
             # 抓图前必须在旁路 stream 上热身：图会把第一次走到的分支和算法
@@ -529,18 +984,6 @@ class WDEva02Tagger(TagBackend):
             if self.verbose:
                 print(f"[tagger] CUDA Graph 抓不了，回落 eager："
                       f"{type(exc).__name__}: {exc}", flush=True)
-
-    def _apply_precision_flags(self) -> None:
-        """tf32 是进程级开关，只能在加载时设一次。
-
-        PyTorch 1.12 起 allow_tf32 默认 False，等于白白丢掉 tensor core；
-        wd-eva02 是卷积分类头，吃满这个开关没有副作用（实测 0 翻面）。
-        """
-        import torch
-
-        on = self.precision in ("tf32", "bf16") and self.device != "cpu"
-        torch.backends.cuda.matmul.allow_tf32 = on
-        torch.backends.cudnn.allow_tf32 = on
 
     def _filter_plan(self) -> list[tuple[int, str, float]]:
         """把"要哪个 tag、下标多少、阈值多少"摊平成一张表并缓存。
@@ -622,8 +1065,9 @@ class WDEva02Tagger(TagBackend):
         x = torch.stack(list(tensors))
         if self.device and self.device != "cpu":
             x = x.to(self.device)
-        if self.precision == "bf16":
-            x = x.to(torch.bfloat16)
+        half = half_dtype(self.precision)
+        if half is not None:
+            x = x.to(half)
         tf0 = time.perf_counter()
         with torch.no_grad():
             if graph is not None and x.shape[0] == graph.batch:
@@ -641,6 +1085,8 @@ class WDEva02Tagger(TagBackend):
         fwd_ms = int((time.perf_counter() - tf0) * 1000)
 
         rating_plan = self._rating_plan()
+        # 只读快照：换了阈值要重筛同一批分数时用（见 rescore_from_last）。
+        self.last_probs = probs
         tags: list[dict[str, float]] = []
         ratings: list[dict[str, float]] = []
         for row in probs:
@@ -961,11 +1407,127 @@ BACKENDS = {
 }
 
 
+# ---------------------------------------------------------- 显存预估（给页面用）
+#
+# 为什么会需要这个：批大小过去是个 1/2/4/8/16 的固定下拉，用户按"大一点更快"
+# 的直觉选 16，结果是 16GB 卡上 batch 8 就超出约 2 GiB（实测），而页面事先
+# 什么都不说。OOM 发生在加载完权重、跑完第一批之后，报的又是一段 CUDA 内部
+# 的错误，看起来像驱动坏了。
+#
+# ★两个"超了"的形态要说清，它们的表现完全不同：
+#   * 真 OOM：进程抛 CUDA out of memory，任务直接失败；
+#   * **回落到系统内存**：Windows 驱动会把溢出的部分放到主机内存里，不报错，
+#     但每步都要过 PCIe，速度掉一个数量级——pixai 用 tf32（权重 fp32、激活
+#     也是 4 字节）跑出 4.6 s/张、而 bf16 只要 0.145 s/张，就是这一种。
+# 所以这里的判据是"估算峰值 vs 当前空闲显存"，而不是"会不会崩"。
+
+# 批大小的上限。前端滑动条、后端夹取、显存估算三处都用这一个数，
+# 免得"UI 能拖到 100、服务端 64 就截断"这种对不上的情况。
+TAG_BATCH_MAX = 100
+
+# 每个后端的显存画像：参数量（百万）、输入边长、单图视觉 token 数。
+# token = (边长 / patch)²：pixai 1008/14 = 72 → 5184；wd-eva02 448/14 = 32 → 1024。
+_TAG_VRAM_PROFILE: dict[str, dict[str, float]] = {
+    "pixai": {"params_m": 486.0, "input": 1008, "tokens": 5184},
+    "wd-eva02": {"params_m": 304.0, "input": 448, "tokens": 1024},
+    "cl-tagger-v2": {"params_m": 300.0, "input": 448, "tokens": 1024},
+    "onnx": {"params_m": 300.0, "input": 448, "tokens": 1024},
+}
+
+# 激活内存的两个系数：线性项（hidden 状态 / MLP）与二次项（注意力矩阵）。
+# 标定依据（2026-11，pixai 1008²，bf16）：16GB 卡上 batch 4 可跑、
+# batch 8 超出约 2 GiB → 每个并发单位约 2.1 GiB。二次项吃掉的正是
+# 5184 token 那个 O(n²) 的注意力，这也是为什么"加倍 batch"不是加倍开销
+# 那么简单——它在同一张卡上同时挤占容量和带宽。
+_ACT_LINEAR_GIB = 3.26e-4      # GiB / token / 并发单位
+_ACT_QUAD_GIB = 1.52e-8        # GiB / token² / 并发单位
+
+
+def estimate_tag_vram_gb(backend: str, precision: str, batch_size: int) -> float | None:
+    """估一个 tag 后端在给定精度/批大小下的峰值显存（GiB）。未知后端返 None。
+
+    是**估算**而不是测量：权重那项基本准（参数量 × 每参数字节），激活那项
+    由两个标定系数推出来，误差大致 ±30%。够用来回答"这个 batch 会不会
+    撑爆我的卡"，不够用来做容量规划。
+
+    ★tf32 的权重仍是 fp32（见 PixAITagger：tf32 只是打开 tensor core，
+      不改 dtype），所以它按 4 字节算——这正是 pixai 选 tf32 时显存翻倍、
+      进而回落到系统内存的原因。
+    """
+    prof = _TAG_VRAM_PROFILE.get(str(backend or "").strip().lower())
+    if prof is None:
+        return None
+    per_param = 4.0 if normalize_precision(precision) in ("fp32", "tf32") else 2.0
+    weights = prof["params_m"] * 1e6 * per_param / 1024 ** 3
+    tokens = prof["tokens"]
+    # 激活随精度按字节数等比缩放（fp32 的中间结果是 bf16 的两倍宽）。
+    scale = per_param / 2.0
+    per_unit = (_ACT_LINEAR_GIB * tokens + _ACT_QUAD_GIB * tokens * tokens) * scale
+    return round(weights + per_unit * max(1, int(batch_size)), 2)
+
+
+def tag_vram_budget(backend: str, precision: str, batch_size: int, *,
+                    device: str = "auto") -> dict:
+    """给页面的一组判断：估算峰值 / 卡上总量 / 此刻空闲 / 建议怎么做。
+
+    返回的 level 只有三档，对应页面上三种颜色：
+      ok     —— 估算值 < 空闲的 85%
+      tight  —— 落在 85%~100%，能跑但别再加
+      over   —— 估算值超过空闲。**不一定会崩**（见上面"回落到系统内存"），
+                但那种状态下吞吐会掉一个数量级，所以照样要红着提示。
+    """
+    from .hardware import free_vram_gb, visible_gpus
+
+    est = estimate_tag_vram_gb(backend, precision, batch_size)
+    if est is None:
+        return {"ok": False, "reason": f"没有 {backend} 的显存画像"}
+    on_cpu = str(device or "").strip().lower() in ("cpu", "")
+    if on_cpu:
+        return {"ok": True, "estimate_gb": est, "level": "cpu",
+                "advice": "跑在 CPU 上，不占显存"}
+    gpus = visible_gpus()
+    if not gpus:
+        return {"ok": False, "estimate_gb": est, "reason": "检测不到 NVIDIA 显卡"}
+    gpu = gpus[0]
+    free = free_vram_gb(gpu.index)
+    total = gpu.vram_gb
+    # 空闲量拿不到就退回总量打八折：经验上桌面合成会先占掉一两 GB，
+    # 按总量直接比会得出"还剩 16GB"这种乐观到危险的结论。
+    budget = free if free is not None else round(total * 0.8, 2)
+    ratio = est / budget if budget > 0 else 99.0
+    if ratio <= 0.85:
+        level, advice = "ok", ""
+    elif ratio <= 1.0:
+        level = "tight"
+        advice = (f"接近上限（估算 {est} GiB / 可用 {budget} GiB），"
+                  f"建议降到 {_safe_batch(backend, precision, budget)}")
+    else:
+        level = "over"
+        advice = (f"超出可用显存（估算 {est} GiB / 可用 {budget} GiB）。"
+                  f"驱动可能回落到系统内存：不报错，但会慢一个数量级。"
+                  f"建议降到 {_safe_batch(backend, precision, budget)}")
+    return {"ok": True, "estimate_gb": est, "total_gb": total,
+            "free_gb": free, "budget_gb": budget, "level": level,
+            "advice": advice, "gpu": gpu.name}
+
+
+def _safe_batch(backend: str, precision: str, budget_gb: float) -> int:
+    """在给定预算内最大的 batch（留 15% 余量）。找不到就返回 1。"""
+    limit = max(0.5, budget_gb * 0.85)
+    best = 1
+    for n in range(1, TAG_BATCH_MAX + 1):
+        est = estimate_tag_vram_gb(backend, precision, n)
+        if est is None or est > limit:
+            break
+        best = n
+    return best
+
+
 def resolve_device(pref: str | None) -> str:
     """把 `auto` 解析成具体设备。
 
-    UI 上给一个下拉框（auto / cpu / cuda:0 / cuda:1）就够了，不用让用户
-    去猜自己有没有卡——auto 走探测，有人插了两张卡也能直接写 cuda:1。
+    只管**一个**设备。要一张卡清单用 `resolve_devices`——多卡必须由调用方
+    显式点名，`auto` 不会自己铺开（理由见那个函数的注释）。
     """
     p = (pref or "auto").strip().lower()
     if p and p != "auto":
@@ -981,6 +1543,236 @@ def resolve_device(pref: str | None) -> str:
     except Exception:  # noqa: BLE001 - 没装 torch 就走 cpu，不用报错
         pass
     return "cpu"
+
+
+def resolve_devices(pref) -> list[str]:
+    """把设备偏好解析成一张卡清单（去重、保序）。
+
+    接受的写法：
+        None / "" / "auto"        → 有卡 ["cuda:0"]，否则 ["cpu"]（=老行为）
+        "cpu"                     → ["cpu"]
+        "cuda:0,cuda:1,cuda:2"    → 三张卡
+        ["cuda:0", "cuda:1"]      → 同上
+
+    ★`auto` **不铺满所有卡**。多一张卡就是多加载一份权重：显存、启动时间、
+    以及"这台机器上还有什么在跑"都跟着变。而"机器有几张卡"和"我想拿几张
+    跑 tag"是两件事——铺满必须由调用方（命令行 / 界面勾选）显式点名。
+
+    ★显式写了 cuda:N 却不存在这张卡时，这里就报错：让它一路走到
+    `model.to("cuda:7")` 只会得到 "Invalid device ordinal"，而那句话离
+    "你把设备勾错了"很远。
+    """
+    if isinstance(pref, (list, tuple)):
+        raw = [str(x or "").strip().lower() for x in pref]
+    else:
+        raw = [s.strip().lower() for s in str(pref or "").split(",")]
+
+    items: list[str] = []
+    for value in raw:
+        if not value:
+            continue
+        if value not in items:
+            items.append(value)
+    if not items or items == ["auto"]:
+        return [resolve_device("auto")]
+    if "auto" in items:
+        # auto 与具体卡混着给，含义是"能自动就自动"——按单卡处理，别猜
+        return [resolve_device("auto")]
+
+    _check_devices_exist(items)
+    return items
+
+
+def _check_devices_exist(items: Sequence[str]) -> None:
+    """cuda:N 越界时提前给一句能查的话。不知道有几张卡就跳过检查。"""
+    wanted = []
+    for it in items:
+        if it.startswith("cuda:"):
+            try:
+                wanted.append(int(it.split(":", 1)[1]))
+            except ValueError:
+                raise ValueError(f"设备写法不对：{it!r}（要 cuda:0 这种）") from None
+    if not wanted:
+        return
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            raise ValueError(
+                f"选了 {', '.join(items)}，但这台机器上 torch 看不到 CUDA。"
+                f"装的是 CPU 版 torch，或者驱动没装好。")
+        total = torch.cuda.device_count()
+    except ValueError:
+        raise
+    except Exception:      # noqa: BLE001 - 探测失败就不拦，让 torch 自己报
+        return
+    bad = sorted({n for n in wanted if n >= total})
+    if bad:
+        raise ValueError(
+            f"设备 {', '.join(f'cuda:{n}' for n in bad)} 不存在："
+            f"这台机器只有 {total} 张卡（cuda:0 ~ cuda:{total - 1}）。")
+
+
+def _split_even(items: Sequence, n: int) -> list[list]:
+    """连续等分成 n 段，前 rem 段各多一张。
+
+    为什么是连续而不是轮转（i % n）：同一张卡拿到的图在内存里连续，
+    wd-eva02 的解码预取才有机会跨块生效；轮转会让每张卡都是"跳着"的，
+    预取退化成每张单独解码。拼回来也简单——按段序接上就是原顺序。
+    """
+    total = len(items)
+    base, rem = divmod(total, n)
+    out: list[list] = []
+    at = 0
+    for i in range(n):
+        size = base + (1 if i < rem else 0)
+        out.append(list(items[at:at + size]))
+        at += size
+    return out
+
+
+class MultiDeviceTagBackend:
+    """同一份权重在 N 张卡上各放一份，按批派活。
+
+    ★**不是** TagBackend 的子类：它不加载权重、不碰 torch，只做切分与对位。
+      调用方要的属性（name / model_id / precision / preprocess / thresholds /
+      keep / max_tags）全部转发给第一份实例，因为多卡之间这些**必须完全
+      一致**——任何一项不同，同一张图的 tag 就会随"落在哪张卡"而变，
+      那是产物层面无法归因的污染。
+
+    为什么用线程而不是进程：每个实例有自己的模型和自己的卡，torch 的前向在
+    C++ 侧执行时释放 GIL，线程之间不互相抢占；而进程方案要求模型对象可
+    pickle（transformers pipeline 不是），Windows 上还只能 spawn，每张卡
+    要多付一次 import torch + 读权重。
+
+    ★`batch_size` 报的是**整批**容量（每卡 batch_size × 卡数）：
+      `local_tag._chunk_size` 拿它算一次取多少图，报单卡值会让每张卡只分到
+      1/N 的批，把攒批的收益折掉。
+    """
+
+    def __init__(self, backends: Sequence["TagBackend"],
+                 devices: Sequence[str] | None = None):
+        subs = [b for b in backends if b is not None]
+        if not subs:
+            raise ValueError("多设备 tag 后端至少要一份实例")
+        self._subs = list(subs)
+        self.devices = list(devices or [str(getattr(b, "device", "") or "")
+                                        for b in self._subs])
+        first = self._subs[0]
+        self.name = str(getattr(first, "name", "") or "")
+        self.model_id = str(getattr(first, "model_id", "") or "")
+        self.precision = str(getattr(first, "precision", "") or "")
+        self.preprocess = str(getattr(first, "preprocess", "pil") or "pil")
+        self.thresholds = dict(getattr(first, "thresholds", None) or {})
+        self.keep = tuple(getattr(first, "keep", None) or ())
+        self.max_tags = int(getattr(first, "max_tags", 0) or 0)
+        self.batch_size = (max(1, int(getattr(first, "batch_size", 1) or 1))
+                           * len(self._subs))
+        self.last_timings: dict[str, int] = {"total": 0, "decode": 0, "forward": 0}
+        self._pool = None
+        self._pool_lock = threading.Lock()
+
+    # -------------------------------------------------------------- 生命周期
+
+    def load(self) -> None:
+        """**顺序**加载。并行加载只会让 N 份权重抢同一块盘/同一条网络，
+        启动反而更慢，还把峰值内存叠起来。"""
+        for b in self._subs:
+            b.load()
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=False)
+            self._pool = None
+
+    # -------------------------------------------------------------- 推理
+
+    def _executor(self):
+        if self._pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with self._pool_lock:
+                if self._pool is None:
+                    self._pool = ThreadPoolExecutor(
+                        max_workers=len(self._subs),
+                        thread_name_prefix="tag-card")
+        return self._pool
+
+    def predict_batch_with(self, images: Sequence,
+                           thresholds: dict[str, float] | None) -> list:
+        """换一套阈值再算一批。逐张卡转发，语义与单卡版一致。
+
+        ★切分必须与 `predict_batch` 完全一致：换阈值只在"这张图的分数"上
+          重筛，而分数属于哪张图是靠位置对回 image_id 的。两次切法不同，
+          tag 就会跟错图，且产物层面看不出来。
+        """
+        imgs = list(images)
+        if not imgs:
+            return []
+        if len(self._subs) == 1:
+            return self._subs[0].predict_batch_with(imgs, thresholds)
+        # 多卡：每张卡各自换阈值，保持一致（否则同一张图落在哪张卡结果不同）。
+        for sub in self._subs:
+            if not hasattr(sub, "predict_batch_with"):
+                raise NotImplementedError(
+                    f"{getattr(sub, 'name', sub)} 不支持换阈值重筛")
+        parts = _split_even(imgs, len(self._subs))
+        pool = self._executor()
+        futures = [pool.submit(sub.predict_batch_with, part, thresholds)
+                   for sub, part in zip(self._subs, parts)]
+        merged: list = []
+        for fut in futures:
+            merged.extend(fut.result())
+        return merged
+
+    def predict_batch(self, images: Sequence) -> list:
+        """切分 → 各卡并行 → 按原顺序拼回。
+
+        拼回顺序就是入参顺序：切分是连续的，每段内部又保持原序，所以
+        "按段序接上"天然对齐。调用方（client / local_tag）靠位置把结果对回
+        image_id，错一格就会让产物里的 tag 与图对不上，而且看不出来。
+        """
+        import time
+
+        imgs = list(images)
+        if not imgs:
+            return []
+        if len(self._subs) == 1:
+            out = self._subs[0].predict_batch(imgs)
+            self.last_timings = dict(getattr(self._subs[0], "last_timings", {}) or {})
+            return out
+
+        parts = _split_even(imgs, len(self._subs))
+        pool = self._executor()
+        t0 = time.perf_counter()
+        futures = [pool.submit(b.predict_batch, part)
+                   for b, part in zip(self._subs, parts) if part]
+        try:
+            chunks = [f.result() for f in futures]
+        except BaseException:
+            # 一张卡炸了就取消其余：让它们继续算只是白烧 GPU，而这一批反正要重试
+            for f in futures:
+                f.cancel()
+            raise
+        total_ms = int((time.perf_counter() - t0) * 1000)
+
+        out: list = []
+        for chunk in chunks:
+            out.extend(chunk)
+        self.last_timings = {
+            "total": total_ms,
+            # 各卡是并行跑的，两个和是"卡·毫秒"，大于墙钟是正常的
+            # （与单卡口径一致：decode 与 forward 本来就重叠）。
+            "decode": sum(int((getattr(b, "last_timings", {}) or {}).get("decode") or 0)
+                          for b, part in zip(self._subs, parts) if part),
+            "forward": sum(int((getattr(b, "last_timings", {}) or {}).get("forward") or 0)
+                           for b, part in zip(self._subs, parts) if part),
+        }
+        return out
+
+    def __repr__(self) -> str:      # 日志里要能一眼看出用了几张卡
+        return (f"MultiDeviceTagBackend({self.name}, "
+                f"{len(self._subs)} 张卡: {', '.join(self.devices)})")
 
 
 def build_backend(
@@ -1000,7 +1792,24 @@ def build_backend(
     prefetch: bool = True,
     preprocess: str = "pil",
 ) -> TagBackend | None:
-    """按名字建后端。`none` / 空串返回 None（表示 tag 走 VLM）。"""
+    """按名字建后端。`none` / 空串返回 None（表示 tag 走 VLM）。
+
+    ★`max_tags`（默认 160）**不要和 `configs/tiers.yaml` 的
+      `output.tag_max_count`（64）统一**。这两个数字看着像同一个东西，实际
+      语义完全不同，强行合并会改变现有产出：
+
+      * 这里：判别式分类头取 top-N。`_filter` 是**先按阈值筛、再取前 N**，
+        所以 N 只是个天花板。0.35 阈值下多数图落在 30~60 个，根本到不了 160；
+        只有"文字密集"的图（包装袋上的品牌/规格/日期成串）实测能到 125~152，
+        那时它才真正起作用。
+      * `output.tag_max_count`：VLM **生成** tag 的预算，和 `max_tokens` 绑死
+        （见该段注释"160 会把 max_tokens 吃干、caption 一个字都不出"）。
+        判别式模型不产 token，那条约束对它没有意义。
+
+      现状是两条入口口径不一：CLI 走 `client.py` 传 `output.tag_max_count`，
+      web 用这里的默认值。这是**刻意的取舍**——统一到 64 会截断上面那类密集
+      图的 tag，而那是当前产出里正常的一部分。要改先想清楚改的是产出。
+    """
     key = (backend or "").strip().lower()
     if key in ("", "none", "vlm"):
         return None
@@ -1021,9 +1830,11 @@ def build_backend(
     }
     if model:
         kw["model_id"] = model
-    # model_dir 只有能"按目录加载"的后端才认（pixai 走 transformers 的缓存，
-    # 传进来会一路漏进基类构造器变成 TypeError）。
-    if model_dir and key in ("wd-eva02", "cl-tagger-v2", "onnx"):
+    # 能"按目录加载"的后端才认这个参数（其余传进去会漏进基类构造器变 TypeError）。
+    # ★pixai 现在也在名单里：它以前被排除，结果是**权重明明下好了还每次联网**——
+    #   pipeline 只收到仓库名，transformers 每回都要先问 hub 有没有新 revision，
+    #   国内这一步就是长时间"正在载入"然后超时。见 PixAITagger._load。
+    if model_dir and key in ("pixai", "wd-eva02", "cl-tagger-v2", "onnx"):
         kw["model_dir"] = model_dir
     if device:
         kw["device"] = device
@@ -1040,3 +1851,48 @@ def build_backend(
     if verbose:
         print(f"[tagger] tag 后端 {obj.name}（模型 {model or '默认'}，{device}）", flush=True)
     return obj
+
+
+def build_tag_backends(backend: str, *, devices: Sequence[str] | None = None,
+                       **kw: Any):
+    """按设备清单建后端。
+
+    单卡（含 `devices` 为空）返回的就是 `build_backend` 的原实例，调用方
+    拿到的对象与以前一字不差——多卡是"多出来的一层"，不是一个新口径。
+
+    多卡时每张卡各建一份（各自加载权重），再用 MultiDeviceTagBackend 包起来。
+    `kwargs` 里的 `device` 会被忽略：设备由 `devices` 决定，两份来源同时存在
+    只会让"到底用了哪张卡"变成猜。
+    """
+    kw.pop("device", None)
+    keys = [d for d in (devices or []) if d]
+    if len(keys) <= 1:
+        single = kw | ({"device": keys[0]} if keys else {})
+        return build_backend(backend, **single)
+
+    objs = [build_backend(backend, device=d, **kw) for d in keys]
+    objs = [o for o in objs if o is not None]
+    if not objs:
+        return None            # backend=none：一张卡都不用建
+    if len(objs) == 1:         # 只建成一份（理论上到不了这里）就别包装
+        return objs[0]
+    return MultiDeviceTagBackend(objs, keys)
+
+
+def build_tag_backend_lanes(backend: str, *, devices: Sequence[str] | None = None,
+                            limit: int = 0, **kw: Any) -> list:
+    """每张卡各建一份实例，**不包装**——包级并行用：一条 lane 独占一张卡。
+
+    为什么不复用 `build_tag_backends`：那个返回的是
+    `MultiDeviceTagBackend`，它会把**每一批**摊到所有卡上。包级并行的前提
+    正好相反——一条 lane 只认自己那张卡，否则 N 条 lane 会互相抢同一批卡，
+    等于两套并行叠在一起，既快不起来也说不清谁在算。
+
+    `limit` 用来把 lane 数压到包数以下：包比卡少时，多出来的实例只有加载
+    权重的时间成本（pixai 一份 fp32 约 2 GB），一点算力都用不上。
+    """
+    kw.pop("device", None)
+    keys = [d for d in (devices or []) if d][:limit or None]
+    if not keys:
+        keys = ["cpu"]
+    return [build_backend(backend, device=d, **kw) for d in keys]

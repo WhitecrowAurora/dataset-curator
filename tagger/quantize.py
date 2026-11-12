@@ -120,10 +120,13 @@ def _model_source(key: str | None) -> tuple[str, dict[str, Any]]:
     if not chosen:
         # 空 = 按显存自动落档，和启动服务时同一口径；没有卡时退回第一个模型。
         try:
-            from .hardware import query_gpus
+            # visible_gpus 而不是 query_gpus：它和"启动服务时按哪张卡分档"
+            # 必须同一个口径，否则设了 CUDA_VISIBLE_DEVICES 的机器会按物理
+            # 0 号（可能是 4GB 卡）选模型，却在 16GB 卡上量化。
+            from .hardware import visible_gpus
             from .config import resolve_profile
 
-            gpus = query_gpus()
+            gpus = visible_gpus()
             if gpus:
                 chosen = resolve_profile(table, gpus[0]).model.key
         except Exception:                # noqa: BLE001 - 没有卡也要能看清单

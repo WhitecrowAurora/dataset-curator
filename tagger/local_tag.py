@@ -262,17 +262,18 @@ def tag_items(backend, items: Sequence[TagItem], *, out_dir: str | Path,
               should_stop: StopFlag | None = None,
               stats: TagStats | None = None,
               read_bytes: Callable[[TagItem], bytes] | None = None,
-              guard=None) -> TagStats:
+              guard=None, max_retries: int = 2) -> TagStats:
     from .storage.work import WorkIndex
     with WorkIndex(Path(out_dir)) as work:
         work.refresh()
         return _tag_items(backend, items, out_dir=out_dir, force=force,
                           on_progress=on_progress, should_stop=should_stop, stats=stats,
-                          read_bytes=read_bytes, guard=guard, work=work)
+                          read_bytes=read_bytes, guard=guard, work=work,
+                          max_retries=max_retries)
 
 
 def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
-               stats, read_bytes, guard, work):
+               stats, read_bytes, guard, work, max_retries=2):
     """按批打标并落盘。返回结账过的 TagStats。
 
     `should_stop` 是**协作式**中止：只在块边界检查，正在算的那一块会算完
@@ -359,11 +360,14 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
             raise RuntimeError(f"图片领取已失效：{item.image_id}")
         payload = _payload(item, pred, backend, precision=precision,
                            fingerprint=fingerprint)
-        try:
-            _write_json(artifact_path(out_dir, item), payload)
-        except OSError as exc:
-            fail(item, f"写盘失败: {exc}")
-            return
+        for attempt in range(max(0, max_retries) + 1):
+            try:
+                _write_json(artifact_path(out_dir, item), payload)
+                break
+            except OSError as exc:
+                if attempt >= max_retries:
+                    fail(item, f"写盘失败: {exc}")
+                    return
         stats.done += 1
         work.release(item.image_id)
         emit("done", item, payload)
@@ -389,6 +393,8 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
             break
         try:
             preds = backend.predict_batch(inputs_of(chunk))
+            if len(preds) != len(chunk):
+                raise RuntimeError("批次返回结果数量与输入图片数量不一致")
         except Exception as exc:      # noqa: BLE001 - 一块坏了不能连坐
             first_error: Exception | None = exc
         else:
@@ -400,15 +406,22 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
                 guard.after_unit()
             continue
 
-        # 这一块整体炸了：逐张重试一次，把账算到真正坏的那张头上。
+        # 只重试失败块里的单图；成功后立即结算，不重复计算成功图。
         for item in chunk:
-            try:
-                one = backend.predict_batch(inputs_of([item]))[0]
-            except Exception as exc:  # noqa: BLE001
-                fail(item, _reason_of(exc) or _reason_of(first_error))
-                continue
-            account_timings()
-            commit(item, one)
+            for attempt in range(max(1, max_retries)):
+                if should_stop is not None and should_stop():
+                    stats.stopped = True
+                    work.release(item.image_id)
+                    break
+                try:
+                    one = backend.predict_batch(inputs_of([item]))[0]
+                except Exception as exc:  # noqa: BLE001
+                    if attempt + 1 >= max(1, max_retries):
+                        fail(item, _reason_of(exc) or _reason_of(first_error))
+                    continue
+                account_timings()
+                commit(item, one)
+                break
         if guard is not None:
             guard.after_unit()
 

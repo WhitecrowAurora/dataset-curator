@@ -80,7 +80,7 @@ export function ResumeBanner({ onOpen }: { onOpen: (jobId: string) => void }) {
           上次的任务没跑完
         </span>
         <span className="ml-2">
-          {info.why === 'paused' ? '已暂停' : '已停止'}
+          {info.why === 'paused' ? '已暂停' : info.why === 'failed' ? '失败待补齐' : '已停止'}
           {info.saved_at ? ` · ${fmtWhen(info.saved_at)}` : ''}
         </span>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-lx-dim">

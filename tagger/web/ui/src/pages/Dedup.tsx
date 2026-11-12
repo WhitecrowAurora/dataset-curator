@@ -28,7 +28,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function Dedup() {
   const [inputDir, setInputDir] = useState('')
-  const [picker, setPicker] = useState(false)
+  // 两个目录共用同一个选择窗口，靠这个值记住"这次是给谁挑"。
+  const [picker, setPicker] = useState<'input' | 'out' | null>(null)
   const [outDir, setOutDir] = useState('')
   const [mode, setMode] = useState<(typeof MODES)[number]>('similar')
   const [threshold, setThreshold] = useState(8)
@@ -139,7 +140,7 @@ export function Dedup() {
         icon={<Copy size={17} />}
         eyebrow="去重"
         title="素材查重"
-        description="列出精确重复与重压缩的相似图，产出排除清单；素材文件一个字节不动。"
+        description="产出排除清单，原图不动"
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>
@@ -167,7 +168,7 @@ export function Dedup() {
           <SectionPanel title="素材目录">
             <SettingRow
               label="输入目录"
-              help="直接指装图的文件夹或单个大 zip 包都行；与打标任务互不影响"
+              help="装图的文件夹或单个大 zip"
             >
               <div className="flex gap-2">
                 <input
@@ -181,7 +182,7 @@ export function Dedup() {
                 <button
                   type="button"
                   className="lx-btn-ghost shrink-0 px-3"
-                  onClick={() => setPicker(true)}
+                  onClick={() => setPicker('input')}
                 >
                   <FolderOpen size={14} className="mr-1 inline" />
                   浏览
@@ -189,7 +190,7 @@ export function Dedup() {
               </div>
             </SettingRow>
 
-            <SettingRow label="重复判定" help="精确零误杀；相似额外抓重压缩/重保存的图">
+            <SettingRow label="重复判定" help="相似模式额外抓重压缩的图">
               <ChoiceGrid
                 options={MODES}
                 value={mode}
@@ -205,7 +206,7 @@ export function Dedup() {
             {mode === 'similar' && (
               <SettingRow
                 label={`相似阈值：${threshold}`}
-                help="感知哈希的汉明距离，≤阈值算同一张。8 允许轻度重压缩；调小更严、误杀少"
+                help="汉明距离 ≤ 阈值算同一张。调小更严、误杀少"
               >
                 <input
                   type="range"
@@ -219,7 +220,7 @@ export function Dedup() {
               </SettingRow>
             )}
 
-            <SettingRow label="组内保留" help="最先 = 与分包编号同序的那张；最大 = 文件最大的（重压缩场景质量高）">
+            <SettingRow label="组内保留" help="最先按分包编号序；最大按文件体积">
               <ChoiceGrid
                 options={KEEPS}
                 value={keep}
@@ -235,17 +236,28 @@ export function Dedup() {
             <details className="px-1">
               <summary className="cursor-pointer text-xs text-lx-muted">高级</summary>
               <div className="mt-3 space-y-4">
-                <SettingRow label="输出目录" help="默认 <输入名>-dedup，哈希缓存 hashes.db 也放这里">
-                  <input
-                    className="lx-input font-mono text-xs"
-                    value={outDir}
-                    onChange={(e) => setOutDir(e.target.value)}
-                    placeholder="留空 = 自动"
-                    spellCheck={false}
-                    disabled={running}
-                  />
+                <SettingRow label="输出目录" help="默认 <输入名>-dedup，哈希缓存也放这里">
+                  <div className="flex gap-2">
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={outDir}
+                      onChange={(e) => setOutDir(e.target.value)}
+                      placeholder="留空 = 自动"
+                      spellCheck={false}
+                      disabled={running}
+                    />
+                    <button
+                      type="button"
+                      className="lx-btn-ghost shrink-0 px-3"
+                      disabled={running}
+                      onClick={() => setPicker('out')}
+                    >
+                      <FolderOpen size={14} className="mr-1 inline" />
+                      浏览
+                    </button>
+                  </div>
                 </SettingRow>
-                <SettingRow label="并行线程" help="扫盘是 IO 密集，8 对机械盘通常已经够饱">
+                <SettingRow label="并行线程" help="机械盘 8 通常够用">
                   <input
                     type="number"
                     className="lx-input w-24 font-mono tabular-nums"
@@ -348,7 +360,7 @@ export function Dedup() {
                 </>
               ) : (
                 <p className="text-[11px] text-lx-muted">
-                  {job.status === 'failed' ? job.error || '扫描失败' : '没有正在进行的扫描。'}
+                  {job.status === 'failed' ? job.error || '扫描失败' : '没有正在进行的扫描'}
                 </p>
               )}
 
@@ -417,13 +429,10 @@ export function Dedup() {
           {!job && (
             <SectionPanel title="怎么用">
               <ol className="list-decimal space-y-2 pl-5 text-[11.5px] leading-relaxed text-lx-secondary">
-                <li>打标完一批素材后、点"发分包"之前，来这里扫一遍。</li>
-                <li>
-                  扫描按小时计（百万级素材），中断了也没关系——哈希缓存在输出目录的
-                  hashes.db，重跑会接着来，不用从头算。
-                </li>
-                <li>结果是一份排除清单和逐组报告；对分组有异议就调阈值重扫（已扫的不会重算）。</li>
-                <li>素材本身不动。确认没问题后再发分包，分包时带上排除清单。</li>
+                <li>分包前扫一遍。</li>
+                <li>中断后重跑会接着算，哈希缓存存在输出目录。</li>
+                <li>产出排除清单与逐组报告；调阈值重扫时已扫的不会重算。</li>
+                <li>素材不动，分包时带上排除清单。</li>
               </ol>
               {running && (
                 <p className="mt-3 flex items-center gap-1.5 text-[11px] text-lx-muted">
@@ -437,12 +446,13 @@ export function Dedup() {
       </div>
 
       <FolderPicker
-        open={picker}
-        start={inputDir}
-        onClose={() => setPicker(false)}
+        open={picker !== null}
+        start={picker === 'out' ? outDir || inputDir : inputDir}
+        onClose={() => setPicker(null)}
         onPick={(path) => {
-          setInputDir(path)
-          setPicker(false)
+          if (picker === 'out') setOutDir(path)
+          else setInputDir(path)
+          setPicker(null)
         }}
       />
     </div>

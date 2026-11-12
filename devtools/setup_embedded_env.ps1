@@ -32,9 +32,12 @@
     删掉 env\python 从头重建。
 
 .PARAMETER TorchIndex
-    torch/torchvision 从哪个索引装。留空按机器自动选：
-    有 nvidia-smi 用 cu126，没有用 cpu。想装别的 CUDA 版本时显式传，
-    例如 https://download.pytorch.org/whl/cu130。
+    torch/torchvision 从哪个索引装。留空按机器自动选，分档与网页依赖页
+    （tagger\web\deps.py 的 torch_plan）一致：
+      50 系（CC 12.0+）且驱动 580+ → cu130；驱动不够 → cpu
+      Turing / Ampere / Ada 且驱动 560+ → cu126；驱动太老 → cpu
+      没有 nvidia-smi → cpu
+    想装别的 CUDA 版本时显式传，例如 https://download.pytorch.org/whl/cu130。
     注意：PyTorch 的索引按 CUDA 版本分目录，每个目录只放自己那份——传一个
     没有 2.14.1 的目录（如 cu124，最高只到 2.6.0；cu128 也没有）会直接
     "No matching distribution found"，换之前先确认那目录里有清单钉死的版本。
@@ -234,31 +237,93 @@ if ($SkipTag) {
     if (-not $TorchIndex) {
         # 有卡就装 CUDA 版：CPU 版跑 tag 反推是 10 张/秒量级，装错了会让人
         # 以为"这软件就这么慢"。没卡只能 CPU，那也是唯一能跑的。
-        if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-            # 光有 nvidia-smi 不够：cu126 的轮子要求驱动支持 CUDA 12.6。驱动太老
-            # 时装得上、`import torch` 才报 driver version insufficient（pip 阶段
-            # 一切正常，页面也是一片绿），所以先读一句表头里的 CUDA Version。
-            $driverCuda = $null
-            try {
-                $smiOut = (& nvidia-smi 2>$null) -join "`n"
-                if ($smiOut -match 'CUDA Version:\s*(\d+)\.(\d+)') {
-                    $driverCuda = [version]("{0}.{1}" -f $Matches[1], $Matches[2])
-                }
-            } catch {
-                $driverCuda = $null
-            }
-            if ($null -eq $driverCuda) {
-                $TorchIndex = 'https://download.pytorch.org/whl/cpu'
-                Write-Warning "[env] 有显卡但没读出驱动的 CUDA 版本，先装 CPU 版（打标会慢十倍）；驱动装好后重跑 install.bat 会换成 CUDA 版"
-            } elseif ($driverCuda -lt [version]'12.6') {
-                $TorchIndex = 'https://download.pytorch.org/whl/cpu'
-                Write-Warning "[env] 驱动只支持 CUDA $driverCuda，cu126 版 torch 装上 import 也会报驱动版本不足；改装 CPU 版（慢十倍）。想用显卡把驱动升到 CUDA 12.6 以上"
-            } else {
-                $TorchIndex = 'https://download.pytorch.org/whl/cu126'
-            }
-        } else {
+        #
+        # ★分档口径必须与 tagger\web\deps.py 的 torch_plan() 一致。这里以前
+        #   只看 nvidia-smi 表头那句 "CUDA Version:"，犯的是和 deps 一模一样的
+        #   错，而且是两个：
+        #     1. 表头是**本地化**的。中文系统写 "CUDA 版本: 11.8"，英文正则一个
+        #        字都对不上 → 判成"读不出驱动" → 直接装 CPU 版。2080 Ti 那位
+        #        用户反馈的"显卡没被认出来"，在装了页面之后重跑 install.bat
+        #        还会再撞一次，因为这里是另一个入口。
+        #     2. 完全不看架构。50 系（CC 12.0+）装 cu126 会每张图报
+        #        "no kernel image"，而这段代码以前给它装的正是 cu126。
+        #   现在改成问 nvidia-smi 要**纯数字**（与语言无关），再按架构分档。
+        $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+        if (-not $smi) {
             $TorchIndex = 'https://download.pytorch.org/whl/cpu'
             Write-Host "[env] 没检测到 nvidia-smi，装 CPU 版 torch"
+        } else {
+            # 驱动号：只吐版本数字，不受系统语言影响
+            $driverVer = ''
+            try {
+                $driverVer = (& $smi.Source --query-gpu=driver_version --format=csv,noheader 2>$null |
+                    Select-Object -First 1)
+            } catch {
+                $driverVer = ''
+            }
+            # 架构：CC 决定"能不能跑"，驱动决定"装得上装不上"
+            $computeCap = ''
+            try {
+                $computeCap = (& $smi.Source --query-gpu=compute_cap --format=csv,noheader 2>$null |
+                    Select-Object -First 1)
+            } catch {
+                $computeCap = ''
+            }
+
+            if ($null -eq $driverVer) { $driverVer = '' }
+            $driverVer = ([string]$driverVer).Trim()
+            if ($null -eq $computeCap) { $computeCap = '' }
+            $computeCap = ([string]$computeCap).Trim()
+
+            # 驱动号 → 能跑的最高 CUDA major，与 deps.py 的 _DRIVER_CUDA_TABLE
+            # 同一张表（只列分界点）。这里只需要 major，够分档了。
+            $driverMajor = 0
+            if ($driverVer -match '^(\d+)\.') { $driverMajor = [int]$Matches[1] }
+
+            $ccMajor = -1
+            $ccMinor = -1
+            if ($computeCap -match '^(\d+)\.(\d+)') {
+                $ccMajor = [int]$Matches[1]
+                $ccMinor = [int]$Matches[2]
+            }
+
+            $isBlackwell = ($ccMajor -ge 12)
+            if ($driverMajor -ge 580) {
+                $driverCudaMajor = 13    # 覆盖 580(13.0) / 610(13.3) 等所有 13.x
+            } elseif ($driverMajor -ge 570) {
+                $driverCudaMajor = 12      # 12.8
+            } elseif ($driverMajor -ge 560) {
+                $driverCudaMajor = 12      # 12.6：cu126 的下限
+            } elseif ($driverMajor -ge 525) {
+                $driverCudaMajor = 12
+            } elseif ($driverMajor -ge 470) {
+                $driverCudaMajor = 11
+            } else {
+                $driverCudaMajor = 0
+            }
+
+            if ($driverMajor -eq 0) {
+                $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+                Write-Warning "[env] 有显卡但没读出驱动版本，先装 CPU 版（打标会慢十倍）；驱动装好后重跑 install.bat 会换成 CUDA 版"
+            } elseif ($isBlackwell) {
+                # 50 系只有 cu130 能跑：cu126 的轮子没有 sm_120 内核
+                if ($driverMajor -lt 580) {
+                    $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+                    Write-Warning "[env] 这台是 50 系（CC $ccMajor.$ccMinor），需要 cu130 版 torch，而驱动只到 $driverVer；cu126 在 sm_120 上没有 kernel。先用 CPU 版，把驱动升到 580 以上后重跑 install.bat"
+                } else {
+                    $TorchIndex = 'https://download.pytorch.org/whl/cu130'
+                }
+            } elseif ($driverCudaMajor -lt 12) {
+                $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+                Write-Warning "[env] 驱动 $driverVer 只支持 CUDA 11.x，cu126 版 torch 装上 import 也会报驱动版本不足；改装 CPU 版（慢十倍）。想用显卡把驱动升到 560 以上（CUDA 12.6）"
+            } else {
+                # Turing / Ampere / Ada 一律 cu126。★20 系（CC 7.5）不要因为
+                # 驱动新就跟着升 cu130：cu130 里确实有 sm_75 的内核（CUDA 13
+                # 砍的是 7.5 **之前**），但 7.5 本身没有 TF32/bf16，换大版本只有
+                # 开销，而 20/30/40 系的实测基准全在 cu126 上。
+                $TorchIndex = 'https://download.pytorch.org/whl/cu126'
+            }
+            Write-Host "[env] 显卡 CC $ccMajor.$ccMinor，驱动 $driverVer → torch 用 $TorchIndex"
         }
     }
 

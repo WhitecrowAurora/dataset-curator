@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CircleDot,
+  FolderOpen,
   KeyRound,
   Loader2,
   Play,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError, type CenterState } from '../lib/api'
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
+import { useFolderPicker } from '../components/FolderPicker'
 import {
   MiniMetricCard,
   PageHeader,
@@ -31,6 +33,26 @@ import {
 
 const MODES = ['both', 'tag', 'nl']
 const MODE_LABEL: Record<string, string> = { both: 'tag + NL', tag: '只出 tag', nl: '只出 NL' }
+
+/**
+ * 派工倾向。**不是**"产出什么"，而是"服务端把哪种片排在我前面"——
+ * 产出什么由上方的「产出模式」决定，两者是正交的：
+ *   只出 tag + 优先 NL  = 我只会做 tag，却想先拿缺 NL 的片 → 接不到能交的活
+ * 所以下面按产出模式筛选项，把这类矛盾直接藏起来而不是让它报错。
+ */
+const PREF_OPTIONS: { value: string; label: string; hint: string }[] = [
+  { value: '', label: '不挑', hint: '接任何还欠内容的片（两侧都做）' },
+  { value: 'pref-tag', label: '优先 tag', hint: '先接缺 tag 的片；另一侧也能做，会兜底' },
+  { value: 'pref-nl', label: '优先 NL', hint: '先接缺 NL 的片；另一侧也能做，会兜底' },
+  { value: 'tag', label: '只接 tag', hint: '只接缺 tag 的片；没有就空转等，不白下载' },
+  { value: 'nl', label: '只接 NL', hint: '只接缺 NL 的片；没有就空转等，不白下载' },
+]
+
+/** 某个倾向是否与产出模式相容：倾向指向的侧必须真能产出来。 */
+function prefFitsMode(pref: string, mode: string): boolean {
+  if (mode === 'both' || !pref) return true
+  return pref.endsWith(mode)
+}
 
 function fmtUptime(sec: number): string {
   if (!sec || sec < 0) return '—'
@@ -56,12 +78,19 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   const [secret, setSecret] = useState('')
   // 运行参数同样是草稿：只在第一次拉到时灌入，之后不跟轮询走（见上）。
   const [mode, setMode] = useState('both')
+  // 派工倾向跟着 mode 走：把 mode 切成单侧时，矛盾的值必须当场清掉，
+  // 否则表单里留着"只出 tag + 只接 NL"，看起来能点、后端也会 400。
+  const [partsPref, setPartsPref] = useState('')
   const [tagUrl, setTagUrl] = useState('')
   const [outDir, setOutDir] = useState('')
   const [waitMode, setWaitMode] = useState(true)
   // 存成字符串而不是数字：输入框清空时得能表达"没填"，转成 NaN 再回填会变成 0
   const [maxPkgs, setMaxPkgs] = useState('0')
+  // 下载口径：连接数同样存字符串（清空后按默认 4 处理），选优是开关
+  const [dlConns, setDlConns] = useState('4')
+  const [cdnProbe, setCdnProbe] = useState(true)
   const seeded = useRef(false)
+  const folder = useFolderPicker()
 
   const pull = useCallback(async () => {
     try {
@@ -73,10 +102,13 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         setServer(s.config.server)
         setUserId(s.config.user_id)
         setMode(s.config.mode || 'both')
+        setPartsPref(s.config.parts_pref ?? '')
         setTagUrl(s.config.tag_url)
         setOutDir(s.config.out_dir)
         setWaitMode(s.config.wait ?? true)
         setMaxPkgs(String(s.config.max_packages ?? 0))
+        setDlConns(String(s.config.download_conns ?? 4))
+        setCdnProbe(s.config.cdn_probe ?? true)
       }
     } catch (e) {
       setPollError(e instanceof ApiError ? e.message : String(e))
@@ -115,6 +147,8 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   const board = state?.board
   const cfg = state?.config
   const leases = board?.leases ?? []
+  // 只有连上看板、且服务端真的给了这项统计才显示（老服务端 → undefined）
+  const pool = board?.ok ? board.parts : undefined
   // 打标服务与产物目录空着就不让开始：后端对空串是"保持原值"（免得把配置
   // 清成空以后再起不来），所以输入框显示空、实际却用着旧地址，是更难查的错。
   const startBlocked = !ident.device_id
@@ -131,7 +165,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         icon={<CircleDot size={18} />}
         eyebrow="局域网协作"
         title="调度中心"
-        description="连上总机后由它分片，这台机器负责打标。开始/停止都在这里按。"
+        description="自动分工，分到的分片在本机打标"
         badges={
           running ? (
             <StatusChip tone="success">运行中 · {fmtUptime(state?.uptime_s ?? 0)}</StatusChip>
@@ -153,12 +187,12 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
 
       {(actionError || pollError) && <ErrorBox error={actionError || pollError} />}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <MiniMetricCard
           icon={<PlugZap size={14} />}
           label="连接"
           value={ident.server ? '已连接' : '未连接'}
-          detail={ident.server || '填地址与姓名'}
+          detail={ident.server || '填地址与 ID'}
           tone={ident.server ? 'success' : 'neutral'}
         />
         <MiniMetricCard
@@ -168,6 +202,33 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
           detail={board?.reason || (board?.ok ? `档位 ${board?.tier || '?'}` : '—')}
           tone={leases.length > 0 ? 'accent' : 'neutral'}
         />
+        {/* 全池余量：谁想补哪一侧，看这两个数决定要不要开工。
+            老服务端没有这项统计——此时整组都不显示，免得把"没统计"读成"一片不缺"。 */}
+        {pool && (
+          <>
+            <MiniMetricCard
+              icon={<CircleDot size={14} />}
+              label="全池剩余"
+              value={String(pool.remaining)}
+              detail={`共 ${pool.total} 片 · 已完成 ${pool.done}`}
+              tone={pool.remaining > 0 ? 'accent' : 'success'}
+            />
+            <MiniMetricCard
+              icon={<CircleDot size={14} />}
+              label="缺 NL"
+              value={String(pool.missing_nl)}
+              detail="只等描述的那一侧"
+              tone={pool.missing_nl > 0 ? 'warning' : 'success'}
+            />
+            <MiniMetricCard
+              icon={<CircleDot size={14} />}
+              label="缺 TAG"
+              value={String(pool.missing_tag)}
+              detail="只等标签的那一侧"
+              tone={pool.missing_tag > 0 ? 'warning' : 'success'}
+            />
+          </>
+        )}
         <MiniMetricCard
           icon={<Loader2 size={14} />}
           label="上次退出码"
@@ -185,13 +246,11 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
 
       <SectionPanel
         title="身份"
-        description={
-          running ? '跑着的时候不能换身份，先停止。' : '姓名就是你的工位：换一个就等于换个人记账。'
-        }
+        description={running ? '运行中不能改，先停止' : '换 ID 将按新身份单独记录'}
       >
         <SettingRow
           label="调度中心地址"
-          help="总机跑 fox-label 服务的地址，形如 http://1.2.3.4:31831。"
+          help="形如 http://1.2.3.4:31831"
           required
         >
           <input
@@ -203,19 +262,19 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             disabled={running}
           />
         </SettingRow>
-        <SettingRow label="姓名 / ID" help="服务端按它记账，也是取回工位的唯一依据。" required>
+        <SettingRow label="ID" help="服务端按它记录你的产出" required>
           <input
             className="lx-input text-xs"
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
-            placeholder="张三"
+            placeholder="zhangsan"
             spellCheck={false}
             disabled={running}
           />
         </SettingRow>
         <SettingRow
           label="密钥"
-          help="管理员签发的 secret。服务端免签时留空即可；登录成功后不再回显。"
+          help="留空 = 本机自动生成；同名被别的机器占着时，让管理员先清空该用户"
         >
           <div className="flex items-center gap-2">
             <input
@@ -223,7 +282,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
               className="lx-input font-mono text-xs"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
-              placeholder={ident.device_id ? '已登录，改身份才需要重填' : '留空 = 免签'}
+              placeholder={ident.device_id ? '已登录' : '留空 = 本机自动生成'}
               autoComplete="off"
               spellCheck={false}
               disabled={running}
@@ -270,7 +329,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
               </dd>
             </div>
             <div className="flex justify-between gap-2">
-              <dt className="text-lx-muted">姓名</dt>
+              <dt className="text-lx-muted">ID</dt>
               <dd className="truncate text-lx-secondary">{ident.user_id || '—'}</dd>
             </div>
           </dl>
@@ -279,7 +338,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         {ident.device_id && (
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-lx pt-3">
             <p className="text-[10.5px] leading-relaxed text-lx-dim">
-              断开只忘掉本机的设备身份，地址和姓名留着——重连不用再抄一遍。
+              断开只清除设备身份，地址与 ID 保留
             </p>
             <button
               type="button"
@@ -297,7 +356,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
 
       <SectionPanel
         title="运行"
-        description="启动的是 worker 子进程：它自己下载分片、调打标、上报结果。"
+        description="启动一个 worker 子进程，自动领片、打标、上报"
         trailing={
           running ? (
             <button
@@ -331,6 +390,9 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
                     extra_args: cfg?.extra_args,
                     wait: waitMode,
                     max_packages: Number(maxPkgs || 0),
+                    download_conns: Math.max(1, Math.min(16, Number(dlConns) || 4)),
+                    cdn_probe: cdnProbe,
+                    parts_pref: partsPref,
                   }),
                 )
               }
@@ -341,18 +403,58 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
           )
         }
       >
-        <SettingRow label="产出模式" help="both = tag 与 NL 都出；单模式更快，但另一份得再跑一遍。">
+        <SettingRow label="产出模式" help="both 出 tag 与 NL；单模式更快">
           <ChoiceGrid
             options={MODES}
             value={mode}
-            onChange={setMode}
+            onChange={(v) => {
+              setMode(v)
+              // 切成单侧时，指向另一侧的倾向当场清掉。留着的话表单看起来
+              // 正常，点「开始」才被后端 400 拦下——那是最难自查的一类错。
+              if (!prefFitsMode(partsPref, v)) setPartsPref('')
+            }}
             disabled={running}
             size="sm"
             ariaLabel="产出模式"
             renderLabel={(v) => MODE_LABEL[v] ?? v}
           />
         </SettingRow>
-        <SettingRow label="打标服务" help="worker 调用的本机 serve 地址；改它等于换一台机器干活。">
+        {/* 派工倾向：服务端据此决定"先把哪种片派给你"。它与产出模式正交，
+            但正交不等于可以随便组合——单侧模式下只有同侧才有意义。 */}
+        <SettingRow
+          label="派工倾向"
+          help={
+            mode === 'both'
+              ? '只影响先派哪种片，不改变本机产出什么'
+              : `产出模式是单侧，只能接缺 ${mode === 'tag' ? 'tag' : 'NL'} 的片`
+          }
+        >
+          {mode === 'both' ? (
+            <div className="flex flex-col gap-1">
+              <select
+                className="lx-select text-xs"
+                value={partsPref}
+                onChange={(e) => setPartsPref(e.target.value)}
+                disabled={running}
+                aria-label="派工倾向"
+              >
+                {PREF_OPTIONS.map((o) => (
+                  <option key={o.value || 'none'} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10.5px] leading-relaxed text-lx-dim">
+                {PREF_OPTIONS.find((o) => o.value === partsPref)?.hint}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-lx-muted">
+              自动：只接缺 {mode === 'tag' ? 'tag' : 'NL'} 的片
+            </span>
+          )}
+        </SettingRow>
+        <SettingRow label="打标服务" help="worker 调用的 serve 地址">
           <input
             className="lx-input font-mono text-xs"
             value={tagUrl}
@@ -363,16 +465,27 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             aria-invalid={!tagUrl.trim()}
           />
         </SettingRow>
-        <SettingRow label="产物目录" help="分片下载与打标产物都落在这里。">
-          <input
-            className="lx-input font-mono text-xs"
-            value={outDir}
-            onChange={(e) => setOutDir(e.target.value)}
-            placeholder="work/fox-work"
-            spellCheck={false}
-            disabled={running}
-            aria-invalid={!outDir.trim()}
-          />
+        <SettingRow label="产物目录" help="分片与打标产物都落这里">
+          <div className="flex gap-2">
+            <input
+              className="lx-input font-mono text-xs"
+              value={outDir}
+              onChange={(e) => setOutDir(e.target.value)}
+              placeholder="work/fox-work"
+              spellCheck={false}
+              disabled={running}
+              aria-invalid={!outDir.trim()}
+            />
+            <button
+              type="button"
+              className="lx-btn-ghost shrink-0 px-3"
+              disabled={running}
+              onClick={() => folder.pick(outDir || undefined, setOutDir)}
+            >
+              <FolderOpen size={14} className="mr-1 inline" />
+              浏览
+            </button>
+          </div>
         </SettingRow>
 
         <div className="mt-4 border-t border-lx pt-3">
@@ -381,7 +494,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             onChange={setWaitMode}
             disabled={running}
             label="挂着等派工（池子空了也不停）"
-            hint="关掉就是“把手上的干完就停”。开着的话，点一次开始就能一直挂在线上，别人往池子里放活它就接。"
+            hint="关掉 = 手头的干完就停"
           />
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
@@ -396,8 +509,36 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
               />
             </label>
             <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
-              0 = 不限。填了数，跑够就自己停手，并把多派的那片还回池子。
-              {!waitMode && '（只在“挂着等派工”时生效）'}
+              0 = 不限，跑够就停并归还多派的片
+              {!waitMode && '（仅「挂着等派工」时生效）'}
+            </p>
+          </div>
+        </div>
+
+        {/* 下载口径。两件事一起决定"这片多久能到"：单条 TCP 常被限速（多连接），
+            以及 DNS 给的那个边缘未必最快（开工前测速选优）。 */}
+        <div className="mt-3 border-t border-lx pt-3">
+          <ToggleRow
+            checked={cdnProbe}
+            onChange={setCdnProbe}
+            disabled={running}
+            label="下载前测速选最快 CDN"
+            hint="每片开工前拉 2MiB 探一次，v4/v6 都测，钉住最快的那条边缘"
+          />
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-lx-muted">下载连接数</span>
+              <input
+                className="lx-input w-24 font-mono text-xs tabular-nums"
+                inputMode="numeric"
+                value={dlConns}
+                onChange={(e) => setDlConns(e.target.value.replace(/[^\d]/g, ''))}
+                placeholder="4"
+                disabled={running}
+              />
+            </label>
+            <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
+              1 = 单连接；国内单条 TCP 常被限速，4~8 条足够，再多只是抢同一份带宽
             </p>
           </div>
         </div>
@@ -408,21 +549,20 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             {state?.cmd || '—'}
           </pre>
           <p className="mt-1.5 text-[10px] leading-relaxed text-lx-dim">
-            由后端按上面的配置拼出来，页面不提供逐字编辑：改坏一个引号，路径里有空格就会
-            断成两条命令，报错还看不出是这里出的问题。
+            由后端按上面的配置拼出，不支持逐字编辑
           </p>
         </details>
       </SectionPanel>
 
       <SectionPanel
         title={leases.length ? `当前租约 · ${leases.length}` : '当前租约'}
-        description="只读：看一眼不会领走任务。"
+        description="只读，不会领走任务"
       >
         {!board?.ok && (
           <p className="text-[11px] text-lx-muted">{board?.reason || '还没连上调度中心。'}</p>
         )}
         {board?.ok && leases.length === 0 && (
-          <p className="text-[11px] text-lx-muted">手上没有租约（要么收工了，要么还在等派工）。</p>
+          <p className="text-[11px] text-lx-muted">当前没有租约</p>
         )}
         {leases.length > 0 && (
           <div className="flex flex-col divide-y divide-lx">
@@ -443,15 +583,17 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         )}
       </SectionPanel>
 
-      <SectionPanel title="日志" description="worker 的 stdout，最近 120 行。">
+      <SectionPanel title="日志" description="最近 120 行">
         {state && state.log.length > 0 ? (
           <pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed text-lx-muted">
             {state.log.join('\n')}
           </pre>
         ) : (
-          <p className="text-[11px] text-lx-muted">还没有输出。点「开始」之后这里会滚动。</p>
+          <p className="text-[11px] text-lx-muted">暂无输出</p>
         )}
       </SectionPanel>
+
+      {folder.dialog}
     </div>
   )
 }

@@ -36,6 +36,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import tmpdir
+
 # ---------------------------------------------------------------- 格式识别
 
 MAGIC: tuple[tuple[bytes, str], ...] = (
@@ -403,7 +405,9 @@ def iter_files(root: str | Path, *,
     """
     table = passwords or PasswordTable()
     root_path = Path(root)
-    base_work = Path(work_dir) if work_dir else Path(tempfile.gettempdir()) / "tagger-extract"
+    # 默认落 ROOT/tmp/tagger-extract，不走 %TEMP%：解压是这里最占盘的一步，
+    # 一个 30M 的 tar 能解出几百 MB（详见 tmpdir）。
+    base_work = Path(work_dir) if work_dir else tmpdir.path("tagger-extract")
     base_work.mkdir(parents=True, exist_ok=True)
 
     def log(msg: str) -> None:

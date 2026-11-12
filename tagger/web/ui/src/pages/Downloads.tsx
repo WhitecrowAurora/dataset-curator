@@ -241,7 +241,7 @@ export function Downloads() {
         icon={<HardDriveDownload size={17} />}
         eyebrow="下载"
         title="分片下载"
-        description="按剩余空间排队把分片备到本地；打标任务直接命中，处理完自动删除。"
+        description="提前把分片备到本地，用完自动删除"
         actions={
           active ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void cancelAll()}>
@@ -275,7 +275,7 @@ export function Downloads() {
             ) : undefined
           }
         >
-          <SettingRow label="仓库" help="数据集仓库（org/name）。私有仓库要填 token，它只在本次请求里用，不落盘">
+          <SettingRow label="仓库" help="org/name；私有仓库需 token">
             <div className="flex gap-2">
               <input
                 className="lx-input font-mono text-xs"
@@ -300,7 +300,7 @@ export function Downloads() {
             </div>
           </SettingRow>
 
-          <SettingRow label="格式" help="parquet 默认逐行流式（不落盘），但网络差时整片下到本地反而更快">
+          <SettingRow label="格式" help="网络差时整片下到本地更快">
             <select
               className="lx-input"
               value={format}
@@ -340,9 +340,7 @@ export function Downloads() {
 
           {files.length === 0 ? (
             <p className="px-1 text-xs text-lx-dim">
-              {detected
-                ? `识别为 ${detected}，点「读取」列出分片。`
-                : '填仓库地址后点「读取」。'}
+              {detected ? `识别为 ${detected}，点「读取」列出分片` : '填仓库地址后点「读取」'}
             </p>
           ) : (
             <>
@@ -423,7 +421,7 @@ export function Downloads() {
           >
             <SettingRow
               label="给产物留的余量（GB）"
-              help="剩余空间不够「这一片 + 余量」时就排队等着，不会下到一半写失败"
+              help="不够这一片 + 余量就排队等"
             >
               <input
                 type="number"
@@ -436,7 +434,7 @@ export function Downloads() {
             </SettingRow>
             <SettingRow
               label="多线程下载"
-              help="把一个分片切成多段并发拉取（IDM 式）。国内单条 TCP 常被压到几百 KB/s，开着更容易跑满线路"
+              help="分段并发拉取，更容易跑满线路"
             >
               <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
                 <input
@@ -451,7 +449,7 @@ export function Downloads() {
             {multi && (
               <SettingRow
                 label="并发线程数"
-                help="单个分片同时开几条连接。4~8 条最实用；再多只是在抢同一份带宽"
+                help="4~8 条足够；再多只是抢同一份带宽"
               >
                 <input
                   type="number"
@@ -467,8 +465,7 @@ export function Downloads() {
             )}
             {state && (
               <p className="px-1 text-[11px] leading-relaxed text-lx-dim">
-                分片落点 <span className="font-mono">{state.cache_root}</span>
-                ，按仓库再分一层。打标任务用同一个目录，处理完即删。
+                分片落点 <span className="font-mono">{state.cache_root}</span>，处理完即删
               </p>
             )}
           </SectionPanel>
@@ -483,7 +480,7 @@ export function Downloads() {
           >
             <SettingRow
               label="代理地址"
-              help="与模型下载、打标任务的 HF 拉取共用这一份设置；留空 = 直连（仍信任环境变量里的 HTTP_PROXY/HTTPS_PROXY）"
+              help="全局生效；留空 = 直连"
             >
               <input
                 className="lx-input font-mono text-xs"

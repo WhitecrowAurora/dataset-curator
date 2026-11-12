@@ -29,11 +29,13 @@ import {
   type TagModelEntry,
   type VlmModelEntry,
 } from '../lib/api'
+import { ENDPOINT_PRESETS, endpointPresetOf } from '../lib/endpoint'
 import { PageHeader, SectionPanel, StatusChip } from '../components/ui/launcher'
 import { QuantizeDialog } from '../components/QuantizeDialog'
 import { GgufConvertDialog } from '../components/GgufConvertDialog'
 import { QuantizeMenu, type QuantPick } from '../components/QuantizeMenu'
 import { ErrorBox } from '../components/ui/controls'
+import { useFolderPicker } from '../components/FolderPicker'
 
 // 模型条目里的 precision = "默认用哪份权重"。两条链路的取值域不是一回事：
 //   vLLM 三档是**加载方式**（同一份权重，不换文件）；
@@ -64,16 +66,6 @@ const PRECISION_LABELS: Record<string, string> = {
 const STANDARD_PRECISIONS: readonly string[] = [...VLLM_PRECISIONS, ...GGUF_TIER_PRECISIONS]
 /** 这一档到底是"加载方式"还是"GGUF 文件档"：只有后者要看本地有没有压出来 */
 const isGgufTier = (p: string) => (GGUF_TIER_PRECISIONS as readonly string[]).includes(p)
-
-// 下载源。镜像站与官方是同一套 API / resolve 路径，只换前缀；国内可直连，
-// 所以它是「下载代理」的替代品——设了镜像就不必再挂梯子按流量烧。
-const ENDPOINT_PRESETS = [
-  { key: '', label: '默认（hf-mirror.com 镜像，国内直连）' },
-  { key: 'https://hf-mirror.com', label: '镜像 hf-mirror.com' },
-  { key: 'https://huggingface.co', label: '官方 huggingface.co（要梯子）' },
-]
-const endpointPresetOf = (url: string) =>
-  ENDPOINT_PRESETS.some((p) => p.key === url) ? url : 'custom'
 
 function fmtBytes(n: number): string {
   if (!n || n < 0) return '0 B'
@@ -128,6 +120,8 @@ function LocalFilesBar({
   onError: (msg: string) => void
 }) {
   const [pending, setPending] = useState('')
+  // 打开位置失败（服务端没桌面环境）时显示的路径。空 = 没失败。
+  const [openHint, setOpenHint] = useState('')
   const key = 'key' in entry ? entry.key : entry.backend
   const download = entry.download
   const running = isRunning(download)
@@ -147,9 +141,29 @@ function LocalFilesBar({
   async function act(label: string, fn: () => Promise<ModelCatalog | void>) {
     setPending(label)
     onError('')
+    setOpenHint('')
     try {
       const res = await fn()
       if (res) onRefresh(res)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPending('')
+    }
+  }
+
+  /**
+   * 「打开位置」：窗口弹不出来（服务端没桌面）时把路径摆出来。
+   *
+   * 不塞进 onError：那是会拦住后续操作的红字，而"窗口没弹"不影响模型能不能用。
+   */
+  async function reveal(withPath: () => Promise<{ path: string; opened: boolean; detail: string }>) {
+    setPending('reveal')
+    onError('')
+    setOpenHint('')
+    try {
+      const r = await withPath()
+      if (!r.opened) setOpenHint(`${r.detail}：${r.path}`)
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -197,6 +211,12 @@ function LocalFilesBar({
             <span className="truncate font-mono text-[10px] text-lx-dim" title={entry.local_abs}>
               {entry.local_dir}
             </span>
+            {/* 窗口弹不出来时的兜底：路径本身就是答案，给个能选中的文本 */}
+            {openHint && (
+              <span className="select-all break-all font-mono text-[10px] text-lx-dim">
+                {openHint}
+              </span>
+            )}
             {!rawReady && (
               <span className="text-lx-dim">
                 没有 config.json / safetensors —— 直接跑没问题；要再走一遍本地量化得先下原始权重
@@ -230,6 +250,11 @@ function LocalFilesBar({
             <span className="truncate font-mono text-[10px] text-lx-dim" title={entry.local_abs}>
               {entry.local_dir}
             </span>
+            {openHint && (
+              <span className="select-all break-all font-mono text-[10px] text-lx-dim">
+                {openHint}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -255,9 +280,7 @@ function LocalFilesBar({
               type="button"
               className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
               disabled={!!pending}
-              onClick={() => void act('reveal', async () => {
-                await api.revealLocalDir(kind, key)
-              })}
+              onClick={() => void reveal(() => api.revealLocalDir(kind, key))}
             >
               <FolderOpen size={12} />
               打开位置
@@ -330,11 +353,7 @@ function LocalFilesBar({
                 type="button"
                 className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-1 text-[11px]"
                 disabled={!!pending}
-                onClick={() =>
-                  void act('reveal', async () => {
-                    await api.revealLocalDir(kind, key)
-                  })
-                }
+                onClick={() => void reveal(() => api.revealLocalDir(kind, key))}
               >
                 <FolderOpen size={12} />
                 打开位置
@@ -506,6 +525,8 @@ export function Models() {
     setDirty(true)
   }
 
+  const folder = useFolderPicker()
+
   const patchTag = (index: number, patch: Partial<TagModelEntry>) => {
     setTag((prev) => prev.map((t, i) => (i === index ? { ...t, ...patch } : t)))
     setSaved('')
@@ -657,7 +678,7 @@ export function Models() {
         icon={<Boxes size={17} />}
         eyebrow="可选清单"
         title="模型管理"
-        description="决定新建任务能选到哪些模型；破限版默认排最前——原版遇 NSFW 图会整批漏标且不报错。"
+        description="决定新建任务能选到哪些模型"
         badges={
           catalog && (
             <StatusChip tone={catalog.overlay_exists ? 'accent' : 'neutral'}>
@@ -697,7 +718,7 @@ export function Models() {
 
       <SectionPanel
         title="NL 模型"
-        description="出自然语言的权重（Qwen-VL 类）；名字就是起服务时的 --model。"
+        description="出自然语言的权重"
         trailing={
           <button
             type="button"
@@ -865,13 +886,23 @@ export function Models() {
                 />
               </Field>
               <Field label="下载到" className="md:col-span-2">
-                <input
-                  className="lx-input font-mono text-[11px]"
-                  value={m.local_dir}
-                  spellCheck={false}
-                  placeholder="留空 = models/nl/<key>"
-                  onChange={(e) => patchVlm(i, { local_dir: e.target.value })}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="lx-input font-mono text-[11px]"
+                    value={m.local_dir}
+                    spellCheck={false}
+                    placeholder="留空 = models/nl/<key>"
+                    onChange={(e) => patchVlm(i, { local_dir: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="lx-btn-ghost shrink-0 px-2.5"
+                    onClick={() => folder.pick(m.local_dir || undefined, (p) => patchVlm(i, { local_dir: p }))}
+                    aria-label="浏览下载目录"
+                  >
+                    <FolderOpen size={14} />
+                  </button>
+                </div>
               </Field>
                 </div>
               )}
@@ -914,7 +945,7 @@ export function Models() {
 
       <SectionPanel
         title="Tag 模型"
-        description="下完的目录可填进新建任务的「权重目录」（pixai 走 HF 缓存，下载仅留副本）。"
+        description="下载目录可填进新建任务的「权重目录」"
         trailing={
           <button
             type="button"
@@ -956,13 +987,23 @@ export function Models() {
                 />
               </Field>
               <Field label="下载到" className="md:col-span-2">
-                <input
-                  className="lx-input font-mono text-[11px]"
-                  value={t.local_dir}
-                  spellCheck={false}
-                  placeholder="留空 = models/<后端名>"
-                  onChange={(e) => patchTag(i, { local_dir: e.target.value })}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="lx-input font-mono text-[11px]"
+                    value={t.local_dir}
+                    spellCheck={false}
+                    placeholder="留空 = models/<后端名>"
+                    onChange={(e) => patchTag(i, { local_dir: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="lx-btn-ghost shrink-0 px-2.5"
+                    onClick={() => folder.pick(t.local_dir || undefined, (p) => patchTag(i, { local_dir: p }))}
+                    aria-label="浏览下载目录"
+                  >
+                    <FolderOpen size={14} />
+                  </button>
+                </div>
               </Field>
 
               <LocalFilesBar
@@ -1017,7 +1058,7 @@ export function Models() {
 
       <SectionPanel
         title="下载网络"
-        description="只作用于本页的权重下载。镜像站与代理二选一；连接数越大越快，过多会被镜像站限速。"
+        description="只作用于本页的权重下载"
         trailing={
           <span className="text-[11px] text-lx-dim">
             {proxy ? <span className="text-lx-accent">{proxy}</span> : '未设置'}
@@ -1150,7 +1191,7 @@ export function Models() {
 
           {!catalog?.socks_supported && (
             <p className="text-[11px] text-lx-warning">
-              socks5 需要 socksio：env\python\python.exe -m pip install socksio
+              socks5 需先装 socksio：env\python\python.exe -m pip install socksio
             </p>
           )}
           {proxyMsg && (
@@ -1192,6 +1233,8 @@ export function Models() {
           }}
         />
       )}
+
+      {folder.dialog}
     </div>
   )
 }

@@ -16,8 +16,6 @@ from __future__ import annotations
 import fnmatch
 import os
 import shutil
-import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -319,17 +317,19 @@ class DownloadManager:
         if last is not None:
             raise last
 
-    def reveal_dir(self, dest: Path) -> str:
+    def reveal_dir(self, dest: Path) -> dict:
+        """打开下载目录。返回 {path, opened, detail}，见 `tagger.reveal`。
+
+        以前这里直接 `Popen(["xdg-open", ...])`：服务器上没有桌面时它要么
+        command not found（异常冒到接口上变 500），要么静默失败，用户只看到
+        "点了没反应"。现在打不开也把路径交回去，页面显示成可复制的文本。
+        """
+        from ..reveal import open_dir
+
         target = self._guard(dest)
         if not target.exists():
             raise ValueError("目录还不存在，先下载或手动建一个")
-        if sys.platform.startswith("win"):
-            subprocess.Popen(["explorer", str(target)])       # noqa: S603,S607
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)])            # noqa: S603,S607
-        else:
-            subprocess.Popen(["xdg-open", str(target)])        # noqa: S603,S607
-        return str(target)
+        return open_dir(target)
 
     def _guard(self, dest: Path) -> Path:
         root = self.models_root.resolve()

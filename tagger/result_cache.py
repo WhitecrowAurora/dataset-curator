@@ -112,6 +112,14 @@ class ResultCache:
             if self._writes % self._evict_every == 0:
                 self._evict_locked()
 
+    def delete(self, key: str) -> None:
+        """只清除异常图片对应的记录；不扫描或清空整个缓存库。"""
+        with self._lock:
+            self._conn.execute("DELETE FROM results WHERE key=?", (key,))
+            self._pending += 1
+            if self._pending >= self._sync_every:
+                self._commit_locked()
+
     def close(self) -> None:
         with self._lock:
             try:

@@ -1,0 +1,564 @@
+# 打标分档表 —— 全部参数都在这里，代码里不留魔法数字
+#
+# 标注 [TODO] 的项等主创决策后填，其余可以直接用。
+
+defaults:
+  # 主创定的口径：768×768 总预算，允许不同宽高比，直接上桶。
+  #
+  # 关键理解：589824 是「面积」，不是「短边」。
+  #   token = 像素数 / 1024（patch 16 × merge 2 = 32×32 像素一个 token）
+  #   768² → 576 tok；若误按「768 短边」处理 16:9 图，会得到 1365×768
+  #   = 1048320 px ≈ 1024 tok，成本凭空涨 1.78 倍。
+  max_pixels: 589824
+
+  # 分桶表：把总预算分摊到 5 种宽高比上，尺寸对齐到 32 的倍数。
+  # 对齐是硬要求——不对齐的话 processor 会自己向上取整，账就算不准了。
+  #
+  # 实测落点（预算 589824）：
+  #   1x1   768×768    589824 px  576 tok  100.0%
+  #   4x3   864×640    552960 px  540 tok   93.8%
+  #   3x2   928×608    564224 px  551 tok   95.7%
+  #   16x9 1024×576    589824 px  576 tok  100.0%
+  #   9x16  576×1024   589824 px  576 tok  100.0%
+  #
+  # 非方形桶填不满预算是几何决定的：32 对齐下 4:3 可选的只有 768×576 和
+  # 864×640，后者已经是能做到的最优。别去改 max_pixels 迁就它。
+  #
+  # 关掉分桶写 buckets: false，届时只按 max_pixels 等比缩放。
+  buckets:
+    align: 32
+    ratios: [1.0, 1.3333, 1.5, 1.7778, 0.5625]
+
+  gpu_memory_utilization: 0.88
+  temperature: 0.2
+  top_p: 0.9
+  # 生成上限必须放得下 NL 全量 + tag 全量 + 两段标记。
+  # 按 output 段算：NL 256 token + 160 个 tag（≈3 token/个）+ 标记 ≈ 800。
+  # 截断的表现是 NL 说到一半断掉、或后面几十个 tag 静默消失，两种都不报错，
+  # 所以这个数字跟 output.tag_max_count 是绑定的，改一个要回头看另一个。
+  max_tokens: 800
+  request_timeout_s: 90
+
+models:
+  # ===========================================================================
+  # 默认口径：无审查版（abliterated / unredacted）
+  #
+  # 打标必须用它：原版遇到 NSFW 图会拒答，表现是"这张图只出几句干巴巴的话、
+  # tag 一个都没有"——也就是漏标，而且不报错。训练 diffusion 的图集里暴露内容
+  # 占比不低，漏标会直接变成脏数据，所以这两条排在前面并进了全部三档。
+  #
+  # ★权重来路只有两条，别混：
+  #   下载    一律下 `path` 指的**原始权重**（safetensors）。网上现成的 GGUF
+  #           一份都不下——同一份权重两种来路，产出漂了根本查不出是哪来的。
+  #   GGUF    由「模型管理」页的「本地量化」从原始权重现压（F16 / Q4_K_M / Q6_K）。
+  #           所以 gguf / mmproj / gguf_quants 指的都是 `models/nl/<key>/` 下的
+  #           本地产物，不是别人的仓库路径。没压之前这几份不存在，启动会报缺。
+  #           命名跟 gguf_convert.default_outputs 对齐，压完 _register 写回同处。
+  # ★默认档是 f16（完整权重）。只有 qwen3vl-8b-abliterated 备了 f16 这一档；
+  #   其余模型仍以各自 gguf: 那份为准，切过去时精度要跟着换成有的档。
+  # ★换量化档位等于换一代数据，必须同步改指纹。
+  # ===========================================================================
+  qwen3vl-4b-abliterated:
+    path: prithivMLmods/Qwen3-VL-4B-Instruct-Unredacted-MAX
+    revision: null
+    family: qwen3vl
+    quantized_path: null
+    precision: int4
+    # 下载不写 download_repo / download_files：整仓库都要（config.json +
+    # tokenizer + 8.27G 单文件 safetensors），少一个文件本地就转不出 GGUF。
+    # GGUF 只认本地产物，路径与 gguf_convert.default_outputs 的命名一致。
+    gguf: models/nl/qwen3vl-4b-abliterated/qwen3vl-4b-abliterated-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-4b-abliterated/mmproj-qwen3vl-4b-abliterated-F16.gguf
+    gguf_quants:
+      q4: models/nl/qwen3vl-4b-abliterated/qwen3vl-4b-abliterated-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-4b-abliterated/qwen3vl-4b-abliterated-Q6_K.gguf
+
+  qwen3vl-8b-abliterated:
+    path: prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX
+    revision: null
+    family: qwen3vl
+    quantized_path: null
+    # ★ 默认档 = **完整权重，不量化**（GGUF F16，8B 约 15.6 GB + mmproj 1.1 GB）。
+    #   口径优先：先保证产出质量，占不下显存的人自己压成 q4/q6 再用
+    #   （「模型管理 → 本地量化」；压出来的文件就是下面 gguf_quants 这几行）。
+    # ★ 换档等于换一代数据：run 指纹里带 precision，别把两档的产物混在一批。
+    precision: f16
+    gguf: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf
+    mmproj: models/nl/qwen3vl-8b-abliterated/mmproj-qwen3vl-8b-abliterated-F16.gguf
+    gguf_quants:
+      f16: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf
+      q4: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q6_K.gguf
+
+  # ---------------------------------------------------------------------------
+  # 官方版（有审查）。保留是为了对照与回退：换了破限版权重后如果发现
+  # 某批图的 tag 风格漂了，用 --model qwen3vl-8b 切回原版就能判断是权重还是
+  # prompt 的问题。默认档位已经不用它们了。
+  # ---------------------------------------------------------------------------
+  qwen3vl-4b:
+    path: Qwen/Qwen3-VL-4B-Instruct
+    # [TODO] 锁定 commit hash，禁止用 main —— 换版本等于换一代数据
+    revision: null
+    family: qwen3vl
+    # int4 权重需自行生成一次（llm-compressor，约 20-30 分钟）；为空会退回 bf16
+    quantized_path: null
+    precision: int4
+    # 下载原始权重（官方 transformers 仓库），GGUF 由本地量化产出。
+    gguf: models/nl/qwen3vl-4b/qwen3vl-4b-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-4b/mmproj-qwen3vl-4b-F16.gguf
+    gguf_quants:
+      q4: models/nl/qwen3vl-4b/qwen3vl-4b-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-4b/qwen3vl-4b-Q6_K.gguf
+
+  qwen3vl-8b:
+    path: Qwen/Qwen3-VL-8B-Instruct
+    revision: null
+    family: qwen3vl
+    quantized_path: null
+    precision: int4
+    # 2026-11-04 实测（4070 Ti SUPER 16G）：Q4_K_M + mmproj-F16，
+    # 并发 4 时 1.27 张/秒、p95 3.4s、解码 206 tok/s；并发 8 不再涨。
+    # 下载原始权重（16.33G 单文件 safetensors）；F16 只是转换中间产物，
+    # 跑完就删——16G 卡上也放不下它（含 mmproj 约 16.1G）。
+    gguf: models/nl/qwen3vl-8b/qwen3vl-8b-Q4_K_M.gguf
+    mmproj: models/nl/qwen3vl-8b/mmproj-qwen3vl-8b-F16.gguf
+    gguf_quants:
+      q4: models/nl/qwen3vl-8b/qwen3vl-8b-Q4_K_M.gguf
+      q6: models/nl/qwen3vl-8b/qwen3vl-8b-Q6_K.gguf
+
+tiers:
+  # 三档都指向**同一个** 8B 破限版的完整权重（f16，不量化）：默认只保留一种口径，
+  # 档位只决定上下文与并发。想省显存/省时间的人自己在「模型管理」页压 q4/q6，
+  # 再在新建页的精度里切过去——那是明确的一次选择，不是默认替人做的决定。
+  - name: low-16g
+    vram_min: 0
+    vram_max: 18
+    model: qwen3vl-8b-abliterated
+    precision: f16
+    max_model_len: 4096
+    max_num_seqs: 4
+    note: "12G/16G：8B 完整权重需要约 17G，装不下就自己压 q4；并发压到 4。"
+
+  - name: mid-24g
+    vram_min: 18
+    vram_max: 28
+    model: qwen3vl-8b-abliterated
+    precision: f16
+    max_model_len: 8192
+    max_num_seqs: 8
+    note: "24G：8B 完整权重 + 8K 上下文，可跑 8 路并发。"
+
+  - name: high-32g
+    vram_min: 28
+    vram_max: 999
+    model: qwen3vl-8b-abliterated
+    precision: f16
+    max_model_len: 16384
+    max_num_seqs: 16
+    note: "32G+：8B 完整权重全开，承担黄金集与难样本。"
+  - name: local-4b-q4
+    vram_min: 0
+    vram_max: 999
+    model: qwen3vl-4b-abliterated
+    precision: q4
+    max_model_len: 8192
+    max_num_seqs: 4
+    note: "本机专用：4B abliterated + Q4_K_M GGUF（llama.cpp 反量化），跑在 V100-16G 上；加它是为绕开主卡 GTX1050 的 f16 显存硬拦。"
+
+
+# ---------------------------------------------------------------------------
+# 硬件保护
+#
+# 这批卡是成员自己的，正赶上涨价（5080 一万二、5090 三万四、1TB SSD 一千一）。
+# 跑坏一张卡的代价远超省下的进度，所以默认值偏保守。
+#
+# 语义沿用 lulynx-trainer 的 gpu_duty_cycle：1.0 = 全速不插入空闲，0.7 = 留三成空。
+# 机制是在任务边界 sleep(busy*(1-duty)/duty)，不碰驱动、不干扰推理框架批处理。
+# ---------------------------------------------------------------------------
+limits:
+  duty_cycle: 0.70        # 1.0 = 关闭让步；0.5 = 一半时间在休息
+  target_temp_c: 0        # 0 = 关闭温度闭环；设 68 表示自动压 duty 维持 68°C
+  temp_deadband_c: 2
+  kp: 0.04
+  ki: 0.004
+  min_duty: 0.2
+  max_sleep_s: 30
+
+  temp_warn_c: 72         # 只记警告，不停
+  temp_cutoff_c: 82       # 硬熔断，立即停止提交任务
+  temp_resume_c: 70       # 降到这条线以下才恢复（留滞回，避免反复横跳）
+
+  disk_min_free_gb: 30
+  disk_min_free_pct: 0.15
+
+  continuous_minutes: 0   # 0 = 不限；笔记本建议 120
+  rest_minutes: 5
+  sample_interval_s: 5
+  auto_tune_laptop: true  # 检测到笔记本自动再收紧一档
+
+# ---------------------------------------------------------------------------
+# 抽样配额（标注规范 v0.2 §1–§3）
+#
+# 就一件事：表里每个来源要多少条，从那份清单里挑多少条。挑法 = 稳定随机
+# （同一个 seed 跑几次都是同一批）。不下载、不解码、不打标。
+#
+# 用法：
+#   tagger sample --profile monet \
+#       --input monet/laion=work/cand/laion.parquet \
+#       --input monet/coyo=work/cand/coyo.parquet \
+#       --out work/sampled/monet.jsonl --report-out work/sampled/monet.json
+#
+# 清单直接用数据集自己的 parquet 即可（只读 id/source 两列）。
+# ---------------------------------------------------------------------------
+sample:
+  active: monet              # 不给 --profile 时用这一组
+  seed: 42                   # 换它 = 换一批
+  allow_borrow: true         # 某来源不够时用别的来源补，但 quota_original 不改
+  # ---- 下面三条是可选的，默认关 ----
+  # 规范里写明是"初始可测试策略，需抽样审计后定稿"，而且都会改变样本分布，
+  # 所以默认不启用；想用就显式打开（或命令行 --min-score / --mix / --dedupe）。
+  min_score: 0.0             # 质量线；0 = 不过滤
+  mix: false                 # 60/25/15 分层；false = 纯随机
+  dedupe: false              # 同近重复簇只留最高分
+  # 清单的列名。换数据集只改这里，不用改代码；空串 = 这份清单没有该列。
+  columns:
+    id: id
+    source: source
+    score: aesthetic_jasperai     # 只在使用 min_score / mix 时才会读
+    cluster: sscd_cluster_id      # 只在 dedupe: true 时才会读
+    stratum: ""                   # 只在 mix: true 时才会读
+  profiles:
+    monet:
+      quota_total: 30000000
+      quotas:
+        monet/laion: 10300000
+        monet/coyo: 6600000
+        monet/commoncatalog-cc-by: 5000000
+        monet/megalith10m: 4300000
+        monet/cc12m: 3787200
+        monet/diffusion-aesthetic-4k: 12800
+    fine-t2i:
+      quota_total: 1000000
+      quotas:
+        fine-t2i/curated: 168424
+        fine-t2i/synthetic_enhanced_prompt_random_resolution: 230000
+        fine-t2i/synthetic_enhanced_prompt_square_resolution: 190000
+        fine-t2i/synthetic_original_prompt_random_resolution: 230000
+        fine-t2i/synthetic_original_prompt_square_resolution: 181576
+      columns:
+        score: ""              # 这份清单没有美学分
+        cluster: ""            # 也没有近重复簇
+
+# ---------------------------------------------------------------------------
+# 分包读写
+#
+# 输入：递归发现目录下所有 zip 分包与散图，用中央目录当索引按需取单张
+# 输出：按条数或字节数封口，可选 zip（随机访问）与 webdataset（HF 流式）
+# ---------------------------------------------------------------------------
+archive:
+  recursive: true          # 递归子目录找输入
+  include_zips: true       # 把 zip 内的图片也算进来
+  include_loose: true      # 散图也算
+  flatten: true            # 归档时平铺（训练侧按 basename 组样本，不需要目录树）
+
+  output_max_records: 5000   # 每包最多多少条（webdataset 下会展开成 3 倍 tar 成员）
+  output_max_bytes: 0        # 每包最多多少字节，0 = 不限（1GB ≈ 1073741824）
+  compress: stored           # 仅对 zip 生效。webdataset 的 tar 不压缩
+  # 输出格式。webdataset = tar 分片 + 同 basename 的 .json/.caption，
+  # HF datasets streaming、webdataset 库、主流训练框架都能顺序流式读，
+  # 不用整包下载。要同时出 zip 写 [webdataset, zip]。
+  # parquet 是主格式（上传 HF 私有仓库、客户端流式读）；
+  # 要 tar 分片就写 [parquet, webdataset]。
+  formats: [parquet]
+  fsync_every: 200           # 每多少条刷一次盘
+
+  # 打包时的重编码质量。9 档下限 90：再低就会在纹理细节上留可见块效应。
+  # 主创口径：接受有损，体积优先（素材要塞进私有仓库、成员流式读）。
+  jpeg_quality: 95           # 允许 90~100
+  # 色度下采样：0=4:4:4（默认），1=4:2:2，2=4:2:0。
+  # 默认 4:4:4 是项目口径：4:2:0 把色度分辨率砍半，饱和色/细线/文字边缘
+  # 会有可见色晕，而这批图要训色感敏感的生成模型。
+  # 实测 1024² 有细节的图（原图 q92/4:2:0 = 540KB）：
+  #   q95/4:4:4 → 1427KB (+164%)   q95/4:2:0 → 688KB (+28%)
+  #   q90/4:2:0 →  481KB (-11%)    q85/4:2:0 → 358KB (-34%)
+  # 4:4:4 的体积代价是真实的（翻两倍多）；要省盘就显式写 1 或 2。
+  jpeg_subsampling: 0
+  # 重编码策略：always / non_jpeg / never
+  # always = 所有图都按 jpeg_quality 重压（当前口径：体积统一优先）。
+  # 代价（实测 1024² 真实照片）：已经是 q92 的图重压成 q95，
+  # 体积 +28%、PSNR 掉 14.5 dB。要真减体积应下调 jpeg_quality：
+  #   q90 约 -11%，q85 约 -34%。
+  #
+  # ★带 alpha 的图**一律转**，透明区域铺白底压平（不是"跳过"）：
+  #   下游训练管线不支持 alpha 通道。留着透明通道，同一张图在不同
+  #   解码器下会长得不一样（有的当黑底、有的当白底），而训练数据必须
+  #   跨工具一致 —— 压平成白底是唯一确定的选择。扩展名也会跟着改成 .jpg。
+  reencode: always
+
+# ---------------------------------------------------------------------------
+# 产出规格
+#
+# mode 决定一次打标生成什么：
+#   nl   只产自然语言描述
+#   tag  只产 tag 串
+#   both 两个都要（默认）
+#
+# 归档里落成 <图片名>.nl 与 <图片名>.tag 两个独立成员，与 <图片名>.json 同 basename。
+# 分成两个文件而不是塞进 json，是为了让训练侧读 NL 和读 tag 各走各的流式直读路径。
+#
+# NL 长度预算按 token 计（不是字符）：32~256。
+# 下限压到 32 是**兜底**，不是目标：图简单、话少时不该判废。
+# 但 prompt 仍按中段引导（约 400~1000 字符），否则等于教模型写短句。
+#
+# tag 数量：12~160。上限给到 160 是高密度图（群像、复杂场景）真能出上百个
+# 有效 tag，卡在 40 会白扔信息；下限 12 是防止模型敷衍——实测真实插画在
+# 0.35 阈值下能稳定出 12~20 个，低于 12 基本意味着图简单或模型没看进去。
+# ---------------------------------------------------------------------------
+output:
+  mode: both
+  nl_min_tokens: 32
+  nl_max_tokens: 256
+  tag_min_count: 12
+  tag_max_count: 160
+  # 中文 NL 的比例（0~1）。按 hash(source + image_id + seed) 抽签，抽中的图用
+  # 中文指令写 caption；**tag 段永远是英文 danbooru**（中文 tag 在训练侧没有
+  # 对应词表）。25% 来自标注规范 v0.2 §5 的初始配比（英文 75 / 中文 25）。
+  # 改它等于改产出分布：它会进缓存指纹，中英混批时靠质检 signals 里的 lang
+  # 字段分辨。写 0 就退回全英文。
+  caption_zh_ratio: 0.25
+  # 图中文字规则用哪一份：`prompts/` 下的文件名（不带 .md）。规则本身是
+  # markdown，主创要改措辞（字体风格、认不准别猜、引号不许加注音）直接编辑
+  # 文件即可，不用动代码。
+  # 空串 = 这批不带图中文字约束（caption 只说画面，不描述文字）。
+  # ★换了文件就是换了指令：指纹与 provenance 会跟着变，两批不能混用。
+  text_rules: 图中文字规则
+
+# ---------------------------------------------------------------------------
+# tag 反推（CPU 侧分类头，与 GPU 上的 VLM 并行跑）
+#
+# 为什么不交给 VLM：VLM 出的 tag 词表会漂（同一张图两次可能写
+# long_hair / long hair / flowing hair），而且没有置信度。分类头是固定
+# 词表 + 有概率，正好补上这两点；它的弱项（看不懂场面）由 VLM 的 NL 补。
+#
+# 默认 pixai（效果最好，486M 参数、1008² 输入，CPU 上偏慢）。
+# CPU 跟不上就换 wd-eva02（timm eva02 448²，快一个量级）。
+# 阈值留空时用模型自带推荐值；给了就按类别覆盖。
+# ---------------------------------------------------------------------------
+tagging:
+  backend: pixai           # pixai | wd-eva02 | cl-tagger-v2 | none
+  # 模型名按后端绑定。写成单个 `model` 字段的话，切后端时会拿错仓库
+  # （把 pixai 的模型名喂给 wd-eva02，加载直接失败）。
+  models:
+    pixai: pixai-labs/pixai-tagger-v1.0
+    wd-eva02: ashen-sensored/wd-eva02-tagger-2026-canary
+    cl-tagger-v2: cella110n/cl_tagger_v2
+  device: cpu
+  # 要保留的类别。artist 永远不要——画师名由目录结构决定，
+  # 让模型猜等于把 100% 准确的信息换成 60% 准确的猜测。
+  keep_categories: [general, character, copyright, style]
+  # 阈值。留空会用 0.35 兜底（不是 0——不过滤的话 WD 的 16473 词表
+  # 每张图都能凑出满额 160 条噪声 tag）。
+  # 实测：纯色图在 0.35 下仍会吐 1girl 这类幻觉，所以这个数必须用真实
+  # 素材调：先跑 500 张，看 sample.md 里出现频次最高的错标，再往上抬。
+  thresholds:
+    default: 0.35
+    # 例：character: 0.5（角色名错标代价大，单独抬）
+
+# ---------------------------------------------------------------------------
+# 画师标签
+#
+# 素材的第一层目录名就是画师名。启用后由系统从路径提取并注入标注。
+#
+# 三条设计取舍，改之前请先读：
+#   1. 标签不由模型生成。哪怕把画师名写进 prompt，模型也可能改写、简写或拼错，
+#      一旦某个批次的标签漂了，整批都要重打——而它本来可以 100% 准确。
+#   2. 非英文名默认不翻译，保留原拼写。画师名是标识符不是描述，
+#      同一个名字在不同批次被翻成不同写法（水月 → Shuiyue / Water Moon），
+#      标签就等于作废。需要英文时走别名表，人工确认一次长期复用。
+#   3. 取不到就留空并记原因，不拿文件名或上级目录去凑。错的标签比没有更糟。
+# ---------------------------------------------------------------------------
+artist:
+  # 默认开：画师是这批数据里最贵的标注（人工整理 + 原始 tag 校对），
+  # 默认关掉的话，别人拿到产物才发现没有 @name，只能整批重打。
+  # 命令行 --artist / --no-artist 可临时覆盖。
+  enabled: true
+  depth: 0               # 取第几层目录，0 = 第一层
+  prefix: "@"            # 社区惯例，如 @sakimichan
+  # 两个独立开关：NL 与 TAG 是两条训练输入，有人只要其一。
+  inject_caption: true   # NL 正文（.nl）开头带 @画师
+  inject_tags: true      # TAG 串（.tag）开头带 @画师
+  max_len: 64            # 超过这个长度视为异常路径，不是作者名
+  # 有空格才转下划线，没有空格一个字都不改。
+  # 原因：caption 按空格分词，`@sakimi chan` 会被切成 @sakimi 和 chan 两个 token，
+  # 画师绑定就散了一半。合并成一个词才能整体激活。
+  space_to_underscore: true
+  # 翻译表。文件不存在时自动创建；遇到新名字会先登记进去（译文留空），
+  # 人工填完译文后长期复用。见 `tagger artists --input-dir <素材目录>`。
+  aliases_path: configs/artist_aliases.json
+  # 画师对照表（可选）。三种写法：
+  #   单个 parquet  —— 全表，946 万条约 66 MB，第一次查询时整份读进内存；
+  #   一个目录      —— 里面是 shard-000123.artist.parquet，用哪片读哪片；
+  #   在线地址      —— hf://datasets/<repo>/<文件或目录>，带 .parquet 是单表，
+  #                    其余当分片目录，用哪片拉哪片（token 走 HF_TOKEN 环境变量）。
+  # 表优先、目录名兜底：danbooru 原始 artist tag 与人工整理的目录名各有缺失，
+  # 谁有就用谁；两边都没有就留空，不猜、不拿上级目录凑。
+  # 在线分片用来解决"成员机器上没那份 104 MB 的表"：跟着分片按需下载。
+  table: /home/scv/项目/tagger-fixtures/artist/artist-test-empty-names.parquet
+  skip_when_missing: true
+  # table: hf://datasets/<your-name>/danbooru-artists/shards
+
+# ---------------------------------------------------------------------------
+# 质量评分与重试
+#
+# L1 规则（几乎免费，默认开）：长度、重复率、拒答、tag 覆盖率
+# L2 CLIP（可选，需 open_clip）：抓"句子通顺但跑题"
+# 分数不够就进重试队列，按要求调整温度/分辨率后再打一次
+# ---------------------------------------------------------------------------
+quality:
+  enabled: true
+  # 这两条是 token 预算的字符兜底（英文约 4.4 字符/token）。
+  # 判定优先级：nl_tokens（来自 API usage，准）> 字符数（没记录 token 时才用）。
+  # 32 token ≈ 140 字符，256 token ≈ 1130 字符。
+  # ★这两条必须跟着 output.nl_*_tokens 一起改：只改 token 不改字符，
+  #   会出现"token 在预算内、却被字符线判成过短"的假失败。
+  min_chars: 140
+  max_chars: 1200
+  min_tag_coverage: 0.60
+  max_repeat_ratio: 0.35
+  repeat_ngram: 4
+
+  pass_score: 3.4          # 1-5 分，≥ 这条放行
+  drop_score: 1.8          # < 这条直接丢，别浪费算力
+
+  max_attempts: 2          # 重打次数上限，防止死循环
+  retry_temp_step: 0.15    # 每次重试温度上调
+  retry_temp_cap: 0.7
+  retry_pixels_scale: 1.5  # 每次重试提高视觉分辨率
+  retry_pixels_cap: 1048576
+  escalate_model: false    # 重试用尽仍不合格时，是否建议换 8B
+
+  enable_clip: false       # 需 pip install open_clip_torch
+  clip_min_score: 0.22
+  clip_model: ViT-L-14
+  clip_pretrained: openai
+
+# ---------------------------------------------------------------------------
+# 分发
+#
+# image_id 在这一步一次性分配（`tagger split`），之后本地只照着填。
+# 理由：10 个人各自编号一定会撞，而撞号的后果不是报错，是两条标注互相覆盖，
+# 等发现时已经查不出是谁盖的。
+#
+# 布局：
+#   flat    画师-000123.jpg，全部拍平（分发一律 flat，成员顺序读即可）
+#   mirror  照搬原目录结构
+#
+# 切分模式：
+#   count   每包固定条数。均衡、可预测。
+#   bytes   每包不超过 N 字节。图片体积差异大时用这个，否则按条数切会出现
+#           某包 40GB、另一包 6GB，前者把人等死。
+#           两种模式都先按 image_id 排序再切，所以每个包始终是一个连续区间。
+# ---------------------------------------------------------------------------
+distribute:
+  layout: flat
+  mode: count
+  per_shard: 20000
+  max_bytes_per_shard: 0     # bytes 模式必填，如 8589934592 = 8GB
+  seq_width: 6               # 序号宽度，6 位支持 999999 张
+
+# ---------------------------------------------------------------------------
+# 回收合并
+#
+# 成员交回的是 <image_id>-tag.json / <image_id>-nl.json 两个文件，
+# 总机按 image_id 合并成总表。
+#
+# dataset_name 会被拼进 image_path，给未来 UI 的数据集类型填空用。
+# 改它等于改训练侧找图的位置，改一次要重刷全量，所以放配置不放代码。
+# ---------------------------------------------------------------------------
+merge:
+  dataset_name: fanbox       # image_path 会是 /image/fanbox/<image_id>.jpg
+  image_root: /image
+  image_ext: .jpg
+  sample_n: 20               # 抽检条数
+  sample_seed: 42            # 固定 seed，同一批数据抽出来的样本必须可复现
+  # 最终表字段名。规范 v0.2 §8 用 nl_final / tags_final，现有下游读 caption / tag。
+  #   both  两套并列（默认）：谁都不用改代码，代价是 caption 多存一份
+  #         （3000 万条约十几 GB）
+  #   legacy 只写 caption / tag
+  #   v02    只写 nl_final / tags_final
+  # 换命名不用重打标，重跑一次 merge 即可。
+  final_names: both
+  # 分包总表（tagger split 写出）。有它才能检测"整包没交"：
+  # 某个区间一条产出都没有，基本等于负责那个人整份都没回来。
+  # 分发包已经不在了也照样能查，因为它只用区间。
+  shard_table: work/shards.json
+
+# ---------------------------------------------------------------------------
+# 批次报告
+#
+# 总体均值没有信息量：它把变化全摊平了。要看的是**趋势**——第 3 批正常、
+# 第 40 批 tag 数突然掉到 8 个，那多半是服务端换了模型或降了分辨率。
+#
+# batch_size 是尺度，不是对错：
+#   1000 → 3000 万条约 3 万格，看全局漂移，单个作者被平均掉
+#   100  → 30 万格，能定位到具体几批，适合试跑与排查
+# 格越小越灵敏，也越吵。判断标准是"你希望多快发现变化"。
+#
+# order：
+#   id   按 image_id。可复现，同画师连在一起。
+#   time 按产出写入时间。反映服务状态，排查"跑到一半变差"用这个。
+#
+# 输出两态：report.json（列式，前端直接画折线）与 report.md（人读）。
+# ---------------------------------------------------------------------------
+report:
+  batch_size: 1000
+  order: id
+
+# ---------------------------------------------------------------------------
+# AB 变体（同一批图、同一模型，只改指令）
+#
+# 跑法：tagger abtest --variants base detail --shard work/dist --limit 200
+# 产物落在 <out-dir>/<变体>/，对比表在 <out-dir>/compare.md 与 compare.json。
+#
+# 两种写法，用途不同：
+#   prompt_note  追加。保留自动生成的长度/数量约束，只补一条要求。
+#                调优时用这个——约束还在，产出仍然达标。
+#   prompt_file  整段替换。连约束一起换掉，写错会产出不达标的数据，
+#                只在明确要换整套指令时用。
+#
+# 注意：变体之间绝不能共用产物目录。否则后一套会因"文件已存在且非空"
+# 被整批跳过，报告上显示成功、实际什么都没跑。
+# ---------------------------------------------------------------------------
+variants:
+  base: {}
+# 调优示例（按需打开）：
+#  detail:
+#    note: "更偏向材质与光影的细描"
+#    prompt_note: |
+#      Additionally describe the dominant colour palette and the surface
+#      material of the main subject (metal / cloth / skin / glass).
+#    temperature: 0.35
+
+
+# ---------------------------------------------------------------------------
+# 上传
+#
+# enabled 是唯一开关：
+#   false（默认）→ 封口后的分包全部留在本地 work/out/，不发起任何网络连接。
+#                   这是安全默认值：没有 FTP 服务器、或还没谈好落地目录时，
+#                   流程照常跑完，产物照常可用。
+#   true          → `tagger upload` 才会真的推送。仍可用 --dry-run 只看不传。
+#
+# 模型公司开好 FTP 后填这里。密码走环境变量 TAGGER_FTP_PASSWORD，别写文件里。
+# ---------------------------------------------------------------------------
+upload:
+  enabled: false
+  protocol: ftp
+  host: ""
+  port: 21
+  user: ""
+  password: ""
+  remote_dir: /incoming
+  passive: true
+  timeout_s: 120
+  max_attempts: 3

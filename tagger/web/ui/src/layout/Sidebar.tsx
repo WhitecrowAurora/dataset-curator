@@ -20,9 +20,16 @@ export type NavItem = {
  */
 export function Sidebar({
   items,
+  actions,
   footer,
 }: {
   items: NavItem[]
+  /**
+   * 导航下方的操作区（不是页面）。放按钮而不是菜单项：这些东西**改变数据**
+   * （重试失败项会真的去推理），和"切换视角"的导航不是一类，混在一起会让
+   * 人以为点一下只是看看。
+   */
+  actions?: ReactNode
   footer?: ReactNode
 }) {
   return (
@@ -85,6 +92,10 @@ export function Sidebar({
           </button>
         ))}
       </nav>
+
+      {actions && (
+        <div className="border-t border-lx px-2 py-2">{actions}</div>
+      )}
 
       <div className="mt-auto border-t border-lx px-2.5 py-2.5">{footer}</div>
     </aside>

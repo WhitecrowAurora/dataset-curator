@@ -174,7 +174,7 @@ export function PromptDialog({
                         autoFocus
                       />
                       <span className="block text-[11px] leading-relaxed text-lx-dim">
-                        名字就是文件名（prompt/&lt;名字&gt;.json），也是下拉框里显示的那一行。
+                        名字即文件名（prompt/&lt;名字&gt;.json）
                       </span>
                     </label>
                   )}

@@ -1,4 +1,4 @@
-"""回传：把本地处理好的 parquet 分片上传到汇总机 FTP。
+"""回传：把本地处理好的 parquet / JSONL 分片上传到汇总机 FTP。
 
 与任务簿（jobs.py）分开建模块，有两个原因：
 
@@ -193,12 +193,12 @@ class UploadManager:
             raise ValueError("没有勾选任何文件")
         if not host.strip():
             raise ValueError("FTP 主机不能为空")
-        # 只认目录内的 .parquet，挡住 ../ 之类的路径注入
+        # 与回传页的产物清单一致；文件仍必须位于所选目录内。
         clean: list[str] = []
         for name in files:
             p = Path(name)
-            if p.name != name or p.suffix.lower() != ".parquet":
-                raise ValueError(f"只支持目录内的 .parquet 文件，收到 {name!r}")
+            if p.name != name or p.suffix.lower() not in (".parquet", ".jsonl"):
+                raise ValueError(f"只支持目录内的 .parquet / .jsonl 文件，收到 {name!r}")
             if not (base / name).is_file():
                 raise ValueError(f"文件不存在：{name}")
             clean.append(name)

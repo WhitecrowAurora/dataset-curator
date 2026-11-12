@@ -1,3 +1,9 @@
+# Python 字节码与缓存。以前只逐个目录列了 /tagger/__pycache__、/work/__pycache__
+# 这类具体路径，结果 devtools/、vendor/、server/ 下的 .pyc 全被提交进来（187 个）。
+# 用目录无关的规则兜住，新增目录不会再漏。
+__pycache__/
+*.py[cod]
+
 /work/pack-smoke
 /work/_lt_smoke
 /tests
@@ -56,3 +62,9 @@
 /tagger/web/__pycache__
 /tagger/web/__pycache__
 /run
+
+# 临时产物（见 tagger/tmpdir.py）：解压、转 GGUF、sqlite 索引、子进程缓存
+# 全落这里，随用随建，不进包也不入库
+/tmp
+/.delete
+/tagger/web/__pycache__

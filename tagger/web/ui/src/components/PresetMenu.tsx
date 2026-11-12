@@ -142,8 +142,12 @@ export function PresetMenu() {
                   type="button"
                   onClick={() => void remove(it.name)}
                   disabled={busy}
-                  className="shrink-0 rounded p-1 text-lx-dim opacity-0 transition hover:text-lx-danger group-hover:opacity-100"
-                  title="删除这份方案"
+                  // 以前是 opacity-0 + group-hover 才显形，结果没人发现这里
+                  // 能删（用户专门来问"能不能加个删除按钮"）。删除是一次性
+                  // 动作、不可能靠"悬停才发现"来降低误触，所以常驻显示，
+                  // 只靠 dim 色和 hover 变红来控制视觉重量。
+                  className="shrink-0 rounded p-1 text-lx-dim transition hover:bg-[color-mix(in_srgb,var(--lx-danger)_12%,transparent)] hover:text-lx-danger disabled:opacity-40"
+                  title="删除这份方案（不影响已生成的产物）"
                   aria-label={`删除方案 ${it.name}`}
                 >
                   <Trash2 size={12} />

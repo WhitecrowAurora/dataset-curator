@@ -38,9 +38,26 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator, Mapping, Sequence
 
 from .artist import ArtistRule, extract_artist, prepend_tag
+
+def _caption_already_has_artist(caption: str, payload: dict) -> bool:
+    """æ­£æéæ¯å¦å·²ç»æç»å¸å¥äºã
+
+    ææ ä¾§ä¼æç»å¸åæå¥å¼ï¼``ä½¿ç¨ @x çé£æ ¼`` / ``In the style of @x``ï¼ï¼å°åä¾§è¥åè¡¥ä¸æ¬¡è£¸ ``@x,``
+    å°±ä¼è®©åä¸å¥éåºç°ä¸¤æ¬¡ç»å¸åã
+
+    ä¸¤æ¡ä¾æ®ï¼äº§ç©éçæ¾å¼æ è®°ä¼åï¼æ°äº§ç©é½æï¼ï¼æ§äº§ç©æ²¡ææ è®°ï¼
+    å°±çå¼å¤´æ¯ä¸æ¯å¥å¼å½¢ââå®å¯å¤çä¸ç¼ç²¾ç¡®æ§ï¼ä¸è¦å ä¸ºçä¸å°å°±éå¤æ³¨
+    ä¸éã
+    """
+    if str(payload.get("artist_injected") or "") == "template":
+        return True
+    head = (caption or "").lstrip()
+    return head.startswith(("\u4f7f\u7528 @", "In the style of @"))
+
 from .local_tag import TagItem, artifact_path, read_artifact
 from .naming import archive_name, make_image_id, normalize_ext, sanitize
 from .storage.discovery import check_stopped
+from .storage.pack_state import artifact_signature
 from .pack import (ContainerReader, InputItem, PackOptions, PackState, Packer,
                    container_stem, discover_inputs, metadata_report,
                    sha256_of_file)
@@ -491,10 +508,12 @@ class PackReport:
 
 
 def _prepare_safe(packer: Packer, kw: dict) -> tuple[object | None, str]:
-    try:
-        return packer.prepare(**kw), ""
-    except Exception as exc:          # noqa: BLE001 - 一张坏图不能毁掉整批
-        return None, f"{type(exc).__name__}: {exc}"
+    for attempt in range(3):
+        try:
+            return packer.prepare(**kw), ""
+        except Exception as exc:      # noqa: BLE001 - 一张坏图不能毁掉整批
+            if attempt == 2:
+                return None, f"{type(exc).__name__}: {exc}"
 
 
 def pack_items(
@@ -509,6 +528,7 @@ def pack_items(
     model_id: str = "",
     artist_prefix: str = "@",
     inject_artist: bool = False,
+    inject_artist_tags: bool | None = None,
     naming: Mapping[str, object] | None = None,
     on_sample: Callable[[TagItem], None] | None = None,
     on_skip: Callable[[TagItem, str], None] | None = None,
@@ -517,6 +537,7 @@ def pack_items(
     should_stop: Callable[[], bool] | None = None,
     guard=None,
     check_space: bool = True,
+    excluded_ids: set[str] | None = None,
 ) -> PackReport:
     """读打标产物 + 原图，封成配置好的归档。
 
@@ -530,12 +551,30 @@ def pack_items(
     （"剩 30G 就停"对小批量太严、对大批量太松），而是这里按"预计产出 +
     20% 冗余"判：开跑前判一次（装不下就直接失败，什么都不写），跑起来后用
     实测的产出/原图比例复算剩余量。`check_space=False` 可跳过这两道检查。
+
+    `excluded_ids`：已确认**不该有产物**的图（输入无效被跳过、重试仍失败被
+    剔除）。它们没有打标产物是结论而不是故障，计进"跳过"而不是"缺产物"——
+    否则 `skipped_missing > 0` 会把整个任务标成 failed，几张坏图就卡住整批。
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report = PackReport()
+    inject_artist_tags = inject_artist if inject_artist_tags is None else inject_artist_tags
+    if inject_artist_tags != inject_artist:
+        naming = {**(naming or {}), "inject_artist": bool(inject_artist),
+                  "inject_artist_tags": bool(inject_artist_tags)}
     fp = pack_fingerprint(options, layout, naming)
     state = PackState(out_dir / f".packstate-{fp}.jsonl")
+    signatures = {item.image_id: artifact_signature(artifact_path(out_dir, item))
+                  for item in items}
+    stale_ids, stale_packs = state.stale(signatures, worker_name)
+    if stale_ids - signatures.keys():
+        raise ValueError("更新标签需要重建整个旧分包，请使用原任务的完整输入范围")
+    for item in items:
+        if item.image_id in stale_ids:
+            payload = read_artifact(out_dir, item)
+            if not payload or payload.get("ok") is not True:
+                raise ValueError(f"重建旧分包前需补齐有效标签：{item.image_id}")
 
     packer = Packer(out_dir, options, worker=worker_name, model_id=model_id,
                     verbose=False)
@@ -544,13 +583,13 @@ def pack_items(
     log = on_log or (lambda _msg: None)
 
     reader = reader or MemberReader()
-    since_seal: list[str] = []
+    since_seal: list[tuple[str, str]] = []
 
     # ---- 盘位预算（开跑前）。先算一遍"还要写多少"，装不下就直接失败：
     # 什么都不写、重跑代价为零，好过跑到一半才发现。
     pending: list[TagItem] = []
     for item in items:
-        if state.done(item.image_id):
+        if state.done(item.image_id) and item.image_id not in stale_ids:
             continue
         if not artifact_path(out_dir, item).is_file():
             continue                     # 没产物就不会写盘，不该占预算
@@ -566,6 +605,14 @@ def pack_items(
             raise PackSpaceError(space_error(required, free, out_dir))
         log(f"盘位预算：预计产出 {_gb(required)}（含 {DISK_HEADROOM:.0%} 冗余），"
             f"剩余 {_gb(free)}")
+
+    if should_stop is not None and should_stop():
+        report.stopped = "用户停止"
+        reader.close()
+        return report
+    state.retire(stale_ids, stale_packs)
+    if stale_ids:
+        log(f"标签已更新：重建 {len(stale_ids)} 张所在分包，旧包保留在 .delete")
 
     # 运行时预算：先验估算随写入逐条扣减；每封一个分片，用"该分片实测字节 /
     # 它的先验估算"校正剩余部分。只看剩余量，不重复计算已经写掉的字节。
@@ -603,10 +650,11 @@ def pack_items(
                              f"（含 {DISK_HEADROOM:.0%} 冗余），只剩 {_gb(free)}")
             log(space["stop"])
 
-    def mark_sealed() -> None:
+    def mark_sealed(before: int) -> None:
         """把"自上次封口以来写进去的 key"记成已完成。"""
-        for key in since_seal:
-            state.mark(key)
+        names = [pack.name for pack in packer.sealed[before:]]
+        state.mark_many((key, {"signature": signature, "packs": names})
+                        for key, signature in since_seal)
         since_seal.clear()
         settle_seal()
 
@@ -660,7 +708,7 @@ def pack_items(
                         f"残留 {len(metadata['dirty'])} 条")
             before = len(packer.sealed)
             packer.write(sample)
-            since_seal.append(item.image_id)
+            since_seal.append((item.image_id, signatures[item.image_id]))
             report.packed += 1
             consume(item, written=True)
             if on_sample is not None:
@@ -669,7 +717,7 @@ def pack_items(
                 except Exception:     # noqa: BLE001
                     pass
             if len(packer.sealed) > before:
-                mark_sealed()
+                mark_sealed(before)
                 emit_new_packs(before)
                 # 分片一封口就有实测比例了：用它校正剩余量，别等写爆了才发现
                 space_check()
@@ -702,6 +750,16 @@ def pack_items(
                     continue
                 payload = read_artifact(out_dir, item)
                 if not payload or payload.get("ok") is not True:
+                    # 已知"合法无产物"的图：算跳过，不算缺失。放在读产物之后
+                    # 而不是之前，是为了万一它后来被补打成功了仍能正常入包。
+                    if excluded_ids and item.image_id in excluded_ids:
+                        report.skipped_done += 1
+                        if on_skip is not None:
+                            try:
+                                on_skip(item, "excluded")
+                            except Exception:  # noqa: BLE001
+                                pass
+                        continue
                     report.skipped_missing += 1
                     if on_skip is not None:
                         try:
@@ -709,9 +767,15 @@ def pack_items(
                         except Exception:  # noqa: BLE001
                             pass
                     continue
-                try:
-                    data = reader.read(item)
-                except Exception as exc:  # noqa: BLE001 - 坏成员单独记，不中断
+                read_error = ""
+                for attempt in range(3):
+                    try:
+                        data = reader.read(item)
+                        read_error = ""
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        read_error = f"{type(exc).__name__}: {exc}"
+                if read_error:
                     report.failed += 1
                     consume(item, written=False)
                     if on_skip is not None:
@@ -719,20 +783,17 @@ def pack_items(
                             on_skip(item, "failed")
                         except Exception:  # noqa: BLE001
                             pass
-                    log(f"读图失败 {item.image_id}: {type(exc).__name__}: {exc}")
+                    log(f"读图失败 {item.image_id}: {read_error}")
                     continue
                 w, h = _image_size(data)
                 artist_tag = f"{artist_prefix}{item.artist}" if item.artist else ""
                 tag_text = str(payload.get("tag") or "")
                 caption = str(payload.get("caption") or payload.get("nl") or "")
-                if inject_artist and artist_tag:
-                    # 画师名落到"样本能看到的文本"上，而不只是 json 字段：
-                    # 训练侧读的是 .tag / .nl，模型要学到画师绑定就得在文本里。
-                    # 关掉它 = 只保留 JSON 里的 artist/artist_tag（做 danbooru
-                    # 纯词表的下游会这么选——`@name` 不在词表里）。
-                    if tag_text:
+                if artist_tag:
+                    if inject_artist_tags and tag_text:
                         tag_text = prepend_tag(tag_text, artist_tag)
-                    if caption:
+                    if (inject_artist and caption
+                            and not _caption_already_has_artist(caption, payload)):
                         caption = prepend_tag(caption, artist_tag)
                 meta = {
                     "image_id": item.image_id,
@@ -780,10 +841,11 @@ def pack_items(
             before = len(packer.sealed)
             packer.close()
             if len(packer.sealed) > before:
-                mark_sealed()
+                mark_sealed(before)
                 emit_new_packs(before)
         except Exception as exc:      # noqa: BLE001 - 收尾失败不该盖住主错误
             log(f"封包收尾失败：{type(exc).__name__}: {exc}")
+            report.failed += 1
         reader.close()
 
     report.meta_checked = metadata["checked"]

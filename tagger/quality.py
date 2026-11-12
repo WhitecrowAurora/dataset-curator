@@ -44,6 +44,13 @@ class QualityPolicy:
     # "token 在预算内但字符数不够"会被字符线判成过短，白丢合格样本。
     min_chars: int = 140
     max_chars: int = 1200
+    # caption 作为**单条纯文本**送进 text encoder 时的 token 上限（infra 硬截断）。
+    # 与上面 max_chars / nl_max_tokens 都不是一回事：
+    #   max_chars           = caption 字符数（我们自己的口径）
+    #   nl_max_tokens       = 整个回复 tag+caption（LLM 口径）
+    #   caption_token_limit = caption 单独一条（text encoder 口径，512 封顶）
+    # 实测当前产出最大 299，离 512 还有余量；这条只是"哪天模型写飞了"的兜底。
+    caption_token_limit: int = 512
     min_tag_coverage: float = 0.60
     max_repeat_ratio: float = 0.35
     repeat_ngram: int = 4
@@ -115,6 +122,10 @@ class Verdict:
     reasons: list[str] = field(default_factory=list)
     signals: dict = field(default_factory=dict)
     retry: RetryPlan | None = None
+    # 这次产出是"模型拒答"。单独透出来，让客户端能对它做和其他失败不同的处理
+    # （换强硬指令重打，见 client._run）。放在 signals 里也能查，但客户端要
+    # 在**重试决策那一行**就读到，从 dict 里翻不适合当控制流。
+    refused: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -123,6 +134,7 @@ class Verdict:
             "dims": self.dims.to_dict(),
             "reasons": self.reasons,
             "signals": self.signals,
+            "refused": self.refused,
             "retry": None if self.retry is None else {
                 "attempt": self.retry.attempt,
                 "temperature": self.retry.temperature,
@@ -331,7 +343,14 @@ class QualityGate:
 
     def evaluate(self, ann: Annotation, *, attempt: int = 0,
                  image=None, temperature: float = 0.2,
-                 max_pixels: int = 589824) -> Verdict:
+                 max_pixels: int = 589824,
+                 force_refusal_retry: bool = True) -> Verdict:
+        """给一条产出打分。
+
+        `force_refusal_retry`：拒答是否按"可重试"处理。默认 True——拒答多半是
+        模型套进了"我不能描述"的模板，换指令再打一次就能好。传 False 恢复
+        v0.2 的老行为（拒答即 drop），留给"这条渠道明确不要拒答重试"的场合。
+        """
         p = self.policy
         text = ann.caption_dense or ann.caption_medium or ""
         stripped = text.strip()
@@ -441,7 +460,19 @@ class QualityGate:
         score = dims.score
 
         # ---- 判定
-        if refused or score < p.drop_score:
+        #
+        # ★拒答不在这里判 drop。理由见 Verdict.refused：
+        #   拒答是"模型这次说了句我不能"，不是"这条样本救不回来"。它挡不住
+        #   换指令、换温度再打一次——实测换一份明确的"直接输出、不要解释"
+        #   指令后大多数能出正常 caption。所以这里只把 refused 交上去，
+        #   由客户端决定要不要硬试；真要放弃也是客户端那一层的事。
+        #   代价要说清：只要 attempts 还在上限内，拒答的图就会多打一遍，
+        #   对纯 API 计费的任务是多一笔钱。这是刻意的取舍。
+        if refused and force_refusal_retry:
+            level = "retry" if attempt < p.max_attempts else "drop"
+        elif refused:
+            level = "drop"
+        elif score < p.drop_score:
             level = "drop"
         elif score < p.pass_score:
             level = "retry" if attempt < p.max_attempts else "drop"
@@ -461,7 +492,7 @@ class QualityGate:
             )
 
         return Verdict(level=level, score=score, dims=dims, reasons=reasons,
-                       signals=signals, retry=retry)
+                       signals=signals, retry=retry, refused=refused)
 
 
 # ------------------------------------------------------------------ 重试队列

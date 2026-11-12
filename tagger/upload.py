@@ -78,21 +78,19 @@ class FtpUploader:
         remote_dir 成了空壳，汇总机在约定目录下永远等不到文件。
         """
         assert self._ftp is not None
-        target = self.cfg.remote_dir.strip("/")
-        if not target:
-            return
+        target = self.cfg.remote_dir
+        if target.startswith("/"):
+            self._ftp.cwd("/")
         parts = [p for p in target.split("/") if p]
-        path = ""
         for part in parts:
-            path = f"{path}/{part}" if path else part
             try:
-                self._ftp.cwd(path)
+                self._ftp.cwd(part)
             except ftplib.error_perm:
                 try:
-                    self._ftp.mkd(path)
-                    self._ftp.cwd(path)
+                    self._ftp.mkd(part)
+                    self._ftp.cwd(part)
                 except ftplib.error_perm as exc:
-                    raise RuntimeError(f"无法创建远端目录 {path}: {exc}") from exc
+                    raise RuntimeError(f"无法创建远端目录 {target}: {exc}") from exc
 
     def close(self) -> None:
         if self._ftp is None:

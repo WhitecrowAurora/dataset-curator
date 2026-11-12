@@ -129,6 +129,90 @@ export function ChoiceGrid<T extends string>({
   )
 }
 
+/**
+ * 多选版的 ChoiceGrid（同样的外观，语义换成"勾选清单"）。
+ *
+ * 为什么不复用 ChoiceGrid：那套是 role=radio + 方向键在档位间移动，语义是
+ * "选一个"。多选下每个按钮是独立的开关（aria-pressed），方向键不该把焦点
+ * 移走——否则用户按一下方向键就不知道自己在勾第几个了。
+ *
+ * `exclusive` 里的值互斥：勾它清空其余（如 auto / cpu 与具体 cuda:N）。
+ * 一个都不剩时不允许取消最后一个——全空的清单没有"用哪个设备"的答案，
+ * 后端只能退回 auto，而页面上一个都没亮，看起来像坏了。
+ */
+export function ChoiceMulti<T extends string>({
+  options,
+  value,
+  onChange,
+  exclusive = [],
+  className = 'grid-cols-4',
+  ariaLabel,
+  mono,
+  size = 'md',
+  renderLabel,
+  disabled,
+}: {
+  options: readonly T[]
+  value: readonly T[]
+  onChange: (v: T[]) => void
+  exclusive?: readonly T[]
+  className?: string
+  ariaLabel?: string
+  mono?: boolean
+  size?: 'sm' | 'md'
+  renderLabel?: (v: T) => React.ReactNode
+  disabled?: boolean
+}) {
+  const sizeClass = size === 'sm' ? 'py-2 px-2 text-xs' : 'py-2.5 text-sm'
+
+  const toggle = (opt: T) => {
+    if (disabled) return
+    if (value.includes(opt)) {
+      if (value.length > 1) onChange(value.filter((v) => v !== opt))
+      return
+    }
+    if (exclusive.includes(opt)) {
+      onChange([opt])
+      return
+    }
+    const next = value.filter((v) => !exclusive.includes(v))
+    next.push(opt)
+    onChange(next)
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      aria-disabled={disabled || undefined}
+      className={`grid gap-2 ${className} ${disabled ? 'opacity-50' : ''}`}
+    >
+      {options.map((opt) => {
+        const active = value.includes(opt)
+        const label = renderLabel ? renderLabel(opt) : opt
+        return (
+          <button
+            key={opt}
+            type="button"
+            aria-pressed={active}
+            disabled={disabled}
+            onClick={() => toggle(opt)}
+            className={`${sizeClass} rounded-lx-sm font-medium transition-colors border ${
+              mono ? 'font-mono' : ''
+            } ${
+              active
+                ? 'bg-lx-accent-subtle border-lx-accent text-lx'
+                : 'bg-lx-surface-raised border-lx text-lx-muted hover:text-lx'
+            } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /** 开关行：原生 checkbox + 统一主题 accent，可带一行说明。 */
 export function ToggleRow({
   checked,

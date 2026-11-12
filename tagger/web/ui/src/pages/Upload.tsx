@@ -187,7 +187,7 @@ export function Upload() {
         icon={<CloudUpload size={17} />}
         eyebrow="回传"
         title="FTP 回传"
-        description="勾选分包产物或 merged.jsonl 传到汇总机；断线自动续传。"
+        description="断线自动续传"
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>
@@ -341,7 +341,7 @@ export function Upload() {
               />
             </SettingRow>
 
-            <SettingRow label="密码" help="只在这次上传里用，不落盘、不进日志">
+            <SettingRow label="密码" help="不落盘、不进日志">
               <input
                 className="lx-input font-mono text-xs"
                 type="password"
@@ -351,7 +351,7 @@ export function Upload() {
               />
             </SettingRow>
 
-            <SettingRow label="远端路径" help="不存在会逐级创建">
+            <SettingRow label="远端路径" help="不存在会自动创建">
               <input
                 className="lx-input font-mono text-xs"
                 value={remoteDir}
@@ -361,7 +361,7 @@ export function Upload() {
               />
             </SettingRow>
 
-            <SettingRow label="传输模式" help="拿不准就选被动（防火墙/NAT 后更稳）">
+            <SettingRow label="传输模式" help="防火墙 / NAT 后用被动更稳">
               <ChoiceGrid
                 options={MODES}
                 value={mode}

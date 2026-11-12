@@ -211,9 +211,9 @@ export function SettingRow({
   children,
 }: {
   label: string
-  /** 常驻说明。**只在真的会误操作时才用**，其余走 help。 */
+  /** 常驻说明。**只在真的会误操作时才用**，其余走 help；一句话，别写成段落。 */
   description?: string
-  /** 解释性文字：收进标签旁的 ? 图标，悬浮才显示，不占版面 */
+  /** 参数含义与出错后果，一句话；归因/设计解释一律不写进 UI */
   help?: string
   icon?: ReactNode
   /**

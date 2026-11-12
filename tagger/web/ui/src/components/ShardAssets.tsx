@@ -12,8 +12,9 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FolderOpen, Loader2, X } from 'lucide-react'
+import { FolderOpen, FolderSearch, Loader2, X } from 'lucide-react'
 import { api, type ArtifactInfo } from '../lib/api'
+import { useFolderPicker } from './FolderPicker'
 
 function fmtBytes(n: number): string {
   if (!n) return '0 B'
@@ -48,6 +49,7 @@ export function ShardAssets({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const folder = useFolderPicker()
 
   async function load(target: string) {
     const path = target.trim()
@@ -129,7 +131,7 @@ export function ShardAssets({
               <div>
                 <h3 className="text-[15px] font-semibold text-lx">已打包分片</h3>
                 <p className="mt-0.5 text-[11px] text-lx-muted">
-                  选一个 parquet 直接作为 NL 输入；行数就是这片里的图片数
+                  选一个 parquet 作为 NL 输入
                 </p>
               </div>
               <button className="lx-btn-ghost-icon" onClick={onClose} aria-label="关闭">
@@ -150,6 +152,21 @@ export function ShardAssets({
                   spellCheck={false}
                   aria-label="分片目录"
                 />
+                <button
+                  type="button"
+                  className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
+                  disabled={busy}
+                  onClick={() =>
+                    folder.pick(dir || startDir || undefined, (path) => {
+                      setDir(path)
+                      void load(path)
+                    })
+                  }
+                  title="浏览目录"
+                >
+                  <FolderSearch size={12} />
+                  浏览
+                </button>
                 <button
                   type="button"
                   className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
@@ -242,6 +259,7 @@ export function ShardAssets({
                 </button>
               </div>
             </footer>
+            {folder.dialog}
           </motion.div>
         </motion.div>
       )}

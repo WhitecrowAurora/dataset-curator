@@ -20,6 +20,7 @@ import contextlib
 import io
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -51,14 +52,15 @@ from .vllm_service import VLLM
 from .center import CENTER, CenterError
 from .multi_gpu import MULTI
 from .selfcheck import SELFCHECK
-from .deps import DEPS
+from .deps import DEPS, torch_hint
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 DIST_DIR = UI_DIR / "dist"
 
-# 产物目录里那些 .jsonl 不是产物：失败账与清单。回传页列文件时排掉，
-# 否则用户会以为"这些也该传"，而传上去的对账侧读不出任何记录。
-_NON_ARTIFACT_NAMES = {"failures.jsonl", "manifest.jsonl", "state.jsonl"}
+# 产物目录里那些 .jsonl 不是产物：失败账、剔除账、无效输入账与清单。
+# 回传页列文件时排掉，否则用户会以为"这些也该传"，而传上去的对账侧读不出任何记录。
+_NON_ARTIFACT_NAMES = {"failures.jsonl", "excused.jsonl", "skipped.jsonl",
+                       "manifest.jsonl", "state.jsonl"}
 
 
 class JobRequest(BaseModel):
@@ -81,7 +83,12 @@ class JobRequest(BaseModel):
     # ---- 打标
     backend: str = "wd-eva02"
     model_dir: str = ""
+    # 单值设备（旧字段，保留兼容）；多卡走 tag_devices
     device: str = "auto"
+    # 多卡设备清单。空 = 回落到 device。每张卡各加载一份权重。
+    tag_devices: list[str] = Field(default_factory=list)
+    # 多卡分工：batch = 批内切分，pack = 每卡一个包
+    tag_mode: str = "batch"
     precision: str = "bf16"
     batch: int = 4
     # pil = CPU 缩放/归一化（现状）；tensor = 缩放/归一化上卡（解码仍在 CPU）
@@ -122,6 +129,10 @@ class JobRequest(BaseModel):
     # 用哪份 NL 提示词：prompt/<名字>.json 的名字。空 = 内置那份（按上面的
     # 长度/比例参数生成）。文件里写的是整段指令，会替换内置提示词。
     prompt_id: str = ""
+    # 多选提示词（顺序即拼接顺序）：`file:<名字>` = 成品（prompt/*.json 整段），
+    # `rule:<名字>` = 规则片段（prompts/*.md 按 mode/语言渲染后追加在成品后面）。
+    # 非空时优先于 prompt_id。
+    prompt_parts: list[str] = []
     timeout_s: int = 90
     concurrency: int = 2
     # 多卡（数据并行）。multi_gpu 打开时忽略 url，改用多卡服务组的地址；
@@ -180,12 +191,20 @@ class JobRequest(BaseModel):
     hf_conns: int = 4
     # HF 请求的代理。空 = 用设置里的全局代理
     hf_proxy: str = ""
+    # 分片缓存目录。空 = 程序目录下的 run/hf-cache（与下载页共用同一份缓存，
+    # 提前下好的分片能直接命中）。填了就换到别的盘，比如产物盘不够大时。
+    hf_cache: str = ""
     # 给产物留的磁盘余量（GB）；0 = 自动（最大分片的 30%，不少于 2 GB）
     hf_reserve_gb: float = 0.0
 
     # 结果缓存：同图同参复用上次产出。默认关（首轮命中率为 0）
     cache: bool = False
     cache_max_gb: float = 8.0
+
+    # 只重试失败项：输入变成上一轮 failures.jsonl 里的 image_id，
+    # 仍失败的按 output.retry_failed_rounds 剔除出分母（excused.jsonl）。
+    # 目前只由侧栏「重试失败」按钮经由 /retry-failed 置位，表单不直接暴露。
+    retry_failed: bool = False
 
     # ---- 产物形态（本地默认 jsonl：一包一文件，回传时一人发自己那份）
     artifact_format: str = "jsonl"
@@ -397,6 +416,17 @@ class NlApiKeyRequest(BaseModel):
     remember: bool = True
 
 
+class HfTokenRequest(BaseModel):
+    """记住 / 忘记 HF 令牌。token 传空 = 删掉存档。
+
+    repo 必须给：存档只在这一个仓库上生效（理由见 nl_api.resolve_hf_token，
+    避免把私有仓库的令牌自动带去别的仓库）。
+    """
+    token: str = ""
+    repo: str = ""
+    remember: bool = True
+
+
 class MultiStartRequest(BaseModel):
     """多卡：每张卡各起一个单卡服务。
 
@@ -463,6 +493,9 @@ class CenterRunRequest(BaseModel):
     """托管 fox worker 的运行参数。全部可省略 = 沿用上次保存的配置。"""
     tag_url: str | None = None
     mode: str | None = None
+    # 派工倾向（2026-11-12）：只影响服务端排序，不改变本机产出什么。
+    # 空串 = 不挑，是有效值，所以这里不能用 exclude_none 之外的默认值兜。
+    parts_pref: str | None = None
     out_dir: str | None = None
     interval: int | None = None
     extra_args: str | None = None
@@ -471,6 +504,9 @@ class CenterRunRequest(BaseModel):
     wait: bool | None = None
     idle_timeout: float | None = None    # 配 wait：连续多少秒没活就自己收工（0 = 一直等）
     max_packages: int | None = None      # 本次最多交付多少片（0 = 不限）
+    # 分片下载：并发连接数（1 = 单流）与"开工前测速选最快 CDN 边缘"开关
+    download_conns: int | None = None
+    cdn_probe: bool | None = None
 
 
 # ---------------------------------------------------------------- 环境信息
@@ -483,11 +519,41 @@ def _gpu_lines() -> list[str]:
     """显卡信息。查不到就返回空表——**不报错**：这个接口是给页面顶部
     "有没有卡"用的，不是启动门槛。"""
     try:
-        from ..hardware import describe, query_gpus
+        from ..hardware import describe, visible_gpus
 
-        return [describe(g) for g in query_gpus()]
+        # 列**可见**卡（= 实际会用来分档/起服务的那批），并按 CUDA 逻辑序号
+        # 标出来。列物理卡会让设过 CUDA_VISIBLE_DEVICES 的机器出现
+        # "顶部显示 0 号 1050、实际按 2 号 V100 分档"，用户对不上账。
+        out = []
+        for i, g in enumerate(visible_gpus()):
+            line = describe(g)
+            out.append(f"cuda:{i}  {line}" if i == 0 else f"cuda:{i}  {line}（未使用）")
+        return out
     except Exception:                 # noqa: BLE001 - nvidia-smi 不在 PATH 之类
         return []
+
+
+def _device_options() -> list[str]:
+    """新建任务页「设备」可勾选的清单。
+
+    cuda:N 按**本机实际卡数**生成，不写死。写死 cuda:0/cuda:1 的结果是：
+    三卡的机器上选不到第三张，而用户会以为是"程序不支持"而不是"这个下拉
+    只列了两项"。`auto` 与 `cpu` 恒在——它们是"不要多卡"的那两种表达。
+    """
+    opts = ["auto"]
+    try:
+        from ..hardware import visible_gpus
+
+        # ★必须用**枚举后的序号**（0..n-1），不能用 g.index：cuda:N 是 torch 的
+        #   逻辑设备号，而 g.index 是 nvidia-smi 的物理号。设了
+        #   CUDA_VISIBLE_DEVICES=2,3 时，torch 只有 0/1，这里若给出 cuda:2/cuda:3，
+        #   用户一选就是 "invalid device ordinal"。没有设变量时两者恰好相等，
+        #   所以平时测不出来。
+        opts += [f"cuda:{i}" for i, _ in enumerate(visible_gpus())]
+    except Exception:                # noqa: BLE001 - 探测失败就只给 auto/cpu
+        pass
+    opts.append("cpu")
+    return opts
 
 
 def _weight_state(key: str, spec: dict[str, Any]) -> dict[str, Any]:
@@ -556,7 +622,13 @@ def _defaults() -> dict:
         raw_models = {}
         raw_tiers = []
     models_dir = _repo_root() / "models"
-    wd = models_dir / "wd-eva02"
+    # ★默认权重目录必须跟**默认后端**走。这里以前写死 models/wd-eva02，而
+    #   configs/tiers.yaml 的默认后端是 pixai：于是新建任务一打开，"权重目录"
+    #   就填着一个 pixai 根本认不了（那时还整个不收这个字段）的 wd-eva02 目录，
+    #   用户以为自己在下好的权重上跑，实际每次都在联网拉 pixai。
+    #   目录不存在时仍然回空——前端拿空值走自己的兜底，比给个假路径好。
+    default_backend = str(tagging.get("backend") or "wd-eva02")
+    wd = models_dir / default_backend
     formats = archive.get("formats") or ["parquet"]
     if isinstance(formats, str):
         formats = [formats]
@@ -601,16 +673,30 @@ def _defaults() -> dict:
         for t in raw_tiers
         if isinstance(t, dict) and t.get("name")
     ]
+    # 阈值 0 是合法值（不设阈值 = 全保留），不能用 `or 0.35` 兜底：那会把 0
+    # 当成"没填"换成 0.35，页面显示与实际产出就对不上了。
+    _thr_cfg = tagging.get("thresholds") or {}
+    _thr_default = _thr_cfg.get("default")
+    if _thr_default is None:
+        _thr_default = 0.35
     return {
         "backend": str(tagging.get("backend") or "wd-eva02"),
         "model_dir": str(wd) if wd.is_dir() else "",
         "models_dir": str(models_dir) if models_dir.is_dir() else "",
         "device": str(tagging.get("device") or "auto"),
-        "precision": "bf16",
+        # 多卡分工：batch = 批内切分（默认），pack = 每卡一个包
+        "tag_mode": str(tagging.get("mode") or "batch"),
+        # 设备多选项（含 cuda:N，按本机卡数生成）。前端不自己拼这张表：
+        # 页面不该知道这台机器有几张卡。
+        "devices": _device_options(),
+        # 精度以前在这里写死成 "bf16"：配置里写 fp32/fp16 时页面照样显示 bf16，
+        # 用户以为自己改过、其实表单提交的还是 bf16。这类"显示与实际不一致"
+        # 正是精度问题反复出现的根源，一律从配置读、只留一个兜底。
+        "precision": str(tagging.get("precision") or "bf16"),
         "batch": int(tagging.get("batch") or 4),
         # 配置里没写就默认 pil：tensor 只有大 PNG 才真赚（见 perf-baseline §12）
         "preprocess": str(tagging.get("preprocess") or "pil"),
-        "threshold": float(((tagging.get("thresholds") or {}).get("default")) or 0.35),
+        "threshold": float(_thr_default),
         "keep_categories": list(tagging.get("keep_categories") or []),
         # 各 tag 后端在配置里绑定的 HF 仓库（按后端分组，切换后端时才不会拿错）。
         "tag_models": {str(k): str(v) for k, v in (tagging.get("models") or {}).items()},
@@ -647,6 +733,12 @@ def _defaults() -> dict:
             }
             for value in nl_api.PROVIDERS
         ],
+        # HF 令牌存档（脱敏）。和 API 密钥同一个文件、同一套口径：页面只拿到
+        # 脱敏值，用来显示"已记住 hf_xx…yy / 仓库名"，明文永远不下发。
+        # 以前这项哪里都不存，用户每开一个 HF 任务都要重贴一次。
+        "hf_saved": ({"repo": entry.get("repo", ""),
+                      "token_masked": nl_api.mask_hf(entry)}
+                     if (entry := nl_api.saved_hf()) else None),
         "guard": guard,
         # 质检的配置默认值。0 在这套表单里是"不覆盖"的哨兵值，所以页面
         # 必须能读到真实数字才能把占位说明写对。
@@ -817,6 +909,94 @@ _DRIVES_TTL = 60.0
 _drives_cache: tuple[float, list[dict[str, str]]] | None = None
 
 
+def _probe_mounts() -> list[dict[str, str]]:
+    """Linux / macOS 的挂载点（只列"真能读"的本地盘）。
+
+    以前非 Windows 直接返回空，理由是"从 `/` 一路往下就能走到任何挂载点"。
+    这句话在桌面发行版上勉强成立，在服务器上不成立：素材盘几乎都挂在
+    `/mnt/data`、`/data`、`/srv/xxx` 这类地方，用户在浏览器里从 `/` 往上翻
+    **永远翻不到**——`/` 的 parent 就是自己。于是"选输入"在这种机器上等于
+    不可用，只能手敲绝对路径。
+    """
+    import shutil as _shutil
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    # /proc/mounts 是 Linux 上最省事的来源（Linux 上 /etc/mtab 通常就是它）。
+    # macOS 没有它，那就退到几个约定俗成的素材盘位置。
+    try:
+        with open("/proc/mounts", encoding="utf-8", errors="replace") as fh:
+            rows = [line.split() for line in fh if line.strip()]
+    except OSError:
+        rows = []
+
+    # 这些是给系统自己用的伪文件系统，列出来只会让人点进一个空目录或者卡死
+    # （/proc/xxx、/sys 一读就是内核态），和 Windows 那边不列光驱同理。
+    skip_fs = {"proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
+               "securityfs", "debugfs", "tracefs", "mqueue", "hugetlbfs",
+               "pstore", "bpf", "fusectl", "configfs", "ramfs", "autofs",
+               "binfmt_misc", "nsfs", "overlay", "squashfs"}
+    # `/usr`、`/boot` 这类是系统和 WSL 自己的挂载（/usr/src/linux-headers-*、
+    # /usr/lib/wsl/drivers、/boot/efi），Docker Desktop 还会塞 /mnt/wsl*。
+    # 它们都不是素材盘，却能把"位置"那一行挤满——盘多了反而找不到要的那块。
+    skip_prefix = ("/proc", "/sys", "/dev", "/run", "/snap", "/usr", "/boot",
+                   "/var/lib/docker", "/var/lib/containers", "/mnt/wsl",
+                   "/mnt/wslg")
+
+    # 挂载点全集：用来判断"这条是不是某个挂载点内部的再挂载"（见下面）。
+    all_mounts = {p[1] for p in rows if len(p) >= 3}
+
+    for parts in rows:
+        if len(parts) < 3:
+            continue
+        mount, fstype = parts[1], parts[2]
+        # 按"整段路径"比而不是字符串前缀：/devdata 不会被 /dev 误伤。
+        if fstype in skip_fs or any(mount == p or mount.startswith(p + "/")
+                                    for p in skip_prefix):
+            continue
+        # 单文件 bind：容器里的 /etc/hosts、/etc/resolv.conf，WSL 的 /init。
+        # 列进"位置"行既点不开，也不可能是素材目录。
+        if not os.path.isdir(mount):
+            continue
+        # 只列第一、二层挂载点。更深的（/usr/src/linux-headers-*、/mnt/wslg/
+        # distro）是系统内部结构；真要那层数据，上一层已经在列表里，点进去再
+        # 翻一层就到了。
+        if len([p for p in mount.split("/") if p]) > 2:
+            continue
+        # 父目录本身就是一个（非根的）挂载点 = 这个盘内部的再挂载
+        # （/tmp/.X11-unix 之于 /tmp、/mnt/wslg/distro 之于 /mnt/wslg）。
+        # 父级不在 `/` 上这条判断是必须的：容器里 `/` 是挂载点，一级目录
+        # （/workspace、/data）的父恰恰就是它，不能跟着丢。
+        parent = str(Path(mount).parent)
+        if parent != "/" and parent in all_mounts:
+            continue
+        if mount in seen:
+            continue
+        try:
+            usage = _shutil.disk_usage(mount)
+        except OSError:
+            continue          # 断掉的 nfs / 没权限的目录：点进去也是报错
+        seen.add(mount)
+        out.append({"path": mount,
+                    "label": f"{usage.free / 2**30:.0f}G 可用"})
+
+    # 容器里的 `/` 是 overlay，上面按 fstype 被丢掉了；但用户的数据就可能放在
+    # 容器根下面，而且没有它就没有"往上翻"的终点。所以固定补一条。
+    if "/" not in seen:
+        out.insert(0, {"path": "/", "label": ""})
+        seen.add("/")
+
+    # 常见的素材盘位置：即使没挂载（只是普通目录）也值得给个入口，
+    # 用户在 /data、/workspace 放东西是这个圈子的默认习惯。
+    for fallback in ("/data", "/data1", "/datasets", "/workspace",
+                     "/mnt", "/media", "/srv", str(Path.home())):
+        if fallback in seen or not os.path.isdir(fallback):
+            continue
+        seen.add(fallback)
+        out.append({"path": fallback, "label": ""})
+    return out
+
+
 def _drives() -> list[dict[str, str]]:
     """可以切换的盘符（Windows）/ 挂载根（其他系统）。
 
@@ -825,21 +1005,17 @@ def _drives() -> list[dict[str, str]]:
     带上卷标（大家都会给盘起名，光有字母根本分不清哪块是哪个），
     前端做成一行可点的切换。
     """
-    if os.name != "nt":
-        # Linux / macOS 从 `/` 一路往下就能走到任何挂载点，不需要额外入口。
-        return []
-
     global _drives_cache
     now = time.monotonic()
     if _drives_cache is not None and now - _drives_cache[0] < _DRIVES_TTL:
         return [dict(d) for d in _drives_cache[1]]
 
-    out = _probe_drives()
+    out = _probe_drives() if os.name == "nt" else _probe_mounts()
     _drives_cache = (now, out)
     return [dict(d) for d in out]
 
 
-def _list_dirs(path: Path) -> dict:
+def _list_dirs(path: Path, exts: tuple[str, ...] = ()) -> dict:
     """给"选输入"用的极简浏览器。子目录 + 当前层图片/素材包数量。
 
     素材包单独计数并单独列出：4TB 级素材常见形态就是"一个目录里几个大包"，
@@ -847,6 +1023,9 @@ def _list_dirs(path: Path) -> dict:
 
     包**不只 zip**：HF 上下的数据集（含我们自己发的 webdataset）都是 `.tar`，
     这里只认 zip 的话，选择器里那几个 tar 根本不出现，用户以为文件没下好。
+
+    `exts` 是调用方额外要挑的文件类型（`json` / `parquet` …）。有些输入框
+    接受"目录或单个文件"，光能选目录等于逼用户回去手敲文件名。
     """
     from ..pack import container_kind
 
@@ -858,6 +1037,8 @@ def _list_dirs(path: Path) -> dict:
         raise HTTPException(404, f"路径不存在: {path}") from exc
     dirs = []
     zips = []
+    files = []
+    want = {e.lower().lstrip(".") for e in exts}
     for entry in entries:
         if entry.name.startswith((".", "$")):
             continue
@@ -881,6 +1062,12 @@ def _list_dirs(path: Path) -> dict:
             except OSError:
                 size = 0
             zips.append({"name": entry.name, "path": str(entry), "bytes": size})
+        elif entry.is_file() and want and entry.suffix.lower().lstrip(".") in want:
+            try:
+                size = entry.stat().st_size
+            except OSError:
+                size = 0
+            files.append({"name": entry.name, "path": str(entry), "bytes": size})
     own = 0
     try:
         own = sum(1 for p in path.glob("*") if p.suffix.lower() in EXTS)
@@ -892,9 +1079,41 @@ def _list_dirs(path: Path) -> dict:
         "images": own,
         "zips": zips,
         "dirs": dirs,
+        # 只有调用方点名要文件类型时才给这个键：没人要的时候多列一遍只是噪音。
+        **({"files": files} if want else {}),
         # 每次都给：盘符是这台机器的固定信息，让前端多记一份状态反而容易过期。
         "drives": _drives(),
     }
+
+
+def _normalize_input(raw: str) -> Path:
+    r"""把用户敲进来的路径规整成 Path。只处理"写法"问题，不做存在性判断。
+
+    三类会被误当成"相对路径"然后拼到当前目录上的写法：
+
+    1. `~/data`         —— expanduser 解决；
+    2. `D:\data` / `C:/x` —— 在 **Linux 上**传进来（从 Windows 记事本里
+       拷的路径、或者人在网吧照着念）时，`Path("D:\\data")` 是个普通
+       相对名，会被当成 `./D:\data`，报"不存在"。这时把盘符拆出来：先在
+       挂载点里找 `/d`、`/mnt/d`、`/media/<user>/d`，找到就用它；找不到
+       就原样返回，让报错停留在"路径不存在"而不是"我猜错了"。
+       Windows 上不动——那边 `D:\data` 本来就是合法绝对路径。
+    3. 反斜杠 —— Linux 上 `data\2026\01` 是**一个**文件名，不是两层目录。
+    """
+    text = raw.strip().strip('"').strip("'")
+
+    if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", text):
+        drive, rest = text[0].lower(), text[2:].replace("\\", "/")
+        for base in (f"/{drive}", f"/mnt/{drive}", f"/media/{drive}",
+                     f"/media/{os.environ.get('USER', '')}/{drive}",
+                     f"/run/media/{os.environ.get('USER', '')}/{drive}"):
+            cand = Path(base)
+            if cand.is_dir():
+                return cand / rest.lstrip("/")
+        return Path(text)
+    if os.name != "nt":
+        return Path(text.replace("\\", "/")).expanduser()
+    return Path(text).expanduser()
 
 
 def _start_path(raw: str) -> Path:
@@ -902,14 +1121,23 @@ def _start_path(raw: str) -> Path:
 
     输入本身可以是文件（.zip / 单张图），浏览时落在它所在的目录——用户
     想看的是"包里还有个什么"，不是"这个包叫什么"。
+
+    **一次性把用户可能写错的形式都规整掉**，否则它们会以"目录不存在"
+    的形式出现，而真实原因是路径写法，用户会去查盘有没有挂上。
     """
     if raw:
-        p = Path(raw).expanduser()
+        p = _normalize_input(raw)
         if p.is_dir():
             return p
         if p.exists() or p.suffix:
             return p.parent if p.parent != p else p
-        return p
+        # 还不存在的路径（最典型是"输出目录"——那正是要被创建的）：落到最近
+        # 存在的祖先，让用户从那儿挑或新建。直接回 404 的话，用户点「浏览」
+        # 只会看到一个"路径不存在"，而他明明就是想指一个还没建的目录。
+        probe = p
+        while probe != probe.parent and not probe.exists():
+            probe = probe.parent
+        return probe if probe.is_dir() else p
     for candidate in (Path.home() / "Pictures", Path.home(), _repo_root()):
         if candidate.is_dir():
             return candidate
@@ -1038,7 +1266,32 @@ def _artist_context_default(enabled: bool, depth: int, inject: bool = True,
 
 # ---------------------------------------------------------------- 应用
 
+# 单卡服务与多卡组共用一把启动锁：抢的是同一批显卡，两边同时起来时谁先
+# OOM 取决于加载顺序，而报错只会指向模型或显存，看不出是冲突。
+_GPU_START_LOCK = threading.Lock()
+
+
+def _gpu_busy(status: str) -> bool:
+    """这套服务此刻是否占着卡。
+
+    除 stopped / failed 外一律算忙：启动中、停止中、部分就绪，以及将来新增
+    的中间态都该拦住——按白名单列状态，新加一个状态就悄悄漏过去了。
+    """
+    return status not in ("", "stopped", "failed")
+
+
 def create_app(*, ui_dist: Path | None = None) -> FastAPI:
+    # 临时产物一律落到程序目录下的 tmp/（见 tagger/tmpdir.py）。放在这里而不是
+    # `tagger serve` 里，是因为桌面外壳也是走 create_app 起的；只在 CLI 里改，
+    # 双击 exe 的那条路就漏了。失败不拦启动：建不出目录只影响"解压/转换"这类
+    # 重活，不该让人连页面都开不了。
+    try:
+        from .. import tmpdir
+
+        tmpdir.apply_env()
+    except OSError:
+        pass
+
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         # 计划任务是懒建的，但服务一启动就得把线程拉起来：否则用户设了
@@ -1087,6 +1340,9 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             "python": sys.version.split()[0],
             "platform": f"{platform.system()} {platform.release()}",
             "gpus": _gpu_lines(),
+            # 顶部栏那一行 torch 档位提示。放 health 而不是单开一个接口：它跟
+            # 显卡信息一起看才有意义，而且 health 本来就在轮询。
+            "torch_hint": torch_hint(),
             "ui_built": (dist / "index.html").is_file(),
             "running_job": (MANAGER.running().id if MANAGER.running() else None),
             "ts": time.time(),
@@ -1095,6 +1351,20 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     @app.get("/api/defaults")
     def defaults() -> dict:
         return _defaults()
+
+    @app.get("/api/tag-vram")
+    def tag_vram(backend: str = "pixai", precision: str = "bf16",
+                 batch: int = 4, device: str = "auto") -> dict:
+        """tag 分类头在给定精度/批大小下的显存估算，给页面上的滑动条用。
+
+        放在**提交之前**回答"这个 batch 撑不撑得住"：批大小过去是 1/2/4/8/16
+        的固定下拉，选 16 之后 OOM 发生在加载完权重、跑完第一批之后，报的还是
+        一段 CUDA 内部错误。而"撑不住"有两种表现，页面上必须说清是哪一种——
+        真 OOM 会失败，回落系统内存则是不报错但慢一个数量级。
+        """
+        from ..cpu_tagger import tag_vram_budget
+
+        return tag_vram_budget(backend, precision, batch, device=device)
 
     # ---- 模型管理（NL 模型 / tag 分类头清单）
 
@@ -1182,8 +1452,23 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             raise HTTPException(500, f"写不进覆盖文件：{exc}") from exc
 
     @app.get("/api/fs")
-    def fs(path: str = "") -> dict:
-        return _list_dirs(_start_path(path))
+    def fs(path: str = "", exts: str = "") -> dict:
+        start = _start_path(path)
+        # `exts` 是逗号分隔的扩展名（`json,jsonl`）。有些输入框收"目录或单个
+        # 文件"，只列目录的话用户还得回去手敲那个文件名。
+        wanted = tuple(e.strip().lower() for e in exts.split(",") if e.strip())
+        out = _list_dirs(start, wanted)
+        # 请求的路径与实际列出来的不是同一个 = 回退了（不存在，或用户指了个
+        # 文件）。前端要靠这个把"地址栏写着 A、列表其实是 B"说清楚——
+        # 不说的话，用户会以为自己进到了那个不存在的目录里。
+        if path:
+            try:
+                want = _normalize_input(path)
+            except (OSError, ValueError):
+                want = None
+            if want is not None and want != start:
+                out["fell_back_to"] = str(start)
+        return out
 
     @app.get("/api/preview")
     def preview(path: str = "", layout: str = "flat", artist: bool = True,
@@ -1439,6 +1724,16 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         # 内存里的活任务 + 盘上的历史（重启后列表还在）。同 id 以内存为准。
         return {"jobs": MANAGER.all_snapshots()}
 
+    @app.delete("/api/history")
+    def clear_history() -> dict:
+        """清空「历史任务」列表。
+
+        **不删产物、不停任务**：只清 run/history/ 里的记录，以及内存表里
+        那些已经结束的条目。产物目录是用户的数据，清个列表就删数据是不可
+        接受的；正在跑的任务也不动，否则它们会继续写却被列表抹掉。
+        """
+        return MANAGER.clear_history()
+
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict:
         snap = MANAGER.snapshot_of(job_id)
@@ -1538,6 +1833,46 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         """用 resume.json 重建任务并开跑。已打完的图由产物判定自动跳过。"""
         try:
             return MANAGER.resume_last().snapshot()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, ConfigError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/jobs/{job_id}/failure-book")
+    def job_failure_book(job_id: str) -> dict:
+        """这一趟还剩多少张该重试（给侧栏按钮显示数字 / 决定能不能点）。
+
+        口径与「重试失败」实际执行时一致：failures 减去已剔除的 excused。
+        两本账都数 id 而不是行——failures.jsonl 是追加写的，同一张图失败三次
+        就有三行，按行数报会虚报三倍，按钮上那个数字就成了假的。
+        """
+        from ..client import load_excused_ids, load_failed_ids
+
+        job = MANAGER.get(job_id)
+        if job is not None:
+            out_dir = job.out_dir
+        else:
+            job = MANAGER.build_readonly(job_id)
+            if job is None:
+                raise HTTPException(404, "没有这个任务")
+            out_dir = job.out_dir
+        status = job.status
+        failed = load_failed_ids(out_dir / "failures.jsonl")
+        excused = load_excused_ids(out_dir / "excused.jsonl")
+        todo = failed.keys() - excused
+        return {"failed": len(failed), "excused": len(excused),
+                "todo": len(todo), "out_dir": str(out_dir), "status": status}
+
+    @app.post("/api/jobs/{job_id}/retry-failed", status_code=202)
+    def retry_failed_job(job_id: str) -> dict:
+        """只重打 failure 清单里的图。仍失败则剔除出分母（不再阻塞分片完成）。
+
+        与 `/restart` 分开是有意的：restart 是"整批再来一遍"（已完成跳过），
+        retry-failed 是"只做那几十张没成的"。前者进度分母是整片张数，后者是
+        失败数——用户点了"重试失败"，界面上就该只看到那几十张在动。
+        """
+        try:
+            return MANAGER.retry_failed(job_id).snapshot()
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
         except (ValueError, ConfigError) as exc:
@@ -1797,15 +2132,19 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         为什么带大小：下载页要靠它算"这一片放不放得下"、表单要靠它显示
         "全选会占多少 GB"。只给文件名的话，这两件事都得等下完才知道。
 
-        token 只在本次请求内使用：不落盘、不进日志、不进任何任务状态。
-        走 POST body 而不是 query，正是为了不让它进 access log。
+        token 只在本次请求内使用：不进日志、不进任何任务状态。走 POST body
+        而不是 query，正是为了不让它进 access log。
+
+        表单没填时取存档（且只在同一个仓库上，见 `nl_api.resolve_hf_token`）。
+        不这么做的话，私有仓库在"列文件"这一步就会 401，用户在还没提交之前
+        就得去填 token，存档等于白存。
         """
         from .. import hf_source
 
         repo = (req.repo or "").strip()
         if not repo:
             raise HTTPException(400, "缺少仓库名（形如 org/name）")
-        token = (req.token or "").strip() or None
+        token = nl_api.resolve_hf_token(repo, req.token or "") or None
         revision = (req.revision or "main").strip() or "main"
         # 表单没填代理就用全局那份：代理是"这台机器怎么上网"，不该按页面各配一套
         proxy = (req.proxy or "").strip() or DOWNLOADS.snapshot().get("proxy", "")
@@ -2294,6 +2633,16 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         """本机服务的状态 + 指纹 + 日志尾巴。页面每 4 秒拉一次。"""
         return VLLM.snapshot()
 
+    @app.get("/api/vllm/report")
+    def vllm_report() -> dict:
+        """一段能直接粘给 AI 的排错报告（纯文本）。
+
+        引擎起不来时，"再装一次"已经是尽头了——剩下的是官方资产名、驱动版本、
+        cudart 配套这类没法穷举的组合。这时候给人的不该是空手，而是现场：
+        页面一个「复制排错信息」按钮，拿到的就是这段。
+        """
+        return {"text": VLLM.report_text()}
+
     @app.get("/api/vllm/capability")
     def vllm_capability(engine: str = "llamacpp") -> dict:
         """某个引擎在这台机器上能不能用。
@@ -2310,22 +2659,29 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
 
     @app.post("/api/vllm/start", status_code=202)
     def vllm_start(req: VllmStartRequest) -> dict:
-        try:
-            return VLLM.start(port=req.port, timeout_s=req.timeout_s,
-                              engine=req.engine,
-                              model=req.model, tier=req.tier,
-                              precision=req.precision,
-                              served_name=req.served_name,
-                              max_model_len=req.max_model_len,
-                              max_num_seqs=req.max_num_seqs,
-                              max_num_batched_tokens=req.max_num_batched_tokens,
-                              gpu_mem=req.gpu_mem,
-                              local_media_root=req.local_media_root,
-                              slots=req.slots)
-        except RuntimeError as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except (ValueError, ConfigError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        # 与 /api/multi/start 同一把锁：检查和启动之间不允许插进另一个启动
+        # 请求，否则两个并发点击都能通过检查，最后两套服务各占一半卡互相 OOM。
+        with _GPU_START_LOCK:
+            if _gpu_busy(MULTI.snapshot()["status"]):
+                raise HTTPException(
+                    409, "多卡服务正在运行（或正在停），会跟单卡服务抢显存；"
+                         "先停掉多卡再启动单卡。")
+            try:
+                return VLLM.start(port=req.port, timeout_s=req.timeout_s,
+                                  engine=req.engine,
+                                  model=req.model, tier=req.tier,
+                                  precision=req.precision,
+                                  served_name=req.served_name,
+                                  max_model_len=req.max_model_len,
+                                  max_num_seqs=req.max_num_seqs,
+                                  max_num_batched_tokens=req.max_num_batched_tokens,
+                                  gpu_mem=req.gpu_mem,
+                                  local_media_root=req.local_media_root,
+                                  slots=req.slots)
+            except RuntimeError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            except (ValueError, ConfigError) as exc:
+                raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/vllm/plan")
     def vllm_plan(model: str = "", tier: str = "", precision: str = "",
@@ -2502,6 +2858,37 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
                            "key_masked": nl_api.mask_key(entry.get("key", ""))}
                           if entry else None)}
 
+    # ---- HF 令牌存档
+    #
+    # 与 API 密钥分开的路径，而不是塞进 /api/nl-api/keys：那是"推理来源"的
+    # 概念（openai / anthropic），HF 跟推理来源无关，混进去以后 provider 的
+    # 枚举会开始同时装两种东西。
+
+    @app.get("/api/hf/token")
+    def hf_token_get() -> dict:
+        """已记住的 HF 令牌（脱敏）。明文永远不出后端。"""
+        entry = nl_api.saved_hf()
+        return {"saved": ({"repo": entry.get("repo", ""),
+                           "token_masked": nl_api.mask_hf(entry)}
+                          if entry else None)}
+
+    @app.post("/api/hf/token")
+    def hf_token_save(req: HfTokenRequest) -> dict:
+        """记住 / 忘记。remember=false 或 token 为空都表示删掉存档。
+
+        repo 只在要记住时才有意义：存档绑仓库，换仓库不自动沿用。
+        """
+        try:
+            token = req.token.strip() if req.remember else ""
+            repo = req.repo.strip() if token else ""
+            nl_api.store_hf_token(token, repo)
+        except OSError as exc:
+            raise HTTPException(500, f"写不进 {nl_api.SAVED_CONFIG}：{exc}") from exc
+        entry = nl_api.saved_hf()
+        return {"saved": ({"repo": entry.get("repo", ""),
+                           "token_masked": nl_api.mask_hf(entry)}
+                          if entry else None)}
+
     # ---- 多卡（数据并行）
     #
     # 与 /api/vllm/* 并列而不是塞进它：单卡服务是一个进程一份状态，
@@ -2527,27 +2914,30 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
 
     @app.post("/api/multi/start", status_code=202)
     def multi_start(req: MultiStartRequest) -> dict:
-        # 单卡服务占着的卡不能再给 worker：两个进程抢同一张卡时，谁先 OOM
-        # 取决于加载顺序，而报错会指向模型，看不出是冲突。
-        if VLLM.snapshot()["status"] in ("starting", "ready"):
-            raise HTTPException(
-                409, "单卡服务正在运行，会和多卡抢显存；先停掉单卡服务再启动多卡。")
-        try:
-            return MULTI.start(
-                # 空值时给 llamacpp：这是 Windows 原生唯一能上 GPU 的引擎，
-                # 也是页面默认值；Linux 上页面会显式传 vllm。
-                engine=req.engine or "llamacpp",
-                gpus=req.gpus,
-                base_port=req.base_port,
-                model=req.model, tier=req.tier, precision=req.precision,
-                served_name=req.served_name or "tagger",
-                per_card_seqs=req.per_card_seqs,
-                timeout_s=req.timeout_s,
-            )
-        except RuntimeError as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except (ValueError, ConfigError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        with _GPU_START_LOCK:
+            # 单卡服务占着的卡不能再给 worker：两个进程抢同一张卡时，谁先 OOM
+            # 取决于加载顺序，而报错会指向模型，看不出是冲突。判定与启动必须
+            # 在同一把锁里——先检查后启动，中间能插进一个 /api/vllm/start。
+            if _gpu_busy(VLLM.snapshot()["status"]):
+                raise HTTPException(
+                    409, "单卡服务正在运行（或正在停），会和多卡抢显存；"
+                         "先停掉单卡服务再启动多卡。")
+            try:
+                return MULTI.start(
+                    # 空值时给 llamacpp：这是 Windows 原生唯一能上 GPU 的引擎，
+                    # 也是页面默认值；Linux 上页面会显式传 vllm。
+                    engine=req.engine or "llamacpp",
+                    gpus=req.gpus,
+                    base_port=req.base_port,
+                    model=req.model, tier=req.tier, precision=req.precision,
+                    served_name=req.served_name or "tagger",
+                    per_card_seqs=req.per_card_seqs,
+                    timeout_s=req.timeout_s,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            except (ValueError, ConfigError) as exc:
+                raise HTTPException(400, str(exc)) from exc
 
     @app.post("/api/multi/stop")
     def multi_stop() -> dict:
@@ -2604,13 +2994,17 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/api/deps/{name}/{action}", status_code=202)
-    def deps_action(name: str, action: str) -> dict:
+    def deps_action(name: str, action: str, torch_variant: str = "") -> dict:
+        """torch_variant 只对 torch / torchvision 有意义：页面选了哪一档就装
+        哪一档（cu130 / cu126 / cpu），空 = 按本机推荐。**只推荐不强制**——
+        用户明确要换一档比对产出时不该被拦。"""
         if action not in ("install", "uninstall", "reinstall"):
             raise HTTPException(404, f"不认识的操作：{action}")
         _deps_guard()
-        return _deps_call({"install": DEPS.install,
-                           "uninstall": DEPS.uninstall,
-                           "reinstall": DEPS.reinstall}[action], name)
+        if action == "uninstall":
+            return _deps_call(DEPS.uninstall, name)
+        fn = DEPS.install if action == "install" else DEPS.reinstall
+        return _deps_call(fn, name, torch_variant=torch_variant.strip())
 
     # ---- 批量
     #

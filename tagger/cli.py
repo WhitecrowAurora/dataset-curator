@@ -19,11 +19,17 @@ from pathlib import Path
 
 from .config import (ConfigError, DEFAULT_TIERS, load_ops, load_tier_table,
                      resolve_profile)
-from .hardware import describe, query_gpus
+from .hardware import describe, query_gpus, visible_gpus, visible_gpus_error
 from .netutil import trust_env_for
 
 # smoke 用的最小 prompt。正式的 caption 规格（四档输出、tag 注入方式）
 # 要等 S1 实验定了再写进 prompts/ 目录，不要在这里堆。
+# tag 前向精度。集中在常量里，是因为它出现在三个子命令的参数定义上
+# （client / tag / pack），漏一个就会变成"命令行不认但配置能读"。
+# fp16 是为 V100 这类没有 bf16 的卡留的：Volta 缺 bf16 硬件支持，
+# 但 fp16 tensor core 正是它的主力。
+TAG_PRECISIONS = ("fp32", "tf32", "bf16", "fp16")
+
 SMOKE_PROMPT = (
     "Describe this image in one paragraph for AI training data. "
     "Cover in this order: main subject; its appearance (color, material, texture); "
@@ -43,8 +49,16 @@ def _setup_console() -> None:
 
 
 def _load_profile(args: argparse.Namespace):
-    gpus = query_gpus()
+    # visible_gpus 而不是 query_gpus：用户用 CUDA_VISIBLE_DEVICES 选过卡时，
+    # "第 0 张"指的是他选中的第一张，不是物理 0 号（两张卡显存可能差 4 倍，
+    # 按错了整档都错）。见 hardware.visible_gpus。
+    gpus = visible_gpus()
     if not gpus:
+        # 先问是不是环境变量把人挡在外面（"指定了不存在的卡号"与"真没卡"
+        # 是两种完全不同的修法，报同一句会让人去重装驱动）。
+        why = visible_gpus_error()
+        if why:
+            raise ConfigError(why)
         raise ConfigError(
             "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）。\n"
             "Mac 不支持 CUDA，无法参与打标；Windows 请确认驱动已安装。"
@@ -52,7 +66,10 @@ def _load_profile(args: argparse.Namespace):
     gpu = gpus[0]
     print(describe(gpu))
     if len(gpus) > 1:
-        print(f"（检测到 {len(gpus)} 张卡，只用第 0 张）")
+        # 说清是哪张：物理卡号与 CUDA 序号在多卡机上不一样，只说"第 0 张"
+        # 会让人以为用的是 smi 列表里的第一张。
+        print(f"（可见 {len(gpus)} 张卡，只用 {gpu.name}；"
+              f"换卡请设 CUDA_VISIBLE_DEVICES）")
 
     table = load_tier_table(args.tiers)
     return resolve_profile(
@@ -158,6 +175,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     print(profile.summary())
     print()
 
+    # --slots 是 llama.cpp 专用的显式槽位数。--max-num-seqs 已经折进
+    # profile.slots，所以正常情况下不需要传它；两个都传时以 --slots 为准
+    # （它更具体，说明用户知道自己在调哪个引擎）。
     log_path = Path(args.log) if args.log else None
     handle = start_server(
         profile,
@@ -167,6 +187,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         wait=not args.no_wait,
         timeout_s=args.timeout,
         engine=getattr(args, "engine", "vllm"),
+        slots_override=getattr(args, "slots", None),
     )
 
     if args.no_wait:
@@ -482,7 +503,7 @@ def cmd_guard(args: argparse.Namespace) -> int:
 
     table = load_tier_table(args.tiers)
     ops = load_ops(table)
-    gpus = query_gpus()
+    gpus = visible_gpus()
     device = gpus[0].name if gpus else ""
     if gpus:
         print(describe(gpus[0]))
@@ -1101,9 +1122,14 @@ def _make_progress_writer(path: Path):
     state = {"last": 0.0}
 
     def hook(kind: str, task, outcome, stats) -> None:
-        # 有归属的条目都算"过了这一张"：完成 / 跳过 / 失败 / 拉黑 / 被别的进程占着。
+        # 有归属的条目都算"过了这一张"：完成 / 跳过 / 失败 / 拉黑 / 被别的进程
+        # 占着 / 无内容图被剔除。最后那个不能漏：它既不在 done 也不在 skipped，
+        # 漏了就会永远显示"差 N 张"，而主循环其实早跑完了。
+        # getattr 兜底：测试和外部脚本会塞只实现这几个字段的假 stats 对象，
+        # 为一个新计数器把整条打标路径带崩不值得。
         handled = (stats.done + stats.skipped + stats.failed
-                   + stats.blacklisted + stats.busy)
+                   + stats.blacklisted + stats.busy
+                   + getattr(stats, "blank_skipped", 0))
         now = time.monotonic()
         if handled < stats.total and now - state["last"] < 1.0:
             return
@@ -1129,7 +1155,13 @@ def cmd_client(args: argparse.Namespace) -> int:
     ops = load_ops(table)
     # 进度文件只给派工端用（心跳报进度）；不传时行为与以前完全一致。
     hook = _make_progress_writer(args.progress_file) if args.progress_file else None
-    return run_client(args, ops, table, on_progress=hook)
+    # 重试轮数缺省取配置（output.retry_failed_rounds）；命令行显式给了就用它。
+    budget = getattr(args, "retry_budget", None)
+    if budget is None:
+        budget = ops.output_spec().retry_failed_rounds
+    return run_client(args, ops, table, on_progress=hook,
+                      only_failed=bool(getattr(args, "only_failed", False)),
+                      retry_budget=int(budget or 0))
 
 
 # ---------------------------------------------------------------- 合并
@@ -1743,6 +1775,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
         rule.depth = max(0, args.artist_depth)
     if args.no_artist_inject:
         rule.inject_caption = False
+        rule.inject_tags = False
 
     formats = args.formats or cfg.get("formats") or ["parquet"]
     if isinstance(formats, str):
@@ -1864,6 +1897,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
             plan.items, out_dir, options, layout=layout,
             artist_prefix=rule.prefix,
             inject_artist=bool(rule.enabled and rule.inject_caption),
+            inject_artist_tags=bool(rule.enabled and rule.inject_tags),
             naming=naming,
             on_seal=on_seal,
             on_log=lambda message: print(f"  · {message}"),
@@ -1884,8 +1918,8 @@ def cmd_pack(args: argparse.Namespace) -> int:
     if report.skipped_missing:
         print(f"[pack][提示] {report.skipped_missing} 条没有打标产物（打标失败或未跑到），"
               f"它们不会进包；重跑一次会补齐。")
-    return 0 if report.failed == 0 and report.packed > 0 else (
-        0 if report.skipped_done > 0 else 1)
+    return 0 if (not report.failed and not report.stopped
+                 and report.packed + report.skipped_done > 0) else 1
 
 
 def _subsampling_label(value: int) -> str:
@@ -1957,7 +1991,11 @@ def build_parser() -> argparse.ArgumentParser:
         # 而 30M 量级下这几项直接决定要跑几天，必须能在起服务时当场调整。
         sp.add_argument("--max-num-seqs", type=int, default=None,
                         dest="max_num_seqs",
-                        help="服务端同时处理多少条请求（默认按分档表）")
+                        help="服务端同时处理多少条请求（默认按分档表）。"
+                             "llama.cpp 上等价于槽位数 -np")
+        sp.add_argument("--slots", type=int, default=None, dest="slots",
+                        help="llama.cpp 槽位数（-np）；--max-num-seqs 已经覆盖它，"
+                             "两个都给时以本项为准")
         sp.add_argument("--max-num-batched-tokens", type=int, default=None,
                         dest="max_num_batched_tokens",
                         help="单步 token 预算；并发调大而它不跟上，吞吐不会涨")
@@ -2294,15 +2332,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp_client.add_argument("--tag-model-dir", default=None, dest="tag_model_dir",
                            help="本地模型目录（离线时用）")
     sp_client.add_argument("--tag-device", default=None, dest="tag_device",
-                           help="cpu / cuda:0，默认 auto（有卡就用卡）")
+                           help="cpu / cuda:0，默认 auto（有卡就用卡）。"
+                                "多卡写逗号串：cuda:0,cuda:1,cuda:2——"
+                                "每张卡各加载一份权重，按批等分；"
+                                "auto 只给一张卡，不会自动铺满")
     sp_client.add_argument("--tag-precision", default=None, dest="tag_precision",
-                           choices=["fp32", "tf32", "bf16"],
+                           choices=list(TAG_PRECISIONS),
                            help="tag 前向精度：tf32 白拿 1.12~1.47× 且实测 0 tag 改判（默认）；"
                                 "bf16 到 2.36×（配 CUDA Graph 3.8×），"
                                 "但 79 张里约有 2 个 tag 会真改判")
     sp_client.add_argument("--tag-batch", type=int, default=None, dest="tag_batch",
-                           help="tag 攒批张数（仅 wd-eva02 生效）；"
-                                "批处理主要在 bf16 下兑现收益，fp32 单给 batch 只有 1.15×")
+                           help="tag 攒批张数（wd-eva02 / pixai 生效，onnx 逐张）；"
+                                "wd-eva02 的批处理主要在 bf16 下兑现收益，"
+                                "fp32 单给 batch 只有 1.15×")
     sp_client.add_argument("--tag-preprocess", default=None, dest="tag_preprocess",
                            choices=["pil", "tensor"],
                            help="tag 预处理：pil = 现状（CPU 缩放/归一化）；"
@@ -2315,6 +2357,12 @@ def build_parser() -> argparse.ArgumentParser:
                            help="用 file:// 传图，需服务端 --allowed-local-media-path 放行产物目录")
     sp_client.add_argument("--failures", default=None,
                            help="失败明细 jsonl，默认 <out-dir>/failures.jsonl")
+    sp_client.add_argument("--only-failed", action="store_true", dest="only_failed",
+                           help="只重打 failures.jsonl 里的图（不是整片重跑）。"
+                                "仍失败则按 output.retry_failed_rounds 剔除出分母")
+    sp_client.add_argument("--retry-budget", type=int, default=None, dest="retry_budget",
+                           help="--only-failed 时允许重试几轮；0=不剔除，失败仍记账。"
+                                "不传则用 output.retry_failed_rounds（默认 2）")
     sp_client.add_argument("--max-failures", type=int, default=3, dest="max_failures",
                            help="同一 id 累计失败多少次后跳过（跨运行累计，0=不限制）")
     sp_client.add_argument("--no-guard", action="store_true", dest="no_guard",
@@ -2447,7 +2495,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="本地权重目录（wd-eva02 认这个）")
     sp_tag.add_argument("--device", default="auto")
     sp_tag.add_argument("--precision", default="bf16",
-                        choices=["fp32", "tf32", "bf16"])
+                        choices=list(TAG_PRECISIONS))
     sp_tag.add_argument("--batch", type=int, default=4)
     sp_tag.add_argument("--preprocess", default="pil", choices=["pil", "tensor"],
                         help="预处理位置：pil = CPU 缩放/归一化（默认）；"
@@ -2506,7 +2554,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="本地权重目录（wd-eva02 认这个）")
     sp_pack.add_argument("--device", default="auto")
     sp_pack.add_argument("--precision", default="bf16",
-                         choices=["fp32", "tf32", "bf16"])
+                         choices=list(TAG_PRECISIONS))
     sp_pack.add_argument("--batch", type=int, default=4)
     sp_pack.add_argument("--preprocess", default="pil", choices=["pil", "tensor"],
                          help="预处理位置：pil = CPU 缩放/归一化（默认）；"

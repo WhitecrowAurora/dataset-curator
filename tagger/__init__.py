@@ -13,7 +13,7 @@
 __version__ = "0.1.0"
 
 from .config import ConfigError, ModelSpec, RunProfile, TierSpec, load_tier_table, resolve_profile
-from .hardware import GPUInfo, describe, query_gpus
+from .hardware import GPUInfo, describe, query_gpus, visible_gpus
 from .schema import Annotation, Provenance, QC, WorkItem
 
 __all__ = [
@@ -31,4 +31,5 @@ __all__ = [
     "load_tier_table",
     "query_gpus",
     "resolve_profile",
+    "visible_gpus",
 ]

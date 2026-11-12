@@ -34,8 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -208,8 +206,19 @@ def list_prompts() -> list[dict[str, Any]]:
 
 
 def info() -> dict[str, Any]:
-    """给 GET /api/prompts 的整体快照：目录 + 清单。"""
-    return {"dir": _display_path(dir_path()), "items": list_prompts()}
+    """给 GET /api/prompts 的整体快照：两个目录 + 两份清单。
+
+    `items` 是成品（prompt/*.json），`rules` 是可追加的规则片段
+    （prompts/*.md）——选择器把两组并排展示，勾选顺序就是拼接顺序。
+    """
+    from . import prompt_rules as rules
+
+    return {
+        "dir": _display_path(dir_path()),
+        "items": list_prompts(),
+        "rules": rule_files(),
+        "rules_dir": _display_path(rules.RULES_DIR),
+    }
 
 
 def find(pid: str) -> Path:
@@ -274,14 +283,123 @@ def create(name: str, fields: dict[str, Any]) -> dict[str, Any]:
     return detail(clean_name)
 
 
-def reveal() -> str:
+def reveal() -> dict[str, Any]:
     """在系统文件管理器里打开 prompt 目录。目录不存在就先建，
-    否则"打开文件夹"会在第一次使用时报错——那不是错误，是还没建。"""
-    target = ensure_dir().resolve()
-    if sys.platform.startswith("win"):
-        subprocess.Popen(["explorer", str(target)])          # noqa: S603,S607
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(target)])              # noqa: S603,S607
-    else:
-        subprocess.Popen(["xdg-open", str(target)])          # noqa: S603,S607
-    return str(target)
+    否则"打开文件夹"会在第一次使用时报错——那不是错误，是还没建。
+
+    打开失败（无桌面环境 / 没装 xdg-utils）不再静默：`opened=False` 加上
+    `path`，页面把路径摆出来让人自己复制。远程服务器上看不到窗口是常态，
+    这里不能假装成功，也不该报成错误拦住房操作。
+    """
+    from .reveal import open_dir
+
+    return open_dir(ensure_dir())
+
+
+# ---------------------------------------------------------------- 组合提示词
+#
+# 选择器支持多选：一份成品（`prompt/*.json`）打底，若干规则片段
+# （`prompts/*.md`）按勾选顺序追加。为什么不是"片段也能单独当整段指令"：
+#   * 片段只有某几节规则（TAG / CAPTION / TEXT），单独拿它顶掉内置那份，会把
+#     产出规格（长度、数量、格式）整段丢掉，模型只能自己猜；
+#   * 内置那份本来就自动读 `prompts/*.md`，再手动勾同一份只是重复一遍。
+# 所以多选的实际语义是"选一份底稿，往上叠条款"。
+
+FILE_PREFIX = "file:"
+RULE_PREFIX = "rule:"
+
+
+def rule_files() -> list[dict[str, Any]]:
+    """`prompts/*.md` 清单：给选择器的「规则片段」分组用。"""
+    from . import prompt_rules as rules
+
+    out: list[dict[str, Any]] = []
+    try:
+        paths = sorted(rules.RULES_DIR.glob("*.md"))
+    except OSError:
+        return out
+    for path in paths:
+        try:
+            rs = rules.load_rules(only=path.stem)
+        except Exception:                  # noqa: BLE001 - 坏的片段只是不列出来
+            continue
+        sections = [s for s in rules.KNOWN_SECTIONS if rs.get(s)]
+        if not sections:
+            continue
+        out.append({
+            "id": path.stem,
+            "name": path.stem,
+            "sections": sections,
+            "chars": sum(len(rs.get(s)) for s in sections),
+            "path": _display_path(path),
+        })
+    return out
+
+
+def render_rule(stem: str, *, zh: bool, mode: str,
+                text_rules: str | bool = "") -> str:
+    """把一份 `prompts/<stem>.md` 渲染成可追加的规则段（按 mode/语言取节）。
+
+    只取与本次产出相关的节：mode 含 tag 才取 TAG，含 nl 才取 CAPTION/
+    CAPTION_ZH，`text_rules` 开着才追加 TEXT。画师句（ARTIST_*）不在此列——
+    它按"这张图有没有可信画师"逐图注入，拼进固定指令里会变成每张都要求写。
+    """
+    from . import prompt_rules as rules
+
+    rs = rules.load_rules(only=stem)
+    want_tag = mode in ("tag", "both")
+    want_nl = mode in ("nl", "both")
+    blocks: list[str] = []
+    if want_tag:
+        blocks.append(rs.get(rules.SECTION_TAG))
+    if want_nl:
+        blocks.append(rs.get(rules.SECTION_CAPTION_ZH if zh
+                              else rules.SECTION_CAPTION))
+        if text_rules:
+            blocks.append(rs.text_rules(zh=zh))
+    return "\n\n".join(b for b in blocks if b.strip())
+
+
+def compose(parts, *, mode: str = "both",
+            text_rules: str | bool = "") -> tuple[str, str, str]:
+    """按顺序把多选拼成 (英文提示词, 中文提示词, system)。
+
+    `parts` 每项形如 `file:<名字>`（整段成品）或 `rule:<名字>`（规则片段，
+    按 mode/语言渲染后整段追加），块之间空一行，顺序就是勾选顺序。
+
+    中文版：**任一成品没写 prompt_zh 就整体返回空串**。半中半英两套指令拼在
+    一起，模型只会照其中一套写，事后也解释不清"为什么这批中文只有一种样子"；
+    与单份提示词的口径保持一致（没写就是没有，不拿内置中文版去凑）。
+    调用方拿到空串时退回全英文并警告。
+
+    返回 ("", "", "") 表示什么都没选，调用方走内置生成那条路。
+    """
+    en: list[str] = []
+    zh: list[str] = []
+    system = ""
+    zh_ok = True
+    for raw in parts or ():
+        item = str(raw or "").strip()
+        if not item:
+            continue
+        kind, _, name = item.partition(":")
+        if not name:                       # 没写前缀：按成品处理，宽容旧数据
+            kind, name = "file", item
+        if kind == RULE_PREFIX.rstrip(":"):
+            block_en = render_rule(name, zh=False, mode=mode, text_rules=text_rules)
+            block_zh = render_rule(name, zh=True, mode=mode, text_rules=text_rules)
+            if block_en.strip():
+                en.append(block_en)
+            if block_zh.strip():
+                zh.append(block_zh)
+            continue
+        doc = load(name)
+        if doc.prompt.strip():
+            en.append(doc.prompt)
+        if doc.prompt_zh.strip():
+            zh.append(doc.prompt_zh)
+        else:
+            zh_ok = False
+        if not system and doc.system.strip():
+            system = doc.system
+    return "\n\n".join(en), ("\n\n".join(zh) if zh_ok else ""), system

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Check,
@@ -32,31 +32,35 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<ResultItem | null>(null)
+  const requestSeq = useRef(0)
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(query.trim()), 250)
+    if (query.trim() === debounced) return
+    const t = window.setTimeout(() => {
+      setDebounced(query.trim())
+      setOffset(0)
+    }, 250)
     return () => window.clearTimeout(t)
-  }, [query])
+  }, [query, debounced])
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setError(null)
     try {
-      setData(await api.results(jobId, { offset, limit, q: debounced, only_failed: onlyFailed }))
+      const result = await api.results(jobId, { offset, limit, q: debounced, only_failed: onlyFailed })
+      if (seq === requestSeq.current) setData(result)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (seq === requestSeq.current) setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }, [jobId, offset, limit, debounced, onlyFailed])
 
   useEffect(() => {
     void load()
+    return () => { requestSeq.current += 1 }
   }, [load])
-
-  useEffect(() => {
-    setOffset(0)
-  }, [debounced, onlyFailed, limit])
 
   const pages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1
   const page = Math.floor(offset / limit) + 1
@@ -132,7 +136,10 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
 
         <button
           type="button"
-          onClick={() => setOnlyFailed((v) => !v)}
+          onClick={() => {
+            setOnlyFailed((v) => !v)
+            setOffset(0)
+          }}
           className={cn(
             'inline-flex items-center gap-1.5 text-[12px]',
             onlyFailed ? 'lx-btn-danger' : 'lx-btn-ghost',
@@ -148,7 +155,10 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
 
         <select
           value={limit}
-          onChange={(e) => setLimit(Number(e.target.value))}
+          onChange={(e) => {
+            setLimit(Number(e.target.value))
+            setOffset(0)
+          }}
           className="lx-select !w-auto text-xs"
           aria-label="每页数量"
         >

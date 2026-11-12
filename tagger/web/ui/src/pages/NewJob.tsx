@@ -21,6 +21,7 @@ import {
   Square,
   Tags,
   TriangleAlert,
+  ChevronDown,
 } from 'lucide-react'
 import {
   api,
@@ -32,15 +33,18 @@ import {
   type PlanPreview,
   type PromptDoc,
   type PromptItem,
+  type PromptRule,
+  type TagVram,
   type VllmModelOption,
   type VllmPlan,
   type VllmProbe,
   type VllmSlotPlan,
   type VllmState,
 } from '../lib/api'
+import { ENDPOINT_PRESETS, endpointPresetOf } from '../lib/endpoint'
 import { basename, fmtBytes, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/ui/launcher'
-import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
+import { ChoiceGrid, ChoiceMulti, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { useFolderPicker } from '../components/FolderPicker'
 import { LlamaSetup } from '../components/LlamaSetup'
 import { MultiGpuPanel } from '../components/MultiGpuPanel'
@@ -63,7 +67,12 @@ const BACKENDS_VLM = [
   ...BACKENDS,
 ]
 
-const PRECISIONS = ['bf16', 'tf32', 'fp32'] as const
+// 分类头精度。fp16 是为 V100（Volta, sm_70）这类**没有 bf16 硬件支持**的卡
+// 留的：它们的 fp16 tensor core 是主力算力，fp32 慢、bf16 跑不了。
+// ★fp16 与 bf16 的风险不一样：fp16 只有 5 位指数（上界 65504），attention /
+//   LayerNorm 在极端输入下可能溢出成 inf；bf16 是 8 位指数、不会溢出。
+//   所以 fp16 更依赖事后的一致性校验，不能因为"也是半精度"就当成等价物。
+const PRECISIONS = ['bf16', 'tf32', 'fp32', 'fp16'] as const
 // VLM 权重精度。与上面那个 tag 分类头的 fp32/tf32/bf16 是两件事，别混用：
 //   bf16  → 不传 --quantization，按权重自带 dtype 加载（最稳，显存最贵）
 //   fp8   → --quantization fp8，vLLM 在线量化（Ada 及以上才支持）
@@ -111,8 +120,62 @@ const ALL_PRECISION_LABELS: Record<string, string> = {
 function looksLikeShard(path: string): boolean {
   return /\.(parquet|zip|tar|tgz|tar\.gz)$/i.test(path.trim())
 }
-const DEVICES = ['auto', 'cuda:0', 'cuda:1', 'cpu'] as const
-const BATCHES = ['1', '2', '4', '8', '16'] as const
+// 设备候选的兜底。真正用哪几个由 `/api/defaults` 的 `devices` 给（后端按
+// 本机实际卡数生成）——写死一张表的结果是 3 卡的机器选不到第三张，而用户
+// 会以为"程序不支持多卡"。这里只在探测失败时兜住最安全的两项。
+const DEVICES_FALLBACK = ['auto', 'cpu']
+
+// 多卡分工。只对多卡有意义：
+//   batch = 一个包在跑，每凑一批等分给各卡（包少图多）
+//   pack  = N 个包同时跑，一个包完整归一张卡（包多；日志也能按卡定位）
+const TAG_MODES = ['batch', 'pack'] as const
+// 批大小改成 1..100 的滑动条（原来只有 1/2/4/8/16 五个固定档）。
+// ★上限放到 100 不等于"能拖到 100 就能跑"：pixai 在 1008² 下每个并发单位
+//   要吃约 2.1 GiB 激活，16GB 卡 batch 8 就超了。所以滑动条必须配着
+//   TagVramHint 一起用——它当场告诉你这一档撑不撑得住。
+const BATCH_MIN = 1
+const BATCH_MAX = 100
+
+/**
+ * 滑动条下面的显存提示。
+ *
+ * 三档颜色对应三种后果，措辞刻意区分开：
+ *   ok    —— 不显示（别拿没用的信息占地方）
+ *   tight —— 能跑，但别再加了
+ *   over  —— 超了可用显存。**不一定会报错**：Windows 驱动会把溢出的部分
+ *            放到主机内存，每步都过 PCIe，吞吐掉一个数量级。pixai 用 tf32
+ *            跑出 4.6s/张（bf16 只要 0.145s/张）就是这么来的。
+ *            所以这一档必须红出来——否则用户看到"没崩"会以为没事。
+ */
+function TagVramHint({ vram, batch }: { vram: TagVram | null; batch: number }) {
+  if (!vram) return null
+  if (!vram.ok) {
+    return <p className="text-[11px] text-lx-muted">{vram.reason || '无法估算显存'}</p>
+  }
+  if (vram.level === 'cpu') {
+    return <p className="text-[11px] text-lx-muted">{vram.advice}</p>
+  }
+  const used = `${batch} 张约 ${vram.estimate_gb} GiB`
+  const room = `可用 ${vram.budget_gb} GiB`
+  if (vram.level === 'ok') {
+    return (
+      <p className="text-[11px] text-lx-muted">
+        {used} · {room}
+        {vram.total_gb ? `（共 ${vram.total_gb} GiB）` : ''}
+      </p>
+    )
+  }
+  const over = vram.level === 'over'
+  return (
+    <p
+      className={`text-[11px] ${over ? 'text-lx-danger' : 'text-lx-warning'}`}
+      role={over ? 'alert' : undefined}
+    >
+      {used} · {room}
+      {vram.advice ? ` — ${vram.advice}` : ''}
+    </p>
+  )
+}
 // 预处理位置。解码都在 CPU，区别只在缩放/归一化：pil = CPU（现状），
 // tensor = 上卡。上卡要 CUDA，且只有"解码比前向重"时才有收益。
 const PREPROCESS = ['pil', 'tensor'] as const
@@ -247,12 +310,23 @@ export function NewJob({
   const [outDir, setOutDir] = useState('')
   const [backend, setBackend] = useState('wd-eva02')
   const [modelDir, setModelDir] = useState('')
-  const [device, setDevice] = useState<string>('auto')
+  // 设备清单。多选是"用几张卡跑 tag"，不是"机器有几张卡"：每张卡各加载
+  // 一份权重，显存与启动时间都跟着翻，所以默认只给 auto（= 单卡）。
+  const [tagDevices, setTagDevices] = useState<string[]>(['auto'])
+  // 单选口径的等价物（旧快照、旧方案、以及产物里的 `device` 都还是单值）。
+  // 取第一项而不是"有多个就写 auto"：至少能如实反映"用了其中这张卡"。
+  const device = tagDevices[0] ?? 'auto'
+  // 多卡分工：batch = 批内切分（默认，与加这个开关之前一致）
+  const [tagMode, setTagMode] = useState<'batch' | 'pack'>('batch')
   const [precision, setPrecision] = useState<string>('bf16')
   const [batch, setBatch] = useState(4)
   const [preprocess, setPreprocess] = useState<string>('pil')
   const [threshold, setThreshold] = useState(0.35)
   const [limit, setLimit] = useState(0)
+  // 显存估算：批大小从"固定下拉 1/2/4/8/16"改成滑动条之后，用户拖到哪
+  // 都得当场知道撑不撑得住——过去选 16 是在加载完权重、跑完第一批之后
+  // 才 OOM，报的还是一段 CUDA 内部错误。
+  const [tagVram, setTagVram] = useState<TagVram | null>(null)
   const [force, setForce] = useState(false)
   const [recursive, setRecursive] = useState(true)
   const [includeZips, setIncludeZips] = useState(true)
@@ -298,9 +372,20 @@ export function NewJob({
   const [zhRatio, setZhRatio] = useState(0.3)
   // 用哪份 NL 提示词（prompt/<名字>.json）。空串 = 内置那份，按上面的长度与
   // 比例参数生成——这也是改造前的唯一行为，所以默认值保持不变。
-  const [promptId, setPromptId] = useState('')
+  // 提示词多选：`file:<名字>` 是成品（prompt/*.json，整段），`rule:<名字>` 是
+  // 规则片段（prompts/*.md，按当前模式/语言渲染后追加）。顺序 = 拼接顺序。
+  // 空数组 = 内置那份（按参数生成），也就是改造前的唯一行为。
+  const [promptParts, setPromptParts] = useState<string[]>([])
   const [prompts, setPrompts] = useState<PromptItem[]>([])
+  const [promptRules, setPromptRules] = useState<PromptRule[]>([])
   const [promptDir, setPromptDir] = useState('')
+  // 打开文件夹失败时的提示（多半是服务端没有桌面环境）。不放 error：
+  // error 会挡住提交，而"窗口没弹出来"不影响任务能不能跑。
+  const [revealHint, setRevealHint] = useState('')
+  const [promptRulesDir, setPromptRulesDir] = useState('')
+  const [promptPickerOpen, setPromptPickerOpen] = useState(false)
+  // 主成品 = 第一个 file: 项。编辑按钮与"文件不在了"都对着这一份说话。
+  const promptId = promptParts.find((p) => p.startsWith('file:'))?.slice(5) ?? ''
   const [promptOpen, setPromptOpen] = useState(false)
   const [promptMode, setPromptMode] = useState<'edit' | 'create'>('edit')
   const [timeoutS, setTimeoutS] = useState(90)
@@ -428,9 +513,18 @@ export function NewJob({
   const [probe, setProbe] = useState<VllmProbe | null>(null)
   const [probeBusy, setProbeBusy] = useState(false)
 
-  // ---- HF 输入（engine="vlm"）。令牌只在提交那次请求里走一趟
+  // ---- HF 输入（engine="vlm"）
+  //
+  // 令牌的规矩和 API 密钥一样：**浏览器内存里只有用户刚敲进去的那一份**。
+  // 勾了「记住」才由后端落盘，之后后端只回脱敏值；提交时不填就由后端自己
+  // 从存档里取（`nl_api.resolve_hf_token`，且只在同一个仓库上取）。
   const [hfRepo, setHfRepo] = useState('')
   const [hfToken, setHfToken] = useState('')
+  const [rememberHf, setRememberHf] = useState(false)
+  // undefined = 还没动过，用 defaults 里那份；null = 明确没有存档。
+  const [savedHfOverride, setSavedHfOverride] = useState<
+    { repo: string; token_masked: string } | null | undefined
+  >(undefined)
   const [hfRevision, setHfRevision] = useState('main')
   const [hfAvailable, setHfAvailable] = useState<string[] | null>(null)
   const [hfFiles, setHfFiles] = useState<string[]>([])
@@ -443,6 +537,12 @@ export function NewJob({
   // 关掉就等价于 hf_conns=1，服务端不支持 Range 时也会自动退回单连接。
   const [hfMulti, setHfMulti] = useState(true)
   const [hfConns, setHfConns] = useState(4)
+  // 分片缓存目录。留空 = run/hf-cache（程序目录下，与「分片下载」页共用同一份
+  // 缓存，提前下好的片能直接命中）。分片每片 1~2 GB，工作盘常年比产物盘小。
+  const [hfCache, setHfCache] = useState('')
+  // '@out' 是哨兵：跟着产物目录那块盘走（后端解析成 out_dir 父目录下的
+  // hf-cache，不是塞进 out_dir 里，见 jobs._resolve_hf_cache）。
+  const cacheSameAsOut = hfCache.trim() === '@out'
   // 给产物留的磁盘余量（GB）。0 = 自动（最大分片的 30%，不少于 2 GB）
   const [hfReserveGb, setHfReserveGb] = useState(0)
   // HF 请求走的代理。留空 = 用下载页/模型下载那份全局代理，
@@ -464,8 +564,21 @@ export function NewJob({
   const [packScanOpen, setPackScanOpen] = useState(false)
   // 结果缓存：同图同参复用上次产出。默认关：首轮命中率为 0，而算图哈希有成本
   const [cacheOn, setCacheOn] = useState(false)
-  // 目标盘剩余空间（字节）。填预取/余量时最想知道的就是这个数。
-  const [diskFree, setDiskFree] = useState<number | null>(null)
+  // 两块盘的剩余空间（字节）。分片写在**缓存目录**里，所以「磁盘余量」真正
+  // 卡住的是缓存盘；产物盘只决定产物写不写得进去，两者经常不是同一块盘。
+  const [diskFree, setDiskFree] = useState<number | null>(null)   // 缓存盘
+  const [outFree, setOutFree] = useState<number | null>(null)     // 产物盘
+  // 后端解析出来的缓存目录绝对路径（相对路径按服务进程的 cwd 解释），显示用
+  const [cachePath, setCachePath] = useState('')
+
+  // ---- 下载源（镜像站）
+  // 这是**全局**设置（与模型页共用 configs/models.json 那一份），不是本次任务的
+  // 参数；放在底部是因为"填了在线仓库 → 发现下不动 → 就地换镜像"是最常见的顺序。
+  const [endpointPick, setEndpointPick] = useState('')
+  const [endpointDraft, setEndpointDraft] = useState('')
+  const [endpointNow, setEndpointNow] = useState('')
+  const [endpointMsg, setEndpointMsg] = useState('')
+  const [endpointBusy, setEndpointBusy] = useState(false)
 
   // ---- 产物形态（engine="vlm"）
   // 默认跟 CLI 一致用 json：每张图一份，断点续跑就看文件在不在，出问题也
@@ -517,6 +630,8 @@ export function NewJob({
     backend,
     modelDir,
     device,
+    tagDevices,
+    tagMode,
     precision,
     batch,
     preprocess,
@@ -553,6 +668,7 @@ export function NewJob({
     captionLo,
     captionHi,
     zhRatio,
+    promptParts,
     promptId,
     timeoutS,
     maxPixels,
@@ -587,6 +703,7 @@ export function NewJob({
     hfPrefetch,
     hfMulti,
     hfConns,
+    hfCache,
     hfReserveGb,
     hfProxy,
     cacheOn,
@@ -641,6 +758,12 @@ export function NewJob({
   const providerMeta = (p: VlmProvider) => providerList.find((o) => o.value === p)
   const savedKey =
     savedKeyOverride !== undefined ? savedKeyOverride : (providerMeta(vlmProvider)?.saved ?? null)
+  // HF 存档。只在仓库对得上时才提醒"已记住"——换个仓库它就自动不生效
+  // （后端同样这么判，见 nl_api.resolve_hf_token），页面上先说出来，
+  // 免得用户以为"已记住"是全局的。
+  const savedHf = savedHfOverride !== undefined ? savedHfOverride : (defaults?.hf_saved ?? null)
+  const savedHfApplies =
+    !!savedHf && !!hfRepo.trim() && savedHf.repo.toLowerCase() === hfRepo.trim().toLowerCase()
 
   // tiers.yaml 的 models 段就是可选权重的唯一真相源：页面不写死名字，
   // 配置里加一个（比如换成本地量化版）下拉里就多一项。
@@ -733,6 +856,19 @@ export function NewJob({
     }
   }
 
+  // 与 toggleRemember 同一套：取消勾选立刻删掉存档，否则令牌会永远躺在
+  // 盘上而页面上看不出还存着。
+  const toggleRememberHf = async (checked: boolean) => {
+    setRememberHf(checked)
+    if (checked || !savedHf) return
+    try {
+      const r = await api.saveHfToken({ token: '', repo: '', remember: false })
+      setSavedHfOverride(r.saved)
+    } catch {
+      // 删存档失败不打断操作；下次进页面还会显示"已记住"。
+    }
+  }
+
   // W4A16 不是运行时开关：没有量化权重时选了也只会回退 BF16。所以先弹窗
   // 问"现在量化吗"，用户取消就回到默认的 BF16（见 QuantizeDialog 的说明）。
   const choosePrecision = (v: string) => {
@@ -743,7 +879,7 @@ export function NewJob({
     setVllmPrecision(v)
   }
 
-  // ---- NL 提示词文件（prompt/*.json）
+  // ---- NL 提示词（prompt/*.json 成品 + prompts/*.md 规则片段）
 
   const refreshPrompts = () => {
     api
@@ -751,8 +887,22 @@ export function NewJob({
       .then((r) => {
         setPrompts(r.items)
         setPromptDir(r.dir)
+        setPromptRules(r.rules ?? [])
+        setPromptRulesDir(r.rules_dir ?? '')
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+  }
+
+  /** 勾/取消一项。顺序按勾选先后追加到底部——拼接就是照这个顺序来的。 */
+  const togglePromptPart = (part: string) => {
+    setPromptParts((prev) =>
+      prev.includes(part) ? prev.filter((p) => p !== part) : [...prev, part],
+    )
+  }
+
+  const promptPartLabel = (part: string) => {
+    const name = part.includes(':') ? part.slice(part.indexOf(':') + 1) : part
+    return part.startsWith('rule:') ? `${name}（片段）` : name
   }
 
   const openPromptDialog = (next: 'edit' | 'create') => {
@@ -761,13 +911,20 @@ export function NewJob({
   }
 
   const revealPromptDir = () => {
-    // 打开的是后端那台机器的文件管理器（本机工具，通常就是同一台）
-    api.revealPrompts().catch((err) => setError(err instanceof Error ? err.message : String(err)))
+    // 打开的是后端那台机器的文件管理器（本机工具，通常就是同一台）。
+    // 服务器上没有图形界面时窗口不会出现，那就把路径摆出来让人自己复制。
+    setRevealHint('')
+    api
+      .revealPrompts()
+      .then((r) => {
+        if (!r.opened) setRevealHint(`${r.detail}：${r.path}`)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }
 
   const onPromptSaved = (doc: PromptDoc) => {
-    // 新建后直接选中它：刚写完这份，下一步就是用它跑一批
-    setPromptId(doc.id)
+    // 新建/改完后把它顶成成品，规则片段保留：刚写完这份，下一步就是拿它跑一批
+    setPromptParts((prev) => [`file:${doc.id}`, ...prev.filter((p) => !p.startsWith('file:'))])
     refreshPrompts()
   }
 
@@ -817,6 +974,16 @@ export function NewJob({
     if (next === 'hf') setInputDir('')
     else setHfRepo('')
   }
+  // ★inputMode 只是"显示哪一个输入框"，真正决定提交内容的是 hfRepo（后端
+  // 看到 hf_repo 就走仓库）。这两份状态有两处会绕过切换按钮直接改数据：恢复
+  // 上次的表单（putS('hf_repo', …)）、以及选离线包时清空 hfRepo。任何一处漏
+  // 同步，页面就会"显示本地、实际按在线仓库跑"（或者反过来，填了仓库却看不到
+  // 输入框）。所以让数据说了算：仓库名非空就一定是 HF 模式。
+  // 只做这一个方向：切到「在线仓库」时仓库名还是空的，此时不能把它推回本地，
+  // 否则用户点了切换却看不到输入框、也就没机会填。
+  useEffect(() => {
+    if (isVlm && hfRepo.trim()) setInputMode('hf')
+  }, [isVlm, hfRepo])
 
   // 首次挂载灌配置默认值；之后每次切回本页只刷新"可选清单"（模型可能刚在
   // 模型管理页加过），不动用户已经填好的路径与参数。
@@ -831,7 +998,8 @@ export function NewJob({
         initedRef.current = true
         setBackend(d.backend)
         setModelDir(d.model_dir)
-        setDevice(d.device)
+        setTagDevices([d.device || 'auto'])
+        setTagMode(d.tag_mode === 'pack' ? 'pack' : 'batch')
         setPrecision(d.precision)
         setBatch(d.batch)
         setThreshold(d.threshold)
@@ -869,8 +1037,8 @@ export function NewJob({
       .catch(() => setSaved({ form: {}, spec: {} }))  // 读不到就照默认值开
   }, [])
 
-  // 提示词清单：进页面拉一次。用户在文件管理器里新建/改名之后点一下「刷新」即可，
-  // 不轮询——那个目录不会在背后自己变，唯一的写入方就是本页面。
+  // 提示词清单（成品 + 规则片段）：进页面拉一次。用户在文件管理器里新建/改名
+  // 之后点一下「刷新」即可，不轮询——那两个目录不会在背后自己变。
   useEffect(() => {
     let alive = true
     api
@@ -879,8 +1047,10 @@ export function NewJob({
         if (!alive) return
         setPrompts(r.items)
         setPromptDir(r.dir)
+        setPromptRules(r.rules ?? [])
+        setPromptRulesDir(r.rules_dir ?? '')
       })
-      .catch(() => undefined)   // 目录还没建：下拉框里只剩「内置」，不打扰
+      .catch(() => undefined)   // 目录还没建：选择器里只剩「内置」，不打扰
     return () => {
       alive = false
     }
@@ -921,6 +1091,36 @@ export function NewJob({
       .then((r) => setPacks(r.packs))
       .catch(() => setPacks([]))
   }, [active])
+
+  // 下载源：进页面读一次"当前生效"。页面设置 > HF_ENDPOINT > 默认镜像，
+  // 这里的 effective 是后端算完的那一个，前端不重复推导优先级。
+  useEffect(() => {
+    if (!active) return
+    api
+      .models()
+      .then((d) => {
+        setEndpointPick(endpointPresetOf(d.endpoint))
+        setEndpointDraft(d.endpoint)
+        setEndpointNow(d.effective_endpoint)
+      })
+      .catch(() => undefined)
+  }, [active])
+
+  async function saveEndpoint(url: string) {
+    setEndpointBusy(true)
+    setEndpointMsg('')
+    try {
+      const res = await api.saveEndpoint(url)
+      setEndpointNow(res.effective)
+      setEndpointPick(endpointPresetOf(url))
+      setEndpointDraft(url)
+      setEndpointMsg('已保存')
+    } catch (err) {
+      setEndpointMsg(err instanceof Error ? err.message : String(err))
+    } finally {
+      setEndpointBusy(false)
+    }
+  }
 
   // 本机 vLLM 的状态。只选 VLM 引擎时才轮询：首次加载要几分钟，
   // 页面上必须能看见"启动中/就绪/失败 + 日志尾巴"，否则只有一个转不完的圈。
@@ -1098,6 +1298,28 @@ export function NewJob({
   const capOk = engineCap ? engineCap.ok : vllm?.local_ok
   const capReason = (engineCap ? engineCap.reason : vllm?.local_reason) || ''
 
+  // 批大小 / 精度 / 卡变化时重新估算显存。
+  // 拖滑动条会连续触发 setState，所以节流 300ms 再打接口，否则一次拖动
+  // 能刷出几十个请求，而这只是"提示"，不该跟用户抢资源。
+  useEffect(() => {
+    let alive = true
+    const timer = window.setTimeout(() => {
+      api
+        .tagVram({ backend: backend || 'pixai', precision, batch, device })
+        .then((v) => {
+          if (alive) setTagVram(v)
+        })
+        // 估算拿不到不该妨碍填表（比如非 Windows、没装 nvidia-smi）
+        .catch(() => {
+          if (alive) setTagVram(null)
+        })
+    }, 300)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [backend, precision, batch, device])
+
   async function startVllm() {
     setVllmBusy(true)
     setVllmError(null)
@@ -1237,7 +1459,15 @@ export function NewJob({
           recursive,
           include_zips: includeZips,
           include_loose: includeLoose,
-          limit: 0,
+          // ★这三项以前没传，预览演的是另一套参数：
+          //   pack 缺省 true（按画师+全局序号编号、layout 生效），而本页没有
+          //   "封包"开关、createJob 也不发 pack，后端按 false 走——预览里的
+          //   `artist-000001.jpg` 实际会变成相对路径当 id。
+          //   limit 缺省 0（全量），表单限了 N 张却按全量报"待处理"。
+          //   out_dir 缺省空，盘位估算落在另一个目录上。
+          pack: false,
+          limit: limit > 0 ? limit : 0,
+          out_dir: effectiveOut || undefined,
           seq_width: seqWidth,
         })
         .then((p) => {
@@ -1256,7 +1486,7 @@ export function NewJob({
       window.clearTimeout(timer)
     }
   }, [isVlm, inputDir, layout, artist, artistDepth, artistTable, recursive, includeZips,
-      includeLoose, seqWidth, useHf])
+      includeLoose, seqWidth, useHf, limit, effectiveOut])
 
   function toggleKeep(value: string) {
     setKeepCategories((prev) =>
@@ -1270,25 +1500,44 @@ export function NewJob({
     )
   }
 
-  // 目标盘剩余空间：决定"能预取几片"的那个数，开跑前就该看得见。
+  // 缓存盘剩余空间：决定"能预取几片 / 余量够不够"的那个数，开跑前就该看得见。
+  // 产物盘也一起量：两个数并排摆着，用户才知道该把哪个目录换到别的盘。
   useEffect(() => {
     if (!useHf) {
       setDiskFree(null)
+      setOutFree(null)
+      setCachePath('')
       return
     }
     let alive = true
+    // 同盘时缓存盘的数就是产物盘那个数，不必再解析一次路径
+    const cacheProbe = cacheSameAsOut
+      ? outDir.trim() || '.'
+      : hfCache.trim() || 'run/hf-cache'
+    api
+      .diskFree(cacheProbe)
+      .then((res) => {
+        if (!alive) return
+        setDiskFree(res.free_bytes)
+        setCachePath(res.path)
+      })
+      .catch(() => {
+        if (!alive) return
+        setDiskFree(null)
+        setCachePath('')
+      })
     api
       .diskFree(outDir.trim() || '.')
       .then((res) => {
-        if (alive) setDiskFree(res.free_bytes)
+        if (alive) setOutFree(res.free_bytes)
       })
       .catch(() => {
-        if (alive) setDiskFree(null)
+        if (alive) setOutFree(null)
       })
     return () => {
       alive = false
     }
-  }, [useHf, outDir])
+  }, [useHf, outDir, hfCache])
 
   async function loadHfFiles() {
     if (!hfRepo.trim()) return
@@ -1356,7 +1605,19 @@ export function NewJob({
 
     // ---- 公共段
     putS('out_dir', setOutDir)
-    putS('device', setDevice)
+    // 设备：优先新的清单字段，其次旧的单值。两者都缺就留当前值。
+    const devs = s.tag_devices
+    if (Array.isArray(devs)) {
+      const picked = devs.filter((x): x is string => typeof x === 'string')
+      if (picked.length) setTagDevices(picked)
+    } else {
+      putS('device', (v) => setTagDevices([v]))
+    }
+    // 旧方案里没有 tag_mode：回落 batch（与加这个开关之前的行为一致）
+    const savedMode = s.tag_mode
+    if (typeof savedMode === 'string') {
+      setTagMode(savedMode === 'pack' ? 'pack' : 'batch')
+    }
     putS('precision', setPrecision)
     putN('batch', setBatch)
     putS('preprocess', setPreprocess)
@@ -1430,8 +1691,13 @@ export function NewJob({
     }
     // 0 是合法值（全英文），所以按"键存在就灌"来还原，不能当假值跳过。
     putN('caption_zh_ratio', setZhRatio)
-    // 空串 = 内置提示词，同样是合法值（不是"没填"）。
-    putS('prompt_id', setPromptId)
+    // 提示词：新快照存 prompt_parts（多选数组）；旧快照只有单片 prompt_id，
+    // 转成一个 file: 项照用。空 = 内置提示词，同样是合法值。
+    if (Array.isArray(s.prompt_parts)) {
+      setPromptParts(s.prompt_parts.filter((x): x is string => typeof x === 'string'))
+    } else if (typeof s.prompt_id === 'string') {
+      setPromptParts(s.prompt_id ? [`file:${s.prompt_id}`] : [])
+    }
     putN('timeout_s', setTimeoutS)
     putN('concurrency', setConcurrency)
     putB('multi_gpu', setMultiGpu)
@@ -1478,6 +1744,7 @@ export function NewJob({
       setHfConns(conns)
       setHfMulti(conns > 1)     // 1 连接 = 关掉多线程下载，两者是同一个开关
     }
+    putS('hf_cache', setHfCache)
     putN('hf_reserve_gb', setHfReserveGb)
     putS('hf_proxy', setHfProxy)
     putB('cache', setCacheOn)
@@ -1545,7 +1812,15 @@ export function NewJob({
     putS('outDir', setOutDir)
     putS('backend', setBackend)
     putS('modelDir', setModelDir)
-    putS('device', setDevice)
+    // 逐项快照存的是清单（tagDevices）；更老的存档只有单值 device。
+    const savedDevs = f.tagDevices
+    if (Array.isArray(savedDevs)) {
+      const picked = savedDevs.filter((x): x is string => typeof x === 'string')
+      if (picked.length) setTagDevices(picked)
+    } else {
+      putS('device', (v) => setTagDevices([v]))
+    }
+    putS('tagMode', (v) => setTagMode(v === 'pack' ? 'pack' : 'batch'))
     putS('precision', setPrecision)
     putN('batch', setBatch)
     putS('preprocess', setPreprocess)
@@ -1577,7 +1852,12 @@ export function NewJob({
     putN('captionLo', setCaptionLo)
     putN('captionHi', setCaptionHi)
     putN('zhRatio', setZhRatio)
-    putS('promptId', setPromptId)
+    // 多选提示词。旧快照只有 promptId（单值），当作"只有一个 file: 项"还原。
+    if (Array.isArray(f.promptParts)) {
+      setPromptParts(f.promptParts.filter((x): x is string => typeof x === 'string'))
+    } else if (typeof f.promptId === 'string') {
+      setPromptParts(f.promptId ? [`file:${f.promptId}`] : [])
+    }
     putN('timeoutS', setTimeoutS)
     putN('maxPixels', setMaxPixels)
     putS('seed', setSeed)
@@ -1608,6 +1888,7 @@ export function NewJob({
     putN('hfPrefetch', setHfPrefetch)
     putB('hfMulti', setHfMulti)
     putN('hfConns', setHfConns)
+    putS('hfCache', setHfCache)
     putN('hfReserveGb', setHfReserveGb)
     putS('hfProxy', setHfProxy)
     putB('cacheOn', setCacheOn)
@@ -1625,8 +1906,14 @@ export function NewJob({
           .map(([k, v]) => [k, Number(v)]),
       )
       const shared = {
-        out_dir: outDir,
+        // 发"页面上显示的那个"而不是原始输入框：留空时后端自己按输入推导，
+        // 而推导出来的名字与预览栏写的不一定一致（HF 那条路它落 work/out）。
+        // 产物目录是"预览说写到哪就写到哪"的一部分，别让两处各算一套。
+        out_dir: effectiveOut,
+        // 单值留着给旧读法（产物/日志里那一栏）；真正决定用几张卡的是清单。
         device,
+        tag_devices: tagDevices,
+        tag_mode: tagMode,
         precision,
         batch,
         preprocess,
@@ -1660,6 +1947,7 @@ export function NewJob({
             hf_format: hfFormat,
             hf_prefetch: hfPrefetch,
             hf_conns: hfMulti ? hfConns : 1,
+            hf_cache: hfCache.trim(),
             hf_reserve_gb: hfReserveGb,
             hf_proxy: hfProxy.trim(),
             cache: cacheOn,
@@ -1680,7 +1968,9 @@ export function NewJob({
               : null,
             // 0 也要发：它不是"没填"，而是"这批全英文"。
             caption_zh_ratio: zhRatio,
-            // 空串 = 内置提示词（后端据此走 _prompt_for 生成那条路）
+            // 空数组 = 内置提示词（后端据此走 _prompt_for 生成那条路）。
+            // prompt_id 仍发主成品，留给"只认单值"的旧路径兜底。
+            prompt_parts: promptParts,
             prompt_id: promptId,
             timeout_s: timeoutS,
             concurrency,
@@ -1752,6 +2042,20 @@ export function NewJob({
           // 密钥存档失败与任务无关，不打断提交。
         }
       }
+      // HF 令牌同一套口径。必须带 repo：存档绑仓库，换仓库不自动沿用。
+      // 空仓库名时后端会把 token 当"没存过"处理，不要走到这一步。
+      if (rememberHf && hfToken.trim() && hfRepo.trim()) {
+        try {
+          const saved = await api.saveHfToken({
+            token: hfToken.trim(),
+            repo: hfRepo.trim(),
+            remember: true,
+          })
+          setSavedHfOverride(saved.saved)
+        } catch {
+          // 同上：存不下顶多下次重贴。
+        }
+      }
       const snap = await api.createJob(spec)
       // 记住这次用的参数，下次打开就是这套（凭据由后端剔掉，不会落到这个文件里）。
       // 不 await：记不住顶多下次重填，任务已经起来了。
@@ -1774,6 +2078,13 @@ export function NewJob({
   // 那会让"我以为在用 A"变成"实际用内置跑了一批"，而且产物里查不出来。
   const promptSel = prompts.find((p) => p.id === promptId)
   const promptMissing = promptId !== '' && promptSel === undefined
+  const promptFileCount = promptParts.filter((p) => p.startsWith('file:')).length
+  // 只勾了片段：后端会拒（拿几节条款顶掉整份指令，产出规格全丢），这里先提示。
+  const promptOnlyRules = promptParts.length > 0 && promptFileCount === 0
+  const promptSummary =
+    promptParts.length === 0
+      ? '内置（按参数生成）'
+      : promptParts.map(promptPartLabel).join(' + ')
 
   const gpus = health?.gpus ?? []
   const total = preview?.total ?? 0
@@ -1793,11 +2104,7 @@ export function NewJob({
         eyebrow={mode === 'both' ? 'Tag + NL' : mode === 'nl' ? 'NL 打标' : 'Tag 打标'}
         title="新建打标任务"
         description={
-          mode === 'both'
-            ? 'tag 与 NL 一起产，两个文件落到同一批产物里。'
-            : mode === 'nl'
-              ? '只产 .nl 自然语言描述。'
-              : '只产 .tag。'
+          mode === 'both' ? 'tag 与 NL 同批产出' : mode === 'nl' ? '只出 .nl' : '只出 .tag'
         }
         actions={
           <>
@@ -1880,8 +2187,8 @@ export function NewJob({
                 />
                 <p className="mt-2 text-[11px] leading-relaxed text-lx-dim">
                   {inputMode === 'local'
-                    ? '从本机读：.parquet / .zip / .tar 分片，或装着分片的目录。'
-                    : '从 Hugging Face 拉：填 org/name，可只下勾选的分片。'}
+                    ? '读本机的分片或装着分片的目录'
+                    : '填 org/name，只下勾选的分片'}
                 </p>
               </div>
             )}
@@ -1889,12 +2196,10 @@ export function NewJob({
             {packs.length > 0 && (
               <SettingRow
                 label="已下载的离线包"
-                help="「分片下载」页提前备好的本地分片。选中后这次任务直接读本地，不再连网"
-                description={`本地已有 ${packs.length} 个包（共 ${fmtBytes(
+                help="「分片下载」页备好的本地分片，选中后直接读本地"
+                description={`${packs.length} 个包 · ${fmtBytes(
                   packs.reduce((acc, p) => acc + p.bytes, 0),
-                )}）。选一个就不用等下载${
-                  packShardSel.length ? `；本次只打勾选的 ${packShardSel.length} 片` : ''
-                }`}
+                )}${packShardSel.length ? ` · 本次只打勾选的 ${packShardSel.length} 片` : ''}`}
                 icon={<HardDriveDownload size={14} />}
               >
                 <div className="flex gap-2">
@@ -1906,8 +2211,12 @@ export function NewJob({
                       // 换包必须清掉勾选：旧包的绝对路径在新包里不存在，
                       // 留着会变成"勾了三片、实际一片也跑不到"。
                       setPackShardSel([])
-                      // 选了本地包就把 HF 仓库清掉，避免"两个输入同时给"被后端拒
-                      if (e.target.value) setHfRepo('')
+                      // 选了本地包就把 HF 仓库清掉，避免"两个输入同时给"被后端拒；
+                      // 模式也要跟着回到本地，否则输入区还停在"填仓库名"那一屏。
+                      if (e.target.value) {
+                        setHfRepo('')
+                        setInputMode('local')
+                      }
                     }}
                   >
                     <option value="">不使用（走下面的仓库 / 本地路径）</option>
@@ -1921,7 +2230,7 @@ export function NewJob({
                     type="button"
                     className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
                     disabled={!currentPack}
-                    title="看这个包里哪些分片已经打过，只勾选要打的那几片"
+                    title="勾选要打的分片"
                     onClick={() => setPackScanOpen(true)}
                   >
                     <ListChecks size={13} />
@@ -1935,7 +2244,7 @@ export function NewJob({
               <>
                 <SettingRow
                   label="HF 团队仓库"
-                  description="org/name；留空用下面的本地分片包"
+                  description="org/name"
                   icon={<Cloud size={14} />}
                 >
                   <div className="flex gap-2">
@@ -1959,15 +2268,44 @@ export function NewJob({
 
                 {hfRepo.trim() !== '' && (
                   <>
-                    <SettingRow label="访问令牌" help="有 read 权限的 token；只在提交时用一次，不落盘">
+                    <SettingRow
+                      label="访问令牌"
+                      // "换了仓库就不沿用"必须常驻显示，不能只放 help：用户
+                      // 明明记住过令牌、这里却要重填，不说出来他会以为存档坏了。
+                      description={
+                        savedHf && !savedHfApplies
+                          ? `已记住的令牌属于 ${savedHf.repo}，本仓库不沿用，需要重新填或勾「记住」覆盖`
+                          : undefined
+                      }
+                      help={
+                        savedHfApplies
+                          ? `已记住 ${savedHf!.token_masked}，留空即用它`
+                          : '需要 read 权限；留空 = 匿名访问（公共仓库够用）'
+                      }
+                    >
                       <input
                         className="lx-input font-mono text-xs"
                         type="password"
                         value={hfToken}
                         onChange={(e) => setHfToken(e.target.value)}
-                        placeholder="hf_..."
+                        placeholder={
+                          savedHfApplies ? `${savedHf!.token_masked}（已记住）` : 'hf_...'
+                        }
                         spellCheck={false}
+                        autoComplete="off"
                       />
+                      {/* 和 API 密钥同一个口径：默认不存，勾了才写
+                          configs/nl_api.json。存档绑仓库，换仓库要重新勾。 */}
+                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-lx-muted">
+                        <input
+                          type="checkbox"
+                          className="lx-check"
+                          checked={rememberHf}
+                          onChange={(e) => void toggleRememberHf(e.target.checked)}
+                        />
+                        记住到本机（明文存 configs/nl_api.json，仅对{' '}
+                        {hfRepo.trim() || '该仓库'} 生效）
+                      </label>
                     </SettingRow>
 
                     <SettingRow label="分支" help="默认 main">
@@ -1982,7 +2320,7 @@ export function NewJob({
 
                     <SettingRow
                       label="代理"
-                      help="留空 = 用分片下载页那份全局代理；填了只影响这次任务（换节点做对照时有用）。支持 http / https / socks5"
+                      help="留空用「分片下载」页的代理。支持 http / https / socks5"
                     >
                       <input
                         className="lx-input font-mono text-xs"
@@ -1996,7 +2334,7 @@ export function NewJob({
 
                     <SettingRow
                       label="仓库格式"
-                      help="auto = 有 parquet 就逐行流式（不落盘）；tar 分片要先下到本地，打完一片删一片"
+                      help="auto：有 parquet 走流式，否则按 tar 下到本地"
                     >
                       <select
                         className="lx-input"
@@ -2017,7 +2355,7 @@ export function NewJob({
                       <>
                         <SettingRow
                           label="多线程下载"
-                          help="把一个分片切成多段并发拉取（IDM 式的分段下载）。开着更吃带宽，也更容易跑满国内常见的单连接限速"
+                          help="分片切多段并发拉取，更吃带宽"
                         >
                           <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
                             <input
@@ -2032,7 +2370,7 @@ export function NewJob({
                         {hfMulti && (
                           <SettingRow
                             label="并发线程数"
-                            help="单个分片同时开几条连接。4~8 条最实用；再多只是在抢同一份带宽，还会让丢包重传的代价变大"
+                            help="单个分片的连接数，4~8 条足够；再多只是抢同一份带宽"
                           >
                             <input
                               type="number"
@@ -2050,7 +2388,7 @@ export function NewJob({
                         )}
                         <SettingRow
                           label="预取分片"
-                          help="下载与打标并行，下载时间藏进上一片的处理里；0 = 严格串行。磁盘余量不够时会自动暂停下载"
+                          help="提前下载下几片，与打标并行；0 = 串行"
                         >
                           <input
                             type="number"
@@ -2066,12 +2404,53 @@ export function NewJob({
                           />
                         </SettingRow>
                         <SettingRow
+                          label="分片缓存目录"
+                          help="留空 = run/hf-cache（与「分片下载」页共用缓存，提前下好的片直接命中）"
+                          description={
+                            cacheSameAsOut
+                              ? '与产物目录同盘：建在产物目录的父目录下（hf-cache）'
+                              : cachePath
+                                ? `实际：${cachePath}`
+                                : undefined
+                          }
+                        >
+                          <div className="flex flex-col gap-2">
+                            <div className="flex gap-2">
+                              <input
+                                className="lx-input font-mono text-xs"
+                                value={cacheSameAsOut ? '' : hfCache}
+                                onChange={(e) => setHfCache(e.target.value)}
+                                placeholder={cacheSameAsOut ? '（跟随产物目录）' : 'run/hf-cache'}
+                                spellCheck={false}
+                                disabled={cacheSameAsOut}
+                              />
+                              <button
+                                type="button"
+                                className="lx-btn-ghost shrink-0 px-3"
+                                disabled={cacheSameAsOut}
+                                onClick={() => folder.pick(hfCache || outDir || undefined, setHfCache)}
+                              >
+                                浏览
+                              </button>
+                            </div>
+                            <label className="flex cursor-pointer items-center gap-2 text-[11px] text-lx-secondary">
+                              <input
+                                type="checkbox"
+                                className="accent-lx-accent"
+                                checked={cacheSameAsOut}
+                                onChange={(e) => setHfCache(e.target.checked ? '@out' : '')}
+                              />
+                              与产物目录同盘（只填一个目录：缓存放进那块盘的 hf-cache，不进产物目录）
+                            </label>
+                          </div>
+                        </SettingRow>
+                        <SettingRow
                           label="磁盘余量（GB）"
-                          help="给产物留的空间；0 = 自动（最大分片的 30%，不少于 2 GB）。空间不够就停下载，不会写爆盘"
+                          help="0 = 自动（最大分片的 30%，不少于 2 GB）；不够就暂停下载"
                           description={
                             diskFree === null
                               ? undefined
-                              : `目标盘剩余 ${(diskFree / 1024 ** 3).toFixed(1)} GB`
+                              : `缓存盘剩余 ${(diskFree / 1024 ** 3).toFixed(1)} GB`
                           }
                         >
                           <input
@@ -2133,7 +2512,7 @@ export function NewJob({
 
                 <SettingRow
                   label="本地分片（可选）"
-                  help="parquet（HF datasets 流式）/ .zip / .tar（WebDataset）都收，也可以给装着分片的目录。填了 HF 仓库就忽略这里"
+                  help="分片文件或目录；填了 HF 仓库则忽略"
                   icon={<HardDrive size={14} />}
                 >
                   <div className="flex gap-2">
@@ -2147,7 +2526,9 @@ export function NewJob({
                     <button
                       type="button"
                       className="lx-btn-ghost shrink-0 px-3"
-                      onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}
+                      onClick={() =>
+                        folder.pick(inputDir || defaults?.models_dir, setInputDir, ['parquet'])
+                      }
                     >
                       浏览
                     </button>
@@ -2164,8 +2545,7 @@ export function NewJob({
                       但"直接选图片目录"这条死路必须提前说出来。 */}
                   {inputDir.trim() !== '' && !looksLikeShard(inputDir) && (
                     <p className="mt-1.5 text-[11px] leading-relaxed text-lx-warning">
-                      这不像分片文件。如果它是一堆散图的目录：NL 只读分片里的图，散图不会被打标，
-                      先去「数据打包」页封成 .parquet / .zip；如果目录里装的就是分片，忽略这条。
+                    这不像分片。散图目录不会被打标，先去「数据打包」页封包。
                     </p>
                   )}
                 </SettingRow>
@@ -2178,12 +2558,12 @@ export function NewJob({
                 required
                 description={
                   scan
-                    ? `这一层 ${fmtCount(scan.images)} 张图${scan.zips ? `，${scan.zips} 个素材包` : ''}${
-                        recursive && includeZips ? '（包内与子目录中的也会算）' : ''
+                    ? `${fmtCount(scan.images)} 张图${scan.zips ? ` · ${scan.zips} 个素材包` : ''}${
+                        recursive && includeZips ? '（含子目录与包内）' : ''
                       }`
                     : undefined
                 }
-                help="接受目录或单个素材包（.zip / .tar / .tar.gz）；png / jpg / webp / bmp / gif / tif"
+                help="目录，或单个素材包"
                 icon={<FolderOpen size={14} />}
               >
                 <div className="flex gap-2">
@@ -2207,16 +2587,29 @@ export function NewJob({
 
             <SettingRow
               label="输出目录"
-              help={isVlm ? 'parquet/json 分片落在这里；留空默认 work/out' : 'tags/ 逐张产物落在这里（默认 <输入名>-tags）；之后在「数据打包」页封包时指回这里'}
+              help={isVlm ? '分片产物目录；留空 = work/out' : '留空 = <输入名>-tags；封包时指回这里'}
               icon={<HardDrive size={14} />}
             >
-              <input
-                className="lx-input font-mono text-xs"
-                value={outDir}
-                onChange={(e) => setOutDir(e.target.value)}
-                placeholder={effectiveOut || '跟随输入路径'}
-                spellCheck={false}
-              />
+              <div className="flex gap-2">
+                <input
+                  className="lx-input min-w-0 flex-1 font-mono text-xs"
+                  value={outDir}
+                  onChange={(e) => setOutDir(e.target.value)}
+                  placeholder={effectiveOut || '跟随输入路径'}
+                  spellCheck={false}
+                />
+                {/* 输出目录以前只能手填。它的起点常是"输入目录旁边"，用同一个
+                    选择器挑一下比照着输入路径抄一遍再改末尾省事得多。 */}
+                <button
+                  type="button"
+                  className="lx-btn-ghost shrink-0 px-3"
+                  onClick={() =>
+                    folder.pick(outDir || inputDir || defaults?.models_dir, setOutDir)
+                  }
+                >
+                  浏览
+                </button>
+              </div>
             </SettingRow>
 
             {!isVlm && (
@@ -2239,7 +2632,7 @@ export function NewJob({
               </>
             )}
 
-            <SettingRow label="忽略已有产物" help="默认断点续跑，打开后全部重算">
+            <SettingRow label="忽略已有产物" help="默认断点续跑；打开后全部重算">
               <ToggleRow checked={force} onChange={setForce} label="强制重打" />
             </SettingRow>
           </SectionPanel>
@@ -2274,7 +2667,7 @@ export function NewJob({
               <SettingRow
                 label="推理来源"
                 icon={<Cloud size={14} />}
-                help="本机/自建走本地服务（有环境指纹、能重试提分辨率）；API 模式不加载权重、不用起服务，密钥留空时从环境变量读"
+                help="本机/自建 = 本地起服务；API = 外部接口，不加载权重"
               >
                 <select
                   className="lx-input"
@@ -2299,7 +2692,7 @@ export function NewJob({
                 <>
               <SettingRow
                 label="本机服务"
-                help="第一次用：先点「启动服务」→ 等右上角变成「就绪」→ 再提交任务。首次加载要几分钟"
+                help="先启动服务，状态变「就绪」再提交"
                 icon={<Server size={14} />}
                 description={
                   vllm?.status === 'failed'
@@ -2355,7 +2748,7 @@ export function NewJob({
                   换引擎等于换一代数据，所以放在最前面、且起了服务就锁住。 */}
               <SettingRow
                 label="引擎"
-                help="Windows 原生只能用 llama.cpp；vLLM 需要 Linux / WSL2"
+                help="Windows 原生只能选 llama.cpp；vLLM 需要 Linux / WSL2"
               >
                 <select
                   className="lx-select"
@@ -2394,7 +2787,7 @@ export function NewJob({
                 // 一列卡片（每条要放名称、状态和一个「下载 / 去量化」按钮），
                 // 塞进右侧那 260~360px 的窄列会全部折行
                 wide
-                help="留空按显存自动落档；灰掉的是还没下载或还没压出 GGUF 的"
+                help="留空按显存自动选；灰掉的是权重还没就绪"
                 description={
                   vllmLocked
                     ? '服务运行中：换模型要先停止服务。'
@@ -2533,7 +2926,7 @@ export function NewJob({
                   想让它跑得开就跟着改这里。 */}
               <SettingRow
                 label="分档"
-                help="决定上下文长度、默认并发与精度。留空按显存自动匹配；选「自定义」则下面填多少用多少"
+                help="留空按显存自动；「自定义」则在下方高级里手填"
               >
 
                 <select
@@ -2566,23 +2959,23 @@ export function NewJob({
                 icon={<Gauge size={14} />}
                 help={
                   vllmEngine === 'vllm'
-                    ? 'vLLM 档：BF16 / FP8 / W4A16（W4A16 需要预量化的 AWQ·GPTQ safetensors）'
-                    : 'llama.cpp 档：F16 / Q4_K_M / Q6_K / Q8_0（各自是一个 .gguf 文件）'
+                    ? 'W4A16 需要预量化的 AWQ / GPTQ 权重'
+                    : '每档对应一个 .gguf 文件'
                 }
                 description={
                   vllmPrecision === 'f16'
-                    ? 'F16：完整权重不量化，8B 约 15.6G。质量优先的默认档，装不下就换 Q4_K_M'
+                    ? '完整权重 · 8B 约 15.6G'
                     : vllmPrecision === 'q4'
-                      ? 'Q4_K_M：8B 约 4.7G，显存与吞吐最划算'
+                      ? '8B 约 4.7G · 最省显存'
                       : vllmPrecision === 'q6'
-                        ? 'Q6_K：8B 约 6.4G，长尾 tag 比 Q4 稳；没压缩过会明确报缺文件'
+                        ? '8B 约 6.4G · 长尾 tag 比 Q4 稳'
                         : vllmPrecision === 'q8'
-                          ? 'Q8_0：几乎等于原精度，8B 约 8.1G；16G 卡上并发要收敛'
+                          ? '8B 约 8.1G · 接近原精度'
                           : vllmPrecision === 'fp8'
-                            ? 'FP8：vLLM 在线量化，显存约省一半；长尾 tag 与数字可能少量改判'
+                            ? '显存约省一半 · 长尾 tag 可能少量改判'
                             : vllmPrecision === 'w4a16'
-                              ? 'W4A16：4bit 权重 + 16bit 激活。当前模型没有量化权重时会回退 BF16（见下方警告）'
-                              : 'BF16：不传 --quantization，按权重自带 dtype 加载，精度最稳、显存最贵'
+                              ? '4bit 权重 · 没有量化权重会回退 BF16'
+                              : '原精度 · 精度最稳、显存最贵'
                 }
               >
                 <ChoiceGrid
@@ -2663,8 +3056,8 @@ export function NewJob({
                     label="上下文长度"
                     help={
                       vllmEngine === 'llamacpp'
-                        ? '0 = 用分档表的值。llama.cpp 每槽最多 3072，填更大不会生效；低于约 1400 装不下一张图'
-                        : '0 = 用分档表的值（16G 档 4096）。调大 KV cache 跟着涨，开太大启动就 OOM'
+                        ? '0 = 分档表的值。每槽最多 3072，低于约 1400 放不下一张图'
+                        : '0 = 分档表的值（16G 档 4096）。调大占更多显存，过大会 OOM'
                     }
                   >
                     <input
@@ -2688,7 +3081,7 @@ export function NewJob({
                   {vllmEngine === 'vllm' && (
                     <SettingRow
                       label="max_num_seqs"
-                      help="服务端同时处理多少条请求。0 = 用分档表的值（16G 卡是 8）"
+                      help="0 = 分档表的值（16G 档 8）"
                     >
                       <input
                         type="number"
@@ -2711,10 +3104,8 @@ export function NewJob({
                       label="槽位（-np）"
                       help={
                         slotPlan
-                          ? `0 = 按显存自动（你这台会给 ${slotPlan.slots_default ?? '?'}）。` +
-                            '想给别的程序让出显存就调小：KV 按槽位数在启动时预留，' +
-                            '把「任务并发」调小一点都不会还回来'
-                          : '0 = 按显存自动。这是唯一能让出显存的旋钮'
+                          ? `0 = 自动（本机给 ${slotPlan.slots_default ?? '?'}）。想给别的程序让显存就调小，调「任务并发」没用`
+                          : '0 = 自动。想给别的程序让显存就调小'
                       }
                     >
                       <input
@@ -2755,7 +3146,7 @@ export function NewJob({
                     <>
                       <SettingRow
                         label="max_num_batched_tokens"
-                        help="单步 token 预算；0 = vLLM 默认，调大才能同时 prefill 多张图"
+                        help="0 = vLLM 默认；调大才能同时 prefill 多张图"
                       >
                         <input
                           type="number"
@@ -2775,7 +3166,7 @@ export function NewJob({
                       </SettingRow>
                       <SettingRow
                         label="显存占比"
-                        help="0 = 用配置值（0.88）；调太高会起不来"
+                        help="0 = 配置值（0.88）；调太高会起不来"
                       >
                         <input
                           type="number"
@@ -2795,18 +3186,28 @@ export function NewJob({
                         label="file:// 放行目录"
                         help={
                           allowedMediaRoot
-                            ? `当前服务已放行 ${allowedMediaRoot}。任务侧才能开 file:// 直传`
-                            : '留空 = 服务端只收 base64。填了才能用 file:// 传图（省 33% 体积）；必须覆盖任务的产物目录'
+                            ? `已放行 ${allowedMediaRoot}`
+                            : '留空 = 只收 base64；填了才能用 file:// 传图'
                         }
                       >
-                        <input
-                          className="lx-input font-mono text-xs"
-                          value={vllmMediaRoot}
-                          disabled={vllmLocked}
-                          onChange={(e) => setVllmMediaRoot(e.target.value)}
-                          placeholder="留空 = 不收 file://"
-                          spellCheck={false}
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            className="lx-input font-mono text-xs"
+                            value={vllmMediaRoot}
+                            disabled={vllmLocked}
+                            onChange={(e) => setVllmMediaRoot(e.target.value)}
+                            placeholder="留空 = 不收 file://"
+                            spellCheck={false}
+                          />
+                          <button
+                            type="button"
+                            className="lx-btn-ghost shrink-0 px-3"
+                            disabled={vllmLocked}
+                            onClick={() => folder.pick(vllmMediaRoot || undefined, setVllmMediaRoot)}
+                          >
+                            浏览
+                          </button>
+                        </div>
                       </SettingRow>
                       <p className="text-[11px] leading-relaxed text-lx-dim">
                         改完要重启服务才生效。每张图约 576 图像 token + 400 指令 token，
@@ -2875,7 +3276,7 @@ export function NewJob({
                   <SettingRow
                     label="API 地址"
                     required={isApiMode}
-                    help="留空按来源取默认域名；自建网关（one-api / LM Studio）填自己的地址"
+                    help="留空用默认域名；自建网关填自己的地址"
                   >
                     <div className="flex gap-2">
                       <input
@@ -2917,10 +3318,10 @@ export function NewJob({
                     label="API 密钥"
                     help={
                       savedKey
-                        ? `已记住 ${savedKey.key_masked}，留空就用它`
+                        ? `已记住 ${savedKey.key_masked}，留空即用它`
                         : providerEnvKey(vlmProvider)
-                          ? `留空则读环境变量 ${providerEnvKey(vlmProvider)}`
-                          : '留空表示不带鉴权头（免鉴权的自建网关很常见）'
+                          ? `留空读环境变量 ${providerEnvKey(vlmProvider)}`
+                          : '留空 = 不带鉴权头'
                     }
                   >
                     <input
@@ -2950,7 +3351,7 @@ export function NewJob({
                 <>
               <SettingRow
                 label="服务地址"
-                help="本机服务就绪后自动填；远程服务直接填 IP"
+                help="本机服务就绪后自动填；远程填 IP"
               >
                 <div className="flex gap-2">
                   <input
@@ -3008,8 +3409,8 @@ export function NewJob({
                 required={isApiMode}
                 help={
                   isApiMode
-                    ? 'API 侧的模型 id（如 gpt-4o / claude-sonnet-4-5），不是本地路由名'
-                    : '对应 --served-model-name，只是路由名，与权重无关'
+                    ? 'API 侧的模型 id，如 gpt-4o'
+                    : '对应 --served-model-name，只是路由名'
                 }
               >
                 <input
@@ -3038,14 +3439,14 @@ export function NewJob({
                 label="并发请求数"
                 help={
                   isApiMode
-                    ? '0 = 用该来源的建议值；云端按每分钟请求数限流，调太高会成片撞 429'
+                    ? '0 = 该来源的建议值；调太高会撞 429'
                     : vllmEngine === 'llamacpp'
-                      ? '0 = 跟服务端槽位（-np）走'
-                      : '0 = 跟服务端 max_num_seqs 走'
+                      ? '0 = 跟服务端槽位（-np）'
+                      : '0 = 跟服务端 max_num_seqs'
                 }
                 description={
                   concurrency === 0
-                    ? `自动：${isApiMode ? `${providerLabel(vlmProvider)} 建议` : '按当前指纹是'} ${effectiveSeqs}`
+                    ? `自动 · ${effectiveSeqs}${isApiMode ? `（${providerLabel(vlmProvider)} 建议）` : ''}`
                     : undefined
                 }
               >
@@ -3066,7 +3467,7 @@ export function NewJob({
                   生成参数（一般不用动）
                 </summary>
                 <div className="mt-2 space-y-0">
-                  <SettingRow label="温度" help="越低越稳；打标建议 ≤0.3">
+                  <SettingRow label="温度" help="越低越稳，打标建议 ≤0.3">
                     <div className="flex items-center gap-3">
                       <input
                         type="range"
@@ -3102,32 +3503,128 @@ export function NewJob({
                     </div>
                   </SettingRow>
 
-                  {/* 提示词：内置那份是按「描述长度」「中文比例」现场生成的。想换一
-                      套说法就选 prompt/*.json——文件内容是**整段替换**，不是追加。 */}
+                  {/* 提示词：内置那份按「描述长度」「中文比例」现场生成。选 prompt/*.json
+                      是整段替换；再勾 prompts/*.md 的规则片段则按勾选顺序追加在后面。 */}
                   <SettingRow
                     label="NL 提示词"
-                    help="prompt/ 目录里的一份 JSON；「内置」= 按上面的长度与中文比例参数生成"
+                    help="prompt/ 的 JSON 打底，可再叠加 prompts/ 的规则片段"
                     wide
                   >
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          className="lx-select min-w-[12rem] flex-1"
-                          value={promptId}
-                          onChange={(e) => setPromptId(e.target.value)}
-                          aria-label="NL 提示词"
-                        >
-                          <option value="">内置（按参数生成）</option>
-                          {prompts.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                              {p.error ? '（读不了）' : ''}
-                            </option>
-                          ))}
-                          {promptMissing && (
-                            <option value={promptId}>{promptId}（文件已不在了）</option>
+                        <div className="relative min-w-[12rem] flex-1">
+                          <button
+                            type="button"
+                            className="lx-select flex w-full items-center justify-between gap-2 text-left"
+                            onClick={() => setPromptPickerOpen((v) => !v)}
+                            aria-expanded={promptPickerOpen}
+                            aria-label="NL 提示词"
+                          >
+                            <span className="truncate">{promptSummary}</span>
+                            <ChevronDown size={13} className="shrink-0 opacity-60" />
+                          </button>
+                          {promptPickerOpen && (
+                            <>
+                              {/* 点面板外面收起。用 fixed 遮罩而不是 onBlur：
+                                  勾选时焦点会离开按钮，onBlur 会把面板关掉。 */}
+                              <div
+                                className="fixed inset-0 z-20"
+                                onClick={() => setPromptPickerOpen(false)}
+                              />
+                              <div className="absolute left-0 top-full z-30 mt-1 max-h-80 w-[min(30rem,88vw)] overflow-auto rounded-lg border border-lx bg-lx-panel p-2 shadow-2xl">
+                                <button
+                                  type="button"
+                                  className="mb-1 w-full rounded px-1 py-1 text-left text-[11px] text-lx-secondary hover:bg-lx-hover"
+                                  onClick={() => setPromptParts([])}
+                                >
+                                  内置（按参数生成）
+                                </button>
+                                <p className="px-1 pb-1 text-[10.5px] uppercase tracking-wide text-lx-muted">
+                                  成品 · {promptDir || 'prompt/'}
+                                </p>
+                                {prompts.length === 0 && (
+                                  <p className="px-1 pb-1 text-[11px] text-lx-dim">
+                                    目录里还没有 JSON
+                                  </p>
+                                )}
+                                {prompts.map((p) => {
+                                  const part = `file:${p.id}`
+                                  const order = promptParts.indexOf(part)
+                                  return (
+                                    <label
+                                      key={part}
+                                      className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 hover:bg-lx-hover"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="mt-0.5 accent-lx-accent"
+                                        checked={order >= 0}
+                                        onChange={() => togglePromptPart(part)}
+                                      />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[12px] text-lx-primary">
+                                          {p.name}
+                                          {p.error ? '（读不了）' : ''}
+                                        </span>
+                                        <span className="block truncate text-[10.5px] text-lx-dim">
+                                          {p.chars ?? 0} 字符
+                                          {p.has_zh ? ' · 有中文版' : ' · 无中文版'}
+                                        </span>
+                                      </span>
+                                      {order >= 0 && (
+                                        <span className="shrink-0 font-mono text-[10.5px] text-lx-muted">
+                                          #{order + 1}
+                                        </span>
+                                      )}
+                                    </label>
+                                  )
+                                })}
+                                <p className="mt-2 px-1 pb-1 text-[10.5px] uppercase tracking-wide text-lx-muted">
+                                  规则片段 · {promptRulesDir || 'prompts/'}
+                                </p>
+                                {promptRules.length === 0 && (
+                                  <p className="px-1 pb-1 text-[11px] text-lx-dim">
+                                    目录里还没有 md 片段
+                                  </p>
+                                )}
+                                {promptRules.map((r) => {
+                                  const part = `rule:${r.id}`
+                                  const order = promptParts.indexOf(part)
+                                  return (
+                                    <label
+                                      key={part}
+                                      className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 hover:bg-lx-hover"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="mt-0.5 accent-lx-accent"
+                                        checked={order >= 0}
+                                        onChange={() => togglePromptPart(part)}
+                                      />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[12px] text-lx-primary">
+                                          {r.name}
+                                        </span>
+                                        <span className="block truncate text-[10.5px] text-lx-dim">
+                                          {r.sections.join(' / ')} · {r.chars} 字符
+                                        </span>
+                                      </span>
+                                      {order >= 0 && (
+                                        <span className="shrink-0 font-mono text-[10.5px] text-lx-muted">
+                                          #{order + 1}
+                                        </span>
+                                      )}
+                                    </label>
+                                  )
+                                })}
+                                <p className="mt-2 border-t border-lx px-1 pt-2 text-[10.5px] leading-relaxed text-lx-dim">
+                                  勾选顺序就是拼接顺序：成品整段在前，片段按当前模式/语言
+                                  渲染后追加。片段单独用不了，至少要勾一份成品。
+                                </p>
+                              </div>
+                            </>
                           )}
-                        </select>
+                        </div>
                         <button
                           type="button"
                           className="lx-btn-ghost inline-flex items-center gap-1.5"
@@ -3136,6 +3633,14 @@ export function NewJob({
                         >
                           <FolderOpen size={13} /> 打开文件夹
                         </button>
+                        {revealHint && (
+                          <span
+                            className="min-w-0 flex-1 select-all break-all font-mono text-[10.5px] leading-relaxed text-lx-dim"
+                            title="复制这个路径去服务端查看"
+                          >
+                            {revealHint}
+                          </span>
+                        )}
                         <button
                           type="button"
                           className="lx-btn-ghost inline-flex items-center gap-1.5"
@@ -3186,10 +3691,22 @@ export function NewJob({
                           {promptDir || 'prompt/'} 里放 JSON 就能换成自己写的。
                         </p>
                       )}
+                      {promptOnlyRules && (
+                        <p className="text-[11px] leading-relaxed text-lx-danger">
+                          只勾了规则片段：请再勾一份成品（prompt/ 里的 json）打底——
+                          光靠几节条款顶掉整份指令，产出规格（长度、数量、格式）会一起丢。
+                        </p>
+                      )}
+                      {promptFileCount > 1 && (
+                        <p className="text-[11px] leading-relaxed text-lx-warn">
+                          勾了 {promptFileCount} 份成品：两段完整指令拼在一起会互相覆盖要求，
+                          通常只该留一份打底。
+                        </p>
+                      )}
                     </div>
                   </SettingRow>
 
-                  <SettingRow label="max_tokens" help="0 = 按规格自动抬高（NL + 全量 tag 放得下）">
+                  <SettingRow label="max_tokens" help="0 = 自动（NL + 全量 tag 放得下）">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
@@ -3204,7 +3721,7 @@ export function NewJob({
                       六段要素覆盖只掉 2~3pp，所以这是最省机时的一个旋钮。 */}
                   <SettingRow
                     label="描述长度"
-                    help="字符数下限-上限。空 = 按 token 区间派生（400-1024）；250-500 实测快 36%、要素覆盖只掉 2~3pp"
+                    help="字符数下限-上限。空 = 400-1024；短了更快、要素更少"
                   >
                     <div className="flex items-center gap-1.5">
                       <input
@@ -3238,7 +3755,7 @@ export function NewJob({
                       对应词表，混进去只是脏数据。拉满 = 全中文，拉到 0 = 全英文。 */}
                   <SettingRow
                     label="中文 caption 比例"
-                    help="抽中的图用中文写描述，tag 段仍为英文；0 = 全英文，默认 30%"
+                    help="抽中的图用中文写描述，tag 仍为英文"
                   >
                     <div className="flex items-center gap-3">
                       <input
@@ -3267,7 +3784,7 @@ export function NewJob({
                     />
                   </SettingRow>
 
-                  <SettingRow label="像素预算" help="0 = 用配置/指纹的默认预算；超预算的图会先缩">
+                  <SettingRow label="像素预算" help="0 = 配置默认；超预算的图会先缩">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
@@ -3289,7 +3806,7 @@ export function NewJob({
 
                   <SettingRow
                     label="质检放行线"
-                    help={`1~5 分，≥ 这条直接收（0 = 用配置的 ${qPassDef}）。抬得越高，重打越多、吞吐越低`}
+                    help={`1~5 分，≥ 这条直接收（0 = 配置的 ${qPassDef}）。越高重打越多`}
                   >
                     <input
                       type="number"
@@ -3306,7 +3823,7 @@ export function NewJob({
 
                   <SettingRow
                     label="质检丢弃线"
-                    help={`< 这条直接丢，不浪费重打（0 = 用配置的 ${qDropDef}）。必须低于放行线`}
+                    help={`< 这条直接丢，不重打（0 = 配置的 ${qDropDef}）。必须低于放行线`}
                   >
                     <input
                       type="number"
@@ -3323,7 +3840,7 @@ export function NewJob({
 
                   <SettingRow
                     label="重打次数上限"
-                    help={`不合格时最多再打几次（0 = 用配置的 ${qAttemptsDef}）。每多一次就是多一份推理成本`}
+                    help={`不合格时最多再打几次（0 = 配置的 ${qAttemptsDef}）`}
                   >
                     <input
                       type="number"
@@ -3339,7 +3856,7 @@ export function NewJob({
 
                   <SettingRow
                     label="失败跳过阈值"
-                    help="累计失败多少次后不再碰这张图（0 = 不限）"
+                    help="累计失败几次后跳过这张图（0 = 不限）"
                   >
                     <input
                       type="number"
@@ -3357,7 +3874,7 @@ export function NewJob({
                   </div>
                   <SettingRow
                     label="温度上调"
-                    help={`每重打一次温度加多少（0 = 用配置的 ${qTempStepDef}）`}
+                    help={`每次重打升多少温度（0 = 配置的 ${qTempStepDef}）`}
                   >
                     <input
                       type="number"
@@ -3373,7 +3890,7 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="温度封顶"
-                    help={`温度最高抬到哪（0 = 用配置的 ${qTempCapDef}）。太高会把描述带偏`}
+                    help={`温度上限（0 = 配置的 ${qTempCapDef}）。太高会把描述带偏`}
                   >
                     <input
                       type="number"
@@ -3389,7 +3906,7 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="像素放大倍数"
-                    help={`重打时像素预算乘几倍（0 = 用配置的 ${qPixelsScaleDef}）。需要服务端 max_pixels 留余量，否则会被钳回去`}
+                    help={`重打时像素预算的倍数（0 = 配置的 ${qPixelsScaleDef}）。服务端 max_pixels 要留余量`}
                   >
                     <input
                       type="number"
@@ -3405,7 +3922,7 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="像素封顶"
-                    help={`重打最高抬到多少像素（0 = 用配置的 ${qPixelsCapDef}）`}
+                    help={`重打的像素上限（0 = 配置的 ${qPixelsCapDef}）`}
                   >
                     <input
                       type="number"
@@ -3424,7 +3941,7 @@ export function NewJob({
                   </div>
                   <SettingRow
                     label="图文 CLIP 打分"
-                    help={`规则层抓不到的"句子通顺但完全跑题"靠它。需要 pip install open_clip_torch，吃一份显存，且打分不是线程安全的——开启后并发会被摁到 1，整条链路慢一个数量级`}
+                    help="抓规则层漏掉的跑题句子。需 open_clip_torch，占显存；开启后并发限为 1"
                     icon={clipOn ? <Cpu size={14} /> : <CloudOff size={14} />}
                   >
                     <ToggleRow
@@ -3437,7 +3954,7 @@ export function NewJob({
                     <>
                       <SettingRow
                         label="相似度下限"
-                        help={`低于这条判"跑题"（0 = 用配置的 ${qClipMinDef}）。抬得越高，误杀越多`}
+                        help={`低于这条判跑题（0 = 配置的 ${qClipMinDef}）。越高误杀越多`}
                       >
                         <input
                           type="number"
@@ -3453,7 +3970,7 @@ export function NewJob({
                     </SettingRow>
                     <SettingRow
                       label="CLIP 权重"
-                      help={`open_clip 的模型名（留空 = 配置的 ${qDef?.clip_model || 'ViT-L-14'}）。换它等于换打分口径，两批分数不能直接比`}
+                      help={`留空 = 配置的 ${qDef?.clip_model || 'ViT-L-14'}。换模型等于换打分口径，两批分数不能直接比`}
                     >
                       <input
                         className="lx-input font-mono text-xs"
@@ -3465,7 +3982,7 @@ export function NewJob({
                     </SettingRow>
                     <SettingRow
                       label="预训练来源"
-                      help={`留空 = 配置的 ${qDef?.clip_pretrained || 'openai'}。laion2b 这类开放权重与 openai 的分数分布不同，阈值要重调`}
+                      help={`留空 = 配置的 ${qDef?.clip_pretrained || 'openai'}。换来源阈值要重调`}
                     >
                       <input
                         className="lx-input font-mono text-xs"
@@ -3483,7 +4000,7 @@ export function NewJob({
                   </div>
                   <SettingRow
                     label="最短字符数"
-                    help={`低于这条判"过短"（留空 = 配置的 ${qDef?.min_chars ?? 140}；填 0 = 不设下限）。注意它和下面那条一起构成区间`}
+                    help={`低于这条判过短（留空 = ${qDef?.min_chars ?? 140}，0 = 不设下限）`}
                   >
                     <input
                       className="lx-input font-mono tabular-nums"
@@ -3496,7 +4013,7 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="最长字符数"
-                    help={`高于这条判"过长"（留空 = 配置的 ${qDef?.max_chars ?? 1200}）。必须不小于最短字符数`}
+                    help={`高于这条判过长（留空 = ${qDef?.max_chars ?? 1200}）。必须不小于最短字符数`}
                   >
                     <input
                       className="lx-input font-mono tabular-nums"
@@ -3514,7 +4031,7 @@ export function NewJob({
                   )}
                   <SettingRow
                     label="tag 覆盖率下限"
-                    help={`高置信 tag 在 caption 里被覆盖的比例低于这条就扣分（留空 = 配置的 ${qDef?.min_tag_coverage ?? 0.6}，填 0 = 不检查）`}
+                    help={`高置信 tag 在 caption 里的覆盖率下限（留空 = ${qDef?.min_tag_coverage ?? 0.6}，0 = 不检查）`}
                   >
                     <input
                       className="lx-input font-mono tabular-nums"
@@ -3528,7 +4045,7 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="重复率上限"
-                    help={`4-gram 重复率高于这条判复读（留空 = 配置的 ${qDef?.max_repeat_ratio ?? 0.35}，填 0 = 一个都不许重复）`}
+                    help={`4-gram 重复率上限（留空 = ${qDef?.max_repeat_ratio ?? 0.35}，0 = 不许重复）`}
                   >
                     <input
                       className="lx-input font-mono tabular-nums"
@@ -3546,11 +4063,7 @@ export function NewJob({
                   </div>
                   <SettingRow
                     label="升级服务地址"
-                    help={
-                      isApiMode
-                        ? '重试用尽仍不合格时改打第二个地址（更大的模型）。API 模式复用同一把密钥，填目标地址即可'
-                        : '重试用尽仍不合格时，把这张图打到第二个服务（更大的权重）。一个 vLLM 进程只服务一套权重，所以必须是另一个地址'
-                    }
+                    help="重试用尽仍不合格时改打第二个服务（更大的模型）"
                   >
                     <input
                       className="lx-input font-mono text-xs"
@@ -3563,7 +4076,7 @@ export function NewJob({
                   {escalateUrl.trim() !== '' && (
                     <SettingRow
                       label="升级模型名"
-                      help="那个服务 --served-model-name 的值；两个都填才会生效"
+                      help="那个服务的 --served-model-name；与地址都填才生效"
                     >
                       <input
                         className="lx-input font-mono text-xs"
@@ -3576,14 +4089,13 @@ export function NewJob({
                   )}
                   {(escalateUrl.trim() !== '') !== (escalateModel.trim() !== '') && (
                     <p className="px-1 text-[11px] leading-relaxed text-lx-warning">
-                      地址和模型名要一起填，只填一个不会生效。
+                      地址和模型名要一起填
                     </p>
                   )}
                   {escalateUrl.trim() !== '' && escalateModel.trim() !== '' && (
                     <p className="px-1 text-[11px] leading-relaxed text-lx-secondary">
                       升级出来的样本会在 provenance 里标 <code>escalated</code> 与
-                      <code> escalated_model</code>，清洗时能整批挑出来——两套权重的产物
-                      不能当同一批数据混用。
+                      <code> escalated_model</code>，可与正常产物区分。
                     </p>
                   )}
 
@@ -3598,8 +4110,8 @@ export function NewJob({
                     label="file:// 直传"
                     help={
                       allowedMediaRoot
-                        ? `服务端已放行 ${allowedMediaRoot}；开启后省掉 base64 的 33% 体积与编码 CPU`
-                        : '服务端没开 --allowed-local-media-path，开了每张图都会被 400 拒绝。请在上面「VLM 服务」里填放行目录'
+                        ? `已放行 ${allowedMediaRoot}；开启后省掉 33% 体积`
+                        : '服务端没开放行目录，开了会被 400 拒绝'
                     }
                   >
                     <ToggleRow
@@ -3632,13 +4144,10 @@ export function NewJob({
           )}
 
           {isVlm && (
-            <SectionPanel
-              title="打标产物"
-              description="产物形态在下面选；要「一个总表」不在这一步——跑完到「数据合并」页合。"
-            >
+            <SectionPanel title="打标产物">
               <SettingRow
                 label="产物形态"
-                help="jsonl：默认，一个分包一个文件（artifacts-<包名>.jsonl），续跑接着写同名文件；parquet：攒成片，本地一般不需要（服务器封包才用）；逐图 json：每张两个小文件，单张排查最方便"
+                help="jsonl 默认，一个分包一个文件；逐图 json 便于单张排查"
                 icon={<Package size={14} />}
               >
                 <ChoiceGrid
@@ -3654,7 +4163,7 @@ export function NewJob({
               </SettingRow>
 
               {artifactFormat !== 'json' && (
-                <SettingRow label="每片行数" help="写满就封口；2000 一片对 FTP 回传比较友好">
+                <SettingRow label="每片行数" help="写满就封口，2000 便于回传">
                   <input
                     type="number"
                     className="lx-input font-mono tabular-nums"
@@ -3667,7 +4176,7 @@ export function NewJob({
 
               <SettingRow
                 label="结果缓存"
-                help="同图同参数直接复用上次产出，不送模型。首轮命中率为 0，重跑 / 换输出目录 / 多机重叠素材才划算"
+                help="同图同参数复用上次产出，不送模型。首轮命中率为 0"
               >
                 <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
                   <input
@@ -3682,33 +4191,41 @@ export function NewJob({
 
               <SettingRow
                 label="画师表"
-                help="单个 parquet、分片目录（里面的 shard-*.artist.parquet），或 hf://datasets/<repo>/<文件或目录>；留空跟配置走"
+                help="parquet、分片目录，或 hf://datasets/<repo>/<路径>；留空跟配置走"
                 description={
                   artistTable.trim()
-                    ? '本任务用这张表：按 post id 查画师，查不到再退回目录名'
+                    ? '按 post id 查画师，查不到退回目录名'
                     : cfgArtistTable
-                      ? `跟配置走：${cfgArtistTable}`
-                      : '未配置：只从目录名取画师'
+                      ? `配置：${cfgArtistTable}`
+                      : '未配置，只从目录名取画师'
                 }
               >
-                <input
-                  className="lx-input font-mono text-xs"
-                  value={artistTable}
-                  onChange={(e) => setArtistTable(e.target.value)}
-                  placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
-                  disabled={!vlmArtist}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="lx-input font-mono text-xs"
+                    value={artistTable}
+                    onChange={(e) => setArtistTable(e.target.value)}
+                    placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
+                    disabled={!vlmArtist}
+                  />
+                  <button
+                    type="button"
+                    className="lx-btn-ghost shrink-0 px-3"
+                    disabled={!vlmArtist}
+                    onClick={() =>
+                      folder.pick(artistTable || undefined, setArtistTable, ['parquet'])
+                    }
+                  >
+                    浏览
+                  </button>
+                </div>
               </SettingRow>
 
               <SettingRow
                 label="画师注入"
                 icon={<Tags size={14} />}
-                help="打开会改写 .nl / .tag 文本，与之前几批就不再是同一代数据"
-                description={
-                  vlmArtist
-                    ? '已启用：会在 .nl / .tag 文本开头写入 @画师'
-                    : '关闭：画师名仍保留在产物 JSON 的 artist 字段，只是不进文本'
-                }
+                help="打开会改写 .nl / .tag 文本，与之前几批不再是同一代数据"
+                description={vlmArtist ? '已启用：文本开头写入 @画师' : '关闭：只留在 JSON 的 artist 字段'}
               >
                 <ToggleRow
                   checked={vlmArtist}
@@ -3721,7 +4238,7 @@ export function NewJob({
                 <>
                   <SettingRow
                     label="NL 注入"
-                    help="开：@画师 写在 .nl 正文开头；关：只留在 JSON 的 artist / artist_tag 字段"
+                    help="开：@画师 写在 .nl 正文开头；关：NL 里不带"
                   >
                     <ToggleRow
                       checked={vlmArtistInject}
@@ -3731,7 +4248,7 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="TAG 注入"
-                    help="开：@画师 写在 .tag 串最前面（训练时 tag 条件里带画师）；关：tag 串里不带"
+                    help="开：@画师 写在 .tag 串最前面；关：TAG 里不带"
                   >
                     <ToggleRow
                       checked={vlmArtistInjectTags}
@@ -3742,9 +4259,8 @@ export function NewJob({
                 </>
               )}
 
-              <p className="rounded-lx-sm bg-lx-accent-subtle px-2.5 py-2 text-[11px] leading-relaxed text-lx-secondary">
-                这批打完别急着发分包：先去「去重」页扫一遍重复图（打标跑着时就可以扫下一批），
-                分包时带上排除清单，重复图不进包、不占编号。
+              <p className="text-[11px] leading-relaxed text-lx-muted">
+                分包前建议先去「去重」页扫一遍，带上排除清单再分包。
               </p>
             </SectionPanel>
           )}
@@ -3753,7 +4269,7 @@ export function NewJob({
             <SectionPanel title="命名">
               <SettingRow
                 label="布局"
-                help="flat = 全部拍平；mirror = 保留原目录结构"
+                help="flat 全部拍平；mirror 保留原目录结构"
                 icon={<Tags size={14} />}
               >
                 <ChoiceGrid
@@ -3769,27 +4285,39 @@ export function NewJob({
 
               <SettingRow
                 label="画师表"
-                help="单个 parquet、分片目录（里面的 shard-*.artist.parquet），或 hf://datasets/<repo>/<文件或目录>；留空跟配置走"
+                help="parquet、分片目录，或 hf://datasets/<repo>/<路径>；留空跟配置走"
                 description={
                   artistTable.trim()
-                    ? '本任务用这张表：按 post id 查画师，查不到再退回目录名'
+                    ? '按 post id 查画师，查不到退回目录名'
                     : cfgArtistTable
-                      ? `跟配置走：${cfgArtistTable}`
-                      : '未配置：只从目录名取画师'
+                      ? `配置：${cfgArtistTable}`
+                      : '未配置，只从目录名取画师'
                 }
               >
-                <input
-                  className="lx-input font-mono text-xs"
-                  value={artistTable}
-                  onChange={(e) => setArtistTable(e.target.value)}
-                  placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
-                  disabled={!artist}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="lx-input font-mono text-xs"
+                    value={artistTable}
+                    onChange={(e) => setArtistTable(e.target.value)}
+                    placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
+                    disabled={!artist}
+                  />
+                  <button
+                    type="button"
+                    className="lx-btn-ghost shrink-0 px-3"
+                    disabled={!artist}
+                    onClick={() =>
+                      folder.pick(artistTable || undefined, setArtistTable, ['parquet'])
+                    }
+                  >
+                    浏览
+                  </button>
+                </div>
               </SettingRow>
 
               <SettingRow
                 label="画师名"
-                help="从素材路径的某一层目录取画师名，写进 image_id 与归档 meta；取不到就只留序号"
+                help="从目录名取画师，写进 image_id 与归档 meta"
               >
                 <ToggleRow checked={artist} onChange={setArtist} label="从目录名提取画师" />
               </SettingRow>
@@ -3798,13 +4326,13 @@ export function NewJob({
                 label="取第几层"
                 help={
                   artist
-                    ? `0 = 素材根目录下第一层（如 alice/1.jpg → alice）；1 = 再往下一层（如 2024/alice/1.jpg → alice）`
+                    ? `0 = alice/1.jpg → alice；1 = 2024/alice/1.jpg → alice`
                     : '先打开上面的「从目录名提取画师」'
                 }
                 description={
                   artist && preview
-                    ? `本批识别到 ${preview.artists.count} 个画师，覆盖 ${fmtCount(preview.artists.covered)} 张${
-                        preview.artists.missing ? `，${fmtCount(preview.artists.missing)} 张取不到` : ''
+                    ? `${preview.artists.count} 个画师 · 覆盖 ${fmtCount(preview.artists.covered)} 张${
+                        preview.artists.missing ? ` · ${fmtCount(preview.artists.missing)} 张取不到` : ''
                       }`
                     : undefined
                 }
@@ -3824,11 +4352,7 @@ export function NewJob({
 
               <SettingRow
                 label="画师注入"
-                help={
-                  artist
-                    ? '开：把 @画师 写到 .tag / .nl 文本开头（训练时文本条件里带画师）；关：只留在 JSON 的 artist 字段'
-                    : '需要先打开「从目录名提取画师」'
-                }
+                help={artist ? '开：把 @画师 写到 .nl 开头；关：只留在 JSON 字段' : '先打开「从目录名提取画师」'}
               >
                 <ToggleRow
                   checked={artist && artistInject}
@@ -3843,11 +4367,7 @@ export function NewJob({
 
               <SettingRow
                 label="TAG 注入"
-                help={
-                  artist
-                    ? '开：@画师 写在 .tag 串最前面，训练时 tag 条件里带画师；关：只留在 JSON 字段'
-                    : '需要先打开「从目录名提取画师」'
-                }
+                help={artist ? '开：@画师 写在 .tag 串最前面；关：只留在 JSON 字段' : '先打开「从目录名提取画师」'}
               >
                 <ToggleRow
                   checked={artist && artistInjectTags}
@@ -3860,7 +4380,7 @@ export function NewJob({
                 />
               </SettingRow>
 
-              <SettingRow label="序号宽度" help="6 位最多 999999 张；10 亿总量需从首批使用 10 位，已有数据保持原宽度">
+              <SettingRow label="序号宽度" help="6 位最多 999999 张；总量上十亿要从首批就用 10 位">
                 <input
                   type="number"
                   className="lx-input font-mono tabular-nums"
@@ -3903,14 +4423,12 @@ export function NewJob({
             <SectionPanel
               title="Tag 模型"
               description={
-                isVlm && backend === 'none'
-                  ? '当前 tag 交给 VLM 出，本地分类头不会加载。'
-                  : undefined
+                isVlm && backend === 'none' ? 'tag 由 VLM 出，不加载本地分类头' : undefined
               }
             >
               <SettingRow
                 label="后端"
-                help={isVlm ? 'none = tag 交给 VLM；选本地后端则 tag 走 GPU/CPU、NL 走 VLM' : undefined}
+                help={isVlm ? 'none = tag 交给 VLM；否则 tag 走本地后端、NL 走 VLM' : undefined}
               >
                 <select
                   className="lx-select"
@@ -3922,6 +4440,11 @@ export function NewJob({
                     // 退回「配置默认」，否则会把上一个后端的仓库名喂给新后端。
                     const owner = backendOfRepo(modelRepo)
                     if (owner && owner !== next) setModelRepo('')
+                    // ★权重目录也是按后端分的（models/wd-eva02、models/pixai…），
+                    //   跟着仓库名一起切走。留着一个指向旧后端目录的路径，新后端
+                    //   要么加载失败，要么悄悄退回联网——正是"下好了还一直载入"。
+                    const preset = defaults?.models_dir
+                    if (preset && next !== 'none') setModelDir(`${preset}\\${next}`)
                   }}
                 >
                   {backendOptions.map((o) => (
@@ -3934,13 +4457,17 @@ export function NewJob({
 
             <SettingRow
               label="分类头精度"
-              help="tag 分类头的算力精度（与上面 NL 的权重精度是两件事）。bf16 与 fp32 的 tag 集合会有极小差异（实测 79 张里差 2 张）"
+              help={
+                precision === 'fp16'
+                  ? '给 V100 等无 bf16 的卡用；fp16 动态范围窄，建议先做一致性校验'
+                  : 'bf16 与 fp32 的 tag 有极小差异'
+              }
             >
               <ChoiceGrid
                 options={PRECISIONS}
                 value={precision as (typeof PRECISIONS)[number]}
                 onChange={(v) => setPrecision(v)}
-                className="grid-cols-3"
+                className="grid-cols-4"
                 size="sm"
                 mono
                 ariaLabel="精度"
@@ -3949,12 +4476,20 @@ export function NewJob({
 
             <SettingRow
               label="设备"
-              help="auto 会在有卡时选 cuda:0，否则退回 cpu；选 GPU 才能跑 pixai"
+              help={
+                tagDevices.length > 1
+                  ? `已选 ${tagDevices.length} 张卡：每张各加载一份权重，按批等分`
+                  : '可多选。auto = 单卡（有卡用 cuda:0）；多选即每张卡各跑一份'
+              }
             >
-              <ChoiceGrid
-                options={DEVICES}
-                value={device as (typeof DEVICES)[number]}
-                onChange={(v) => setDevice(v)}
+              <ChoiceMulti
+                options={
+                  (defaults?.devices?.length ? defaults.devices : DEVICES_FALLBACK) as string[]
+                }
+                value={tagDevices}
+                onChange={setTagDevices}
+                // auto / cpu 是"不要多卡"的两种表达，与具体卡互斥
+                exclusive={['auto', 'cpu']}
                 className="grid-cols-4"
                 size="sm"
                 mono
@@ -3963,27 +4498,73 @@ export function NewJob({
             </SettingRow>
 
             <SettingRow
-              label="批大小"
-              help="CUDA Graph 只在批内形状固定时才生效，4~8 通常最划算"
+              label="多卡分工"
+              help={
+                tagDevices.length < 2
+                  ? '选两张以上显卡后才生效'
+                  : tagMode === 'pack'
+                    ? '每个包整体交给一张卡：包多时更快，日志能按卡定位问题'
+                    : '一个包在跑，每批等分给各卡：包少图多时最快'
+              }
             >
               <ChoiceGrid
-                options={BATCHES}
-                value={String(batch) as (typeof BATCHES)[number]}
-                onChange={(v) => setBatch(Number(v))}
-                className="grid-cols-5"
+                options={TAG_MODES}
+                value={tagMode}
+                onChange={setTagMode}
+                className="grid-cols-2"
                 size="sm"
-                mono
-                ariaLabel="批大小"
-                renderLabel={(v) => `${v}`}
+                ariaLabel="多卡分工"
+                disabled={tagDevices.length < 2}
+                renderLabel={(v) => (v === 'pack' ? '每卡一个包' : '批内切分')}
               />
             </SettingRow>
 
             <SettingRow
-              label="预处理"
+              label="批大小"
               help={
-                '解码都在 CPU，区别只在缩放/归一化放哪；1024² 大 PNG 上卡约 1.5×，' +
-                'JPEG 基本不赚。上卡换了重采样实现，线稿类图约一成 tag 会变'
+                tagDevices.length > 1
+                  ? `每张卡各 ${batch} 张，一次共 ${batch * tagDevices.length} 张`
+                  : '没有越大越快这回事：观测到超出显存就退回来'
               }
+            >
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={BATCH_MIN}
+                    max={BATCH_MAX}
+                    step={1}
+                    value={batch}
+                    onChange={(e) => setBatch(Number(e.target.value))}
+                    aria-label="批大小"
+                    className="h-1.5 min-w-0 flex-1 cursor-pointer accent-lx-accent"
+                  />
+                  {/* 滑动条不好精确停在某个数，配一个数字框；两处都夹到 1..100，
+                      手打 999 不会把服务端打成 OOM。 */}
+                  <input
+                    type="number"
+                    min={BATCH_MIN}
+                    max={BATCH_MAX}
+                    value={batch}
+                    onChange={(e) =>
+                      setBatch(
+                        Math.max(
+                          BATCH_MIN,
+                          Math.min(BATCH_MAX, Math.round(Number(e.target.value) || BATCH_MIN)),
+                        ),
+                      )
+                    }
+                    aria-label="批大小数值"
+                    className="lx-input w-16 px-1.5 py-0.5 text-right font-mono text-xs tabular-nums"
+                  />
+                </div>
+                <TagVramHint vram={tagVram} batch={batch} />
+              </div>
+            </SettingRow>
+
+            <SettingRow
+              label="预处理"
+              help={'大 PNG 快约 1.5×，JPEG 基本不赚；线稿类图约一成 tag 会变'}
             >
               <ChoiceGrid
                 options={PREPROCESS}
@@ -3998,7 +4579,7 @@ export function NewJob({
 
             <SettingRow
               label="阈值"
-              help="全局默认阈值；按类别覆盖见下方「按类别阈值」"
+              help="全局阈值；分类别覆盖在下方「按类别阈值」"
               icon={<Gauge size={14} />}
             >
               <div className="flex items-center gap-3">
@@ -4021,7 +4602,7 @@ export function NewJob({
             {keepOptions.length > 0 && (
               <SettingRow
                 label="保留类别"
-                help="不勾 = 用配置默认；勾选后只保留这些类别的 tag"
+                help="不勾 = 配置默认；勾选后只保留这些类别的 tag"
               >
                 <div className="flex flex-wrap gap-1.5">
                   {keepOptions.map((c) => {
@@ -4081,9 +4662,9 @@ export function NewJob({
               help="tag 分类头的权重，与出 NL 的大模型无关"
               description={
                 isVlm && backend === 'none'
-                  ? '当前 tag 由 VLM 自己出，这里不会加载任何本地分类头。'
+                  ? '当前 tag 由 VLM 出，不加载本地分类头'
                   : tagRepoForBackend
-                    ? `当前后端的默认仓库：${tagRepoForBackend}`
+                    ? `默认：${tagRepoForBackend}`
                     : undefined
               }
             >
@@ -4133,15 +4714,36 @@ export function NewJob({
             <SettingRow
               label="权重目录"
               description={defaults?.models_dir || undefined}
-              help="填了就不走 HF 缓存/仓库名。wd-eva02 / cl-tagger-v2 / onnx 认这个字段"
+              help="填了就不走 HF 缓存，也不会再去问网络；留空 = 交给 transformers 自己找缓存"
             >
-              <input
-                className="lx-input font-mono text-xs"
-                value={modelDir}
-                onChange={(e) => setModelDir(e.target.value)}
-                placeholder="h:\tagger\models\wd-eva02"
-                spellCheck={false}
-              />
+              {/* 清空按钮是必要的：现在 pixai 也认这个字段，而多数人是从
+                  wd-eva02 切过来的，输入框里还留着上一条路径。不说明白的话，
+                  用户会以为"清空 = 用默认"，实际是"用旧后端那个目录"。 */}
+              <div className="flex gap-2">
+                <input
+                  className="lx-input font-mono text-xs"
+                  value={modelDir}
+                  onChange={(e) => setModelDir(e.target.value)}
+                  placeholder={`${defaults?.models_dir ?? 'models'}\\${backend === 'none' ? 'wd-eva02' : backend}`}
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="lx-btn-ghost shrink-0 px-3"
+                  onClick={() => folder.pick(modelDir || defaults?.models_dir, setModelDir)}
+                >
+                  浏览
+                </button>
+                {modelDir && (
+                  <button
+                    type="button"
+                    className="lx-btn-ghost shrink-0 px-2 text-[11px]"
+                    onClick={() => setModelDir('')}
+                  >
+                    清空
+                  </button>
+                )}
+              </div>
             </SettingRow>
             </SectionPanel>
           )}
@@ -4159,7 +4761,7 @@ export function NewJob({
 
             <SettingRow
               label="硬件保护"
-              help="占空比 / 温度 / 强制休息"
+              help="按占空比、温度与休息时长限制"
               icon={guard ? <Cpu size={14} /> : <CloudOff size={14} />}
             >
               <ToggleRow checked={guard} onChange={setGuard} label="开启" />
@@ -4171,7 +4773,7 @@ export function NewJob({
             {!isVlm && (
               <SettingRow
                 label="盘位预算"
-                help="按「预计产出 + 20% 冗余」判；关掉就回落到配置里的固定磁盘阈值"
+                help="按预计产出 + 20% 冗余判断；关掉则用配置的固定磁盘阈值"
                 icon={<HardDrive size={14} />}
               >
                 <ToggleRow checked={checkSpace} onChange={setCheckSpace} label="开跑前检查磁盘" />
@@ -4220,7 +4822,7 @@ export function NewJob({
                     aria-label="占空比"
                   />
                   <span className="text-[10px] leading-snug text-lx-dim">
-                    1.00 = 全速；0.70 = 每忙 7 份睡 3 份（直接影响耗时）
+                    1.00 = 全速；0.70 = 每忙 7 份睡 3 份
                   </span>
                 </label>
 
@@ -4233,7 +4835,7 @@ export function NewJob({
                     step={1}
                     value={guardPolicy.target_temp_c ?? 0}
                     onChange={(v) => setKnob('target_temp_c', v)}
-                    hint="0 = 关，只靠下面的硬线兜底"
+                    hint="0 = 关闭闭环，只靠下面的硬线"
                   />
                   <GuardKnob
                     label="警告温度"
@@ -4263,7 +4865,7 @@ export function NewJob({
                     step={1}
                     value={guardPolicy.temp_resume_c ?? 70}
                     onChange={(v) => setKnob('temp_resume_c', v)}
-                    hint="必须低于熔断温度，否则一熔断就恢复不了"
+                    hint="必须低于熔断温度"
                   />
                   <GuardKnob
                     label="连续运行"
@@ -4283,7 +4885,7 @@ export function NewJob({
                     step={1}
                     value={guardPolicy.rest_minutes ?? 5}
                     onChange={(v) => setKnob('rest_minutes', v)}
-                    hint="配合上一项，只有连跑上限非 0 时才生效"
+                    hint="只在「连续运行」非 0 时生效"
                   />
                 </div>
 
@@ -4301,7 +4903,7 @@ export function NewJob({
                       step={0.01}
                       value={guardPolicy.kp ?? 0.04}
                       onChange={(v) => setKnob('kp', v)}
-                      hint="压占空比的速度；太大温度会来回震"
+                      hint="压占空比的速度；太大会震荡"
                     />
                     <GuardKnob
                       label="积分 ki"
@@ -4320,7 +4922,7 @@ export function NewJob({
                       step={0.5}
                       value={guardPolicy.temp_deadband_c ?? 2}
                       onChange={(v) => setKnob('temp_deadband_c', v)}
-                      hint="目标温度上下这么多度内不调整"
+                      hint="目标温度上下这个范围内不调整"
                     />
                     <GuardKnob
                       label="最低占空比"
@@ -4329,7 +4931,7 @@ export function NewJob({
                       step={0.02}
                       value={guardPolicy.min_duty ?? 0.2}
                       onChange={(v) => setKnob('min_duty', v)}
-                      hint="闭环最多压到这条线，压到 0 等于停跑"
+                      hint="闭环能压到的最低点"
                     />
                     <GuardKnob
                       label="单次让步上限"
@@ -4339,11 +4941,11 @@ export function NewJob({
                       step={1}
                       value={guardPolicy.max_sleep_s ?? 30}
                       onChange={(v) => setKnob('max_sleep_s', v)}
-                      hint="一次最多睡这么久；太大温度会过冲"
+                      hint="单次让步的时长上限；太大会过冲"
                     />
                   </div>
                   <p className="mt-2 text-[10px] leading-snug text-lx-dim">
-                    kp / ki 同时为 0 时闭环退化成"只按最低占空比跑"，不再跟随温度。
+                    kp / ki 同时为 0 时，闭环只按最低占空比跑。
                   </p>
                 </details>
               </div>
@@ -4355,7 +4957,7 @@ export function NewJob({
             早就滚出视野了。sticky 之后，机器/产出/产物/提交一直在手边。 */}
         <aside className="flex min-w-0 flex-col gap-3.5 lg:sticky lg:top-3.5 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
           <SectionPanel
-            title="这台机器"
+            title="系统"
             trailing={
               <StatusChip tone={gpus.length ? 'success' : 'warning'}>
                 {gpus.length ? `${gpus.length} 张卡` : '无显卡'}
@@ -4364,7 +4966,7 @@ export function NewJob({
           >
             <dl className="space-y-2.5 text-xs">
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-lx-muted">系统</dt>
+                <dt className="text-lx-muted">平台</dt>
                 <dd className="truncate text-right text-lx-secondary">{health?.platform ?? '—'}</dd>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -4391,7 +4993,7 @@ export function NewJob({
           </SectionPanel>
 
           <SectionPanel
-            title="这次会产出"
+            title="任务概览"
             trailing={
               <StatusChip tone={missingInput ? 'warning' : 'success'}>
                 {missingInput ? '待填输入' : '可以开跑'}
@@ -4400,7 +5002,7 @@ export function NewJob({
           >
             {/* 右栏只有 320px 宽，塞不下页头那种带左分隔线的大数字条
                 （那个样式是给整行横排用的，硬塞进来会挤成两列错位）。
-                这里用和「这台机器」一致的键值行，窄栏里才稳。 */}
+                这里用和「系统」一致的键值行，窄栏里才稳。 */}
             <dl className="space-y-2.5 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-lx-muted">待处理</dt>
@@ -4464,9 +5066,19 @@ export function NewJob({
           <SectionPanel title="统计和状态">
             <dl className="space-y-2.5 text-xs">
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-lx-muted">目标盘剩余</dt>
+                <dt className="text-lx-muted" title="分片缓存的盘，下载真正受它限制">
+                  缓存盘剩余
+                </dt>
                 <dd className="font-mono tabular-nums text-lx-secondary">
                   {diskFree === null ? '—' : `${(diskFree / 1024 ** 3).toFixed(1)} GB`}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-lx-muted" title="产物目录所在的盘">
+                  产物盘剩余
+                </dt>
+                <dd className="font-mono tabular-nums text-lx-secondary">
+                  {outFree === null ? '—' : `${(outFree / 1024 ** 3).toFixed(1)} GB`}
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -4517,15 +5129,73 @@ export function NewJob({
             </div>
           </SectionPanel>
 
+          {/* 下载源。放在提交入口上方：填了在线仓库、发现下不动的时候，
+              就地换镜像，不必折回模型页。它是全局设置，不是本次任务的参数。 */}
+          <SectionPanel title="下载源（镜像）">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="text-[11px] text-lx-muted">镜像</span>
+                <select
+                  className="lx-select text-xs"
+                  value={endpointPick}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setEndpointPick(v)
+                    setEndpointMsg('')
+                    if (v === 'custom') setEndpointDraft(endpointDraft || 'https://')
+                  }}
+                >
+                  {ENDPOINT_PRESETS.map((p) => (
+                    <option key={p.key || 'default'} value={p.key}>
+                      {p.label}
+                    </option>
+                  ))}
+                  <option value="custom">自定义…</option>
+                </select>
+              </label>
+              {endpointPick === 'custom' && (
+                <label className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="text-[11px] text-lx-muted">地址</span>
+                  <input
+                    className="lx-input font-mono text-xs"
+                    spellCheck={false}
+                    value={endpointDraft}
+                    placeholder="https://hf-mirror.com"
+                    onChange={(e) => {
+                      setEndpointDraft(e.target.value)
+                      setEndpointMsg('')
+                    }}
+                  />
+                </label>
+              )}
+              <button
+                type="button"
+                className="lx-btn-ghost shrink-0 px-3 py-1.5 text-[11px]"
+                disabled={endpointBusy}
+                onClick={() =>
+                  void saveEndpoint(
+                    (endpointPick === 'custom' ? endpointDraft : endpointPick).trim(),
+                  )
+                }
+              >
+                {endpointBusy ? '保存中…' : '保存'}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-lx-dim">
+              当前生效：<span className="font-mono">{endpointNow || '—'}</span>
+            </p>
+            {endpointMsg && <p className="mt-1 text-[11px] text-lx-muted">{endpointMsg}</p>}
+          </SectionPanel>
+
           {/* 左下角的提交入口。页顶那个按钮在长表单滚到底以后就看不见了，
               这里再放一个同样的入口，顺带把「还差什么」直接写出来。 */}
           <SectionPanel title="提交">
             <p className="mb-2.5 text-[11px] leading-relaxed text-lx-muted">
               {missingInput
                 ? isVlm
-                  ? '还差输入：填 HF 团队仓库，或选一个本地分片包。'
-                  : '还差输入路径：选一个图片目录，或 .zip / .tar 素材包。'
-                : '参数都在上面；提交后到「运行中」看进度，跑完去「回传」或「数据打包」。'}
+                  ? '还差输入：填仓库名，或选本地分片包'
+                  : '还差输入：选图片目录，或 .zip / .tar 素材包'
+                : '提交后到「运行中」看进度'}
             </p>
             <button
               type="button"

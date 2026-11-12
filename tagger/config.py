@@ -76,6 +76,12 @@ class TierSpec:
     precision: str | None = None
     max_model_len: int = 8192
     max_num_seqs: int = 8
+    # llama.cpp 的分档推算槽位（-np）。与 max_num_seqs 同义但不能混用：
+    # max_num_seqs 是 vLLM 的连续批处理上限，llama.cpp 根本没有那条参数，
+    # 它的等价物是 --parallel。两者都给一个数，是为了"分档表同时服务两个引擎"
+    # 时不至于逼用户按引擎手改表。
+    # 0 / 缺省 = 不写，由 nl_engine.SLOT_TIERS 按显存推。
+    slots: int = 0
     # 单步最多处理多少 token（prefill + decode 合计）。0 = 用 vLLM 默认。
     max_num_batched_tokens: int = 0
     cc_min: tuple[int, int] | None = None
@@ -152,6 +158,13 @@ class RunProfile:
     request_timeout_s: int
     device_name: str
     vram_gb: float
+    # llama.cpp 的 -np（每卡槽位数）。0 = 不指定，由 nl_engine 按显存推。
+    # 与 max_num_seqs 分开存，但**默认同值**：`--max-num-seqs 12` 在
+    # llama.cpp 上就该得到 12 个槽位（Bug 1：以前它只落到 profile 上，
+    # 而 build_command 只认 slots_override，用户传了等于没传）。
+    # 放在 buckets 之前是因为 dataclass 不允许"带默认值的字段"排在
+    # 无默认值字段前面，而这些字段都在构造末尾、无默认值的都在前面。
+    slots: int = 0
     # 分桶表。max_pixels 是总预算，buckets 是这预算在五种宽高比下的具体落点。
     # 空列表表示只用单一尺寸，不分桶。
     buckets: list[Bucket] = field(default_factory=list)
@@ -219,6 +232,9 @@ class RunProfile:
             f"max_pixels    : {self.max_pixels}",
             f"max_model_len : {self.max_model_len}",
             f"max_num_seqs  : {self.max_num_seqs}",
+            # 两个引擎的并发不是一个字段：vLLM 连续批处理看上面那行，
+            # llama.cpp 只认 -np。都打出来，用户才对得上自己传的参数。
+            f"slots         : {self.slots or 'auto'}",
         ]
         if self.max_num_batched_tokens:
             lines.append(f"max_batched   : {self.max_num_batched_tokens}")
@@ -354,6 +370,15 @@ def _as_flag(value: Any, default: bool) -> bool:
     return str(value).strip().lower() not in ("", "0", "false", "no", "off", "none")
 
 
+# 图中文字规则的默认文件（`prompts/` 下的文件名，不带后缀）。
+#
+# ★为什么默认开：混批（一个包里有的图有字、有的没有）不可能在中途改开关，
+#   而文字条款的措辞本身就是条件式的（"any text visible" / "图中文字"），
+#   无文字的图没有可转写的东西，规则自然不生效。所以"一律带上"才是正确默认，
+#   关掉只应发生在"这批图肯定没字、连提都不想提"的场合。
+DEFAULT_TEXT_RULES = "图中文字规则"
+
+
 @dataclass(slots=True)
 class OutputSpec:
     """产出什么、多长。决定一次打标要生成哪些字段。
@@ -391,7 +416,56 @@ class OutputSpec:
     # 图中文字规则用 `prompts/` 下的哪一份（文件名不带后缀）。空 = 这批不加
     # 图中文字约束。规则是 markdown，主创自己改措辞不用动代码。
     # ★它进缓存指纹与 provenance：换了规则文本就是换了指令，两批不能混。
-    text_rules: str = ""
+    # ★默认开。混批里不可能中途改开关，且文字条款的措辞是条件式的，无文字的
+    #   图不会被它影响；显式写 `text_rules: ""` 才是关掉（见 from_dict）。
+    text_rules: str = DEFAULT_TEXT_RULES
+    # tag 数量达不到下限时的**降阈值重筛**（0 = 关，行为与老版本完全一致）。
+    # 为什么不是"重跑一遍"：CPU 分类头是确定性的（同图同权重分数不变），
+    # 重跑只会拿到同一份数字。正确做法是同一份分数按更低的线再筛一次。
+    tag_fallback_threshold: float = 0.0
+    # 降阈值重筛后仍 < tag_min_count 时，够这个数就如实采纳（不判废）。
+    # 为什么必须有这条：素材里有信息量真的很少的图（纯色、简单图标），
+    # 让它一条条进失败队列，等于用"达不到 12"去否定"这图确实只有 5 个东西"。
+    # 0 = 不采纳，仍然判失败。
+    tag_min_accept: int = 0
+    # tag 数量超出上限时的**提阈值重筛**（0 = 关）。文字密集的图（包装上的
+    # 品牌/规格/日期成串）实测能出 125~152 个长复合 tag，把 max_tokens 吃干，
+    # caption 一个字都出不来。抬线比截断更合理：截断留下的是"重要性靠前的
+    # 那批"，抬线留下的是"模型真的有把握的那批"，后者才是这张图的骨架。
+    tag_retry_threshold: float = 0.0
+    # 抬线重筛的触发线：tag 数超过它才认为"图被小字撑爆了"。
+    # 必须 >= tag_max_count，否则正常图也会被抬线。0 = 用 tag_max_count。
+    tag_overflow_count: int = 0
+    # 回复被截断后重打时追加的规则文件名（`prompts/` 下，不带后缀）。
+    # 空串 = 不追加，退化成原来的"抬高温度再打一次"。
+    dense_retry_rules: str = ""
+    # 截断重打时临时收紧的 tag 上限（0 = 不收紧，用 tag_max_count）。
+    # 为什么重打还要另外压一次：文字密集图被打断，是因为 TAGS 段就吃光了预算。
+    # 只改 prompt 措辞是软约束，模型照样能列满；把上限临时压到 24~32 才是硬闸。
+    # 这一条只管那次重打，落盘后的产出仍守 tag_max_count。★进缓存指纹。
+    dense_retry_tag_max: int = 0
+    # 输入图字节下限（0 = 不限）。低于它的图直接判「跳过」，不算失败。
+    # 依据：实测那批「tag 最多只出 3 个」的图全是 5~7 KB 的纯色占位图/缩略图,
+    # 解出来是一块平涂，没有任何可标内容。这类图重试一万次也是同样结果，
+    # 放进数据集还会把模型往「空白」上带。
+    # ★为什么按字节而不按像素方差：字节判据零解码成本，且在入口就能挡；
+    #   算方差要先解一张 20 MP 的图，为了丢掉它反而多花一次解码。
+    # ★被跳过的图**不进 failures.jsonl**（写进 skipped.jsonl）：它们不是失败，
+    #   是输入无效。分成两类之后，「失败率」这个数才说得清。
+    min_image_bytes: int = 0
+    # 拒答重打：模型拒答时是否换一份"直接出块、别解释"的指令再打一次。
+    # 默认开。为什么值得多花一次推理：拒答是模板回复，对温度不敏感，但对
+    # **指令**敏感——换掉"能不能回答"这一层预设，大多数就能正常产出。
+    # 关掉它等于回到旧行为（拒答即 drop，那张图直接进失败账）。
+    refusal_retry: bool = True
+    # 「重试失败项」最多做几轮（0 = 不重试，失败项留在 failures.jsonl 里等人工）。
+    #
+    # 语义：失败项重新跑一轮，仍失败则**从分母里剔除**、记进 excused.jsonl，
+    # 单样本归档，不再阻塞分片上报。为什么不是无限重试：CPU 分类头是确定性的，
+    # 重试能改变结果的只有"模型那段"（拒答、截断、超时），连试两轮还不行，
+    # 再试大概率是同样的结果，而那几张图会把整个分片永远卡在"未完成"。
+    # 剔除是显式的：归档文件留在盘上，谁都可以事后人工捞回来。
+    retry_failed_rounds: int = 2
 
     @property
     def wants_nl(self) -> bool:
@@ -421,7 +495,25 @@ class OutputSpec:
             caption_zh_ratio=min(1.0, max(0.0, float(
                 d.get("caption_zh_ratio", 0.0) or 0.0))),
             # 规则文件名照原样留着（可带空格、中文），读文件那一步再补后缀。
-            text_rules=str(d.get("text_rules") or "").strip(),
+            # ★"键不存在"和"显式空串"是两件事：前者用默认（开着），后者是用户
+            #   主动关掉。写成 `d.get(...) or ""` 会让默认值永远不生效。
+            text_rules=(DEFAULT_TEXT_RULES if d.get("text_rules") is None
+                        else str(d.get("text_rules")).strip()),
+            # 四条 tag 兜底参数一律夹到合法区间，不报错：它们只是"要不要救"
+            # 的旋钮，写错一个数不该拦住整批任务。
+            tag_fallback_threshold=min(1.0, max(0.0, float(
+                d.get("tag_fallback_threshold", 0.0) or 0.0))),
+            tag_min_accept=max(0, int(d.get("tag_min_accept", 0) or 0)),
+            tag_retry_threshold=min(1.0, max(0.0, float(
+                d.get("tag_retry_threshold", 0.0) or 0.0))),
+            tag_overflow_count=max(0, int(d.get("tag_overflow_count", 0) or 0)),
+            dense_retry_rules=str(d.get("dense_retry_rules", "") or "").strip(),
+            dense_retry_tag_max=max(0, int(d.get("dense_retry_tag_max", 0) or 0)),
+            min_image_bytes=max(0, int(d.get("min_image_bytes", 0) or 0)),
+            # 拒答重打默认开：显式 false 才关（`or True` 会让 False 永远失效）。
+            refusal_retry=(True if d.get("refusal_retry") is None
+                           else bool(d.get("refusal_retry"))),
+            retry_failed_rounds=max(0, int(d.get("retry_failed_rounds", 2) or 0)),
         )
         if spec.nl_max_tokens and spec.nl_min_tokens > spec.nl_max_tokens:
             raise ConfigError(
@@ -724,6 +816,25 @@ def resolve_buckets(raw: Any, max_pixels: int) -> list[Bucket]:
         ) from exc
 
 
+def _positive(value: Any, *, name: str = "并发数") -> int:
+    """把"用户填的数"转成正整数；None / 0 视为没填，负数直接拒绝。
+
+    为什么不能只用 `or`：`--max-num-seqs 0` 会被 `or` 静默换成分档表默认值，
+    用户以为改成了 0（"先不并发"），实际跑的是 8；而 `-4` 在另一条路径上会被
+    `max(1, ...)` 变成 1。同一个非法输入三种结果，全程无提示——这类"看着生效
+    其实没生效"正是上一轮 bug 的同一个病根。
+    """
+    if value is None:
+        return 0
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{name}必须是整数，收到 {value!r}") from None
+    if n < 0:
+        raise ConfigError(f"{name}不能是负数，收到 {n}")
+    return n
+
+
 def resolve_profile(
     table: dict[str, Any],
     gpu: GPUInfo,
@@ -778,6 +889,7 @@ def resolve_profile(
             precision=t.get("precision"),
             max_model_len=int(t.get("max_model_len", 8192)),
             max_num_seqs=int(t.get("max_num_seqs", 8)),
+            slots=int(t.get("slots", 0) or 0),
             max_num_batched_tokens=int(t.get("max_num_batched_tokens", 0) or 0),
             cc_min=_parse_cc(t.get("cc_min")),
             note=t.get("note", ""),
@@ -833,7 +945,15 @@ def resolve_profile(
         # 上下文长度可以自己填：分档表只有三档粗粒度，而"这张卡到底能开多大"
         # 取决于权重精度和预留显存，用户比配置更清楚。
         max_model_len=int(max_model_len_override or tier.max_model_len),
-        max_num_seqs=int(max_num_seqs_override or tier.max_num_seqs),
+        max_num_seqs=(_positive(max_num_seqs_override, name="--max-num-seqs")
+                      or tier.max_num_seqs),
+        # 槽位沿用同一个用户输入：`--max-num-seqs 12` 在两个引擎上都该是 12。
+        # ★优先级必须是**用户 > 分档表**。反过来写（tier.slots 在前）会造出
+        #   一模一样的 Bug 1：某档配了 slots: 6 之后，用户传 --max-num-seqs 12
+        #   被静默吃掉，-np 仍是 6，而且没有任何提示。
+        slots=int(_positive(max_num_seqs_override)
+                  or tier.slots
+                  or tier.max_num_seqs),
         max_num_batched_tokens=int(max_num_batched_tokens_override
                                    or tier.max_num_batched_tokens),
         gpu_memory_utilization=float(

@@ -876,6 +876,7 @@ def run_pack(params: PackParams, *, on_progress, should_stop, on_log) -> dict:
             layout=params.layout,
             artist_prefix=rule.prefix,
             inject_artist=bool(rule.enabled and rule.inject_caption),
+            inject_artist_tags=bool(rule.enabled and rule.inject_tags),
             naming=naming,
             on_sample=count_sample,
             on_seal=lambda row: on_log(
@@ -998,6 +999,15 @@ class DataJob:
                 should_stop=self.stop_flag.is_set,
                 on_log=self._on_log,
             )
+            if self.kind == "pack":
+                if self.summary["failed"]:
+                    raise RuntimeError(
+                        f"封包失败 {self.summary['failed']} 张，已封成品保留；"
+                        "修复后重跑会补做失败项")
+                if not (self.summary["packed"] + self.summary["skipped_done"]):
+                    raise RuntimeError(
+                        f"没有可封包的打标产物（缺少 {self.summary['skipped_missing']} 张）；"
+                        "请补齐打标结果并确认编号方式后重跑")
             self.status = "done"
         except DataJobStopped:
             with self._lock:

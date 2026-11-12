@@ -49,8 +49,8 @@ env\python\python.exe -m pytest
 **Linux / macOS / WSL：**
 
 ```bash
-chmod +x install.sh tagger.sh     # 从 Windows 拷过来会丢执行位
-./install.sh                      # 幂等
+bash install.sh                   # 首次用 bash；脚本开头自动补齐三个 .sh 的执行位
+./install.sh                      # 之后可直接调用（幂等）
 ./install.sh --force              # 重建 env/linux
 ./install.sh --offline            # 用 env/initialization/wheels
 ./install.sh --python python3.12  # 指定解释器

@@ -141,7 +141,7 @@ export function Conflicts() {
         icon={<GitCompareArrows size={17} />}
         eyebrow="冲突与决策"
         title="冲突审批"
-        description="同一 image_id 有多份不同产物时，在这里逐条定留哪份；合并只取你批准的那份。"
+        description="同一 image_id 有多份产物时，逐条定留哪份"
         badges={
           <StatusChip tone={tone}>
             {!state?.index
@@ -175,7 +175,7 @@ export function Conflicts() {
 
       <SectionPanel
         title="产物目录"
-        description="只填一个共同父目录也行（会递归扫）；合并时给的目录要与这里一致。"
+        description="合并时给的目录要与这里一致"
       >
         {roots.map((value, i) => (
           <SettingRow key={i} label={`目录 ${i + 1}`}>
@@ -213,7 +213,7 @@ export function Conflicts() {
 
       <SectionPanel
         title="自动审批"
-        description="策略只预填建议，批准后仍可逐条反悔。"
+        description="策略只给建议，批准后可逐条反悔"
         trailing={
           <button
             type="button"
@@ -228,7 +228,7 @@ export function Conflicts() {
       >
         <SettingRow
           label="审批方案"
-          help="保留最新 = 按产物写入时间取新的那份；保留最长 = 正文字符最多（tag 就是串最长）。人工决策 = 不自动批任何一条。"
+          help="保留最新按写入时间；保留最长按正文字符数；人工决策不自动批"
         >
           <ChoiceGrid
             options={STRATEGIES}
@@ -244,7 +244,7 @@ export function Conflicts() {
 
       <SectionPanel
         title="冲突明细"
-        description="点「保留这份」即批准，批准过的在合并时生效。"
+        description="点「保留这份」即批准，合并时生效"
         trailing={
           <div className="flex items-center gap-2">
             <button
@@ -273,7 +273,7 @@ export function Conflicts() {
         }
       >
         {!state?.index && (
-          <p className="px-1 py-3 text-xs text-lx-muted">还没有扫描结果。填好目录后点右上角「扫描冲突」。</p>
+          <p className="px-1 py-3 text-xs text-lx-muted">填好目录后点「扫描冲突」</p>
         )}
         {state?.index && state.unreadable > 0 && (
           <p className="px-1 py-3 text-xs text-lx-warning">

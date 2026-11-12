@@ -36,6 +36,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .artist_templates import starts_with_artist_sentence
+
 # 标签里不能出现的字符：逗号会和 tag 列表分隔冲突，换行会破坏 jsonl 行边界，
 # @ 前缀重复会导致 "@@@name" 这种下游解析歧义。
 _UNSAFE = re.compile(r"[,;\n\r\t@#]+")
@@ -46,6 +48,18 @@ _NON_ASCII = re.compile(r"[^\x00-\x7F]")
 
 # 分片包的几种后缀。剥掉它们才和画师表文件名（`<stem>.artist.parquet`）对得上。
 _PACK_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip")
+
+# NL 注入句式的取值归一化。认不出的值一律按 `template`——新行为是默认，
+# 只有显式写 bare/legacy 才回到"裸 @名 接正文"。
+_NL_STYLES = {
+    "template": "template", "sentence": "template", "style": "template",
+    "bare": "bare", "prefix": "bare", "legacy": "bare", "old": "bare",
+}
+
+
+def _nl_style(value) -> str:
+    raw = str(value if value is not None else "template").strip().lower()
+    return _NL_STYLES.get(raw, "template")
 
 
 @dataclass(slots=True)
@@ -72,11 +86,25 @@ class ArtistRule:
     table: str | None = None
     # 允许出现在标签里的最大长度，超了视为异常路径而不是作者名
     max_len: int = 64
+    # 查不到画师时是否**跳过这张图**（默认否：照常产出，只是没有 @ 前缀）。
+    # 关掉的取舍是"宁可少一个前缀也不丢数据"——真实数据集里约 4.6% 的图
+    # 在 danbooru 上没有作者标注，整批跳过等于凭空砍掉这部分样本；开着的
+    # 取舍是"只要带画师绑定的干净数据"，由使用方按训练目标决定。
+    skip_when_missing: bool = False
     # 名字里有空格时替换成下划线。
     # 原因：caption 是按空格分词的，`@sakimi chan` 会被切成 `@sakimi` 和 `chan`
     # 两个 token，画师绑定就散了一半。合并成一个词才能整体激活。
     # 没有空格的名字原样保留，不做任何改写。
+    # ⚠ 与 `verbatim_names` 冲突：后者打开时（默认）本项对画师名**失效**。
     space_to_underscore: bool = True
+    # 名字逐字原样优先。画师名是绑定键，大小写、空格、假名都是键的一部分；
+    # 注入形态必须与来源 tag 逐字相等，否则训练侧绑不上同一个人。
+    # 与 `space_to_underscore` 冲突时以本项为准（历史清洗规则让位）；
+    # 置 False 才回到"空格转下划线"的旧行为。
+    verbatim_names: bool = True
+    # NL 注入句式。`template`（默认）：自然句式、位置固定开头；
+    # `bare`：旧行为，裸 `@名字` 直接接正文，仅用于回退对比。
+    nl_style: str = "template"
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "ArtistRule":
@@ -91,6 +119,9 @@ class ArtistRule:
             table=d.get("table") or None,
             max_len=int(d.get("max_len", 64)),
             space_to_underscore=bool(d.get("space_to_underscore", True)),
+            verbatim_names=bool(d.get("verbatim_names", True)),
+            nl_style=_nl_style(d.get("nl_style")),
+            skip_when_missing=bool(d.get("skip_when_missing", False)),
         )
 
 
@@ -302,17 +333,20 @@ def extract_artist(
 
     # 先查翻译表。key 用原始目录名，因为表是人照着目录名填的，
     # 不能拿已经转过下划线的形式去查——那样人工填的条目永远命中不了。
+    # 名字逐字原样优先：verbatim_names 打开（默认）时，空格转下划线对画师名
+    # 失效，否则 `sakimi chan` 会变成 `sakimi_chan`，注入形态与来源 tag 不再
+    # 逐字相等，训练侧绑不上同一个人。
+    fold_spaces = rule.space_to_underscore and not rule.verbatim_names
     if aliases:
         mapped_source = aliases.get(raw)
         if mapped_source:
             mapped = _clean(mapped_source, rule.max_len,
-                            space_to_underscore=rule.space_to_underscore)
+                            space_to_underscore=fold_spaces)
             if mapped:
                 return ArtistTag(raw=raw, tag=mapped, mapped=True)
         # 表里存在但值为空 = 待翻译，仍按原名走，并在统计里算作缺口
 
-    tag = _clean(raw, rule.max_len,
-                 space_to_underscore=rule.space_to_underscore)
+    tag = _clean(raw, rule.max_len, space_to_underscore=fold_spaces)
     if not tag:
         return ArtistTag(raw=raw, reason=f"第 {rule.depth + 1} 层目录名清洗后为空")
 
@@ -341,6 +375,11 @@ def prepend_tag(text: str, tag: str) -> str:
     "caption 里带了画师、tag 串里没带"这种对不上的产物。
     """
     if not tag:
+        return text
+    if starts_with_artist_sentence(text, tag):
+        # 上游已按句式模板把画师句写在开头（`使用 @名 的风格` /
+        # `In the style of @名`）。这里再拼一次裸名前缀，同一个名字会在
+        # 正文里出现两遍——句式那次带语义，裸名这次才是多余的，所以跳过。
         return text
     text = text.lstrip()
     if not text:
@@ -574,8 +613,37 @@ class ArtistTable:
         if bad:
             self._complain(expect or path.name, bad)
             return None
-        return dict(zip(tbl.column("id").to_pylist(),
-                        tbl.column("artists").to_pylist()))
+        return self._normalize(
+            dict(zip(tbl.column("id").to_pylist(),
+                     tbl.column("artists").to_pylist())), path, expect)
+
+    def _normalize(self, raw: dict, path: Path, expect: str) -> dict[int, list[str]]:
+        """把表里的 id 与画师名整成查表侧的唯一口径。
+
+        两件事，都是实测踩出来的：
+
+        - **id 可能是字符串**（danbooru 的导出常见）。不转 int 的话 lookup 一律
+          查不到，而且**不报错**——表现成"整批没有画师"，再叠上
+          skip_when_missing 就是整片静默跳过。
+        - **名字可能是空串或纯空格**。原样返回会让上层以为"有画师"，于是跳过
+          开关不生效、caption 里又不会出现前缀，两头不一致。空名一律当没有。
+        """
+        out: dict[int, list[str]] = {}
+        bad_id = 0
+        for key, names in raw.items():
+            try:
+                pid = int(key)
+            except (TypeError, ValueError):
+                bad_id += 1
+                continue
+            cleaned = [str(n).strip() for n in (names or []) if str(n).strip()]
+            if cleaned:
+                out[pid] = cleaned
+        if bad_id:
+            self._complain(expect or path.name,
+                           f"{path.name} 有 {bad_id} 行的 id 不是数字，已跳过"
+                           f"（那些图会被当成没有画师）")
+        return out
 
     def _single_dict(self) -> dict[int, list[str]]:
         """单表形态（本地文件或远程 parquet）整份读进内存。"""

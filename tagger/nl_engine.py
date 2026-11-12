@@ -160,12 +160,24 @@ def check_engine(engine: str) -> None:
         return
     binary = find_server_binary()
     if binary is None:
+        # 装过、但目录里翻不到 exe：这时的关键信息不是"再装一次"，而是
+        # "装到哪了"。自查一下再说话，否则用户只会反复重装。
+        from .llama_runtime import BINARY_NAME, INSTALL_ROOT, _local_binary
+
+        if INSTALL_ROOT.is_dir() and any(INSTALL_ROOT.iterdir()):
+            found = _local_binary()
+            raise ConfigError(
+                f"llama.cpp 目录里有东西，但没找到 {BINARY_NAME}：{INSTALL_ROOT}\n"
+                f"（本次查找结果：{found or '无'}）\n"
+                f"大概是解压不完整或被杀软删了。去网页点「下载并安装 llama.cpp」"
+                f"重装一次；也可以用「从本地压缩包安装」装一份官方包，或在命令行 "
+                f"`tagger llama install --zip <路径>`。")
         raise ConfigError(
-            "找不到 llama-server。三条路：\n"
+            f"找不到 {BINARY_NAME}。三条路：\n"
             "  1) 网页上点「下载并安装 llama.cpp」（推荐，装到 runtime/llama.cpp）；\n"
             "  2) 命令行 `tagger llama install`（可用 --zip 指定本地包或镜像地址）；\n"
             "  3) 已经有现成构建：设环境变量 TAGGER_LLAMA_SERVER 指向 "
-            "llama-server.exe 的完整路径。\n"
+            f"{BINARY_NAME} 的完整路径。\n"
             "GitHub 直连不通时先设 HTTPS_PROXY。"
         )
 
@@ -202,19 +214,36 @@ def slot_plan(profile: RunProfile, vram_gb: float | None = None,
     vram 未知时给最保守的 2 slot —— 这个值只影响吞吐，不影响产出，
     所以按"肯定起得来"选，不猜。
 
-    override 是用户在页面上填的"每卡并发"（多卡时每张卡一份服务，各按
-    这个数开 slot）。它只改吞吐不改产出，所以允许覆盖显存推算值；
-    但每 slot 上下文仍取 CTX_PER_SLOT，总上下文随之线性增长——显存不够时
-    会 OOM，这是用户显式选择的结果，不做二次猜测。
+    取值顺序：override > profile.slots > 显存推算。
+      * override 是页面上填的"每卡并发"（多卡时每张卡一份服务，各按这个数
+        开 slot），多卡那条路专用；
+      * profile.slots 来自 resolve_profile（分档表 slots 或 --max-num-seqs），
+        单卡命令行/页面启动走这条；
+      * 都没有才按显存推。
+    它只改吞吐不改产出，所以允许覆盖显存推算值；但每 slot 上下文仍取
+    CTX_PER_SLOT，总上下文随之线性增长——显存不够时会 OOM，这是用户显式
+    选择的结果，不做二次猜测。
     """
     if override:
         slots = max(1, min(64, int(override)))
     else:
-        slots = SLOT_TIERS[-1][1]
-        for floor, n in SLOT_TIERS:
-            if (vram_gb or 0.0) >= floor:
-                slots = n
-                break
+        # profile.slots 是"用户/分档表给的值"（resolve_profile 里已把
+        # --max-num-seqs 折进来）。它非零就别再按显存推——Bug 1 就是这条
+        # 路断了：用户传了 12，build_command 只认 override，profile 上那个
+        # 数从来没被读过，日志里永远是按显存算出来的 2。
+        want = int(getattr(profile, "slots", 0) or 0)
+        if want < 0:
+            # 负槽位不可能有意义，且不同路径的结果不一致（这里会被判成"按
+            # 显存取 12"，override 路径会被 max(1,..) 变成 1）。直接拒绝。
+            raise ConfigError(f"槽位数不能是负数，收到 {want}")
+        if want > 0:
+            slots = max(1, min(64, want))
+        else:
+            slots = SLOT_TIERS[-1][1]
+            for floor, n in SLOT_TIERS:
+                if (vram_gb or 0.0) >= floor:
+                    slots = n
+                    break
     # 模型自带的最长上下文是硬上限，不能超过
     ctx_per_slot = min(int(profile.max_model_len), CTX_PER_SLOT)
     need = image_tokens_for(profile) + MIN_CTX_HEADROOM

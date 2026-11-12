@@ -7,6 +7,8 @@ import tempfile
 from collections.abc import MutableMapping, Sequence
 from pathlib import Path
 
+from .. import tmpdir
+
 SPILL_AT = 8192
 
 
@@ -18,7 +20,11 @@ class SpillMap(MutableMapping):
         self.temp = None
 
     def _spill(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="tagger-index-")
+        self.close()
+        # 索引是 sqlite 文件，几万行的表也有几十 MB：跟其他临时产物一起落
+        # 在程序目录下的 tmp/（详见 tmpdir）。
+        self.temp = tempfile.TemporaryDirectory(prefix="tagger-index-",
+                                                dir=tmpdir.ensure())
         self.db = sqlite3.connect(Path(self.temp.name) / "index.sqlite3", check_same_thread=False)
         self.db.execute("PRAGMA cache_size=-4096")
         self.db.execute("PRAGMA temp_store=FILE")

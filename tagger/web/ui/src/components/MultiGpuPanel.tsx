@@ -144,11 +144,11 @@ export function MultiGpuPanel({
       <SettingRow
         label="多卡并行"
         icon={<Cpu size={14} />}
-        help="每张卡各起一个独立服务、各打各的图，结果照旧写进同一批产物。4 张卡约等于 4 倍吞吐，代价是每卡一份权重（8B-Q4 约 6GB）"
+        help="每张卡独立起一个服务，结果写进同一批产物；每卡一份权重"
         description={
           running
             ? `${readyCount}/${workers.length} 张就绪 · 每卡并发 ${state?.per_card_seqs || '按分档'} · 合计 ${state?.total_seqs || 0} 条在途`
-            : '不融合权重，卡与卡互不影响；一张卡挂了其余照跑'
+            : '卡与卡互不影响，一张挂了其余照跑'
         }
       >
         <label className="flex items-center gap-2 text-[12px]">

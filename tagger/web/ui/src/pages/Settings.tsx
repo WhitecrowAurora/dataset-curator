@@ -1,7 +1,7 @@
 import { Settings2 } from 'lucide-react'
 import { ChoiceGrid } from '../components/ui/controls'
 import { PageHeader, SectionPanel, SettingRow } from '../components/ui/launcher'
-import { PROGRESS_INTERVALS, PROGRESS_INTERVAL_KEY } from '../lib/prefs'
+import { PROGRESS_INTERVALS } from '../lib/prefs'
 
 /**
  * 设置页。目前只有一个偏好，但独立成页是刻意的：界面偏好以后会越攒越多
@@ -26,13 +26,13 @@ export function Settings({
         icon={<Settings2 size={18} />}
         eyebrow="本机偏好"
         title="设置"
-        description="这些只存在当前浏览器里，不影响服务端跑什么任务。"
+        description="只存在当前浏览器里"
       />
 
       <SectionPanel title="界面">
         <SettingRow
           label="底部进度条刷新频率"
-          help="底部那条显示正在跑的任务（打标/分包/拼接/封包/合并/自检）。调快更跟手但会多打几次后端；任务多的时候 2s 左右比较合适。"
+          help="调快更跟手，但会多打后端"
         >
           <ChoiceGrid
             options={options}
@@ -46,9 +46,7 @@ export function Settings({
           />
         </SettingRow>
         <p className="px-1 pt-2 text-[10px] leading-relaxed text-lx-dim">
-          默认 5 秒。选「暂停」后不再向后端轮询（任务照样在跑），硬件读数与
-          计划任务入口仍然保留，随时能取消自动关机。
-          存在 localStorage 的 <span className="font-mono">{PROGRESS_INTERVAL_KEY}</span> 里。
+          默认 5 秒；「暂停」只停止轮询，任务照跑
         </p>
       </SectionPanel>
     </div>

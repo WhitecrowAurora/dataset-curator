@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>fox-label</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<p id="fp-live" class="fp-sr" role="status" aria-live="polite" aria-atomic="true"></p>
+
+<div class="fp-app">
+  <aside class="fp-sidebar" id="sidebar">
+    <div class="fp-brand">
+      <svg class="fp-brand__ic" viewBox="0 0 24 24" width="20" height="20"
+           fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M4 14c3.5-1 4.5-6 8-6s4.5 4 8 4"/>
+        <path d="M4 18c3.5-1 4.5-4 8-4s4.5 2 8 2"/>
+      </svg>
+      <div>
+        <span class="fp-brand__name" id="brand-name"></span>
+        <span class="fp-brand__sub" id="brand-sub"></span>
+      </div>
+    </div>
+    <nav class="fp-navwrap" id="nav-side">
+      <ul class="fp-nav" id="nav-side-list"></ul>
+    </nav>
+    <div class="fp-sidebar__ft">
+      <span class="fp-pill fp-pill--idle" id="up-pill-side"></span>
+      <span class="fp-sidebar__ver" id="side-ver"></span>
+    </div>
+  </aside>
+
+  <div class="fp-shell">
+    <header class="fp-header" id="header">
+      <h1 class="fp-header__title" id="page-title"></h1>
+      <div class="fp-header__actions">
+        <span class="fp-pill fp-pill--idle" id="up-pill"></span>
+        <label class="fp-check" id="auto-wrap">
+          <input type="checkbox" id="auto">
+          <span class="fp-check__t" id="auto-label"></span>
+        </label>
+        <button class="fp-btn fp-btn--primary" id="refresh" type="button">
+          <span id="refresh-label"></span>
+        </button>
+        <button class="fp-iconbtn fp-notifbtn" id="notif-btn" type="button"
+                aria-haspopup="dialog" aria-expanded="false">
+          <span class="fp-notifbtn__badge" id="notif-badge" hidden></span>
+        </button>
+        <button class="fp-iconbtn" id="theme" type="button" aria-pressed="false"></button>
+        <button class="fp-iconbtn" id="help-btn" type="button"></button>
+        <form method="post" action="/logout" class="fp-inline">
+          <button class="fp-btn fp-btn--ghost fp-btn--sm" id="logout" type="submit"></button>
+        </form>
+      </div>
+    </header>
+
+    <nav class="fp-tabs" id="tabs"></nav>
+
+    <main class="fp-main" id="main" tabindex="-1">
+
+      <section class="fp-page" id="page-overview" hidden>
+        <div class="fp-stats" id="ov-stats" aria-busy="false"></div>
+        <section class="fp-card">
+          <div class="fp-card__hd">
+            <h2 id="ov-repo-title"></h2>
+            <span class="fp-card__hint" id="ov-repo-hint"></span>
+          </div>
+          <div class="fp-tablewrap" id="ov-repo" aria-busy="false"></div>
+        </section>
+        <p class="fp-note" id="ov-note" hidden></p>
+        <p class="fp-page__ts fp-card__hint" id="ov-ts"></p>
+      </section>
+
+      <section class="fp-page" id="page-packages" hidden>
+        <div class="fp-toolbar" id="pkg-toolbar" role="search">
+          <div class="fp-toolbar__l">
+            <label class="fp-field">
+              <span id="lbl-repo"></span>
+              <select id="f-repo"></select>
+            </label>
+            <label class="fp-field">
+              <span id="lbl-status"></span>
+              <select id="f-status"></select>
+            </label>
+            <label class="fp-field fp-field--grow">
+              <span id="lbl-q"></span>
+              <input id="f-q" type="search" maxlength="200" autocomplete="off" spellcheck="false">
+            </label>
+          </div>
+          <div class="fp-toolbar__r">
+            <span class="fp-badge fp-badge--danger" id="pkg-stale" hidden></span>
+            <label class="fp-check" id="pkg-ovd-wrap">
+              <input type="checkbox" id="pkg-ovd-first">
+              <span class="fp-check__t" id="lbl-pkg-ovd">逾期优先</span>
+            </label>
+            <label class="fp-field">
+              <span id="lbl-size"></span>
+              <select id="pkg-size"></select>
+            </label>
+            <button class="fp-btn fp-btn--sm" id="pkg-export" type="button">
+              <span id="pkg-export-label"></span>
+            </button>
+          </div>
+        </div>
+        <p class="fp-note" id="pkg-note" hidden></p>
+        <div class="fp-tablewrap" id="pkg-wrap" aria-busy="false"></div>
+        <nav class="fp-pager" id="pkg-pager">
+          <button class="fp-btn fp-btn--sm" id="pkg-prev" type="button"></button>
+          <span class="fp-pager__info" id="pkg-info"></span>
+          <button class="fp-btn fp-btn--sm" id="pkg-next" type="button"></button>
+        </nav>
+      </section>
+
+      <section class="fp-page" id="page-devices" hidden>
+        <section class="fp-card">
+          <div class="fp-card__hd">
+            <h2 id="dev-title"></h2>
+            <span class="fp-card__hint" id="dev-hint"></span>
+            <label class="fp-field fp-field--sm" id="dev-filter-wrap">
+              <span id="lbl-dev-status">状态筛选</span>
+              <select id="f-dev-status">
+                <option value="online">在线</option>
+                <option value="idle">空闲</option>
+                <option value="offline">离线</option>
+                <option value="all" selected>全部</option>
+              </select>
+            </label>
+            <label class="fp-check" id="dev-arch-wrap">
+              <input type="checkbox" id="f-dev-archived">
+              <span class="fp-check__t" id="lbl-dev-arch">显示已归档</span>
+            </label>
+          </div>
+          <div class="fp-tablewrap" id="dev-wrap" aria-busy="false"></div>
+          <nav class="fp-pager" id="dev-pager">
+            <button class="fp-btn fp-btn--sm" id="dev-prev" type="button"></button>
+            <span class="fp-pager__info" id="dev-info"></span>
+            <button class="fp-btn fp-btn--sm" id="dev-next" type="button"></button>
+          </nav>
+        </section>
+        <section class="fp-card">
+          <div class="fp-card__hd">
+            <h2 id="lease-title"></h2>
+            <span class="fp-card__hint" id="lease-hint"></span>
+          </div>
+          <div class="fp-tablewrap" id="lease-wrap" aria-busy="false"></div>
+          <nav class="fp-pager" id="lease-pager">
+            <button class="fp-btn fp-btn--sm" id="lease-prev" type="button"></button>
+            <span class="fp-pager__info" id="lease-info"></span>
+            <button class="fp-btn fp-btn--sm" id="lease-next" type="button"></button>
+          </nav>
+        </section>
+        <p class="fp-card__hint" id="dev-ts"></p>
+      </section>
+
+      <section class="fp-page" id="page-overdue" hidden>
+        <section class="fp-card">
+          <div class="fp-card__hd">
+            <h2 id="ovd-title"></h2>
+            <span class="fp-card__hint" id="ovd-hint"></span>
+          </div>
+          <p class="fp-note" id="ovd-note"></p>
+          <div class="fp-ovd-list" id="ovd-list" aria-busy="false"></div>
+          <span class="fp-pager__info" id="ovd-info"></span>
+        </section>
+      </section>
+
+      <section class="fp-page" id="page-anomalies" hidden>
+        <div class="fp-stats" id="an-stats" aria-busy="false"></div>
+        <p class="fp-note" id="an-ok" hidden></p>
+        <section class="fp-card" id="an-stuck-card">
+          <div class="fp-card__hd">
+            <h2 id="an-stuck-title"></h2>
+            <span class="fp-card__hint" id="an-stuck-hint"></span>
+          </div>
+          <div class="fp-tablewrap" id="an-stuck" aria-busy="false"></div>
+          <nav class="fp-pager" id="an-stuck-pager">
+            <button class="fp-btn fp-btn--sm" id="an-stuck-prev" type="button"></button>
+            <span class="fp-pager__info" id="an-stuck-info"></span>
+            <button class="fp-btn fp-btn--sm" id="an-stuck-next" type="button"></button>
+          </nav>
+        </section>
+        <section class="fp-card" id="an-orphan-card">
+          <div class="fp-card__hd">
+            <h2 id="an-orphan-title"></h2>
+            <span class="fp-card__hint" id="an-orphan-hint"></span>
+          </div>
+          <div class="fp-tablewrap" id="an-orphan" aria-busy="false"></div>
+          <nav class="fp-pager" id="an-orphan-pager">
+            <button class="fp-btn fp-btn--sm" id="an-orphan-prev" type="button"></button>
+            <span class="fp-pager__info" id="an-orphan-info"></span>
+            <button class="fp-btn fp-btn--sm" id="an-orphan-next" type="button"></button>
+          </nav>
+        </section>
+        <section class="fp-card" id="an-ghost-card">
+          <div class="fp-card__hd">
+            <h2 id="an-ghost-title"></h2>
+            <span class="fp-card__hint" id="an-ghost-hint"></span>
+          </div>
+          <div class="fp-tablewrap" id="an-ghost" aria-busy="false"></div>
+          <nav class="fp-pager" id="an-ghost-pager">
+            <button class="fp-btn fp-btn--sm" id="an-ghost-prev" type="button"></button>
+            <span class="fp-pager__info" id="an-ghost-info"></span>
+            <button class="fp-btn fp-btn--sm" id="an-ghost-next" type="button"></button>
+          </nav>
+        </section>
+      </section>
+
+      <section class="fp-page" id="page-audit" hidden>
+        <div class="fp-toolbar" id="au-toolbar" role="search">
+          <div class="fp-toolbar__l">
+            <div class="fp-segmented" id="au-tabs" role="group" aria-label="审计视图">
+              <button class="fp-segmented__btn" id="au-tab-events" type="button" aria-pressed="true">
+                <span id="au-tab-events-t"></span>
+              </button>
+              <button class="fp-segmented__btn" id="au-tab-writes" type="button" aria-pressed="false">
+                <span id="au-tab-writes-t"></span>
+              </button>
+              <button class="fp-segmented__btn" id="au-tab-denied" type="button" aria-pressed="false">
+                <span id="au-tab-denied-t"></span>
+              </button>
+            </div>
+            <label class="fp-field fp-field--grow" id="au-q-wrap">
+              <span id="lbl-audit"></span>
+              <input id="f-audit" type="search" maxlength="200" autocomplete="off" spellcheck="false">
+            </label>
+            <span class="fp-field fp-field--grow" id="au-q-note" hidden>
+              <span id="lbl-audit-note"></span>
+              <span class="fp-field__static" id="au-q-note-t"></span>
+            </span>
+          </div>
+          <div class="fp-toolbar__r" id="au-acts">
+            <span class="fp-pager__info" id="au-count"></span>
+            <button class="fp-btn fp-btn--sm" id="au-export-jsonl" type="button" hidden>
+              <span id="au-export-jsonl-t"></span>
+            </button>
+            <button class="fp-btn fp-btn--sm" id="au-export-csv" type="button" hidden>
+              <span id="au-export-csv-t"></span>
+            </button>
+          </div>
+        </div>
+        <div class="fp-subbar" id="au-filters" hidden>
+          <label class="fp-field" id="au-f-action">
+            <span id="lbl-au-action"></span>
+            <select id="f-au-action"></select>
+          </label>
+          <label class="fp-field" id="au-f-reason" hidden>
+            <span id="lbl-au-reason"></span>
+            <input id="f-au-reason" type="search" maxlength="40" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="fp-field" id="au-f-path" hidden>
+            <span id="lbl-au-path"></span>
+            <select id="f-au-path"></select>
+          </label>
+          <label class="fp-field" id="au-f-actor">
+            <span id="lbl-au-actor"></span>
+            <input id="f-au-actor" type="search" maxlength="80" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="fp-field" id="au-f-result">
+            <span id="lbl-au-result"></span>
+            <select id="f-au-result"></select>
+          </label>
+          <label class="fp-field" id="au-f-range">
+            <span id="lbl-au-range"></span>
+            <select id="f-au-range"></select>
+          </label>
+          <label class="fp-field" id="au-f-size">
+            <span id="lbl-au-size"></span>
+            <select id="f-au-size"></select>
+          </label>
+          <button class="fp-btn fp-btn--sm" id="au-clear" type="button">
+            <span id="au-clear-t"></span>
+          </button>
+        </div>
+        <div class="fp-stalebar" id="au-stale" hidden></div>
+        <div class="fp-tablewrap" id="au-wrap" aria-busy="false"></div>
+        <nav class="fp-pager" id="au-pager">
+          <button class="fp-btn fp-btn--sm" id="au-prev" type="button"></button>
+          <span class="fp-pager__info" id="au-info"></span>
+          <button class="fp-btn fp-btn--sm" id="au-next" type="button"></button>
+        </nav>
+      </section>
+
+    </main>
+
+    <footer class="fp-footer" id="footer">
+      <span id="ft-brand"></span>
+      <span class="fp-footer__sep" aria-hidden="true">·</span>
+      <span id="ft-version">v{{VERSION}}</span>
+      <span class="fp-footer__sep" aria-hidden="true">·</span>
+      <span id="ft-note"></span>
+      <span class="fp-footer__sep" aria-hidden="true">·</span>
+      <span id="ft-upstream">{{UPSTREAM}}</span>
+      <span class="fp-footer__sep" aria-hidden="true">·</span>
+      <span id="ft-updated"></span>
+    </footer>
+  </div>
+</div>
+
+<nav class="fp-tabbar" id="tabbar"></nav>
+
+<div class="fp-scrim" id="scrim" hidden></div>
+
+<aside class="fp-drawer" id="drawer" role="dialog" aria-modal="true"
+       aria-labelledby="drawer-title" hidden>
+  <header class="fp-drawer__hd">
+    <h2 id="drawer-title"></h2>
+    <button class="fp-iconbtn" id="drawer-close" type="button"></button>
+  </header>
+  <div class="fp-drawer__bd" id="drawer-bd"></div>
+  <footer class="fp-drawer__ft" id="drawer-ft" hidden></footer>
+</aside>
+
+<div class="fp-dialogwrap" id="help-wrap" hidden>
+  <div class="fp-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" id="help">
+    <header class="fp-dialog__hd">
+      <h2 id="help-title"></h2>
+      <button class="fp-iconbtn" id="help-close" type="button"></button>
+    </header>
+    <div class="fp-dialog__bd" id="help-bd"></div>
+  </div>
+</div>
+
+<aside class="fp-notif" id="notif" role="dialog" aria-modal="false"
+       aria-labelledby="notif-title" hidden>
+  <header class="fp-notif__hd">
+    <h2 id="notif-title"></h2>
+    <div class="fp-notif__acts">
+      <button class="fp-btn fp-btn--sm" id="notif-readall" type="button">
+        <span id="notif-readall-t"></span>
+      </button>
+      <button class="fp-iconbtn" id="notif-close" type="button"></button>
+    </div>
+  </header>
+  <div class="fp-notif__bd" id="notif-list" aria-live="polite"></div>
+  <footer class="fp-notif__ft">
+    <a id="notif-all" href="#/audit?tab=writes"></a>
+  </footer>
+</aside>
+
+<div class="fp-toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

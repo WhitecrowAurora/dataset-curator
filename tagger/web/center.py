@@ -26,6 +26,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -42,7 +43,10 @@ DEFAULTS = {
     "user_id": "",
     # 打标服务地址（本机 serve 或外部 API 的中转都行）。
     "tag_url": "http://127.0.0.1:8000",
-    "mode": "both",                 # both / tag / nl
+    "mode": "both",                 # both / tag / nl（能产哪几侧，硬约束）
+    # 派工倾向：只影响服务端把哪种片排在前面，不改变本机产出什么。
+    # "" = 不挑（老口径）；tag/nl = 只接缺那侧的片；pref-tag/pref-nl = 优先那侧。
+    "parts_pref": "",
     "out_dir": str(ROOT / "work" / "fox-work"),
     "interval": 120,                # 心跳秒；0 = 用服务端建议值
     "extra_args": "",               # 追加给 tagger client 的参数（高级）
@@ -52,7 +56,23 @@ DEFAULTS = {
     "wait": True,
     "idle_timeout": 0,              # 配 wait：连续这么多秒没活就自己收工（0 = 一直等）
     "max_packages": 0,              # 本次最多交付多少片，够了就停（0 = 不限）
+    # 分片下载：并发连接数 + 开工前测速选最快 CDN 边缘。
+    # 国内到 HF 单条 TCP 常被限速，多连接才是把带宽吃满的那一半；
+    # 选优那一半是靠 2MiB 的探测把 v4/v6 里最快的那条路钉住。
+    "download_conns": 4,            # 1 = 单流；4~8 条足够
+    "cdn_probe": True,              # 关掉只省几秒探测，多连接照旧
+    # 看门狗：子进程非主动退出（崩溃、被杀内存、网络断到进程自己抛死）时自动
+    # 按退避重新拉起。关掉就回到"崩了就停在已停止，等人再点开始"的老行为。
+    "watchdog": True,
 }
+
+# 看门狗策略。FATAL_RC 是"重启也救不了"的退出码：2 配置/用法、3 认证、
+# 7 连续失败到上限（worker 侧主动停手，等环境修好）。其余一律当偶发处理。
+FATAL_RC = {2, 3, 7}
+RESTART_BASE = 3.0        # 首次退避 3s，之后翻倍：3/6/12/24/48/60
+RESTART_MAX = 60.0
+HEALTHY_SECONDS = 600.0   # 跑满 10 分钟就算这次是健康的，退避归零
+WATCHDOG_TICK = 1.0       # 看门狗巡一圈的间隔（测试会把它调小）
 
 LOG_LINES = 400
 
@@ -60,6 +80,13 @@ LOG_LINES = 400
 _NON_EMPTY = {"server", "user_id", "tag_url", "out_dir", "mode"}
 
 MODES = ("both", "tag", "nl")
+
+# 派工倾向（服务端 dispatch.PARTS_CHOICES 去掉 both 之后的写法）：
+#   ""        不挑，接任何还欠东西的片（老口径，两侧都做）
+#   "tag" / "nl"            **只接**缺这一侧的片，没有就空转等
+#   "pref-tag" / "pref-nl"  优先缺这一侧的片，另一侧也能做（兜底接）
+# 空串是有效值（= 不传 --parts），所以不能加进 _NON_EMPTY。
+PARTS_PREFS = ("", "tag", "nl", "pref-tag", "pref-nl")
 
 
 def _num(val, default: float = 0.0) -> float:
@@ -72,6 +99,28 @@ def _num(val, default: float = 0.0) -> float:
 
 class CenterError(RuntimeError):
     """消息直接给页面显示。"""
+
+
+def _kill_tree(pid: int) -> None:
+    """终止 pid 及其全部子孙进程。
+
+    Windows 用 `taskkill /T` 按父子链收（没有进程组语义）；POSIX 靠
+    `start_new_session` 建出来的进程组整组 SIGTERM，worker 才有机会归还租约。
+    两边的失败都咽掉：进程可能已经自己退了，那不是错误。
+    """
+    if not pid:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           capture_output=True, timeout=20, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (OSError, AttributeError):
+        pass
 
 
 class Center:
@@ -90,6 +139,16 @@ class Center:
         # 看板缓存。snapshot() 是每个接口的返回值，而取看板要打一次 HTTP
         # （连不上时最长 6s）——不缓存的话点「开始」「停止」都得先陪等一轮超时。
         self._board_cache: tuple[float, dict] | None = None
+        # 看门狗状态：_wanted 是"用户希望它在跑"，和 running（此刻真在跑）分开。
+        # 用户点停止 → _wanted=False，进程被我们杀掉也不会被拉起；进程自己崩了 →
+        # _wanted 仍为 True，到点自动重新拉起。
+        self._wanted = False
+        self._next_spawn = 0.0
+        self._restarts = 0
+        self._spawn_at = 0.0
+        self._argv: list[str] = []
+        threading.Thread(target=self._watchdog, name="center-watchdog",
+                         daemon=True).start()
 
     # ------------------------------------------------------------ 配置
     def config(self) -> dict:
@@ -229,48 +288,107 @@ class Center:
                 ident = self.identity()
                 if not ident.get("server"):
                     raise CenterError("还没连过：先填地址和姓名点「连接」")
-                mode = str(cfg.get("mode") or "")
-                if mode not in MODES:
-                    # mode 是直接拼进命令行的，白名单是唯一的把关处。
-                    raise CenterError(f"产出模式只能是 {' / '.join(MODES)}，现在是 {mode!r}")
+                # 先把"想跑"这件事置上，拉起失败再撤回：否则 _spawn 抛错之后
+                # 看门狗会以为这是一次崩溃，过几秒又去拉一个注定失败的进程。
+                self._wanted = True
+                self._restarts = 0
+                self._next_spawn = 0.0
                 try:
-                    Path(cfg["out_dir"]).mkdir(parents=True, exist_ok=True)
-                except OSError as exc:
-                    # 盘符不存在 / 没权限是最常见的操作错误，得说清是哪个目录。
-                    raise CenterError(f"产物目录建不出来：{cfg['out_dir']}（{exc}）") from exc
-                argv = [sys.executable, "-m", "tagger.fox_worker", "run",
-                        "--out", cfg["out_dir"], "--cmd", self.build_cmd(cfg)]
-                interval = _num(cfg.get("interval"))
-                if interval > 0:
-                    argv += ["--interval", f"{interval:g}"]
-                # 长驻等待：池子空了不退出，隔一会儿再问。页面上点一次「开始」就
-                # 一直挂着等派工，而不是干完手上的就变成「已停止」。
-                if cfg.get("wait"):
-                    argv.append("--wait")
-                idle = _num(cfg.get("idle_timeout"))
-                if idle > 0:
-                    argv += ["--idle-timeout", f"{idle:g}"]
-                max_pkgs = int(_num(cfg.get("max_packages")))
-                if max_pkgs > 0:
-                    argv += ["--max-packages", str(max_pkgs)]
-                self._push(f"[center] 启动：{' '.join(argv)}")
-                try:
-                    self._proc = subprocess.Popen(
-                        argv, cwd=str(ROOT), env=self._env(), stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                        errors="replace", bufsize=1)
-                except OSError as exc:
-                    raise CenterError(f"worker 起不来：{exc}") from exc
-                self._started_at = time.time()
-                self._last_rc = None
-                threading.Thread(target=self._pump, args=(self._proc,),
-                                 name="center-log", daemon=True).start()
+                    self._spawn(cfg)
+                except CenterError:
+                    self._wanted = False
+                    raise
         return self.snapshot()
+
+    def _spawn(self, cfg: dict) -> None:
+        """按配置把一个 worker 子进程拉起来。**调用方必须已持有 self._lock**。
+
+        抽出来是为了让看门狗复用：手动点和自动拉起走同一条路径，就不会出现
+        "点开始能跑、自动拉起少传一个参数"这种只在半夜发作的差异。
+        """
+        mode = str(cfg.get("mode") or "")
+        if mode not in MODES:
+            # mode 是直接拼进命令行的，白名单是唯一的把关处。
+            raise CenterError(f"产出模式只能是 {' / '.join(MODES)}，现在是 {mode!r}")
+        try:
+            Path(cfg["out_dir"]).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # 盘符不存在 / 没权限是最常见的操作错误，得说清是哪个目录。
+            raise CenterError(f"产物目录建不出来：{cfg['out_dir']}（{exc}）") from exc
+        argv = [sys.executable, "-m", "tagger.fox_worker", "run",
+                "--out", cfg["out_dir"], "--cmd", self.build_cmd(cfg)]
+        interval = _num(cfg.get("interval"))
+        if interval > 0:
+            argv += ["--interval", f"{interval:g}"]
+        # 长驻等待：池子空了不退出，隔一会儿再问。页面上点一次「开始」就
+        # 一直挂着等派工，而不是干完手上的就变成「已停止」。
+        if cfg.get("wait"):
+            argv.append("--wait")
+        idle = _num(cfg.get("idle_timeout"))
+        if idle > 0:
+            argv += ["--idle-timeout", f"{idle:g}"]
+        max_pkgs = int(_num(cfg.get("max_packages")))
+        if max_pkgs > 0:
+            argv += ["--max-packages", str(max_pkgs)]
+        # 下载口径：worker 自己按这两个参数决定分段并发与 CDN 选优。
+        # 不在命令行里传时 worker 有同样的默认值（4 连接 + 选优），这里传是因为
+        # 页面允许改；clamp 在 worker 里也有一份，两边各兜一次。
+        conns = int(_num(cfg.get("download_conns")))
+        if conns >= 1:
+            argv += ["--download-conns", str(max(1, min(16, conns)))]
+        if not cfg.get("cdn_probe", True):
+            argv.append("--no-cdn-probe")
+        # 分项意愿（2026-11-12）。服务端认五值：both|tag|nl|pref-tag|pref-nl。
+        # 两个概念必须分开，否则会申报一个"我做不出"的意愿：
+        #   产出模式 mode  = **能力**，硬约束（client 按它决定跑哪套模型）
+        #   派工倾向 pref  = **优先级**，软约束（只影响服务端排序）
+        # 组合规则：
+        #   mode=both → 直接采用 pref（"" = 不传，老口径"都做"）
+        #   mode=tag  → 只能是 tag；pref 若指向 nl 那侧则**报错**，不静默改写
+        #   mode=nl   → 只能是 nl；同上
+        pref = str(cfg.get("parts_pref") or "").strip().lower()
+        if pref not in PARTS_PREFS:
+            raise CenterError(
+                f"派工倾向只能是 {'/'.join(p or '不挑' for p in PARTS_PREFS)}，现在是 {pref!r}")
+        if mode in ("tag", "nl"):
+            # 与能力相反的一侧：接了也产不出内容，只会白下载 1.8G。
+            # 页面会在 mode≠both 时禁掉这个下拉框，走到这里说明是手改了
+            # center.json —— 报错比悄悄改成 mode 更好查。
+            if pref and not pref.endswith(mode):
+                raise CenterError(
+                    f"产出模式是「只出 {mode}」，派工倾向却指向 {pref}；"
+                    f"这样接到的片本侧产不出内容。把倾向改成「不挑」或 {mode}。")
+            parts_arg = mode
+        else:
+            parts_arg = pref
+        if parts_arg:
+            argv += ["--parts", parts_arg]
+        self._argv = argv
+        self._push(f"[center] 启动：{' '.join(argv)}")
+        # 独立进程组：停止时要连 worker 起的孙进程（真正在打标、写产物的那个）
+        # 一起收，否则"已停止"只是杀掉了父进程，见 _kill_tree。
+        extra = {} if os.name == "nt" else {"start_new_session": True}
+        try:
+            self._proc = subprocess.Popen(
+                argv, cwd=str(ROOT), env=self._env(), stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                errors="replace", bufsize=1, **extra)
+        except OSError as exc:
+            self._proc = None
+            raise CenterError(f"worker 起不来：{exc}") from exc
+        self._started_at = time.time()
+        self._spawn_at = time.time()
+        self._last_rc = None
+        threading.Thread(target=self._pump, args=(self._proc,),
+                         name="center-log", daemon=True).start()
 
     def stop(self, report: bool = True) -> dict:
         """终止子进程。report=False 用在进程退出的路径上：那条路上没人看快照，
         而取快照要多等一次远端 HTTP。"""
         with self._lock:
+            # 用户明确要停：先撤"想跑"，_pump 收尾时就不会把它当成崩溃再拉起来。
+            self._wanted = False
+            self._next_spawn = 0.0
             proc = self._proc
             if proc is not None:
                 # 先把引用摘掉：收日志的线程随后收尾时不再认领它，退出码由这里记。
@@ -287,8 +405,15 @@ class Center:
         return self.snapshot() if report else {}
 
     def _terminate(self, proc: subprocess.Popen) -> int | None:
+        """收掉 worker **和它的整棵进程树**。
+
+        为什么不能只 terminate 直接子进程：worker 用 `shell=True` 起 `--cmd`，
+        真正在打标、往产物目录写文件的是**孙进程**。杀掉 worker 之后孙进程
+        还活着，页面上写着"已停止"、盘上却在继续长文件——两边都是实话，
+        只是看的不是同一个东西。所以这里按进程组/进程树一起收。
+        """
+        _kill_tree(proc.pid)
         try:
-            proc.terminate()
             return proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             self._push("[center] 15s 没退出，强杀（包会在 TTL 到期后自动回池）")
@@ -318,6 +443,53 @@ class Center:
                     self._last_rc = rc
                     self._proc = None
                     self._push(f"[center] 进程结束，退出码 {rc}")
+                    self._schedule_restart(rc)
+
+    def _schedule_restart(self, rc: int | None) -> None:
+        """子进程结束了：判断要不要自动拉起，并排下一次的时间。**调用方持锁**。
+
+        三种情况按原样停：
+          * 用户点过停止（_wanted 已撤）；
+          * 配置里关了看门狗；
+          * 退出码属于"重启也救不了"的那几类（配置错、认证失效、连续失败停手）。
+        其余（崩溃、被系统杀掉、网络异常退出）一律按退避重拉，退避 3→60s。
+        """
+        if not self._wanted:
+            return
+        if not self.config().get("watchdog", True):
+            return
+        if rc in FATAL_RC:
+            self._wanted = False
+            self._push(f"[center] 看门狗：退出码 {rc} 需要人工处理，不再自动拉起")
+            return
+        # 上一个进程跑够久就说明它是健康的，退避归零——偶发崩溃不该越滚越慢。
+        if self._spawn_at and time.time() - self._spawn_at > HEALTHY_SECONDS:
+            self._restarts = 0
+        delay = min(RESTART_MAX, RESTART_BASE * (2 ** min(self._restarts, 5)))
+        self._restarts += 1
+        self._next_spawn = time.time() + delay
+        self._push(f"[center] 看门狗：{delay:.0f}s 后自动拉起（第 {self._restarts} 次）")
+
+    def _watchdog(self) -> None:
+        """后台每秒看一眼：该在跑却不在跑、且已到点，就重新拉起。
+
+        只在"用户希望它在跑"时才动手，所以点过停止的机器不会被反复拉起
+        （那会变成怎么点都停不下来的怪物）。
+        """
+        while True:
+            time.sleep(WATCHDOG_TICK)
+            with self._lock:
+                if not self._wanted or not self._next_spawn:
+                    continue
+                if self.running or time.time() < self._next_spawn:
+                    continue
+                self._next_spawn = 0.0
+                try:
+                    self._spawn(self.config())
+                except CenterError as exc:
+                    # 拉不起来（盘没了、配置被改坏）：别一秒一次刷屏，半分钟后再试
+                    self._push(f"[center] 看门狗：拉不起来（{exc}），30s 后再试")
+                    self._next_spawn = time.time() + 30.0
 
     def _push(self, line: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -412,16 +584,45 @@ class Center:
         if code != 200:
             return {"ok": False, "reason": f"HTTP {code}"}
         data["ok"] = True
+        # 池子余量（SPEC-parts §7）：新服务端在 status 里直接给了 parts；
+        # 老服务端没有，就单独问一次 pool。两次任一失败都不影响看板本身——
+        # 顶部那三个数字是"要不要去补"的参考，不能因为它连不上就把租约也藏了。
+        if not isinstance(data.get("parts"), dict):
+            data["parts"] = self._pool_fetch() or {}
         return data
+
+    def _pool_fetch(self) -> dict | None:
+        """问服务端「池子还剩多少」。不需要身份，也不需要包名。"""
+        ident = self.identity()
+        server = ident.get("server") or self.config().get("server")
+        if not server:
+            return None
+        try:
+            resp = httpx.post(f"{server.rstrip('/')}/api/v1/pool", json={}, timeout=6.0)
+            if resp.status_code != 200:
+                return None
+            got = resp.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+        return got.get("parts") if isinstance(got, dict) else None
 
     def snapshot(self) -> dict:
         cfg = self.config()
         return {
             "running": self.running,
             "last_rc": self._last_rc,
+            # 看门狗状态：页面拿它区分"被停了"和"崩了正在等重启"
+            "watchdog": {
+                "on": bool(cfg.get("watchdog", True)),
+                "wanted": self._wanted,
+                "restarts": self._restarts,
+                "next_in": (round(max(0.0, self._next_spawn - time.time()))
+                            if self._next_spawn else None),
+            },
             "uptime_s": round(time.time() - self._started_at, 1) if self.running else 0,
             "config": {k: cfg[k] for k in ("server", "user_id", "tag_url", "mode",
-                                           "out_dir", "interval", "extra_args")},
+                                           "out_dir", "interval", "extra_args",
+                                           "download_conns", "cdn_probe")},
             "cmd": self.build_cmd(cfg),
             "identity": self.identity(),
             "board": self.board(),

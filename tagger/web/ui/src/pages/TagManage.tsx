@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   CheckCircle2,
   FileJson,
+  FolderOpen,
   FolderSearch,
   Merge,
   ScanSearch,
@@ -25,6 +26,7 @@ import {
   type StatusTone,
 } from '../components/ui/launcher'
 import { ErrorBox } from '../components/ui/controls'
+import { useFolderPicker } from '../components/FolderPicker'
 
 // 打标管理：把一堆 json 整理成**一个单体 json**。
 //
@@ -77,6 +79,7 @@ export function TagManage() {
   // 自检同样后台跑：扫几十万张在网络盘上是分钟级
   const [checkTaskId, setCheckTaskId] = useState('')
   const [checkTask, setCheckTask] = useState<TagMergeTask | null>(null)
+  const folder = useFolderPicker()
 
   // 输出扩展名跟着 json/jsonl 走：两者不一致时后端会拒绝，提前对齐省一次报错
   useEffect(() => {
@@ -265,7 +268,7 @@ export function TagManage() {
         icon={<Merge size={17} />}
         eyebrow="打标管理"
         title="数据合并"
-        description="按 image_id 合成一条记录，字段取并集；支持 json 数组 / JSONL。"
+        description="按 image_id 合并，字段取并集"
         actions={
           <button
             type="button"
@@ -305,7 +308,7 @@ export function TagManage() {
         >
           <SettingRow
             label="目录"
-            help="打标产物目录（含 *.json）。也可以直接填一个 json 文件"
+            help="打标产物目录，或单个 json 文件"
           >
             <div className="flex items-center gap-2">
               <input
@@ -315,6 +318,16 @@ export function TagManage() {
                 placeholder="H:\out\tags"
                 spellCheck={false}
               />
+              <button
+                type="button"
+                className="lx-btn-ghost shrink-0 px-2.5"
+                onClick={() =>
+                  folder.pick(dir || undefined, setDir, ['json', 'jsonl', 'parquet'])
+                }
+                aria-label="浏览目录或单个产物文件"
+              >
+                <FolderOpen size={14} />
+              </button>
               <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-lx-dim">
                 <input
                   type="checkbox"
@@ -431,7 +444,7 @@ export function TagManage() {
               </button>
             }
           >
-            <SettingRow label="输出文件" help="相对路径按仓库根算。写出是流式的，不先物化整表">
+            <SettingRow label="输出文件" help="相对路径按仓库根算；流式写出">
               <input
                 className="lx-input font-mono text-xs"
                 value={outPath}
@@ -441,7 +454,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="输出格式"
-              help="full = 保留全部字段（便于核对/二次加工）；train = 只留 image_id / image_path / caption / tag"
+              help="train 只留 image_id / image_path / caption / tag"
             >
               <select
                 className="lx-input"
@@ -452,7 +465,7 @@ export function TagManage() {
                 <option value="train">训练四项</option>
               </select>
             </SettingRow>
-            <SettingRow label="文件形态" help="单体数组便于人看，JSONL 便于下游逐行流式读">
+            <SettingRow label="文件形态" help="JSONL 便于逐行流式读">
               <select
                 className="lx-input"
                 value={asJsonl ? 'jsonl' : 'json'}
@@ -464,7 +477,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="图片路径前缀"
-              help="填了就覆盖成「前缀/图片ID+扩展名」，例如 /images/fanbox；留空 = 保留产物自带的值（HF 模式是 hf://datasets/…，本地分发的产物没有这个字段）"
+              help="填了就改写成「前缀/图片ID+扩展名」；留空 = 保留原值"
             >
               <div className="flex items-center gap-2">
                 <input
@@ -485,7 +498,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="路径自检"
-              help="按上面的前缀逐条核对图在不在本地。训练机路径与本机不同时，右边填本机目录做映射；hf:// 之类远端路径不计入缺图"
+              help="按前缀逐条核对本地是否存在；路径不同时填本机目录做映射"
             >
               <div className="flex items-center gap-2">
                 <input
@@ -498,6 +511,14 @@ export function TagManage() {
                 <button
                   type="button"
                   className="lx-btn-ghost shrink-0 px-2.5 py-1 text-[11px]"
+                  onClick={() => folder.pick(localRoot || undefined, setLocalRoot)}
+                >
+                  <FolderOpen size={12} className="mr-1 inline" />
+                  浏览
+                </button>
+                <button
+                  type="button"
+                  className="lx-btn-ghost shrink-0 px-2.5 py-1 text-[11px]"
                   disabled={!selected.size || busy}
                   onClick={() => void doCheck()}
                 >
@@ -507,7 +528,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="分批大小"
-              help="0 = 自动（估算超过 30 万条才分桶）。分桶把内存上限降到一个桶；代价是输出按桶序排列，不再全局按 image_id 排序"
+              help="0 = 自动（超 30 万条才分桶）；分桶后不再全局排序"
             >
               <input
                 type="number"
@@ -518,7 +539,7 @@ export function TagManage() {
                 onChange={(e) => setBatchSize(Math.max(0, Number(e.target.value) || 0))}
               />
             </SettingRow>
-            <SettingRow label="去重键" help="同键的多个文件会合并成一条（tag 与 nl 就靠这个配对）">
+            <SettingRow label="去重键" help="同键合并成一条；tag 与 nl 靠它配对">
               <input
                 className="lx-input font-mono text-xs"
                 value={key}
@@ -526,7 +547,7 @@ export function TagManage() {
                 spellCheck={false}
               />
             </SettingRow>
-            <SettingRow label="字段冲突" help="artist / provenance / ts 这类字段两边都有，值不同时取哪个">
+            <SettingRow label="字段冲突" help="同一字段两边值不同时取哪个">
               <select
                 className="lx-input"
                 value={onConflict}
@@ -536,7 +557,7 @@ export function TagManage() {
                 <option value="last">后读到的覆盖</option>
               </select>
             </SettingRow>
-            <SettingRow label="完整性过滤" help="both = 缺 caption 或缺 tag 的整条丢掉，避免训练侧读到空字段">
+            <SettingRow label="完整性过滤" help="缺字段的整条丢掉">
               <select
                 className="lx-input"
                 value={require}
@@ -727,6 +748,7 @@ export function TagManage() {
           </SectionPanel>
         </div>
       </div>
+      {folder.dialog}
     </div>
   )
 }

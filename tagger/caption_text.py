@@ -266,14 +266,126 @@ def drop_restatement(caption: str) -> str:
     return head
 
 
-def tidy_caption(caption: str) -> str:
+# "这张图没有文字"这类断言。无文字的图上模型常自己补一句交代。
+#
+# ★prompt 层压不住它：实测给规则加「无文字就不要提文字」之后，英文从 3/3
+#   降到 0/3，中文还有 1/3 会补一句「无可见文字」——中文 CAPTION 规则里
+#   "画面里可见的文字，用双引号原样抄下来"是必答项，没字可抄时它就交白卷。
+#   这类断言是确定性的字符串形态，用代码兜底才能保证 0。
+_NO_TEXT_ZH = re.compile(
+    r"(?:没有|无|不含|未见|不存在)(?:任何)?(?:可见)?(?:的)?(?:文字|文本)"
+    r"|(?:文字|文本)(?:是)?(?:不存在|空白|为空)"
+)
+_NO_TEXT_EN = re.compile(
+    # 限定词统一放一处：no visible / no legible / no readable / no text 全吃。
+    r"\bno\s+(?:(?:visible|legible|readable)\s+)?text\b"
+    r"|\bwithout\s+(?:any\s+)?(?:(?:visible|legible|readable)\s+)?text\b"
+    r"|\btext\s+(?:is\s+)?(?:absent|missing|not\s+present)\b",
+    re.I,
+)
+
+
+def drop_no_text_note(caption: str) -> str:
+    """删掉"本图没有文字"这类交代句。
+
+    只删**整句都是这件事**的短句（≤60 字符且不带引号）。带引号的句子通常是
+    在讲别的对象（"招牌上没写字，只有图案"），动它会丢内容。
+    """
+    if not caption:
+        return caption
+
+    # 中英分开切：中文句号后面不跟空格，英文必须跟空白才切（避免把 3.5、
+    # U.S. 这种切碎）。只写 `[。！？；;]` 会把英文整段当成一句，等于没切。
+    kept = []
+    for part in re.split(r"(?<=[。！？；;])\s*|(?<=[.!?])\s+", caption):
+        s = part.strip()
+        if not s:
+            continue
+        looks_like_note = bool(_NO_TEXT_ZH.search(s) or _NO_TEXT_EN.search(s))
+        if looks_like_note and len(s) <= 60 and not _QUOTED.search(s):
+            continue
+        kept.append(part)
+
+    out = "".join(kept).strip()
+    # 整段都在说"没有文字"时不动它：删空会被质检判成"没有产出 caption"，
+    # 那比留一句正确的废话更糟。
+    return out or caption
+
+
+# text encoder 口径的 token 估算比例（实测，不是拍脑袋）：
+#   英文约 5.4 字符/token，中文约 1.4 字符/token（1 汉字≈1 token，引号里的
+#   日文/中文按字算）。用真实 caption 在 Qwen tokenizer 上量出来的。
+_EN_CHARS_PER_TOKEN = 5.4
+_CJK_CHARS_PER_TOKEN = 1.4
+_CJK_CHAR = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+                       r"\u3040-\u30ff\uac00-\ud7af]")
+
+
+def est_caption_tokens(caption: str) -> int:
+    """估算 caption 作为**单条纯文本**送进 text encoder 时的 token 数。
+
+    为什么不用真实 tokenizer：生产链路里的模型可能是云端 API，拿不到
+    tokenizer；每张图再发一次 tokenize 请求也不划算。infra 那条线是 512，
+    余量很大，比例估算足够当保险。
+
+    ★口径别混：这里不算 tag、不算 LLM 的 completion_tokens。
+    """
+    if not caption:
+        return 0
+    cjk = sum(1 for ch in caption if _CJK_CHAR.match(ch))
+    other = len(caption) - cjk
+    return int(round(cjk / _CJK_CHARS_PER_TOKEN + other / _EN_CHARS_PER_TOKEN))
+
+
+def fit_token_budget(caption: str, limit: int) -> str:
+    """把 caption 压到 token 上限以内：按句从尾部砍，砍到预算内。
+
+    这是给 infra 的硬保险——超出 512 会在那边被**无提示截断**，截在哪没人
+    知道。在这里砍至少是确定的、落在句边界上。
+
+    `limit<=0` 表示不启用（保持原样）。
+    """
+    if limit <= 0 or not caption:
+        return caption
+
+    # 留 15% 余量：比例是拟合的，实测最坏情况估算偏小约 6%（h5 中文估 172、
+    # 真实 183）。余量不足会让超线样本漏过去，那正是这道保险要防的事。
+    budget = int(limit * 0.85)
+    if est_caption_tokens(caption) <= budget:
+        return caption
+
+    parts = [p for p in re.split(r"(?<=[。！？；;])|(?<=[.!?])\s+", caption) if p.strip()]
+    kept: list[str] = []
+    for part in parts:
+        candidate = "".join(kept) + part
+        if kept and est_caption_tokens(candidate) > budget:
+            break
+        kept.append(part)
+    out = "".join(kept).strip()
+
+    # 第一句就超预算（极少见）时按比例硬切，保证保险真的兜住。
+    if est_caption_tokens(out) > budget:
+        ratio = budget / max(1, est_caption_tokens(out))
+        out = out[:max(20, int(len(out) * ratio))].rstrip(" ，、；,;:：")
+        if out and out[-1] not in "。.！？!?":
+            out += "。"
+
+    return out or caption
+
+
+def tidy_caption(caption: str, token_limit: int = 0) -> str:
     """caption 入库前的清洗总入口。
 
     顺序有讲究：先去重再砍复述段。反过来的话，复述段里那批重复引文会把
     "首次出现"占掉，正文里真正该保留的那条反而被当成重复脱了引号。
+    最后才删"没有文字"的交代句——它要看到砍完复述之后的最终文本。
 
-    两步都是纯字符串操作，不改画面描述本身，只在引文层面收敛。
+    最后一道是 infra 的 token 硬保险（`token_limit>0` 才启用）：超了会在
+    训练侧被无提示截断，宁可在这里按句砍。
+
+    四步都是纯字符串操作，不改画面描述本身，只在引文层面收敛。
     """
     if not caption:
         return caption
-    return drop_restatement(dedupe_quotes(caption))
+    out = drop_no_text_note(drop_restatement(dedupe_quotes(caption)))
+    return fit_token_budget(out, token_limit)

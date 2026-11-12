@@ -679,8 +679,9 @@ def reveal_files(kind: str, key: str) -> dict[str, Any]:
     from . import downloads as dl
 
     item = _entry(kind, key)
-    shown = dl.DOWNLOADS.reveal_dir(Path(item["local_abs"]))
-    return {"path": shown}
+    # reveal_dir 现在返回 {path, opened, detail}：没桌面环境时 opened=False，
+    # 页面把 path 摆出来让人复制，而不是点一下没反应。
+    return dl.DOWNLOADS.reveal_dir(Path(item["local_abs"]))
 
 
 class _Registry:

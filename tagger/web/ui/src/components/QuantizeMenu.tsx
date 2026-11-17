@@ -31,6 +31,7 @@ const GROUPS: {
       { key: 'f16', label: 'F16', note: '不压缩，体积最大' },
       { key: 'q4_k_m', label: 'Q4_K_M', note: '最小最快' },
       { key: 'q6_k', label: 'Q6_K', note: '质量接近 F16' },
+      { key: 'q8_0', label: 'Q8_0', note: '8bit 权重，显存占用较高' },
     ],
   },
   {

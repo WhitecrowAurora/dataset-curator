@@ -1,0 +1,145 @@
+{
+  "date": "2026-11-16",
+  "backup": "/tagger/.delete/panel-ui-20261116-093757",
+  "changed_source_files": {
+    "fox-panel/panel.py": "ff382c0bb5d294fe39471a70ed241f51587702e1a44d7628168b3a0e2fda12a0",
+    "fox-panel/web/app.js": "eaec30e8cf1194125775aad979b6b7830e6a54cf6ffc0766c41cf89c824ca671",
+    "fox-panel/web/allocation.js": "27c0067eb33adea50c835ec161af21c2989822d8282680dc933a55ad47c5a741",
+    "fox-panel/web/index.html": "92f40c7cf739d6f6a6daa2a3d11e07e15ddd82a95c8d7891feb55a460db99f4e",
+    "fox-panel/web/workspace.js": "a6ba3c811ccde56cfa68198540e52c6a5de250c5716382c02782954432cc7fd8",
+    "fox-panel/web/allocation.css": "eeebe0deb346e5ccff1aa7e108ffddc0b3230b48fd0d4f69968bfc15b29b6ad0"
+  },
+  "before": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 1,
+      "leases": 256
+    },
+    "open": [],
+    "bindings": [
+      {
+        "device_id": "d2f902ed88f9",
+        "user_id": "lulu",
+        "workspace_id": null
+      }
+    ],
+    "workspaces": [
+      {
+        "ws_id": "fox768",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "allocation_mode": "auto"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "after": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 1,
+      "leases": 256
+    },
+    "open": [],
+    "bindings": [
+      {
+        "device_id": "d2f902ed88f9",
+        "user_id": "lulu",
+        "workspace_id": null
+      }
+    ],
+    "workspaces": [
+      {
+        "ws_id": "fox768",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "allocation_mode": "auto"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "production_checks": {
+    "passed": 14,
+    "checks": [
+      "static/app.js",
+      "static/allocation.js",
+      "static/allocation.css",
+      "static/workspace.js",
+      "/",
+      "/health",
+      "/api/meta",
+      "/api/summary",
+      "/api/workspaces",
+      "/api/scheduling",
+      "/api/managed/devices",
+      "/api/history",
+      "/api/packages",
+      "/api/csrf"
+    ],
+    "services": [
+      "active",
+      "active"
+    ]
+  },
+  "linux_panel_checks": {
+    "passed": 10,
+    "checks": [
+      "正式写目录包含可见的设备解绑与解除工作区归属",
+      "面板静态资源包含简化视图及样式",
+      "删除 API 继续拒绝污染参数",
+      "工作区保存规范化参数后完整删除",
+      "解除设备工作区覆盖且保留执行任务",
+      "简化视图用户展开的设备集合完整保存",
+      "非法设备分配不破坏已保存映射",
+      "普通解绑释放活动及预锁租约并保留身份",
+      "没有租约的设备仍能普通解绑",
+      "强制解绑清身份绑定及设备映射并保持数据库完整"
+    ]
+  },
+  "browser_clicks_verified": false,
+  "client_and_release_unchanged": true,
+  "cleanup_complete": true,
+  "front_checks": {
+    "passed": 17,
+    "checks": [
+      "取消指派后删除无残留且正确确认工作区 ID",
+      "派工失败关闭后解绑恢复确认按钮",
+      "旧弹窗预览晚到不污染新弹窗",
+      "同一操作乱序预览只采用最新结果",
+      "保存使用服务端规范化参数且执行中禁止切换／关闭",
+      "新建工作区未填 ID 不可提交",
+      "异步派工表单加载晚到不覆盖当前操作",
+      "已撤销操作的执行响应不关闭新弹窗",
+      "正常指派与执行中表单锁定",
+      "简化默认与已有部分设备分配显示",
+      "加号补齐用户当前可用设备且去重",
+      "详细与简化切换保留逐设备选择",
+      "减号只移除当前仓库用户设备",
+      "简化保存现有 API 且过滤越权及停用设备",
+      "自动模式保存不改变选择",
+      "只读模式禁用添加删除与保存",
+      "自动刷新保留未保存及正在保存的积木配置"
+    ]
+  },
+  "local_linux_panel_checks": {
+    "passed": 10,
+    "checks": [
+      "正式写目录包含可见的设备解绑与解除工作区归属",
+      "面板静态资源包含简化视图及样式",
+      "删除 API 继续拒绝污染参数",
+      "工作区保存规范化参数后完整删除",
+      "解除设备工作区覆盖且保留执行任务",
+      "简化视图用户展开的设备集合完整保存",
+      "非法设备分配不破坏已保存映射",
+      "普通解绑释放活动及预锁租约并保留身份",
+      "没有租约的设备仍能普通解绑",
+      "强制解绑清身份绑定及设备映射并保持数据库完整"
+    ]
+  },
+  "old_frontend_reproduced": true,
+  "temporary_tests_removed": [
+    "local backend/smoke/modal-isolation-20261116",
+    "/tagger/backend/smoke/modal-isolation-20261116"
+  ]
+}

@@ -1,5 +1,5 @@
 /**
- * 清掉 dist/assets 里**上一代**的入口产物（index-<hash>.js / .css）。
+ * 把 dist/assets 的旧入口产物归档到仓库 .delete，保持原目录结构。
  *
  * 为什么需要它：vite.config.ts 里 `emptyOutDir: false` 是有意的（某些受管环境
  * 会给 fs.rm 挂安全删除守卫，清空 dist 时直接抛错让构建失败），代价是每次
@@ -7,15 +7,15 @@
  * 而 pack-dist.bat 会把整个 dist 打进分发包——等于每发一版白带 50 MB 死文件。
  *
  * 做法是**只认 index.html 里真被引用的那两个**：
- *   - 只删 index-*.js / index-*.css，其他命名（字体、将来的 vendor chunk）
+ *   - 只归档 index-*.js / index-*.css，其他命名（字体、将来的 vendor chunk）
  *     一律不碰——删错一个 chunk 的后果是页面白屏，而省下的只是几百 KB。
- *   - 用 unlink 逐个删文件，不做目录递归删除，绕开上面那个 rm 守卫。
+ *   - 逐个移动文件，不递归删除目录。
  *
  * 用法：
- *   node scripts/prune-dist.mjs            # 真删
+ *   node scripts/prune-dist.mjs            # 归档
  *   node scripts/prune-dist.mjs --dry-run  # 只报告
  */
-import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, statSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,6 +23,8 @@ const UI_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 const DIST = join(UI_DIR, 'dist')
 const ASSETS = join(DIST, 'assets')
 const dryRun = process.argv.includes('--dry-run')
+const ARCHIVE = join(UI_DIR, '..', '..', '..', '.delete', 'ui-build-' + Date.now(),
+  'tagger', 'web', 'ui', 'dist', 'assets')
 
 /** index.html 里 /assets/xxx 形式的引用 = 这一版真正要用的入口产物。 */
 function referencedAssets() {
@@ -65,9 +67,10 @@ for (const name of readdirSync(ASSETS)) {
   const full = join(ASSETS, name)
   const size = statSync(full).size
   if (dryRun) {
-    console.log(`[dry-run] 将删除 ${name}  ${(size / 1024).toFixed(0)} KB`)
+    console.log(`[dry-run] 将归档 ${name}  ${(size / 1024).toFixed(0)} KB`)
   } else {
-    unlinkSync(full)
+    mkdirSync(ARCHIVE, { recursive: true })
+    renameSync(full, join(ARCHIVE, name))
   }
   removed += 1
   freed += size
@@ -77,6 +80,6 @@ const mb = (freed / 1024 / 1024).toFixed(1)
 if (removed === 0) {
   console.log(`[prune-dist] 没有旧产物（保留 ${kept.join(', ')}）`)
 } else {
-  console.log(`[prune-dist] ${dryRun ? '可删除' : '已删除'} ${removed} 个旧产物，`
+  console.log(`[prune-dist] ${dryRun ? '可归档' : '已归档'} ${removed} 个旧产物，`
     + `${mb} MB；保留 ${kept.join(', ')}`)
 }

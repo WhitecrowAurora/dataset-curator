@@ -4,6 +4,7 @@ import {
   ChartSpline,
   Copy,
   Download,
+  FileJson,
   GitCompareArrows,
   History,
   Layers,
@@ -16,6 +17,7 @@ import {
   ShieldCheck,
   UploadCloud,
   Waypoints,
+  Wrench,
 } from 'lucide-react'
 import { api, type CenterBrief, type Health } from './lib/api'
 import { cn } from './lib/cn'
@@ -30,6 +32,7 @@ import { History as HistoryPage } from './pages/History'
 import { Stats } from './pages/Stats'
 import { Packaging } from './pages/Packaging'
 import { Upload } from './pages/Upload'
+import { Manifests } from './pages/Manifests'
 import { Dedup } from './pages/Dedup'
 import { Models } from './pages/Models'
 import { Downloads } from './pages/Downloads'
@@ -37,12 +40,14 @@ import { TagManage } from './pages/TagManage'
 import { Conflicts } from './pages/Conflicts'
 import { Deps } from './pages/Deps'
 import { Settings } from './pages/Settings'
+import { Tools } from './pages/Tools'
 import { Center } from './pages/Center'
 import { GlobalProgress } from './components/GlobalProgress'
 import { SelfCheckDialog } from './components/SelfCheckDialog'
 import { ResumeBanner } from './components/ResumeBanner'
 import { RetryFailedButton } from './components/RetryFailedButton'
 import { ActivityNotice } from './components/ActivityNotice'
+import { QuickSetup } from './components/setup/QuickSetup'
 
 // 手写 hash 路由：七个页面、零依赖，比引 react-router 更省事也更不容易踩版本。
 // 用 hash 而不是 history 还有一个实际好处——右键"在新标签打开"不会 404。
@@ -52,6 +57,7 @@ type Route =
   | { name: 'run'; id: string }
   | { name: 'results'; id: string }
   | { name: 'upload' }
+  | { name: 'manifests' }
   | { name: 'dedup' }
   | { name: 'packaging' }
   | { name: 'conflicts' }
@@ -63,6 +69,7 @@ type Route =
   | { name: 'deps' }
   | { name: 'center' }
   | { name: 'settings' }
+  | { name: 'tools' }
 
 const LAST_KEY = 'tagger-last-job'
 
@@ -72,6 +79,7 @@ function parseRoute(hash: string): Route {
   if (match) return { name: match[1] as 'run' | 'results', id: match[2] }
   if (path === '/history') return { name: 'history' }
   if (path === '/upload') return { name: 'upload' }
+  if (path === '/manifests') return { name: 'manifests' }
   if (path === '/dedup') return { name: 'dedup' }
   if (path === '/packaging') return { name: 'packaging' }
   if (path === '/conflicts') return { name: 'conflicts' }
@@ -82,6 +90,7 @@ function parseRoute(hash: string): Route {
   if (path === '/deps') return { name: 'deps' }
   if (path === '/center') return { name: 'center' }
   if (path === '/settings') return { name: 'settings' }
+  if (path === '/tools') return { name: 'tools' }
   return { name: 'new' }
 }
 
@@ -90,6 +99,8 @@ function go(path: string) {
 }
 
 export default function App() {
+  const [setupForm, setSetupForm] = useState<Record<string, unknown> | null>(null)
+  const [setupOpen, setSetupOpen] = useState(false)
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
   const [health, setHealth] = useState<Health | null>(null)
   // 顶栏那盏灯只管"有没有身份"，所以走 /api/center/status（只读本地文件），
@@ -169,12 +180,15 @@ export default function App() {
   const runningId = health?.running_job ?? (route.name === 'run' ? route.id : '') ?? ''
   const resultsId = route.name === 'results' ? route.id : lastJobId
 
+  // 分组顺序就是干活顺序：领活 → 看进度 → 处理数据 → 折腾环境。
+  // section 只写在每组第一项上（由 Sidebar 渲染成分割线 + 组标题）。
   const items: NavItem[] = [
     // 排在最前：这是"活从哪来"的入口。从总机领分片和本机自建任务是两条并列的
     // 起点，而前者决定了这台机器默认在干什么，所以先问它。
     {
       key: 'center',
       label: '调度中心',
+      section: '任务',
       icon: <Waypoints size={15} />,
       active: route.name === 'center',
       hint: '自动领分片打标，看派工与租约',
@@ -188,56 +202,9 @@ export default function App() {
       onClick: () => go('/'),
     },
     {
-      key: 'selfcheck',
-      label: '部署自检',
-      icon: <ShieldCheck size={15} />,
-      active: selfCheckOpen,
-      hint: '逐项验证环境、目录与服务，真跑一张图',
-      onClick: () => setSelfCheckOpen(true),
-    },
-    {
-      key: 'deps',
-      label: '依赖检测',
-      icon: <Package size={15} />,
-      active: route.name === 'deps',
-      hint: '查看依赖与版本，可单独装卸',
-      onClick: () => go('/deps'),
-    },
-    {
-      key: 'models',
-      label: '模型管理',
-      icon: <Layers size={15} />,
-      active: route.name === 'models',
-      hint: '管理 NL 模型与 tag 分类头',
-      onClick: () => go('/models'),
-    },
-    {
-      key: 'downloads',
-      label: '分片下载',
-      icon: <Download size={15} />,
-      active: route.name === 'downloads',
-      hint: '提前把仓库分片备到本地',
-      onClick: () => go('/downloads'),
-    },
-    {
-      key: 'tag-manage',
-      label: '打标管理',
-      icon: <Merge size={15} />,
-      active: route.name === 'tag-manage',
-      hint: '多个 json 合成一个，tag/nl 按图配对',
-      onClick: () => go('/tag-manage'),
-    },
-    {
-      key: 'conflicts',
-      label: '冲突与决策',
-      icon: <GitCompareArrows size={15} />,
-      active: route.name === 'conflicts',
-      hint: '同一张图多份产物时逐条定留哪份',
-      onClick: () => go('/conflicts'),
-    },
-    {
       key: 'run',
       label: '运行中',
+      section: '运行',
       icon: <PlayCircle size={15} />,
       active: route.name === 'run',
       disabled: !runningId,
@@ -258,6 +225,40 @@ export default function App() {
       active: route.name === 'stats',
       hint: '通过率、失败率与质检分趋势',
       onClick: () => go('/stats'),
+    },
+    {
+      key: 'results',
+      label: '查看结果',
+      icon: <ListChecks size={15} />,
+      active: route.name === 'results',
+      disabled: !resultsId,
+      hint: resultsId ? '浏览最近一次任务的产物' : '还没有跑过任务',
+      onClick: () => resultsId && go(`/results/${resultsId}`),
+    },
+    {
+      key: 'tag-manage',
+      label: '打标管理',
+      section: '数据',
+      icon: <Merge size={15} />,
+      active: route.name === 'tag-manage',
+      hint: '多个 json 合成一个，tag/nl 按图配对',
+      onClick: () => go('/tag-manage'),
+    },
+    {
+      key: 'tools',
+      label: '工具',
+      icon: <Wrench size={15} />,
+      active: route.name === 'tools',
+      hint: '清洗已打好的 JSONL 标签产物',
+      onClick: () => go('/tools'),
+    },
+    {
+      key: 'conflicts',
+      label: '冲突与决策',
+      icon: <GitCompareArrows size={15} />,
+      active: route.name === 'conflicts',
+      hint: '同一张图多份产物时逐条定留哪份',
+      onClick: () => go('/conflicts'),
     },
     {
       key: 'dedup',
@@ -284,20 +285,52 @@ export default function App() {
       onClick: () => go('/upload'),
     },
     {
-      key: 'results',
-      label: '查看结果',
-      icon: <ListChecks size={15} />,
-      active: route.name === 'results',
-      disabled: !resultsId,
-      hint: resultsId ? '浏览最近一次任务的产物' : '还没有跑过任务',
-      onClick: () => resultsId && go(`/results/${resultsId}`),
+      key: 'manifests',
+      label: '打标清单',
+      icon: <FileJson size={15} />,
+      active: route.name === 'manifests',
+      hint: '汇总机上已上传的分片与合成进度',
+      onClick: () => go('/manifests'),
+    },
+    {
+      key: 'models',
+      label: '模型管理',
+      section: '环境',
+      icon: <Layers size={15} />,
+      active: route.name === 'models',
+      hint: '管理 NL 模型与 tag 分类头',
+      onClick: () => go('/models'),
+    },
+    {
+      key: 'downloads',
+      label: '分片下载',
+      icon: <Download size={15} />,
+      active: route.name === 'downloads',
+      hint: '提前把仓库分片备到本地',
+      onClick: () => go('/downloads'),
+    },
+    {
+      key: 'deps',
+      label: '依赖检测',
+      icon: <Package size={15} />,
+      active: route.name === 'deps',
+      hint: '查看依赖与版本，可单独装卸',
+      onClick: () => go('/deps'),
+    },
+    {
+      key: 'selfcheck',
+      label: '部署自检',
+      icon: <ShieldCheck size={15} />,
+      active: selfCheckOpen,
+      hint: '逐项验证环境、目录与服务，真跑一张图',
+      onClick: () => setSelfCheckOpen(true),
     },
     {
       key: 'settings',
       label: '设置',
       icon: <Settings2 size={15} />,
       active: route.name === 'settings',
-      hint: '界面偏好：底栏刷新频率等',
+      hint: '界面偏好与下载源',
       onClick: () => go('/settings'),
     },
   ]
@@ -305,6 +338,7 @@ export default function App() {
   return (
     <AppShell
       items={items}
+      setup={<QuickSetup onSaved={(form) => { setSetupForm(form); refreshCenter() }} onOpen={go} onOpenChange={setSetupOpen} />}
       actions={
         // 放在导航下方、状态行上方：它是"对上一个任务的动作"，不是页面。
         // 目标任务取最近的那个（lastJobId），与「查看结果」同一个来源——
@@ -371,6 +405,8 @@ export default function App() {
       <div className={route.name === 'new' ? undefined : 'hidden'}>
         <NewJob
           active={route.name === 'new'}
+          configuredForm={setupForm}
+          configuring={setupOpen}
           onStarted={openJob}
           onOpenModels={() => go('/models')}
         />
@@ -396,12 +432,14 @@ export default function App() {
         />
       )}
       {route.name === 'upload' && <Upload />}
+      {route.name === 'manifests' && <Manifests />}
       {route.name === 'dedup' && <Dedup />}
       {route.name === 'packaging' && <Packaging />}
       {route.name === 'stats' && <Stats />}
       {route.name === 'deps' && <Deps />}
+      <div className={route.name === 'tools' ? undefined : 'hidden'}><Tools /></div>
       {/* 登录成功要立刻唤醒顶栏的灯，别等下一轮轮询 */}
-      {route.name === 'center' && <Center onLinked={refreshCenter} />}
+      {route.name === 'center' && <Center key={setupForm ? JSON.stringify(setupForm) : 'initial'} onLinked={refreshCenter} />}
       {route.name === 'settings' && (
         <Settings
           progressInterval={progressInterval}

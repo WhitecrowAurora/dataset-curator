@@ -123,8 +123,13 @@ if (-not $PythonZip -or -not (Test-Path $PythonZip)) {
 $py = Join-Path $pyDir 'python.exe'
 if ($Force -or -not (Test-Path $py)) {
     if (Test-Path $pyDir) {
-        Write-Host "[env] 删除旧环境: $pyDir"
-        Remove-Item $pyDir -Recurse -Force
+        $resolvedPy = [IO.Path]::GetFullPath($pyDir)
+        $expectedPy = [IO.Path]::GetFullPath((Join-Path $repo 'env\python'))
+        if ($resolvedPy -ne $expectedPy) { throw "旧环境路径不符合预期：$resolvedPy" }
+        $archivePy = Join-Path $repo ('.delete\env-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '\env\python')
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $archivePy) | Out-Null
+        Write-Host "[env] 归档旧环境: $archivePy"
+        Move-Item -LiteralPath $resolvedPy -Destination $archivePy
     }
     New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
     Write-Host "[env] 解压 $(Split-Path $PythonZip -Leaf)"
@@ -479,7 +484,7 @@ Write-Host "  tagger.cli --help: $(if ($helpCode -eq 0) { 'OK' } else { "失败�
 # 「启动服务」拿到的会是"GGUF 权重不存在"，但原因和他刚才跑的 install 无关。
 Write-Host "[env] 模型权重:"
 try {
-    $wJson = & $envPy -c "import json;from tagger.config import load_tier_table, resolve_profile;from tagger.hardware import query_gpus;t=load_tier_table();g=query_gpus();p=resolve_profile(t,g[0]) if g else None;print(json.dumps({'key':p.model.key if p else '','gguf':str(p.model.gguf or '') if p else '','mmproj':str(p.model.mmproj or '') if p else ''}))" 2>$null
+    $wJson = & $py -c "import json;from tagger.config import load_tier_table, resolve_profile;from tagger.hardware import query_gpus;t=load_tier_table();g=query_gpus();p=resolve_profile(t,g[0]) if g else None;print(json.dumps({'key':p.model.key if p else '','gguf':str(p.model.gguf or '') if p else '','mmproj':str(p.model.mmproj or '') if p else ''}))" 2>$null
     $w = $null
     if ($wJson) { try { $w = $wJson | ConvertFrom-Json } catch { $w = $null } }
     if ($w -and $w.gguf) {

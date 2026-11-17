@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-16",
+  "source_files": {
+    "fox-label/server.py": {
+      "before": "c8ea5613b5d512042eba76a3ba76318a65c670adb3c08725eb74a05c610b1d7e",
+      "after": "b50a324794ab9983709b0775388100638f353ab49b6d5d0aec0050e46339ad98"
+    },
+    "fox-label/dispatch.py": {
+      "before": "d6ce8ef621dc02570449874f41fec6cecb3ed021240b8aee00018b8374f543d0",
+      "after": "970169a1eb9eada3c07a16f814ec035da79cfab3dc7137cf33692547b326bca3"
+    },
+    "fox-label/delivery/routes.py": {
+      "before": "13d3b8ae3ba0f943566cc57599fae2ac5d4b8acae8b739c504155095d5b34217",
+      "after": "ba06d24d7431bcaa9b37fd46d80e7049acd3453e419a8a29b4ecbd12a624b225"
+    },
+    "fox-label/managed/store.py": {
+      "before": "7efb0f48bb089cb150b67f10f17d0d79d08b15288020d14f87ddfec1decd0b7f",
+      "after": "9b6695d968f46cfbb5546b1cb9754cecf8356b037592136ee0ea5f7db0210ab7"
+    },
+    "fox-label/managed/contracts.py": {
+      "before": "0ad10b30f8afbfd2472f7253131ca63c29914b24abd98a4856fb4fd205bdd4d7",
+      "after": "4b680ba7ac20e77ce814610230f03a76e0ed47207dc22ddd1ed92e7b854296b6"
+    },
+    "fox-panel/panel.py": {
+      "before": "50a578f9d302cf88d501f823465368d1431772b55fceeae66e73902e0baca3bb",
+      "after": "721deae13c0e82d0af15c650f863b8b002315cb6a752fc664b91f8da32be49e9"
+    },
+    "fox-panel/web/managed.js": {
+      "before": "832acdc4eb131e5c276c41f56a6830cbe20f6f28949e222f04177398f9476d85",
+      "after": "0bae5f69656bdbef8ddcdccbeaa71fc37e483762bc2b38a8547bc85f5a4fa93a"
+    },
+    "fox-label/history/routes.py": {
+      "before": null,
+      "after": "89ab46882d66e69247dd8ed76e3dd95129126e368d6e686e0c3e91ae7faeda04"
+    },
+    "fox-label/history/store.py": {
+      "before": null,
+      "after": "220ccf75082cb9bd55b8a7c9c45a77d9f64c3ce1babd73e0edbc312f9d0c1451"
+    },
+    "fox-label/history/uploads.py": {
+      "before": null,
+      "after": "7f3a7fecb15f68321e184e14cccd982a8b0d71685177a8bd86d0131586a0acd7"
+    },
+    "fox-label/history/__init__.py": {
+      "before": null,
+      "after": "d5d5603e0f6b75c9d579186b0e6732461e7163e97fe29d7e084d8e50abc29b3a"
+    },
+    "fox-label/verification/history.py": {
+      "before": null,
+      "after": "8330519d2435567128f0c9d1795c93ea9e4b4989f73cbe76b552bd7a2db5523a"
+    },
+    "fox-label/verification/payload.py": {
+      "before": null,
+      "after": "1d040b4cf1c2d1cb7f24a8bb1ba90ea7eddf97deb0485090e4fe04012141a45f"
+    },
+    "fox-label/verification/__init__.py": {
+      "before": null,
+      "after": "01b2f9d2ff7eeeeef071bb2f6185340af00e4e9ba191735fbb049366775182a8"
+    }
+  },
+  "server_http_checks": 12,
+  "live_client_panel_checks": [
+    "panel-8-reads",
+    "local-login",
+    "save-does-not-start",
+    "history-bind",
+    "local-managed-panel-online",
+    "local-config-locked",
+    "binding-locked",
+    "panel-check-local-upload-complete.tar",
+    "panel-check-local-upload-tag-only.tar",
+    "panel-check-local-upload-incomplete.tar",
+    "panel-stop",
+    "panel-remote-config-rejected",
+    "exit-and-unlock"
+  ],
+  "followup_checks": [
+    "zip-manifest-mismatch",
+    "same-name-source-conflict",
+    "panel-start-real-worker",
+    "start-preserves-local-environment",
+    "panel-stop-retains-hosting",
+    "legacy-failure-ledger-real-upload",
+    "final-exit-releases-session",
+    "legacy-final-exclusion",
+    "retriable-failure"
+  ],
+  "browser_clicks_verified": false,
+  "gpu_inference_verified_this_round": false
+}

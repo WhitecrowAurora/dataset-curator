@@ -9,7 +9,9 @@
       "gguf_quants": {
         "f16": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-F16.gguf",
         "q4": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q4_K_M.gguf",
-        "q6": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q6_K.gguf"
+        "q5": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q5_K_M.gguf",
+        "q6": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q6_K.gguf",
+        "q8": "models/nl/qwen3vl-8b-abliterated/qwen3vl-8b-abliterated-Q8_0.gguf"
       }
     }
   },

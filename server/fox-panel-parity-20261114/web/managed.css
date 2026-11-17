@@ -1,0 +1,11 @@
+.fp-managed { padding: var(--fp-card-pad); }
+.fp-managed > .fp-field { margin: 12px 0; }
+.fp-managed fieldset { border: 1px solid var(--fp-border); border-radius: var(--fp-radius-md); padding: 12px; margin: 12px 0; }
+.fp-managed legend { padding: 0 6px; font-weight: 600; }
+.fp-managed-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.fp-managed .fp-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fp-managed .fp-input { width: 100%; }
+.fp-managed .fp-check { min-height: 32px; }
+.fp-managed-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.fp-managed-history { padding-left: 22px; margin: 8px 0; overflow-wrap: anywhere; }
+.fp-managed [role="status"] { overflow-wrap: anywhere; margin: 12px 0; }

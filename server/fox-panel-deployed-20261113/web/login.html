@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="referrer" content="no-referrer">
+<title>登录 · fox-label 面板</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login">
+<main class="fp-login">
+  <section class="fp-card fp-login__card">
+    <div class="fp-brand fp-brand--login">
+      <svg class="fp-brand__ic" viewBox="0 0 24 24" width="20" height="20"
+           fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M4 14c3.5-1 4.5-6 8-6s4.5 4 8 4"/>
+        <path d="M4 18c3.5-1 4.5-4 8-4s4.5 2 8 2"/>
+      </svg>
+      <div>
+        <span class="fp-brand__name">fox-label 面板</span>
+        <span class="fp-brand__sub">只读管理面板</span>
+      </div>
+    </div>
+
+    <form method="post" action="/login" class="fp-login__form">
+      <label class="fp-field">
+        <span>账号</span>
+        <input name="user" type="text" autocomplete="username" required autofocus>
+      </label>
+      <label class="fp-field">
+        <span>密码</span>
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <div class="fp-login__error">{{ERROR}}</div>
+      <button class="fp-btn fp-btn--primary fp-login__submit" type="submit">登录</button>
+    </form>
+
+    <p class="fp-login__hint">
+      只读面板 · 账号密码由管理员通过 <code>python3 panel.py init</code> 设置
+    </p>
+  </section>
+</main>
+</body>
+</html>

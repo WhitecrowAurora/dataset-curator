@@ -185,9 +185,13 @@ export function History({
           <SheetHead title="任务记录" count={jobs.length} hint="按创建时间倒序" />
           <div className="border-t border-lx">
             {jobs.map((job) => {
-              const status = STATUS[job.status] ?? STATUS.pending
-              // progress 为 null = 流式任务（HF 分片），总量未知：进度条退化为计数
-              const pct = (job.progress ?? (job.counts.total ? (job.counts.settled / job.counts.total) : 0)) * 100
+              const packing = job.phase === 'pack'
+              const status = packing && job.status === 'running'
+                ? { label: '封包中', tone: 'accent' as const }
+                : STATUS[job.status] ?? STATUS.pending
+              const counts = packing ? job.pack : job.counts
+              // null 表示完整总量未知，不能用已读取数量补造百分比。
+              const pct = job.progress == null ? null : job.progress * 100
               const active = job.id === currentId
               // 盘上的历史记录：只有快照，事件流和产物索引都随进程没了。
               const offline = Boolean(job.historical)
@@ -203,7 +207,7 @@ export function History({
                         className="truncate text-[13px] font-medium text-lx"
                         title={job.spec.input_dir}
                       >
-                        {basename(job.spec.input_dir) || job.spec.input_dir}
+                        {job.spec.hf_repo || basename(job.spec.input_dir) || job.spec.input_dir}
                         {active && <span className="ml-1.5 text-[10px] text-lx-accent">当前</span>}
                       </div>
                       <div className="mt-0.5 truncate font-mono text-[10.5px] text-lx-muted" title={job.out_dir}>
@@ -216,12 +220,14 @@ export function History({
 
                   <div className="w-[132px] shrink-0">
                     <div className="mb-1 flex items-baseline justify-between gap-2 text-[10.5px] text-lx-muted">
-                      <span className="tabular-nums">{Math.round(pct)}%</span>
                       <span className="tabular-nums">
-                        {fmtCount(job.counts.settled)}/{fmtCount(job.counts.total)}
+                        {packing ? '封包 ' : ''}{pct === null ? '已处理' : `${Math.round(pct)}%`}
+                      </span>
+                      <span className="tabular-nums">
+                        {fmtCount(counts.settled)}{pct === null ? ' 张' : `/${fmtCount(counts.total)}`}
                       </span>
                     </div>
-                    <ProgressBar
+                    {pct !== null && <ProgressBar
                       percent={pct}
                       tone={
                         job.status === 'failed'
@@ -233,7 +239,7 @@ export function History({
                               : 'neutral'
                       }
                       heightClass="h-1"
-                    />
+                    />}
                   </div>
 
                   <div className="hidden w-[184px] shrink-0 text-[10.5px] text-lx-muted md:block">

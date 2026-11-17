@@ -119,7 +119,7 @@ body {
   .lx-card-interactive:hover {
     transform: translateY(-2px);
     border-color: var(--lx-border-hover) !important;
-    box-shadow: 0 10px 22px -6px rgba(0, 0, 0, 0.55);
+    box-shadow: var(--lx-shadow-hover);
   }
 
   /* ── Button ──────────────────────────────────────────────────────────── */

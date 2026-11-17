@@ -15,7 +15,9 @@
   "top_p": 0.9,
   "max_tokens": 512,
   "vllm_version": "b12188",
-  "python": "3.14.0",
+  "python": "3.12.9",
   "device": "gpu",
+  "gpu_layers": null,
+  "kv_type": "q8_0",
   "local_media_root": ""
 }

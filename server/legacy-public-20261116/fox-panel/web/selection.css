@@ -1,0 +1,21 @@
+.fp-selection { min-width: 0; margin-block: 12px; padding: 12px; border: 1px solid var(--fp-border); border-radius: var(--fp-radius-md); }
+.fp-selection-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.fp-selection-toolbar input { flex: 1 1 180px; min-width: 0; min-height: var(--fp-field-h); padding: 6px 10px; background: var(--fp-surface); color: var(--fp-text-1); border: 1px solid var(--fp-border-field); border-radius: var(--fp-radius-md); }
+.fp-selection-toolbar span { color: var(--fp-text-3); font-size: var(--fp-fs-12); }
+.fp-selection-list { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--fp-border); border-radius: var(--fp-radius-md); background: var(--fp-surface); }
+.fp-selection-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--fp-border); }
+.fp-selection-row:last-child { border-bottom: 0; }
+.fp-selection-row:hover, .fp-selection-row.is-selected { background: var(--fp-surface-2); }
+.fp-selection-row input { flex: none; width: 17px; height: 17px; margin-top: 2px; accent-color: var(--fp-accent, #f05b36); }
+.fp-selection-row > span { min-width: 0; overflow-wrap: anywhere; }
+.fp-selection-content { flex: 1; }
+.fp-selection-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.fp-selection-meta { flex: none; color: var(--fp-text-3); white-space: nowrap; }
+.fp-selection-entry { display: flex; align-items: center; gap: 8px; padding-right: 12px; border-bottom: 1px solid var(--fp-border); }
+.fp-selection-entry > .fp-selection-row { flex: 1; min-width: 0; border-bottom: 0; }
+.fp-selection-entry:last-child { border-bottom: 0; }
+.fp-selection-row small { display: block; margin-top: 4px; color: var(--fp-text-3); }
+.fp-selection-row:has(input:disabled) { cursor: default; opacity: .65; }
+.fp-selection [hidden] { display: none; }
+.fp-selection-list > .fp-note { padding: 12px; }
+.fp-scheduling-advanced > summary, .fp-workspace-advanced > summary { cursor: pointer; margin-block: 12px; color: var(--fp-text-3); }

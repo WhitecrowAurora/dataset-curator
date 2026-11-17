@@ -322,7 +322,7 @@ class MultiGpuService:
                 "engine": engine, "gpus": wanted, "base_port": base_port,
                 "model": (model or "").strip() or None,
                 "tier": (tier or "").strip() or None,
-                "precision": normalize_quant_precision(precision),
+                "precision": normalize_quant_precision(precision, engine=engine),
                 "served_name": served_name,
                 "per_card_seqs": seqs,
             }
@@ -406,6 +406,7 @@ class MultiGpuService:
                     tier_override=cfg["tier"],
                     precision_override=cfg["precision"],
                     max_num_seqs_override=seqs,
+                    **({"engine": "native"} if engine == "native" else {}),
                 )
                 Path(w.log_path).parent.mkdir(parents=True, exist_ok=True)
                 handle = start_server(

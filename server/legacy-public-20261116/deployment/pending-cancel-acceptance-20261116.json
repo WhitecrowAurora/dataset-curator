@@ -1,0 +1,154 @@
+{
+  "ok": true,
+  "backup": "/tagger/.delete/pending-cancel-20261116-121952",
+  "before": {
+    "tables": {
+      "repos": {
+        "count": 2,
+        "sha256": "c0c1ac07c168c0d305e3e9080cb65f355dcc2589c1016c4cfc204052591b794e"
+      },
+      "packages": {
+        "count": 874,
+        "sha256": "caaf7066565e2fad9de331b6ad71908ebb790134b0556c3395596f216ffd85cf"
+      },
+      "package_targets": {
+        "count": 30,
+        "sha256": "141623510d88a804269fb77d832f8c257a8c82cc67df266cde3311b901affdd0"
+      },
+      "package_queue": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "part_assignments": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "leases": {
+        "count": 256,
+        "sha256": "c5ca1730b3c31c987e10fabf3190905632cbc8546bf22d62ea111dc2881bdf53"
+      },
+      "lease_parts": {
+        "count": 512,
+        "sha256": "6cbeaf2fd19eb18f62adf6015b472bb692dc866a3656069f7265f8ae99e1e1e1"
+      },
+      "users": {
+        "count": 12,
+        "sha256": "34dd3580e5fc7b6b0c606e4f34f1197c2def16157392bfd14f14e5218c78cb95"
+      },
+      "devices": {
+        "count": 2,
+        "sha256": "86613158c7523f13d7ad52813ef916db6dc23cc680e4360b99f276f14fa35d53"
+      },
+      "workspaces": {
+        "count": 1,
+        "sha256": "c667c5660597fc95b75abd6e81c882c4f1197afe1708523c417db65abe158464"
+      },
+      "user_groups": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "managed_devices": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "managed_commands": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "history_checks": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "integrity": "ok"
+  },
+  "hashes": {
+    "fox-label/server.py": "638a41659049eca322a3bc494a102b872fed33a7fbb4d7b1fdf276e9bae9b757",
+    "fox-label/assignments/cancellation.py": "f5d5332507e3f183d6e77a90972673cd5bd3f68942c7869dc16d16f3aafa7b87",
+    "fox-panel/panel.py": "3b29dbf3b3c6e8db94a1f9b8d4e6b9ff28dbc416fcecfea96b698f9b464668c2",
+    "fox-panel/web/app.js": "ba2931572311ea9ad7556d74962ad876dae9dc23ab22194be12b44944656f992"
+  },
+  "local_backend_checks": 32,
+  "remote_backend_checks": 32,
+  "frontend_checks": 17,
+  "cleanup_complete": true,
+  "after": {
+    "tables": {
+      "repos": {
+        "count": 2,
+        "sha256": "c0c1ac07c168c0d305e3e9080cb65f355dcc2589c1016c4cfc204052591b794e"
+      },
+      "packages": {
+        "count": 874,
+        "sha256": "caaf7066565e2fad9de331b6ad71908ebb790134b0556c3395596f216ffd85cf"
+      },
+      "package_targets": {
+        "count": 30,
+        "sha256": "141623510d88a804269fb77d832f8c257a8c82cc67df266cde3311b901affdd0"
+      },
+      "package_queue": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "part_assignments": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "leases": {
+        "count": 256,
+        "sha256": "c5ca1730b3c31c987e10fabf3190905632cbc8546bf22d62ea111dc2881bdf53"
+      },
+      "lease_parts": {
+        "count": 512,
+        "sha256": "6cbeaf2fd19eb18f62adf6015b472bb692dc866a3656069f7265f8ae99e1e1e1"
+      },
+      "users": {
+        "count": 12,
+        "sha256": "34dd3580e5fc7b6b0c606e4f34f1197c2def16157392bfd14f14e5218c78cb95"
+      },
+      "devices": {
+        "count": 2,
+        "sha256": "86613158c7523f13d7ad52813ef916db6dc23cc680e4360b99f276f14fa35d53"
+      },
+      "workspaces": {
+        "count": 1,
+        "sha256": "c667c5660597fc95b75abd6e81c882c4f1197afe1708523c417db65abe158464"
+      },
+      "user_groups": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "managed_devices": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "managed_commands": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "history_checks": {
+        "count": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "integrity": "ok"
+  },
+  "formal_reads": [
+    "/",
+    "/health",
+    "/api/meta",
+    "/static/app.js",
+    "/api/packages?status=available&size=100&repo=MatchaCuratio%2FAnime-Fox768-400k&q=shard-000000.tar",
+    "/api/summary",
+    "/api/workspaces",
+    "/api/scheduling",
+    "/api/managed/devices",
+    "/api/history",
+    "/api/source-catalog",
+    "/api/delivery/settings",
+    "production pending preview only"
+  ],
+  "formal_state_unchanged": true,
+  "services": "active\nactive",
+  "browser_verified": false
+}

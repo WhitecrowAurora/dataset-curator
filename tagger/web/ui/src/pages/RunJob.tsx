@@ -19,11 +19,13 @@ import {
 } from 'lucide-react'
 import { createLiveStore } from '../lib/store'
 import { api } from '../lib/api'
+import { failureAdvice } from '../lib/guidance'
 import { basename, fmtCount, fmtPct, fmtSeconds } from '../lib/format'
 import { PageHeader, SectionPanel, SheetHead, StatusChip, type StatusTone } from '../components/ui/launcher'
 import { ErrorBox } from '../components/ui/controls'
 import { OverviewFigure, OverviewFigureRow } from '../components/ui/OverviewFigures'
 import { ProgressBar } from '../components/ui/ProgressBar'
+import { InferenceProgress } from '../components/InferenceProgress'
 
 const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   pending: { label: '排队中', tone: 'neutral' },
@@ -86,11 +88,12 @@ export function RunJob({
   const sealed = pack?.packs ?? []
 
   const pct = (snap?.progress ?? 0) * 100
-  const speed = snap && snap.rate_per_s > 0 ? `${snap.rate_per_s.toFixed(2)} 张/s` : '—'
-  const perImage = snap && snap.rate_per_s > 0 ? `${(1 / snap.rate_per_s).toFixed(2)}` : '—'
-  const total = snap?.counts.total ?? 0
-  const settled = snap?.counts.settled ?? 0
-  // progress 为 null = 流式任务（HF 分片），总量事先不知道：
+  const rate = (packing ? pack?.rate_per_s : snap?.rate_per_s) ?? 0
+  const speed = rate > 0 ? `${rate.toFixed(2)} 张/s${packing ? '（封包）' : ''}` : '—'
+  const perImage = rate > 0 ? `${(1 / rate).toFixed(2)}` : '—'
+  const total = (packing ? pack?.total : snap?.counts.total) ?? 0
+  const settled = (packing ? pack?.settled : snap?.counts.settled) ?? 0
+  // progress 为 null = 流式输入尚未读完，总量还不知道：
   // 显示"已结算 N 张 + 速率"，不硬造百分比
   const streaming = snap !== null && snap?.progress === null
   const title = snap
@@ -215,7 +218,11 @@ export function RunJob({
           error="已退回每秒轮询，数据会慢一拍"
         />
       )}
-      {snap?.status === 'failed' && <ErrorBox error={snap.error || '任务失败'} title="任务失败" />}
+      {snap?.status === 'failed' && <ErrorBox error={snap.error || '任务失败'} title="任务失败"
+        nextStep={failureAdvice(snap.error || '', 'task')}
+        actions={<><button type="button" className="lx-btn-ghost"
+          onClick={() => document.getElementById('job-logs')?.scrollIntoView({ block: 'start' })}>查看任务日志</button>
+          <button type="button" className="lx-btn-ghost" onClick={onNew}>修改任务配置</button></>} />}
       {guardEv && guardEv.level !== 'ok' && (
         <ErrorBox
           tone={guardEv.level === 'stop' ? 'danger' : 'warning'}
@@ -237,6 +244,19 @@ export function RunJob({
           error="已算完的部分都落盘了，重新开始会自动跳过。停止的任务不封包。"
         />
       )}
+      {snap?.status === 'done' && (snap?.counts.blacklisted ?? 0) > 0 && (
+        <div className="flex items-start gap-3 rounded-lx-sm border-l-2 border-lx-warning bg-lx-warning-subtle px-4 py-3">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-lx-warning" />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-lx-warning">有条件完成</div>
+            <p className="mt-1 text-xs text-lx-secondary">
+              另有 {fmtCount(snap?.counts.blacklisted ?? 0)} 张重试后依然失败、本次按条件跳过，
+              不会再产出（明细见产物目录的 failures.jsonl）；其余图片产物完整。
+            </p>
+          </div>
+        </div>
+      )}
+
       {snap?.status === 'done' && snap.spec.engine === 'local' && !snap.spec.pack && (
         <div className="flex items-start gap-3 rounded-lx-sm border-l-2 border-lx-accent bg-lx-accent-subtle px-4 py-3">
           <PackageOpen className="mt-0.5 h-4 w-4 shrink-0 text-lx-accent" />
@@ -259,7 +279,7 @@ export function RunJob({
                     {fmtCount(settled)}
                   </div>
                   <div className="mt-2 text-xs text-lx-muted">
-                    张已结算 · 总量未知（流式读取分片）
+                    张已处理 · 总量尚未确定
                     {snap?.current && !finished && (
                       <span className="ml-2 truncate font-mono text-[11px] text-lx-dim">
                         {snap.current}
@@ -274,7 +294,7 @@ export function RunJob({
                   </div>
                   <div className="mt-2 text-xs text-lx-muted">
                     {packing && pack
-                      ? `${fmtCount(pack.settled)} / ${fmtCount(pack.total)} 张已封包`
+                      ? `${fmtCount(pack.settled)} / ${fmtCount(pack.total)} 张封包已处理`
                       : `${fmtCount(settled)} / ${fmtCount(total)} 张已结算`}
                     {snap?.current && !finished && (
                       <span className="ml-2 truncate font-mono text-[11px] text-lx-dim">
@@ -292,9 +312,7 @@ export function RunJob({
               </span>
               <span className="flex items-center gap-1.5">
                 <Gauge size={12} />{' '}
-                {packing && pack && pack.rate_per_s > 0
-                  ? `${pack.rate_per_s.toFixed(2)} 张/s（封包）`
-                  : speed}
+                {speed}
               </span>
               {snap?.eta_s != null && !finished && !packing && (
                 <span className="tabular-nums">约剩 {fmtSeconds(snap.eta_s)}</span>
@@ -312,10 +330,36 @@ export function RunJob({
           )}
         </div>
 
+        {snap?.spec.engine === 'vlm' && snap.spec.output_mode === 'both' && snap.output_progress && (
+          <InferenceProgress outputs={snap.output_progress} finished={finished || packing} />
+        )}
+
         <div className="px-[18px] pb-5 md:px-7">
           <OverviewFigureRow>
             <OverviewFigure label="完成" value={fmtCount(snap?.counts.done ?? 0)} tone="success" first />
             <OverviewFigure label="跳过（已有）" value={fmtCount(snap?.counts.skipped ?? 0)} />
+            {/* "跳过"不是一个数：产物已有之外，还有图太小、没画师、重试剔除、
+                重试后依然失败四类，各有各的处理方式，混成一个数看不出该修哪边。 */}
+            {(snap?.counts.blank_skipped ?? 0) > 0 && (
+              <OverviewFigure
+                label="跳过（图太小）"
+                value={fmtCount(snap?.counts.blank_skipped ?? 0)}
+              />
+            )}
+            {(snap?.counts.artist_skipped ?? 0) > 0 && (
+              <OverviewFigure
+                label="跳过（无画师）"
+                value={fmtCount(snap?.counts.artist_skipped ?? 0)}
+                tone="warning"
+              />
+            )}
+            {(snap?.counts.excused ?? 0) > 0 && (
+              <OverviewFigure
+                label="跳过（重试剔除）"
+                value={fmtCount(snap?.counts.excused ?? 0)}
+                tone="warning"
+              />
+            )}
             {(snap?.counts.busy ?? 0) > 0 && (
               <OverviewFigure label="其他进程处理中" value={fmtCount(snap?.counts.busy ?? 0)} tone="warning" />
             )}
@@ -325,7 +369,11 @@ export function RunJob({
               tone={snap?.counts.failed ? 'danger' : undefined}
             />
             {(snap?.counts.blacklisted ?? 0) > 0 && (
-              <OverviewFigure label="拉黑" value={fmtCount(snap?.counts.blacklisted ?? 0)} tone="warning" />
+              <OverviewFigure
+                label="跳过（重试后依然失败）"
+                value={fmtCount(snap?.counts.blacklisted ?? 0)}
+                tone="warning"
+              />
             )}
             {/* token 只在本机模式是 0：本机不计费，整天挂着一行 0 是噪音。 */}
             {(snap?.usage.prompt_tokens ?? 0) > 0 && (
@@ -350,7 +398,7 @@ export function RunJob({
                 note="按配置价目"
               />
             )}
-            <OverviewFigure label="平均每张" value={perImage} note="秒" />
+            <OverviewFigure label={packing ? '平均封包每张' : '平均每张'} value={perImage} note="秒" />
           </OverviewFigureRow>
         </div>
 
@@ -532,6 +580,7 @@ export function RunJob({
             )}
           </SectionPanel>
 
+          <div id="job-logs" className="scroll-mt-4" />
           <SectionPanel title="日志">
             {logs.length === 0 ? (
               <p className="flex items-center gap-1.5 text-xs text-lx-muted">

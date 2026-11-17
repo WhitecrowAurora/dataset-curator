@@ -140,7 +140,7 @@ def merge_tag_stats(target: Any, parts: Sequence[Any]) -> None:
 
 _CLIENT_INT_FIELDS = ("total", "done", "skipped", "failed", "busy",
                       "blacklisted", "cached", "rate_limited", "tokens",
-                      "prompt_tokens", "artist_skipped")
+                      "prompt_tokens", "artist_skipped", "blank_skipped", "excused")
 
 
 def merge_client_stats(target: Any, parts: Sequence[Any]) -> None:
@@ -152,6 +152,8 @@ def merge_client_stats(target: Any, parts: Sequence[Any]) -> None:
         if not hasattr(target, name):
             continue
         setattr(target, name, sum(int(getattr(p, name, 0) or 0) for p in parts))
+    if hasattr(target, "input_complete"):
+        target.input_complete = all(getattr(p, "input_complete", False) for p in parts)
     # wall_ms 是"每张耗时的和"，并行下加起来没有意义，取总耗时更接近直觉。
     if hasattr(target, "wall_ms"):
         target.wall_ms = max(int(getattr(p, "wall_ms", 0) or 0) for p in parts)

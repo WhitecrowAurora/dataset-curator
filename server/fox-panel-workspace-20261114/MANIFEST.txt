@@ -1,0 +1,27 @@
+fox-panel v2 只读 Web 面板 —— 交付包清单
+版本: 2.0.0    打包时间: 2026-11-10 22:35:30 +0800
+运行环境: Python 3.9+（纯标准库，无第三方依赖）
+已验证: tests/test_panel.py 39 项 + tests/test_panel_v2.py 204 项 + 本机/公网真实数据验收
+
+本版要点:
+  · 前端拆成 web/{index.html,login.html,app.css,app.js}，由 panel.py 按固定文件名下发（ETag/304）
+  · 新增只读接口: /api/package（单包详情 13 键）、/api/export.csv（BOM+CRLF+10 列+RFC4180）
+  · /api/meta（前端启动配置，上游故障降级 200）、/api/packages 新增 sort/order（非法枚举 400）
+  · 设计系统 + 五页 + 单包抽屉：暗/亮主题、三档响应式、键盘可达、aria-live、零内联
+  · 仍为只读：无写操作、无 SSE、单账号、仅中文
+
+启动: python3 panel.py init --user admin && python3 panel.py serve
+自检: python3 tests/test_panel.py && python3 tests/test_panel_v2.py
+
+文件校验（sha256，解包后在本目录执行: grep -E '^[0-9a-f]{64}  ' MANIFEST.txt | sha256sum -c -）:
+4a7b9dc46975d980dc2c181355a168c4c6e44499a86bcd34fa85d0e67b482f8c  DELIVERY-v2.md
+99ee651b8dc1675239ddc6face730d542238c70acc4eaa47aa6d480aa10b8573  README.md
+dd0c40e50a2d89c0d74a8dc389c3635c9336fae3079a944ecd2fbd6350dc13bc  SPEC-v2.md
+4c07f334cd11530a1da4578e3917d89944aa914a9c9121e87fdf1d2a2d88b980  fox-panel.service
+5f6b2efdc34a419c1233e4e04038ff55b4841ce20b10dacf9b1b508fe4325f75  panel.py
+50888ecf5db35b64548a3ab35064e3343d462842bcb712a9e36ea4ec447085e8  tests/test_panel.py
+e28e5a3f6593606779286dcb48363a378771563217938323ec98571d9064e241  tests/test_panel_v2.py
+41a90af5364a938a1196fa66f3cb3bb05ef84f0efd6bde4bb40eab5c4917b9c5  web/app.css
+be7eb48cd74a5a9aeabbba040bbee43816abadafcb59cfd08458518a815bdb12  web/app.js
+2688ceb0cf830191d3cdaff42f54ea4a44bf26e1196d30546d5909f22b3d5f18  web/index.html
+96a2afea46f4a0a8a401c86a6ace7bc9a6b141c63b4680724ece5c7c379f5e5a  web/login.html

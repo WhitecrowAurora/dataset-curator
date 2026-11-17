@@ -1,0 +1,374 @@
+{
+  "date": "2026-11-16",
+  "backup": "/tagger/.delete/repo-sync-20261116-095239",
+  "changed_source_files": {
+    "fox-label/server.py": "c69193728f5348a4a4b5fd36e6cde2f975d60de12f7763267dd7933457d91cba",
+    "fox-panel/panel.py": "5a7e796c0bfacbe31ef38802b2fa638f69f301dad07963e0c9fb0faa24d5912c",
+    "fox-panel/web/app.js": "5cd2be6b98a0b715c66d478fb5f328281d5964366299e55a4b6c73b153a7b82d"
+  },
+  "before": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 1,
+      "leases": 256
+    },
+    "open": [],
+    "bindings": [
+      {
+        "device_id": "d2f902ed88f9",
+        "user_id": "lulu",
+        "workspace_id": null
+      }
+    ],
+    "workspaces": [
+      {
+        "ws_id": "fox768",
+        "name": "Fox768 打标",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "note": null,
+        "created_at": "2026-11-13T12:47:12+0000",
+        "allow_manual_claim": 1,
+        "allocation_mode": "auto"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "after_deploy": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 1,
+      "leases": 256
+    },
+    "open": [],
+    "bindings": [
+      {
+        "device_id": "d2f902ed88f9",
+        "user_id": "lulu",
+        "workspace_id": null
+      }
+    ],
+    "workspaces": [
+      {
+        "ws_id": "fox768",
+        "name": "Fox768 打标",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "note": null,
+        "created_at": "2026-11-13T12:47:12+0000",
+        "allow_manual_claim": 1,
+        "allocation_mode": "auto"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "services": [
+    "active",
+    "active"
+  ],
+  "production_sync_pending": false,
+  "production": {
+    "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+    "revision": "bfb2dce5c795b9797604e376c02dd7bec1b9904c",
+    "hf_entries": 1692,
+    "before_count": 105,
+    "after_count": 844,
+    "added": 739,
+    "ids_sha256": "a393ec26545180e1d53cebc310a336ed4f6ab60b3232752f9729c406f81a9fe5",
+    "result": {
+      "target": {
+        "repo": "MatchaCuratio/Anime-2024Dru768-8M"
+      },
+      "ok": true,
+      "code": 200,
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "added": 739,
+      "files": 844,
+      "pruned": 0,
+      "source": "hf",
+      "cached_at": "2026-11-16T09:55:08+08:00",
+      "refreshing": false,
+      "event_seq": 786,
+      "write_id": "W20261116T095509-26be2e"
+    },
+    "passed": 21,
+    "checks": [
+      "encrypted HF token available",
+      "HF full tree valid",
+      "named visible sync action",
+      "production /",
+      "production /static/app.js",
+      "served updated app",
+      "production /static/allocation.js",
+      "production /static/allocation.css",
+      "production /static/workspace.js",
+      "production preview",
+      "production force execute",
+      "production downloaded fresh metadata",
+      "existing package states preserved",
+      "leases devices workspaces preserved",
+      "complete HF and DB name sets match",
+      "reported counts match",
+      "overview count refreshed",
+      "settings count refreshed",
+      "package list count refreshed",
+      "workspace registry count refreshed",
+      "SQLite integrity"
+    ],
+    "existing_task_states_preserved": true
+  },
+  "tests": {
+    "frontend": {
+      "passed": 16,
+      "checks": [
+        "sync visible; user.rekey still hidden",
+        "overview button name",
+        "overview preview force=true",
+        "dialog title and submit name",
+        "settings button name",
+        "settings preview force=true",
+        "retry force and no old dispatch fields",
+        "failure toast retry force=true",
+        "result retry force=true",
+        "readonly overview has no sync",
+        "readonly cannot invoke write",
+        "workspace count uses full registry",
+        "overview ignores late old response",
+        "devices ignore late old response",
+        "shared summary ignores response from earlier page",
+        "settings ignores late old response"
+      ],
+      "browser": false
+    },
+    "http": {
+      "passed": 15,
+      "checks": [
+        "late upstream read does not restore stale cache",
+        "write clears overdue cache too",
+        "write detaches old scan and preserves fresh cache",
+        "complete multi-page tree",
+        "visible named metadata",
+        "preview cache-test-001",
+        "ordinary sync uses cached tree",
+        "preview force-test-001",
+        "force fetch and insert",
+        "claimed and complete preserved",
+        "idempotent replay avoids another fetch",
+        "preview error-test-001",
+        "HF failure reported",
+        "failure keeps index and task states",
+        "readonly write rejected"
+      ],
+      "isolated": true
+    }
+  },
+  "browser_verified": false,
+  "cleanup_complete": true,
+  "refresh_followup": {
+    "date": "2026-11-16",
+    "backup": "/tagger/.delete/repo-refresh-20261116-095958",
+    "changed_source_files": {
+      "fox-label/server.py": "c69193728f5348a4a4b5fd36e6cde2f975d60de12f7763267dd7933457d91cba",
+      "fox-panel/panel.py": "5a7e796c0bfacbe31ef38802b2fa638f69f301dad07963e0c9fb0faa24d5912c",
+      "fox-panel/web/app.js": "5cd2be6b98a0b715c66d478fb5f328281d5964366299e55a4b6c73b153a7b82d"
+    },
+    "before": {
+      "counts": {
+        "repos": 2,
+        "packages": 874,
+        "users": 11,
+        "devices": 1,
+        "leases": 256
+      },
+      "open": [],
+      "bindings": [
+        {
+          "device_id": "d2f902ed88f9",
+          "user_id": "lulu",
+          "workspace_id": null
+        }
+      ],
+      "workspaces": [
+        {
+          "ws_id": "fox768",
+          "name": "Fox768 打标",
+          "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+          "note": null,
+          "created_at": "2026-11-13T12:47:12+0000",
+          "allow_manual_claim": 1,
+          "allocation_mode": "auto"
+        }
+      ],
+      "integrity": "ok"
+    },
+    "after_deploy": {
+      "counts": {
+        "repos": 2,
+        "packages": 874,
+        "users": 11,
+        "devices": 1,
+        "leases": 256
+      },
+      "open": [],
+      "bindings": [
+        {
+          "device_id": "d2f902ed88f9",
+          "user_id": "lulu",
+          "workspace_id": null
+        }
+      ],
+      "workspaces": [
+        {
+          "ws_id": "fox768",
+          "name": "Fox768 打标",
+          "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+          "note": null,
+          "created_at": "2026-11-13T12:47:12+0000",
+          "allow_manual_claim": 1,
+          "allocation_mode": "auto"
+        }
+      ],
+      "integrity": "ok"
+    },
+    "services": [
+      "active",
+      "active"
+    ],
+    "production_sync_pending": false,
+    "production": {
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "revision": "bfb2dce5c795b9797604e376c02dd7bec1b9904c",
+      "hf_entries": 1692,
+      "before_count": 844,
+      "after_count": 844,
+      "added": 0,
+      "ids_sha256": "a393ec26545180e1d53cebc310a336ed4f6ab60b3232752f9729c406f81a9fe5",
+      "result": {
+        "target": {
+          "repo": "MatchaCuratio/Anime-2024Dru768-8M"
+        },
+        "ok": true,
+        "code": 200,
+        "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+        "added": 739,
+        "files": 844,
+        "pruned": 0,
+        "source": "hf",
+        "cached_at": "2026-11-16T09:55:08+08:00",
+        "refreshing": false,
+        "event_seq": 786,
+        "write_id": "W20261116T095509-26be2e"
+      },
+      "passed": 25,
+      "checks": [
+        "encrypted HF token available",
+        "HF full tree valid",
+        "named visible sync action",
+        "production /",
+        "production /static/app.js",
+        "served updated app",
+        "production /static/allocation.js",
+        "production /static/allocation.css",
+        "production /static/workspace.js",
+        "production downloaded fresh metadata",
+        "existing package states preserved",
+        "leases devices workspaces preserved",
+        "complete HF and DB name sets match",
+        "reported counts match",
+        "overview count refreshed",
+        "settings count refreshed",
+        "package list count refreshed",
+        "workspace registry count refreshed",
+        "production /api/scheduling",
+        "production /api/managed/devices",
+        "production /api/history",
+        "production /api/source-catalog",
+        "nginx health route",
+        "nginx serves final app",
+        "SQLite integrity"
+      ],
+      "existing_task_states_preserved": true
+    },
+    "tests": {
+      "frontend": {
+        "passed": 16,
+        "checks": [
+          "sync visible; user.rekey still hidden",
+          "overview button name",
+          "overview preview force=true",
+          "dialog title and submit name",
+          "settings button name",
+          "settings preview force=true",
+          "retry force and no old dispatch fields",
+          "failure toast retry force=true",
+          "result retry force=true",
+          "readonly overview has no sync",
+          "readonly cannot invoke write",
+          "workspace count uses full registry",
+          "overview ignores late old response",
+          "devices ignore late old response",
+          "shared summary ignores response from earlier page",
+          "settings ignores late old response"
+        ],
+        "browser": false
+      },
+      "http": {
+        "passed": 15,
+        "checks": [
+          "late upstream read does not restore stale cache",
+          "write clears overdue cache too",
+          "write detaches old scan and preserves fresh cache",
+          "complete multi-page tree",
+          "visible named metadata",
+          "preview cache-test-001",
+          "ordinary sync uses cached tree",
+          "preview force-test-001",
+          "force fetch and insert",
+          "claimed and complete preserved",
+          "idempotent replay avoids another fetch",
+          "preview error-test-001",
+          "HF failure reported",
+          "failure keeps index and task states",
+          "readonly write rejected"
+        ],
+        "isolated": true
+      }
+    },
+    "browser_verified": false,
+    "cleanup_complete": true,
+    "verification_mode": "read_only_after_followup_deployment"
+  },
+  "related_probe": {
+    "repos": [
+      {
+        "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+        "hf_packages": 844,
+        "db_packages": 844,
+        "missing": [],
+        "extra": [],
+        "ids_sha256": "a393ec26545180e1d53cebc310a336ed4f6ab60b3232752f9729c406f81a9fe5"
+      },
+      {
+        "repo": "MatchaCuratio/Anime-Fox768-400k",
+        "hf_packages": 30,
+        "db_packages": 30,
+        "missing": [],
+        "extra": [],
+        "ids_sha256": "3fd62393459dc33ef2165a396a1fe09019b20ff4ab1399bc7eaf08fec6761224"
+      }
+    ],
+    "action_priority_mismatch": {},
+    "hidden": {
+      "user.rekey": "重签密钥"
+    }
+  },
+  "cleanup": {
+    "temporary_directory": "/tagger/backend/smoke/repo-sync-20261116",
+    "removed": true,
+    "HF_shards_downloaded": 0,
+    "HF_files_uploaded": 0,
+    "other_smoke_directories_retained": true
+  }
+}

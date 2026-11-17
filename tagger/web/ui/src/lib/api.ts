@@ -44,6 +44,12 @@ export type JobSpec = {
   guard_policy?: Record<string, number>
   /** 按"预计产出 + 20% 冗余"判盘够不够（取代 guard 的固定磁盘阈值） */
   check_space: boolean
+  /** 打标完成后自动回传（分块通道）。空 = 不回传 */
+  auto_upload_url?: string
+  /** 回传令牌。快照里始终是 ***，只在表单里明文填写 */
+  auto_upload_token?: string
+  /** 远端子目录，空 = 仓库根 */
+  auto_upload_dir?: string
   // VLM 服务（engine="vlm"）
   url: string
   vlm_model: string
@@ -200,6 +206,17 @@ export type PackProgress = {
   packs: PackRow[]
 }
 
+export type OutputProgress = {
+  total: number
+  done: number
+  skipped: number
+  failed: number
+  settled: number
+  progress: number | null
+  rate_per_s: number
+  eta_s: number | null
+}
+
 export type Snapshot = {
   id: string
   status: JobStatus
@@ -210,7 +227,14 @@ export type Snapshot = {
   counts: {
     total: number
     done: number
+    /** 只有"产物已有"这一种。其余跳过原因在下面三个字段里，各自独立 */
     skipped: number
+    /** 输入图过小（纯色/空图），永远不会有产物 */
+    blank_skipped?: number
+    /** 开关了 skip_when_missing 但取不到画师 */
+    artist_skipped?: number
+    /** 重试轮次用完仍失败，已从分母剔除 */
+    excused?: number
     busy?: number
     failed: number
     blacklisted: number
@@ -218,9 +242,13 @@ export type Snapshot = {
   }
   /** null = 总量未知的流式任务（HF parquet），前端按计数显示不造百分比 */
   progress: number | null
+  /** false = counts.total 只是已读取数量，完整输入尚未读完；旧历史没有此字段 */
+  total_known?: boolean
   elapsed_s: number
   rate_per_s: number
   eta_s: number | null
+  /** TAG / NL 独立推理进度；旧历史快照没有此字段 */
+  output_progress?: { tag: OutputProgress; nl: OutputProgress } | null
   timings_ms: { decode: number; forward: number }
   /** 云端按量计费用量；本机模式全 0，cost 为 null = 没配价目 */
   usage: {
@@ -284,7 +312,7 @@ export type ResultItem = {
   in_zip: boolean
   ok: boolean
   tag: string
-  tags: [string, number][]
+  tags: string[]
   rating: Record<string, number>
   tag_backend: string
   /** 只有 VLM 引擎有：NL 文案 */
@@ -316,7 +344,14 @@ export type JobStatsBucket = {
   settled: number
   done_first: number
   done_retry: number
+  /** 只有"产物已有"。其余三类跳过原因各自独立，别加起来再减 */
   skipped: number
+  /** 输入图过小（纯色/空图），永远不会有产物 */
+  blank_skipped: number
+  /** 开关了 skip_when_missing 但取不到画师 */
+  artist_skipped: number
+  /** 重试轮次用完仍失败，已从分母剔除 */
+  excused: number
   blacklisted: number
   failed: number
   /** 质检分累计（已除回原值），配合 score_n 求平均分 */
@@ -365,7 +400,7 @@ export type Defaults = {
   /** NL 服务来源（local / openai / anthropic…），各带默认地址 */
   vlm_providers: VlmProviderOption[]
   /** 记住过的 HF 令牌（脱敏 + 绑定的仓库）。null = 没有存档 */
-  hf_saved: { repo: string; token_masked: string } | null
+  hf_saved: { repo: string; token_masked: string; scope?: 'global' } | null
   /** 硬件保护阈值（tiers.yaml 的 limits 段），用户未改时的参考值 */
   guard: Record<string, number>
   /** 质检判定的默认分（页面上的"0 = 用配置的 3.4"就是它） */
@@ -544,7 +579,7 @@ export type VllmPlan =
       max_model_len: number
       max_num_seqs: number
       max_num_batched_tokens: number
-      gpu_memory_utilization: number
+      gpu_memory_utilization: number | null
       vram_gb: number
       device: string
       warnings: string[]
@@ -657,6 +692,127 @@ export type UploadState = {
   done: number
   failed: number
   sent_bytes: number
+}
+
+// ---- 分块回传（HTTP）：块寻址 + 秒传 + 提交成文件
+
+/** 一个分块回传文件的逐项状态。chunks 总数只有开始传才知道 */
+export type BlobFileState = {
+  name: string
+  bytes: number
+  status: 'pending' | 'uploading' | 'done' | 'failed' | 'stopped'
+  /** 实际传出去的字节（秒传的不计） */
+  sent: number
+  chunks: number
+  uploaded_chunks: number
+  skipped_chunks: number
+  resumed: boolean
+  error: string
+  /** 服务端 commit 时回的分片校验结论；空 = 老版本服务端或跳过了校验 */
+  verify?: ShardVerify
+}
+
+export type BlobUploadState = {
+  id: string
+  dir: string
+  status: 'pending' | 'running' | 'done' | 'stopped' | 'failed'
+  error: string
+  created: number
+  started: number
+  ended: number
+  /** auth 只表示"带没带令牌"，令牌本身不出后端 */
+  target: { url: string; remote_dir: string; auth: boolean }
+  files: BlobFileState[]
+  total: number
+  done: number
+  failed: number
+  sent_bytes: number
+  uploaded_chunks: number
+  skipped_chunks: number
+}
+
+/** 孤儿块定时清扫的状态。last_run=0 表示还没跑过（服务刚起） */
+export type BlobJanitor = {
+  enabled: boolean
+  interval_hours: number
+  linger_hours: number
+  running: boolean
+  started: number
+  last_run: number
+  last_error: string
+  /** 上一次真删的结果：orphans/bytes/kept/tmp_dropped/referenced */
+  last_result: Record<string, number>
+  runs: number
+  root: string
+}
+
+/** 块仓库占用 + 清扫状态。chunks/bytes = 块仓库本体，files = 已提交成品数 */
+export type BlobStats = {
+  chunks: number
+  bytes: number
+  files: number
+  root: string
+  referenced: number
+  janitor?: BlobJanitor
+}
+
+/** 一片标注分片的扫描结果（服务器侧） */
+export type BlobShardReport = {
+  name: string
+  path: string
+  bytes: number
+  mtime: number
+  /** 总行数（含剔除行） */
+  rows: number
+  /** 至少一侧有内容的行 */
+  tagged: number
+  only_tag: number
+  only_nl: number
+  both: number
+  excluded: number
+  excluded_kinds: Record<string, number>
+  /** 既无内容也不是剔除记录的行——写盘中断的典型形态 */
+  empty: number
+  error: string
+  /** commit 时留下的校验报告；null = 没校验过 */
+  verified: ShardVerify | null
+}
+
+export type ShardVerify = {
+  ok: boolean
+  problems: string[]
+  warnings?: string[]
+  duplicates?: number
+  missing_count?: number
+  missing_side?: number
+  rows?: number
+  ts?: number
+}
+
+/** 打标清单：每片 + 批次汇总 */
+export type BlobManifests = {
+  root: string
+  shards: BlobShardReport[]
+  summary: {
+    shards: number
+    rows: number
+    tagged: number
+    only_tag: number
+    only_nl: number
+    both: number
+    excluded: number
+    empty: number
+    bytes: number
+    kinds: Record<string, number>
+  }
+}
+
+/** 本机回传鉴权状态。token_hint 只是尾部几位，用来确认填对了没有 */
+export type BlobAuth = {
+  required: boolean
+  token_hint: string
+  client: string
+  loopback: boolean
 }
 
 export type DedupGroupPreview = {
@@ -954,6 +1110,7 @@ export type Activity = {
   /** 副标题：打标是输入目录，数据任务是当前阶段，合并/自检是 stage */
   detail: string
   phase: string
+  status?: JobStatus
   done: number
   total: number
   /** 后端算好的比例 0~1；null = 总量未知，按计数显示 */
@@ -1098,6 +1255,7 @@ export type VlmModelEntry = {
   family: string
   revision: string | null
   quantized_path: string | null
+  quantized?: boolean
   note: string
   /** config = 来自 tiers.yaml；managed = 在这个页面加/改的 */
   source: 'config' | 'managed'
@@ -1497,7 +1655,7 @@ export type CenterLease = {
   repo: string
   package: string
   /** 剩多少秒到期 */
-  expires_in: number
+  expires_in?: number
   progress?: Record<string, unknown>
 }
 
@@ -1523,9 +1681,59 @@ export type CenterBoard = {
   leases?: CenterLease[]
   /** 老服务端没有这项 → undefined，顶部不显示余量而不是显示 0 */
   parts?: PoolParts
+  workspace?: { ws_id: string; name: string; repos: string[]; allow_manual_claim: boolean; missing?: boolean } | null
 }
 
-export type CenterConfig = {
+export type CenterWorkspacePage = {
+  ok: boolean; workspace: CenterBoard['workspace']; allow_manual_claim: boolean; empty_reason: string
+  total: number; next_offset: number | null
+  queue_only?: boolean
+  items: { repo: string; id: string; size: number; missing_parts: string[]; claimable: boolean;
+    assigned_device: string | null; working_device: string | null; lease_id: string | null }[]
+}
+export type CenterOfflineState = {
+  id: string; status: string; message: string; error: string; running: boolean
+  tasks: { repo: string; package: string }[]
+  config?: CenterExecution & { mode: string }; out_dir?: string
+}
+
+export type SetupState = {
+  completed: boolean
+  dismissed: boolean
+  usage: 'local' | 'center'
+  pack_format: 'parquet' | 'webdataset' | 'zip'
+}
+
+export type CenterExecution = {
+  hosting_mode: 'active' | 'passive'
+  inference_source: 'local' | 'existing'
+  tag_backend: string
+  tag_device: string
+  tag_precision: string
+  tag_batch: number
+  nl_engine: 'llamacpp' | 'vllm' | 'native'
+  nl_model: string
+  nl_device: string
+  nl_precision: string
+  served_name: string
+  concurrency: number
+  gpu_mem: number
+  auto_download: boolean
+  auto_quantize: boolean
+  stop_service: boolean
+  resume_on_startup: boolean
+}
+
+export type CenterOptions = {
+  devices: { value: string; physical_index: number; name: string; vram_gb: number }[]
+  engines: string[]
+  engine_status?: Record<string, { available: boolean; reason: string }>
+  tag_models: { backend: string; ready: boolean; repo: string }[]
+  nl_models: { key: string; ready: boolean; raw_ready: boolean; gguf_quants?: Record<string, string> }[]
+}
+
+export type CenterConfig = CenterExecution & {
+  auto_upload: boolean
   server: string
   user_id: string
   tag_url: string
@@ -1559,6 +1767,20 @@ export type CenterIdentity = {
 }
 
 export type CenterState = {
+  history?: { running: boolean; status: string; message: string }
+  credentials: { hf_token_set: boolean; remember_hf: boolean }
+  runtime: {
+    active: boolean
+    status: string
+    message: string
+    error: string
+    preparing: boolean
+    hosting_mode: string
+    resolved: Partial<CenterConfig>
+    managed: null | { status: string; error: string; session_id: string; last_seq: number;
+      results: { id: string; seq: number; status: string; error: string }[] }
+  }
+  progress: { done?: number; total?: number; phase?: string }
   running: boolean
   /** 上一轮进程的退出码；null = 还没跑过 */
   last_rc: number | null
@@ -1569,6 +1791,15 @@ export type CenterState = {
   identity: CenterIdentity
   board: CenterBoard
   log: string[]
+}
+
+export type CenterHistory = {
+  running: boolean; status: string; message: string
+  items: { id: string; repo: string; package: string; source: string; out_dir: string;
+    files: string[]; status: string; local_status: string; automatic?: boolean; report?: { expected?: number; error?: string; registered_parts?: string[];
+      complete_parts: string[]; conflicts: string[];
+      parts: Record<string, { success: number; excluded: number; failed: number; missing: number }> } }[]
+  unlinked: { name: string; path: string; reason?: string }[]
 }
 
 /**
@@ -1631,7 +1862,7 @@ export type ConflictsState = {
   items: ConflictItem[]
 }
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
+export async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
@@ -1837,6 +2068,7 @@ export const api = {
   saveJobForm: (payload: {
     form?: Record<string, unknown>
     spec?: Partial<JobSpec>
+    strict?: boolean
   }) =>
     json<{ form: Record<string, unknown>; spec: Partial<JobSpec> }>('/api/job-form', {
       method: 'POST',
@@ -1890,6 +2122,7 @@ export const api = {
       local_media_root?: string
       /** llama.cpp 的 -np。留空 = 按显存自动；这是唯一能让出显存的旋钮 */
       slots?: number
+      device?: string
     } = {},
   ) =>
     json<VllmState>('/api/vllm/start', {
@@ -1900,6 +2133,7 @@ export const api = {
     opts: {
       /** vllm / llamacpp；用来判定精度档与引擎是否搭得上 */
       engine?: string
+      device?: string
       model?: string
       tier?: string
       /** bf16 / fp8 / w4a16（vLLM）或 q4 / q6 / q8（llama.cpp）；不传 = 按分档表默认 */
@@ -1915,6 +2149,7 @@ export const api = {
   ) => {
     const qs = new URLSearchParams()
     if (opts.engine) qs.set('engine', opts.engine)
+    if (opts.device) qs.set('device', opts.device)
     if (opts.model) qs.set('model', opts.model)
     if (opts.tier) qs.set('tier', opts.tier)
     // 精度必须带上：不带的话服务端按 None 解析，页面选 int4 却算出 bf16 的
@@ -1956,6 +2191,45 @@ export const api = {
     json<{ ok: boolean; snapshot: UploadState | null }>(`/api/upload/${id}/stop`, {
       method: 'POST',
     }),
+
+  // ---- 分块回传：列清单 / 开任务 / 轮询 / 停
+  blobUploadFiles: (path: string) =>
+    json<{ path: string; files: ArtifactInfo[] }>(
+      `/api/blob/upload/list?path=${encodeURIComponent(path)}`,
+    ),
+  blobUploadStart: (body: {
+    dir: string
+    files: string[]
+    url: string
+    token: string
+    remote_dir: string
+  }) =>
+    json<BlobUploadState>('/api/blob/upload/start', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  blobUpload: (id: string) =>
+    json<BlobUploadState>(`/api/blob/upload/${encodeURIComponent(id)}`),
+  blobUploadStop: (id: string) =>
+    json<{ ok: boolean; snapshot: BlobUploadState | null }>(
+      `/api/blob/upload/${encodeURIComponent(id)}/stop`,
+      { method: 'POST' },
+    ),
+  /** 服务端要不要令牌 + 是不是本机。页面据此提示"填不填"和"能不能改" */
+  blobAuth: () => json<BlobAuth>('/api/blob/auth'),
+  /** 块仓库占用 + 定时清扫状态 */
+  blobStats: () => json<BlobStats>('/api/blob/stats'),
+  /** 打标清单：仓库里每片标注的统计与批次汇总 */
+  blobManifests: () => json<BlobManifests>('/api/blob/manifests'),
+  /** 重跑一片的校验并刷新报告 */
+  blobManifestVerify: (name: string, need = '') =>
+    json<ShardVerify>(
+      `/api/blob/manifests/verify?name=${encodeURIComponent(name)}&need=${need}`,
+    ),
+  /** 立刻按定时任务的口径真删一次（不可逆，页面要二次确认） */
+  blobGcRunNow: () => json<{ ok: boolean; error?: string }>('/api/blob/gc/run', {
+    method: 'POST',
+  }),
   // ---- 去重页
   dedupStart: (spec: {    input_dir: string
     out_dir?: string
@@ -2006,7 +2280,10 @@ export const api = {
     }),
 
   /** 记住 / 忘记 HF 令牌。token 传空 = 删掉存档。存档绑仓库，换仓库不自动沿用。 */
-  saveHfToken: (payload: { token: string; repo: string; remember: boolean }) =>
+  hfToken: () => json<{ saved: { repo: string; token_masked: string } | null }>('/api/hf/token'),
+  setup: () => json<SetupState>('/api/setup'),
+  saveSetup: (state: SetupState) => json<SetupState>('/api/setup', { method: 'PUT', body: JSON.stringify(state) }),
+  saveHfToken: (payload: { token: string; repo: string; remember: boolean; scope?: 'repo' | 'global' }) =>
     json<{ saved: { repo: string; token_masked: string } | null }>('/api/hf/token', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -2188,10 +2465,10 @@ export const api = {
    * 下载模型。VLM 一律下原始权重（path 指的那个仓库，整包）；量化档不在
    * 网上拿，由「本地量化」现场压。precision 只为兼容旧调用保留，不影响下载。
    */
-  startDownload: (kind: string, key: string, precision?: string) =>
+  startDownload: (kind: string, key: string, precision?: string, token?: string) =>
     json<DownloadState>('/api/models/download', {
       method: 'POST',
-      body: JSON.stringify({ kind, key, precision: precision || null }),
+      body: JSON.stringify({ kind, key, precision: precision || null, token }),
     }),
 
   cancelDownload: (kind: string, key: string) =>
@@ -2403,6 +2680,24 @@ export const api = {
 
   // ---- 调度中心
   center: () => json<CenterState>('/api/center'),
+  centerHistory: () => json<CenterHistory>('/api/center/history'),
+  centerHistoryDiscover: () => json<CenterHistory>('/api/center/history/discover', { method: 'POST' }),
+  centerHistoryDirectory: (path: string) => json<CenterHistory>('/api/center/history/directories', { method: 'POST', body: JSON.stringify({ path }) }),
+  centerHistoryCheck: () => json<CenterHistory>('/api/center/history/check', { method: 'POST' }),
+  centerHistoryBind: (body: { repo: string; package: string; source: string; out_dir: string }) =>
+    json<CenterHistory>('/api/center/history/bindings', { method: 'POST', body: JSON.stringify(body) }),
+  centerHistoryRemove: (id: string) => json<CenterHistory>(`/api/center/history/bindings/${id}`, { method: 'DELETE' }),
+  centerOptions: () => json<CenterOptions>('/api/center/options'),
+  centerWorkspace: (offset = 0) => json<CenterWorkspacePage>(`/api/center/workspace?offset=${offset}`),
+  centerReserve: (items: { repo: string; id: string }[]) => json<{ ok: boolean }>('/api/center/reserve', { method: 'POST', body: JSON.stringify({ items }) }),
+  centerOffline: () => json<CenterOfflineState>('/api/center/offline'),
+  centerOfflineImport: (path: string) => json<CenterOfflineState>('/api/center/offline/import', { method: 'POST', body: JSON.stringify({ path }) }),
+  centerOfflineStart: (shard_dir: string, out_dir: string, upload = false) => json<CenterOfflineState>('/api/center/offline/start', { method: 'POST', body: JSON.stringify({ shard_dir, out_dir, upload }) }),
+  centerOfflineStop: () => json<CenterOfflineState>('/api/center/offline/stop', { method: 'POST' }),
+  centerQueue: (queue_only: boolean, clear = false) => json<{ ok: boolean }>('/api/center/queue', { method: 'POST', body: JSON.stringify({ queue_only, clear }) }),
+  centerOfflineConfigure: (config: CenterExecution & { hf_token?: string; remember_hf?: boolean }) => json<CenterOfflineState>('/api/center/offline/config', { method: 'PUT', body: JSON.stringify(config) }),
+  centerConfigure: (payload: Partial<CenterConfig> & { hf_token?: string; remember_hf?: boolean }) =>
+    json<CenterState>('/api/center', { method: 'PUT', body: JSON.stringify(payload) }),
   /** 顶栏的灯：只读后端本地身份，不打远端 */
   centerBrief: () => json<CenterBrief>('/api/center/status'),
   /**
@@ -2414,7 +2709,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  centerStart: (payload: {
+  centerStart: (payload: Partial<CenterExecution> & {
+    hf_token?: string
+    remember_hf?: boolean
+    auto_upload?: boolean
     tag_url?: string
     mode?: string
     /** 派工倾向：'' 不挑 / tag / nl 只接这侧 / pref-tag / pref-nl 优先这侧 */

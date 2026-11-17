@@ -48,7 +48,7 @@ from .netutil import trust_env_for
 
 ROOT = Path(__file__).resolve().parents[1]
 
-ENGINES = ("vllm", "llamacpp")
+ENGINES = ("vllm", "llamacpp", "native")
 
 # Qwen3-VL 的视觉 token 换算：patch 16 × merge 2 = 32×32 像素一个 token。
 # 换家族就不成立，所以换算只在这个家族里启用（见 image_tokens_for）。
@@ -59,8 +59,8 @@ def normalize_engine(value: str | None) -> str:
     """归一化引擎名。空 = 默认 llama.cpp。"""
     key = str(value or "").strip().lower()
     if not key:
-        # 默认 llama.cpp：它是唯一在 Windows 原生能上 GPU 的引擎（vLLM 官方
-        # 只有 Linux 版，Windows 要 WSL2），而这个项目的主要使用场景就是
+        # 默认 llama.cpp：稳定的 Windows CUDA 路径；专用引擎仍是实验实现。
+        # vLLM 官方只有 Linux 版，Windows 要 WSL2，主要使用场景就是
         # Windows + 单卡。默认选一个"多数机器开箱能跑"的，比默认选一个
         # "多数机器一上来就报错"的强。
         # 想用 vLLM 就显式写 engine=vllm——引擎决定产出算什么口径，所以
@@ -70,7 +70,9 @@ def normalize_engine(value: str | None) -> str:
         return "llamacpp"
     if key in ("vllm", "v-llm"):
         return "vllm"
-    raise ConfigError(f"未知 NL 引擎 {value!r}。可选：vllm / llamacpp。")
+    if key in ("native", "lulynx", "qwen3vl"):
+        return "native"
+    raise ConfigError(f"未知 NL 引擎 {value!r}。可选：vllm / llamacpp / native。")
 
 
 def image_tokens_for(profile: RunProfile) -> int:
@@ -153,6 +155,11 @@ def resolve_weights(profile: RunProfile) -> tuple[Path, Path]:
 
 def check_engine(engine: str) -> None:
     """能不能在本机拉起这个引擎。不能时给一句人能读的原因。"""
+    if engine == "native":
+        from .inference.qwen3vl.runtime import check_environment
+
+        check_environment()
+        return
     if engine != "llamacpp":
         from .model_loader import check_environment
 
@@ -299,12 +306,16 @@ def build_command(
     mmproj: Path,
     vram_gb: float | None = None,
     slots_override: int | None = None,
+    gpu_layers: int | None = None,
 ) -> list[str]:
     """拼 llama-server 命令行。每个参数都对应一个会让产出漂移的变量。"""
     binary = find_server_binary()
     if binary is None:                      # check_engine 已经拦过，这里兜底
         raise ConfigError("找不到 llama-server")
     slots, ctx_per_slot, kv_type = slot_plan(profile, vram_gb, slots_override)
+    if gpu_layers == 0:
+        # CPU 路径关闭 flash attention；量化 V 缓存依赖它，改用完整缓存。
+        kv_type = "f16"
     ctx_total = slots * ctx_per_slot
     cmd = [
         binary,
@@ -322,10 +333,12 @@ def build_command(
         "-ctv", kv_type,
         # 全部层上卡。16GB 卡上 8B-Q4 加视觉塔还剩得下 32K 上下文；
         # 留一部分在内存反而会因 PCIe 往返把 decode 拖慢一个数量级。
-        "-ngl", "99",
+        "-ngl", str(99 if gpu_layers is None else gpu_layers),
         "--image-max-tokens", str(image_tokens_for(profile)),
         "--metrics",
     ]
+    if gpu_layers == 0:
+        cmd += ["--device", "none", "--no-mmproj-offload", "-fa", "off", "--no-kv-offload"]
     return cmd
 
 

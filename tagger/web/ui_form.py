@@ -104,7 +104,7 @@ def load() -> dict[str, Any]:
 
 
 def save(*, form: dict[str, Any] | None = None,
-         spec: dict[str, Any] | None = None) -> dict[str, Any]:
+         spec: dict[str, Any] | None = None, strict: bool = False) -> dict[str, Any]:
     """只更新传进来的那一半：填一项时不必把整份 spec 重写一遍。"""
     current = load()
     if isinstance(form, dict):
@@ -122,5 +122,6 @@ def save(*, form: dict[str, Any] | None = None,
         except OSError:
             pass
     except OSError:
-        pass                             # 写不了就只是"这次没记住"，不报错
+        if strict:
+            raise
     return current

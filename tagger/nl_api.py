@@ -175,7 +175,7 @@ def normalize_provider(value: str | None) -> str:
     本机服务"是这类配置里代价最高的误解。
     """
     text = str(value or "").strip().lower()
-    if text in ("", "local", "none", "off", "vllm", "llamacpp"):
+    if text in ("", "local", "none", "off", "vllm", "llamacpp", "native"):
         return LOCAL
     if text in ("openai", "openai-compatible", "openai_compatible", "compat"):
         return "openai"
@@ -437,6 +437,7 @@ def load_saved() -> dict:
         # 老文件没有这两个键：空串 = 没存过，与"存了个空字符串"同义。
         "hf_token": str(raw.get("hf_token") or "").strip(),
         "hf_repo": str(raw.get("hf_repo") or "").strip(),
+        "hf_scope": "global" if raw.get("hf_scope") == "global" else "repo",
     }
 
 
@@ -507,12 +508,15 @@ def saved_for(provider: str) -> dict:
 
 
 def saved_hf() -> dict:
-    """→ {"repo": str, "token": str}；没存过就是空 dict（与 saved_for 同口径）。"""
+    """返回本机令牌；全局授权额外带 scope，没存过返回空 dict。"""
     data = load_saved()
     token = str(data.get("hf_token") or "").strip()
     if not token:
         return {}
-    return {"repo": str(data.get("hf_repo") or "").strip(), "token": token}
+    entry = {"repo": str(data.get("hf_repo") or "").strip(), "token": token}
+    if data.get("hf_scope") == "global":
+        entry["scope"] = "global"
+    return entry
 
 
 def mask_hf(hf: dict | None = None) -> str:
@@ -521,7 +525,7 @@ def mask_hf(hf: dict | None = None) -> str:
     return mask_key(str(entry.get("token") or ""))
 
 
-def store_hf_token(token: str, repo: str = "") -> dict:
+def store_hf_token(token: str, repo: str = "", *, scope: str = "repo") -> dict:
     """记住 / 忘记 HF 令牌。token 传空 = 删掉存档（连仓库名一起删）。
 
     **只记仓库名、不记分支**：分支（main / 某个 revision）不是凭据，它已经
@@ -532,12 +536,13 @@ def store_hf_token(token: str, repo: str = "") -> dict:
     text = str(token or "").strip()
     data["hf_token"] = text
     data["hf_repo"] = str(repo or "").strip() if text else ""
+    data["hf_scope"] = "global" if text and scope == "global" else "repo"
     save_saved(data)
     return data
 
 
 def resolve_hf_token(repo: str, token: str = "") -> str:
-    """显式给的优先；否则用存档，**且只在仓库对得上时**用。
+    """显式给的优先；全局授权复用，否则只在仓库对得上时用。
 
     仓库对不上就返回空串，让请求以匿名身份发——私有仓库会得到 401/403，
     那个报错至少指向"没有读权限"，比"拿了别人的令牌去问"清楚得多。
@@ -548,6 +553,8 @@ def resolve_hf_token(repo: str, token: str = "") -> str:
     saved = saved_hf()
     if not saved:
         return ""
+    if saved.get("scope") == "global" and str(repo or "").strip():
+        return str(saved.get("token") or "").strip()
     saved_repo = str(saved.get("repo") or "").strip()
     want = str(repo or "").strip()
     # 存档里没记仓库（老文件/手工改过）时**不用**：宁可让用户重贴一次，

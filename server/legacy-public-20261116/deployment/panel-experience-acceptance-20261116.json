@@ -1,0 +1,155 @@
+{
+  "date": "2026-11-16",
+  "backup": "/tagger/.delete/panel-experience-20261116-101557",
+  "source_hashes": {
+    "app.js": "5d954c2069e84159855ff94f7754839e02a262bdc794e7a23bdbf9507884d962",
+    "delivery.js": "8ec6ed63f2ab2c863071509fff0da8196340e9557f021c314aba276f9942498f",
+    "scheduling.js": "7fc06966b9be6fa113e2cfdeeec8f9fee7d4456deb6acbcd570d0c6e7ed1a023",
+    "source-catalog.js": "fef89546241c8f336ae4c04a35b0d80e8dee543bf9e8d0bb5bd11c8b8db95e43",
+    "workspace.js": "294173e4cc67623e3aa4f81aed55ff60284df02a971231ac687cd338a911ed44",
+    "managed.js": "c3ea9a61ddc19c7d8522d3783ebc4e576e83204817af7c48e1be1e42cd8d3c55"
+  },
+  "before": {
+    "counts": {
+      "repos": 2,
+      "packages": 874,
+      "users": 11,
+      "devices": 1,
+      "leases": 256
+    },
+    "task_state_sha256": "7e3da5385d92c0597c646a8a35bc57a2a4e0f49d6347ba1f25d8faa917b311b5",
+    "open": [],
+    "bindings": [
+      {
+        "device_id": "d2f902ed88f9",
+        "user_id": "lulu",
+        "workspace_id": null
+      }
+    ],
+    "workspaces": [
+      {
+        "ws_id": "fox768",
+        "name": "Fox768 打标",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "note": null,
+        "created_at": "2026-11-13T12:47:12+0000",
+        "allow_manual_claim": 1,
+        "allocation_mode": "auto"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "after": {
+    "counts": {
+      "repos": 2,
+      "packages": 874,
+      "users": 11,
+      "devices": 1,
+      "leases": 256
+    },
+    "task_state_sha256": "7e3da5385d92c0597c646a8a35bc57a2a4e0f49d6347ba1f25d8faa917b311b5",
+    "open": [],
+    "bindings": [
+      {
+        "device_id": "d2f902ed88f9",
+        "user_id": "lulu",
+        "workspace_id": null
+      }
+    ],
+    "workspaces": [
+      {
+        "ws_id": "fox768",
+        "name": "Fox768 打标",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "note": null,
+        "created_at": "2026-11-13T12:47:12+0000",
+        "allow_manual_claim": 1,
+        "allocation_mode": "auto"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "services": [
+    "active",
+    "active"
+  ],
+  "tests": {
+    "components": {
+      "passed": 28,
+      "checks": [
+        "delivery initial load not duplicated",
+        "storage option names",
+        "delivery list callback and locked form",
+        "repository fetch keeps current selection",
+        "delivery save callback payload",
+        "delivery failure re-enables retry",
+        "delivery success visible",
+        "delivery readonly form disabled",
+        "app passes its actual private write callback to delivery",
+        "scheduling draft survives in-flight read",
+        "scheduling skips automatic reads while editing",
+        "scheduling save locks controls",
+        "scheduling save releases controls",
+        "scheduling readonly buttons disabled",
+        "empty part selection disabled",
+        "part selection enables save",
+        "part submit locked and marked busy",
+        "part submit releases busy",
+        "part assignment does not overlap another workspace action",
+        "source draft survives in-flight read",
+        "source drafts survive repository switch",
+        "source save locks and preserves submitted draft",
+        "source save clears edit flag",
+        "source batch requires selected packages",
+        "source batch does not overlap workspace action",
+        "workspace edit survives refreshed statistics",
+        "workspace edit value retained",
+        "workspace late old page ignored"
+      ],
+      "browser": false
+    },
+    "http": {
+      "passed": 5,
+      "checks": [
+        "delivery settings authenticated read",
+        "delivery repository lookup through panel",
+        "delivery save through panel",
+        "invalid csrf never reaches upstream",
+        "readonly never reaches upstream"
+      ],
+      "isolated": true
+    }
+  },
+  "production": {
+    "passed": 17,
+    "checks": [
+      "/",
+      "/health",
+      "/api/meta",
+      "/api/summary",
+      "/api/workspaces",
+      "/api/scheduling",
+      "/api/managed/devices",
+      "/api/history",
+      "/api/source-catalog",
+      "/api/delivery/settings",
+      "/api/csrf",
+      "/static/app.js",
+      "/static/delivery.js",
+      "/static/scheduling.js",
+      "/static/source-catalog.js",
+      "/static/workspace.js",
+      "/static/managed.js"
+    ],
+    "state_preserved": true
+  },
+  "browser_verified": false,
+  "cleanup_complete": true,
+  "cleanup": {
+    "temporary_directory": "/tagger/backend/smoke/panel-experience-20261116",
+    "removed": true,
+    "other_smoke_directories_retained": true,
+    "hf_uploads": 0,
+    "source_shard_downloads": 0
+  }
+}

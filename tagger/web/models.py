@@ -523,7 +523,7 @@ def _entry(kind: str, key: str) -> dict[str, Any]:
 
 
 def start_download(kind: str, key: str,
-                   precision: str | None = None) -> dict[str, Any]:
+                   precision: str | None = None, token: str | None = None) -> dict[str, Any]:
     """起一个下载。
 
     VLM 只有一条路：整仓库原始权重（safetensors + config + tokenizer）。
@@ -537,6 +537,7 @@ def start_download(kind: str, key: str,
 
     item = _entry(kind, key)
     dest = Path(item["local_abs"])
+    from ..nl_api import resolve_hf_token
     if kind == "vlm":
         repo = _download_repo("vlm", str(item.get("path") or ""))
         if not repo:
@@ -545,11 +546,13 @@ def start_download(kind: str, key: str,
                 "直接把本地目录填进 path 即可，不需要走这条路。")
         # allow=None = 整仓库。少一个文件（config.json / tokenizer / 某个
         # 分片）本地就转不出 GGUF。
+        resolved_token = resolve_hf_token(repo, token or "")
         return dl.DOWNLOADS.start(kind, key, repo, dest, proxy=proxy_url(),
-                                  allow=None)
+                                  allow=None, **({"token": resolved_token} if resolved_token else {}))
     repo = str(item.get("download_repo") or "")
+    resolved_token = resolve_hf_token(repo, token or "")
     return dl.DOWNLOADS.start(kind, key, repo, dest, proxy=proxy_url(),
-                              allow=None)
+                              allow=None, **({"token": resolved_token} if resolved_token else {}))
 
 
 def _read_overlay_raw() -> dict[str, Any]:

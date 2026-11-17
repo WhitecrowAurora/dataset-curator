@@ -1,0 +1,95 @@
+{
+  "backup": "/tagger/.delete/reliability-20261116-045648",
+  "source_files": {
+    "fox-label/dispatch.py": "ccadaaab9f5e3524ee1b723df0a09833a91c31e0153aaa6ca825b2009b98a39f",
+    "fox-label/server.py": "328e629d5fb561a33a2c21081c5863deafe1952766ee041c94ed62b952bcdf3a",
+    "fox-label/worker-sources.json": "0f108918c924ee6132679a18676e0989414265dd141d7647cd8928963e7ba690",
+    "fox-label/worker.py": "618e2fcf15981bd0c79c6ff0c0175796f1e61d807474501b06f73f9d5646f4bb",
+    "fox-label/assignments/offline.py": "4d70e3ff775f8440633bb7186e55f4cdd05e6db5b7908a0f035390a83b4150ca",
+    "fox-label/delivery/conflicts.py": "769b6d57e7b3ec06f01a9befa1fb7ab867ef4f27661af338410baea5926a138f",
+    "fox-label/delivery/details.py": "968587ef3ee05dd84c8451f2293bc5ba7eb9c2c091ab49328a6626bd8326c97a",
+    "fox-label/delivery/reconciliation.py": "57b03ef415b9a68bd54e6681f5a4f464738df91b21adcdd7a2f1b6c99a8d8f33",
+    "fox-label/history/store.py": "377d732c699c82fd476e5a572af2ef480d5ac695744a02c40b0f150ce418c09b",
+    "fox-label/managed/store.py": "90a97c7817f653e5f96b66c7961e0619bb709f130bd12c8f1504a1680d4e8695",
+    "fox-label/scheduling/allocation.py": "3b59be91554a24701e982086b62402aced34c25fe9f483c57a49fb58ec5bb0f6",
+    "fox-label/scheduling/packages.py": "2c4f914182db0f3b6c8f776db6406dccf716f5b4cb6af1e17df5a04b1b22f61f",
+    "fox-label/scheduling/policies.py": "bc1f9f6d662e5ec40da33f935c28081dd02cc8133436f2a871dc4c59b20d8600",
+    "fox-label/scheduling/reservations.py": "58013d7678aee83bc876290009aa09e51b430c578cc86d4b350a7f9a05b7c340",
+    "fox-label/scheduling/selection.py": "c0d12cfd4442fb723d43e16ff6ccb425ed2dea44dea24dd2cc06d87d0a2a9e91",
+    "fox-label/source_catalog/manager.py": "b83e2400b441c439b6ba78bc1a3befe5fb411b3635ea68a34ffab44c67e02687",
+    "fox-label/source_catalog/network.py": "1022f527c5ba31eeed9e86a07467de149da1b62049c0874ce2d0c8c29ba366de",
+    "fox-label/source_catalog/retry.py": "13fa5bcc03057333a26e027eee2992629278ccd9dc41ce9ed8f2a8cb3dd067c6",
+    "fox-label/source_catalog/routes.py": "a49f0bf431c2eb12455da70b0abb670f0a333a187b30d04e7d5d4e99072985ca",
+    "fox-panel/panel.py": "934ecbf4b900c17076d01c75513f7e56a2c3db0b304b4e54d224ef15e0efe83a",
+    "fox-panel/web/allocation.js": "0cd2b9582e963eec6000a818b95b7db5bfe4dcdbdbcd3cf800d85e9f6e5e05c3",
+    "fox-panel/web/index.html": "0f95a6d325c89e20fb265c113a32470406852c8eaa62682fab6a46ceea2e8dd3",
+    "fox-panel/web/scheduling.js": "d39669a542fcfbdc46709357025ab3649c3857fabdaa56e4696c3e739b5fe4fb",
+    "fox-panel/web/source-catalog.js": "d855ef84e59bf977b9d98e0f9f046e30ca0ece87c5491ec66c805dc67508326a",
+    "fox-panel/web/workspace.js": "8050f5e46137f143626b34d8ce1787f1275cf3a18398a9b94b30aa572751b09a"
+  },
+  "migration_idempotent": true,
+  "before": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 13,
+      "leases": 256
+    },
+    "open": [
+      {
+        "lease_id": "Le2b161af69c0",
+        "repo": "MatchaCuratio/Anime-Fox768-400k",
+        "pkg": "shard-000000.tar",
+        "kind": "active",
+        "device_id": "0d8273dba0b5",
+        "parts_json": "[\"tag\",\"nl\"]"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "after": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 13,
+      "leases": 256
+    },
+    "open": [
+      {
+        "lease_id": "Le2b161af69c0",
+        "repo": "MatchaCuratio/Anime-Fox768-400k",
+        "pkg": "shard-000000.tar",
+        "kind": "active",
+        "device_id": "0d8273dba0b5",
+        "parts_json": "[\"tag\",\"nl\"]"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "production_read_checks": [
+    "/health",
+    "/",
+    "/static/allocation.js",
+    "/static/source-catalog.js",
+    "/api/source-catalog",
+    "/api/workspaces",
+    "/api/workspace-packages?ws_id=fox768",
+    "/api/managed/devices",
+    "/api/history",
+    "/api/summary"
+  ],
+  "source_hashes_verified": 73,
+  "services": [
+    "active",
+    "active"
+  ],
+  "followup_fixes": [
+    "user_assignment_capability",
+    "effective_device_workspace",
+    "disabled_account_assignment",
+    "forget_identity_targets",
+    "offline_user_assignment_preserved"
+  ]
+}

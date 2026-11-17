@@ -187,7 +187,7 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
               key={item.image_id}
               type="button"
               onClick={() => setSelected(item)}
-              className="group relative overflow-hidden rounded-lx border border-lx bg-lx-surface text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-lx-hover hover:shadow-[0_10px_24px_-10px_rgba(0,0,0,0.7)]"
+              className="group relative overflow-hidden rounded-lx border border-lx bg-lx-surface text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-lx-hover hover:shadow-lx-hover"
             >
               <div className="relative aspect-square overflow-hidden bg-[color-mix(in_srgb,var(--lx-bg)_70%,var(--lx-surface))]">
                 {item.thumb === false ? (
@@ -230,11 +230,11 @@ export function Results({ jobId, onBack }: { jobId: string; onBack: () => void }
                   {item.image_id}
                 </div>
                 <div className="flex flex-wrap gap-1 overflow-hidden">
-                  {item.tags.slice(0, 2).map(([t, p]) => (
+                  {item.tags.slice(0, 2).map((t) => (
                     <span
                       key={t}
                       className="max-w-full truncate rounded-[4px] bg-lx-surface-raised px-1.5 py-0.5 font-mono text-[10px] text-lx-secondary"
-                      title={`${t} ${p.toFixed(2)}`}
+                      title={t}
                     >
                       {t}
                     </span>
@@ -296,7 +296,6 @@ function DetailDrawer({
   onClose: () => void
 }) {
   const [copied, setCopied] = useState<'tag' | 'caption' | null>(null)
-  const sorted = useMemo(() => [...item.tags].sort((a, b) => b[1] - a[1]), [item.tags])
   const rating = RATING_ORDER.filter((k) => k in item.rating)
 
   useEffect(() => {
@@ -415,11 +414,11 @@ function DetailDrawer({
             </div>
           )}
 
-          {sorted.length > 0 && (
+          {item.tags.length > 0 && (
             <>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-[11px] uppercase tracking-wide text-lx-muted">
-                  {sorted.length} 个 tag
+                  {item.tags.length} 个 tag
                 </span>
                 <button
                   type="button"
@@ -432,17 +431,13 @@ function DetailDrawer({
               </div>
 
               <ul className="space-y-0.5">
-                {sorted.map(([name, prob]) => (
+                {item.tags.map((name) => (
                   <li
                     key={name}
                     className="flex items-center gap-2 rounded-lx-sm px-1 py-1 transition-colors hover:bg-[color-mix(in_srgb,var(--lx-text)_4%,transparent)]"
                   >
                     <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-lx-secondary" title={name}>
                       {name}
-                    </span>
-                    <ProgressBar percent={clamp01(prob) * 100} className="w-16 shrink-0" />
-                    <span className="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-lx-muted">
-                      {prob.toFixed(2)}
                     </span>
                   </li>
                 ))}

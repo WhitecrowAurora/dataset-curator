@@ -27,7 +27,6 @@ import {
   ApiError,
   type DataJobKind,
   type DataJobState,
-  type Defaults,
   type MergeSummary,
   type PackSummary,
   type PlanPreview,
@@ -188,10 +187,15 @@ export function Packaging() {
   }
 
   useEffect(() => {
-    api
-      .defaults()
-      .then((d: Defaults) => {
-        setFormats(d.formats.length ? d.formats : ['parquet'])
+    let alive = true
+    Promise.all([api.defaults(), api.setup(), api.jobForm()])
+      .then(([d, setup, saved]) => {
+        if (!alive) return
+        setFormats(setup.completed && setup.usage === 'local' ? [setup.pack_format] : d.formats.length ? d.formats : ['parquet'])
+        if (setup.completed && setup.usage === 'local') {
+          setPackInput(typeof saved.form.inputDir === 'string' ? saved.form.inputDir : '')
+          setPackOut(typeof saved.form.outDir === 'string' ? saved.form.outDir : '')
+        }
         setQuality(d.jpeg_quality)
         setSubsampling(String(d.jpeg_subsampling))
         setReencode(d.reencode)
@@ -205,6 +209,7 @@ export function Packaging() {
         setCfgArtistTable(d.artist_table ?? '')
       })
       .catch(() => undefined)
+    return () => { alive = false }
   }, [])
 
   // 刷新页面后重新接上最近一次数据任务——拼接的对账看板值得留着看
@@ -1004,7 +1009,7 @@ export function Packaging() {
                         aria-pressed={active}
                         className={`rounded-lx-sm border px-2 py-2 text-center transition-colors ${
                           active
-                            ? 'border-lx-accent bg-lx-accent-subtle text-lx'
+                            ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
                             : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
                         } ${running ? 'cursor-not-allowed opacity-50' : ''}`}
                       >

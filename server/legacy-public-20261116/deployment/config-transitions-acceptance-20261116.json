@@ -1,0 +1,92 @@
+{
+  "date": "2026-11-16",
+  "backup": "/tagger/.delete/config-transitions-20261116-091427",
+  "changed_source_files": {
+    "fox-label/dispatch.py": "dd0fac5ec28510c6cfaac3dd255963721ecbf2aefc33e75406357b928fa8c245",
+    "fox-label/assignments/store.py": "78dc95cb7aa1206551f8dc13eae0c16c88135d1cadb837866a84949dd99729b4",
+    "fox-label/managed/store.py": "0357151042c3c14f9d776edcf9738966c7ef3f3523f88999faec251727e3818f",
+    "fox-label/scheduling/allocation.py": "bcca117a55791338edadf368d418e1eaf6373efe67d40da28b8875c8154f1434",
+    "fox-label/scheduling/policies.py": "d80e14484e918032802427a82cd2b41938a370dc35e6efd4a76d5a2cda824678",
+    "fox-label/scheduling/transitions.py": "cc472f7bc6883e4adfa2ea465a23a5d691cf922990287b4b67ccb70cc2b6ca62",
+    "fox-label/scheduling/identities.py": "e262d911d97e5af11afdd856321ed39aefddbbb80766bf0419faac8ae781f468"
+  },
+  "before": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 13,
+      "leases": 256
+    },
+    "open": [
+      {
+        "lease_id": "Le2b161af69c0",
+        "repo": "MatchaCuratio/Anime-Fox768-400k",
+        "pkg": "shard-000000.tar",
+        "kind": "active",
+        "device_id": "0d8273dba0b5",
+        "parts_json": "[\"tag\",\"nl\"]"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "linux_checks": {
+    "tests": 23,
+    "failures": 0,
+    "errors": 0
+  },
+  "panel_checks": {
+    "checks": [
+      "allocation replay",
+      "part assignment",
+      "invalid allocation rolls back",
+      "group change preserves device override",
+      "workspace replay preserves assignment",
+      "capability transition reflected in panel",
+      "incompatible assignment rejected",
+      "package page available"
+    ],
+    "passed": 8
+  },
+  "no_client_or_release_changes": true,
+  "cleanup_complete": true,
+  "after": {
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 13,
+      "leases": 256
+    },
+    "open": [
+      {
+        "lease_id": "Le2b161af69c0",
+        "repo": "MatchaCuratio/Anime-Fox768-400k",
+        "pkg": "shard-000000.tar",
+        "kind": "active",
+        "device_id": "0d8273dba0b5",
+        "parts_json": "[\"tag\",\"nl\"]"
+      }
+    ],
+    "integrity": "ok"
+  },
+  "production_reads": [
+    "/health",
+    "/",
+    "/static/allocation.js",
+    "/api/source-catalog",
+    "/api/workspaces",
+    "/api/workspace-packages?ws_id=fox768",
+    "/api/managed/devices",
+    "/api/history",
+    "/api/summary",
+    "/api/scheduling"
+  ],
+  "services": [
+    "active",
+    "active"
+  ],
+  "remote_test_directory_absent": true,
+  "hf_test_files_created": false,
+  "local_test_directory_absent": true
+}

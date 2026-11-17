@@ -13,10 +13,15 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Iterable, Sequence
 
 
 SCHEMA_VERSION = 1
+
+
+def tag_names(tags: Iterable[str | Sequence[Any]] | None) -> list[str]:
+    """读取纯标签及旧版 (标签, 置信度)，对外只返回标签名称。"""
+    return [tag if isinstance(tag, str) else str(tag[0]) for tag in tags or ()]
 
 
 @dataclass(slots=True)
@@ -59,6 +64,9 @@ class Provenance:
     # 只能靠这一项分辨。给默认值是为了让**旧产物**（没有这个键）仍能读回——
     # 新增必填键会让历史数据在读回时直接 TypeError。
     provider: str = "local"
+    # local 内部的引擎与专用运行配置摘要。旧产物留空，完整配置见服务指纹。
+    engine: str = ""
+    runtime_sha: str = ""
     # 这条是结果缓存还原的（没经历本次推理）。命中才写，未命中时产物里没有这个键。
     cache_hit: bool = False
 
@@ -109,7 +117,7 @@ class Annotation:
 
     def to_jsonl(self) -> str:
         d = asdict(self)
-        # tuple 会被转成 list，这里保持 tags 为 [[tag, prob], ...]
+        d["tags"] = tag_names(self.tags)
         return json.dumps(d, ensure_ascii=False, separators=(",", ":"))
 
     @classmethod
@@ -117,7 +125,9 @@ class Annotation:
         d: dict[str, Any] = json.loads(line)
         prov = d.pop("provenance", None)
         qc = d.pop("qc", None)
-        d["tags"] = [(t, p) for t, p in d.get("tags", [])]
+        # 置信度仅供内部质检；新产物的纯标签读回时使用中性权重。
+        d["tags"] = [(t, 1.0) if isinstance(t, str) else (t[0], t[1])
+                     for t in d.get("tags", [])]
         ann = cls(**{k: v for k, v in d.items() if k in cls.__slots__})
         if prov:
             ann.provenance = Provenance(**prov)

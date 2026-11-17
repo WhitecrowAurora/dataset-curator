@@ -1,0 +1,74 @@
+{
+  "checked_at": "2026-11-15T16:16:05.935000+00:00",
+  "base_url": "http://119.28.16.93",
+  "location": "Windows client network",
+  "passed": true,
+  "artifacts_uploaded": false,
+  "real_job_started": false,
+  "results": [
+    {
+      "proxy_mode": "direct",
+      "path": "/",
+      "status": 200,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/login",
+      "bytes": 1709
+    },
+    {
+      "proxy_mode": "direct",
+      "path": "/health",
+      "status": 200,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/health",
+      "bytes": 41
+    },
+    {
+      "proxy_mode": "direct",
+      "path": "/api/v1/handshake",
+      "status": 401,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/api/v1/handshake",
+      "bytes": 39
+    },
+    {
+      "proxy_mode": "direct",
+      "path": "/api/blob/chunk?sha=invalid",
+      "status": 401,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/api/blob/chunk?sha=invalid",
+      "bytes": 37
+    },
+    {
+      "proxy_mode": "system",
+      "path": "/",
+      "status": 200,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/login",
+      "bytes": 1709
+    },
+    {
+      "proxy_mode": "system",
+      "path": "/health",
+      "status": 200,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/health",
+      "bytes": 41
+    },
+    {
+      "proxy_mode": "system",
+      "path": "/api/v1/handshake",
+      "status": 401,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/api/v1/handshake",
+      "bytes": 39
+    },
+    {
+      "proxy_mode": "system",
+      "path": "/api/blob/chunk?sha=invalid",
+      "status": 401,
+      "server": "nginx",
+      "final_url": "http://119.28.16.93/api/blob/chunk?sha=invalid",
+      "bytes": 37
+    }
+  ]
+}

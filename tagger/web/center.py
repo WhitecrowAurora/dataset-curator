@@ -1,24 +1,7 @@
-"""调度中心：把 fox-label v3 客户端托管成一个可启停的后台进程。
+"""调度中心 Web 门面：保存本机配置、身份和日志，管理 worker 子进程。
 
-边界
-----
-协调（握手 / 派工 / 心跳 / 预锁 / 回收 / 归还）是同事那套 `worker.py`，我们只内置
-一份原样副本 `tagger/fox_worker.py`，**这段逻辑一行都不重写**。这里只做三件事：
-
-1. 起 / 停那个子进程，把它的 stdout 收进环形缓冲给页面看；
-2. 身份（worker.json）与本页配置落在 `work/center/` 下，不脏用户主目录；
-3. 拿同一套凭据打一次 `/api/v1/status`，给页面一份**只读**看板（不派工、不续约）。
-
-为什么开子进程而不是在 web 进程里开线程
---------------------------------------
-worker 自己会起孙进程（`--cmd` 打标）、自己管信号与退出码。放进 web 线程里，
-一次崩栈就把整个后端带走；作为子进程，它死了页面能看见，重启也只是再点一次。
-这也和 `vllm_service.py` 管 llama-server 的方式一致。
-
-用户只需要填两样
-----------------
-服务器地址 + 姓名。`--cmd` 由这里自动拼好（打标服务地址、模式、进度文件都在里面），
-页面高级项才允许改——普通人不需要知道"要跑什么命令"。
+模型准备与主动/被动执行由 center_runtime 编排；任务、申报与租约归还仍走
+fox_worker。页面看板只读状态，打开页面不会领片。
 """
 
 from __future__ import annotations
@@ -34,6 +17,12 @@ import time
 from pathlib import Path
 
 import httpx
+from .center_runtime.config import EXECUTION_DEFAULTS, execution_config
+from .center_runtime.secrets import Credentials
+from .center_runtime.controller import Controller
+from ..storage.atomic import write_bytes
+from ..runtime.processes import spawn_owned
+from ..center_runtime.identity import saved_path
 
 ROOT = Path(__file__).resolve().parents[2]
 CENTER_DIR = ROOT / "work" / "center"
@@ -64,6 +53,9 @@ DEFAULTS = {
     # 看门狗：子进程非主动退出（崩溃、被杀内存、网络断到进程自己抛死）时自动
     # 按退避重新拉起。关掉就回到"崩了就停在已停止，等人再点开始"的老行为。
     "watchdog": True,
+    **EXECUTION_DEFAULTS,
+    "wanted": False,
+    "auto_upload": True,
 }
 
 # 看门狗策略。FATAL_RC 是"重启也救不了"的退出码：2 配置/用法、3 认证、
@@ -101,11 +93,11 @@ class CenterError(RuntimeError):
     """消息直接给页面显示。"""
 
 
-def _kill_tree(pid: int) -> None:
+def _kill_tree(pid: int, *, force: bool = False) -> None:
     """终止 pid 及其全部子孙进程。
 
     Windows 用 `taskkill /T` 按父子链收（没有进程组语义）；POSIX 靠
-    `start_new_session` 建出来的进程组整组 SIGTERM，worker 才有机会归还租约。
+    `start_new_session` 建出来的进程组整组终止；故障恢复用 SIGKILL 保留租约。
     两边的失败都咽掉：进程可能已经自己退了，那不是错误。
     """
     if not pid:
@@ -118,7 +110,7 @@ def _kill_tree(pid: int) -> None:
             pass
         return
     try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
+        os.killpg(os.getpgid(pid), signal.SIGKILL if force else signal.SIGTERM)
     except (OSError, AttributeError):
         pass
 
@@ -147,6 +139,10 @@ class Center:
         self._restarts = 0
         self._spawn_at = 0.0
         self._argv: list[str] = []
+        self.credentials = Credentials(self.dir)
+        from .center_runtime.history import History
+        self.history = History(self)
+        self.runtime = Controller(self)
         threading.Thread(target=self._watchdog, name="center-watchdog",
                          daemon=True).start()
 
@@ -178,10 +174,32 @@ class Center:
             if key in _NON_EMPTY and isinstance(val, str) and not val.strip():
                 continue
             cfg[key] = val
-        self.cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
-                                 encoding="utf-8")
+        cfg.update(execution_config(cfg))
+        write_bytes(self.cfg_path, json.dumps(cfg, ensure_ascii=False, indent=2).encode("utf-8"))
         return cfg
+
+    def configure(self, **kw) -> dict:
+        with self.runtime.lock:
+            if self.runtime.active or self.runtime.preparing or self.running or self.history.running:
+                raise CenterError("请先停止或退出托管，再修改本机配置")
+            token, remember = kw.pop("hf_token", None), kw.pop("remember_hf", None)
+            self.save_config(**kw)
+            if token is not None or remember is not None:
+                self.credentials.update(token, remember)
+        return self.snapshot()
+
+    def progress(self) -> dict:
+        try:
+            root = Path(self.config()["out_dir"]).resolve()
+            current = root / '.fox-current.json'
+            path = root
+            if current.exists():
+                path = (root / json.loads(current.read_text(encoding='utf-8'))['directory']).resolve()
+                path.relative_to(root)
+            data = json.loads((path / ".fox-progress").read_text(encoding="utf-8"))
+            return {k: data[k] for k in ("done", "total", "phase") if k in data}
+        except (OSError, ValueError, TypeError, KeyError):
+            return {}
 
     # ------------------------------------------------------------ 身份
     def identity(self) -> dict:
@@ -196,14 +214,28 @@ class Center:
                 ("user_id", "device_id", "server", "server_id", "beat_interval")
                 if data.get(k) not in (None, "")}
 
-    def _env(self) -> dict:
+    def _env(self, execution: dict | None = None) -> dict:
         env = dict(os.environ)
+        # 停止信号只交给运行任务的进程，登录不继承上一轮的停止请求。
+        env.pop("FOXLABEL_STOP_FILE", None)
         env["FOXLABEL_WORKER_CONFIG"] = str(self.worker_cfg)
         env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONUNBUFFERED"] = "1"
         # 子进程的 print 走 locale 编码（Windows 上是 cp936），而管道那头我们
         # 按 UTF-8 解 —— 不钉死这一项，页面日志里的中文全是"�"。
         env["PYTHONIOENCODING"] = "utf-8"
+        if token := self.credentials.effective_token():
+            env["HF_TOKEN"] = token
+        cfg = execution if execution is not None else (self.runtime.resolved or self.config())
+        env["TAGGER_DL_CONNS"] = str(cfg.get("download_conns",4))
+        env["FOXLABEL_CDN_PROBE"] = "1" if cfg.get("cdn_probe",True) else "0"
+        env["LULYNX_CENTER_EXECUTION"] = json.dumps({
+            "url": cfg["tag_url"], "model_name": cfg["served_name"], "mode": cfg["mode"],
+            "tag_backend": cfg["tag_backend"], "tag_device": cfg["tag_device"],
+            "tag_precision": cfg["tag_precision"], "tag_batch": cfg["tag_batch"] or 1,
+            "tag_model_dir": cfg.get("tag_model_dir"), "tag_model": cfg.get("tag_model"),
+            "concurrency": cfg["concurrency"] or 2,
+        })
         return env
 
     # ------------------------------------------------------------ 登录
@@ -214,17 +246,19 @@ class Center:
             raise CenterError("要填调度中心地址（例：http://1.2.3.4:31831）")
         if not user_id:
             raise CenterError("要填姓名/ID：服务端按它记账，也是你取回工位的唯一依据")
-        if self.running:
+        if self.running or self.runtime.active or self.history.running:
             raise CenterError("正在跑的时候不能换身份，先停止")
 
         argv = [sys.executable, "-m", "tagger.fox_worker", "login",
                 "--server", server, "--user-id", user_id]
         if secret.strip():
             argv += ["--secret", secret.strip()]
+        env = self._env()
+        env["FOXLABEL_REGISTER_ONLY"] = "1"
         try:
             # encoding 必须和 _env 里的 PYTHONIOENCODING 对齐：子进程按 UTF-8 写，
             # 这边却按 locale(cp936) 读，中文会解码失败或变成乱码。
-            proc = subprocess.run(argv, cwd=str(ROOT), env=self._env(),
+            proc = subprocess.run(argv, cwd=str(ROOT), env=env,
                                   capture_output=True, text=True, timeout=60,
                                   encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired as exc:
@@ -237,26 +271,33 @@ class Center:
             self._push(f"[login] {line}")
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-            raise CenterError(detail[-1] if detail else f"登录失败（退出码 {proc.returncode}）")
+            message = next((line for line in detail if line.startswith("[X] ")),
+                           detail[-1] if detail else f"登录失败（退出码 {proc.returncode}）")
+            raise CenterError(message)
 
+        identity = self.identity()
+        if not identity.get("device_id"):
+            raise CenterError("登录未完成：未保存本机设备身份，请重新连接")
         self.save_config(server=server, user_id=user_id)
         # 身份换了，旧看板已经不是这台设备的事，别让缓存继续显示上一个人的租约。
         self._board_cache = None
-        return self.identity()
+        return identity
 
     def logout(self) -> dict:
-        """断开：忘掉本机的设备身份，地址和姓名留着。
+        """断开：停用当前身份，保留本机凭据供下次连接沿用。
 
-        删的是 worker.json（device_id + secret）。center.json 里那份配置不动，
-        这样重连只要再点一次「连接」，不用把地址重新抄一遍。
+        worker.json 移为本机保存的凭据，页面只读活动身份；重新登录成功才恢复。
+        密钥和设备号不变，严格认证和同名其他设备都不会被一次断开影响。
         """
         with self._lock:
-            if self.running:
+            if self.running or self.runtime.active or self.history.running:
                 raise CenterError("正在跑，先停止再断开")
             try:
-                self.worker_cfg.unlink(missing_ok=True)
+                self.worker_cfg.replace(saved_path(self.worker_cfg))
+            except FileNotFoundError:
+                pass
             except OSError as exc:
-                raise CenterError(f"删不掉身份文件：{self.worker_cfg}（{exc}）") from exc
+                raise CenterError(f"无法停用本机身份：{self.worker_cfg}（{exc}）") from exc
             self._board_cache = None
         return self.snapshot()
 
@@ -274,7 +315,6 @@ class Center:
         return (
             f'"{sys.executable}" -m tagger.cli client '
             f'--shard "{{shard}}" --out-dir "{{out}}" '
-            f'--url "{cfg["tag_url"]}" --mode {cfg["mode"]} '
             f'--progress-file "{{out}}/.fox-progress"'
             + (f" {extra}" if extra else "")
         )
@@ -282,21 +322,21 @@ class Center:
     def start(self, **kw) -> dict:
         # 快照放在锁外：snapshot 会去问一次调度中心（连不上最长 6s），
         # 持锁做这件事会把收日志的线程一起堵住，日志全堆在管道里。
-        with self._lock:
-            if not self.running:
-                cfg = self.save_config(**kw) if kw else self.config()
-                ident = self.identity()
-                if not ident.get("server"):
-                    raise CenterError("还没连过：先填地址和姓名点「连接」")
-                # 先把"想跑"这件事置上，拉起失败再撤回：否则 _spawn 抛错之后
-                # 看门狗会以为这是一次崩溃，过几秒又去拉一个注定失败的进程。
-                self._wanted = True
+        with self.runtime.lock:
+            if not self.runtime.active:
+                if self.history.running:
+                    raise CenterError("请等待历史检查结束")
+                token, remember = kw.pop("hf_token", None), kw.pop("remember_hf", None)
+                self.save_config(**kw)
+                if token is not None or remember is not None:
+                    self.credentials.update(token, remember)
                 self._restarts = 0
                 self._next_spawn = 0.0
+                self.save_config(wanted=True)
                 try:
-                    self._spawn(cfg)
-                except CenterError:
-                    self._wanted = False
+                    self.runtime.start()
+                except Exception:
+                    self.save_config(wanted=False)
                     raise
         return self.snapshot()
 
@@ -338,6 +378,8 @@ class Center:
             argv += ["--download-conns", str(max(1, min(16, conns)))]
         if not cfg.get("cdn_probe", True):
             argv.append("--no-cdn-probe")
+        if cfg.get("auto_upload", True):
+            argv.append("--auto-upload")
         # 分项意愿（2026-11-12）。服务端认五值：both|tag|nl|pref-tag|pref-nl。
         # 两个概念必须分开，否则会申报一个"我做不出"的意愿：
         #   产出模式 mode  = **能力**，硬约束（client 按它决定跑哪套模型）
@@ -365,12 +407,16 @@ class Center:
             argv += ["--parts", parts_arg]
         self._argv = argv
         self._push(f"[center] 启动：{' '.join(argv)}")
+        (self.dir / "stop-request").unlink(missing_ok=True)
+        (Path(cfg['out_dir']) / '.fox-current.json').unlink(missing_ok=True)
+        env = self._env(cfg)
+        env["FOXLABEL_STOP_FILE"] = str(self.dir / "stop-request")
         # 独立进程组：停止时要连 worker 起的孙进程（真正在打标、写产物的那个）
         # 一起收，否则"已停止"只是杀掉了父进程，见 _kill_tree。
         extra = {} if os.name == "nt" else {"start_new_session": True}
         try:
-            self._proc = subprocess.Popen(
-                argv, cwd=str(ROOT), env=self._env(), stdout=subprocess.PIPE,
+            self._proc = spawn_owned(
+                argv, cwd=str(ROOT), env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                 errors="replace", bufsize=1, **extra)
         except OSError as exc:
@@ -383,8 +429,11 @@ class Center:
                          name="center-log", daemon=True).start()
 
     def stop(self, report: bool = True) -> dict:
-        """终止子进程。report=False 用在进程退出的路径上：那条路上没人看快照，
-        而取快照要多等一次远端 HTTP。"""
+        self.runtime.stop()
+        return self.snapshot() if report else {}
+
+    def _stop_worker(self, *, graceful: bool = True) -> None:
+        """主动停止归还租约；模型故障强制终止，留给下一轮幂等续接。"""
         with self._lock:
             # 用户明确要停：先撤"想跑"，_pump 收尾时就不会把它当成崩溃再拉起来。
             self._wanted = False
@@ -393,16 +442,23 @@ class Center:
             if proc is not None:
                 # 先把引用摘掉：收日志的线程随后收尾时不再认领它，退出码由这里记。
                 self._proc = None
-                self._push("[center] 停止：发 SIGTERM，worker 会归还手上的租约")
+                self._push("[center] 停止：通知 worker 归还手上的租约" if graceful
+                           else "[center] 模型故障：终止 worker，保留租约等待恢复")
         if proc is not None:
             # 终止过程**不持锁**：wait 期间收日志的线程要继续读管道，否则子进程
             # 输出一多就会写满管道缓冲区，双双卡到超时。
-            rc = self._terminate(proc)
+            if graceful:
+                rc = self._terminate(proc)
+            else:
+                _kill_tree(proc.pid, force=True)
+                try:
+                    rc = proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    rc = None
             with self._lock:
                 self._last_rc = rc
                 # 租约已经还回去了，别让看板继续显示上一轮的派工。
                 self._board_cache = None
-        return self.snapshot() if report else {}
 
     def _terminate(self, proc: subprocess.Popen) -> int | None:
         """收掉 worker **和它的整棵进程树**。
@@ -412,12 +468,12 @@ class Center:
         还活着，页面上写着"已停止"、盘上却在继续长文件——两边都是实话，
         只是看的不是同一个东西。所以这里按进程组/进程树一起收。
         """
-        _kill_tree(proc.pid)
+        write_bytes(self.dir / "stop-request", b"stop")
         try:
-            return proc.wait(timeout=15)
+            return proc.wait(timeout=75)
         except subprocess.TimeoutExpired:
-            self._push("[center] 15s 没退出，强杀（包会在 TTL 到期后自动回池）")
-            proc.kill()
+            self._push("[center] 等待部分回传与归还租约超时，终止进程树；本机产物保留")
+            _kill_tree(proc.pid)
             try:
                 # kill 之后必须再 wait：否则句柄挂着（Windows 上尤其），
                 # 而且这一轮的退出码就没人记了。
@@ -458,6 +514,9 @@ class Center:
             return
         if not self.config().get("watchdog", True):
             return
+        if rc == 0:
+            self._wanted = False
+            return
         if rc in FATAL_RC:
             self._wanted = False
             self._push(f"[center] 看门狗：退出码 {rc} 需要人工处理，不再自动拉起")
@@ -478,22 +537,35 @@ class Center:
         """
         while True:
             time.sleep(WATCHDOG_TICK)
+            try:
+                self.runtime.tick()
+            except Exception as exc:
+                self._push(f"[center] 状态更新失败：{exc}")
             with self._lock:
                 if not self._wanted or not self._next_spawn:
                     continue
                 if self.running or time.time() < self._next_spawn:
                     continue
                 self._next_spawn = 0.0
+                managed = self.runtime.active
+                if not managed:
+                    try:
+                        self._spawn(self.config())
+                    except CenterError as exc:
+                        self._push(f"[center] 看门狗：拉不起来（{exc}），30s 后再试")
+                        self._next_spawn = time.time() + 30.0
+            if managed:
                 try:
-                    self._spawn(self.config())
-                except CenterError as exc:
-                    # 拉不起来（盘没了、配置被改坏）：别一秒一次刷屏，半分钟后再试
-                    self._push(f"[center] 看门狗：拉不起来（{exc}），30s 后再试")
-                    self._next_spawn = time.time() + 30.0
+                    with self.runtime.lock:
+                        if self.runtime.active and self._wanted and not self.runtime.preparing:
+                            self.runtime.launch()
+                except ValueError as exc:
+                    self._push(f"[center] 恢复失败：{exc}")
 
     def _push(self, line: str) -> None:
         stamp = time.strftime("%H:%M:%S")
         with self._lock:
+            line = self.credentials.redact(line) if hasattr(self, "credentials") else line
             self._log.append(f"[{stamp}] {line}" if not line.startswith("[") else line)
 
     # ------------------------------------------------------------ 状态
@@ -620,9 +692,11 @@ class Center:
                             if self._next_spawn else None),
             },
             "uptime_s": round(time.time() - self._started_at, 1) if self.running else 0,
-            "config": {k: cfg[k] for k in ("server", "user_id", "tag_url", "mode",
-                                           "out_dir", "interval", "extra_args",
-                                           "download_conns", "cdn_probe")},
+            "config": {k: v for k, v in cfg.items() if k not in ("wanted", "cmd_template")},
+            "credentials": self.credentials.snapshot(),
+            "runtime": self.runtime.snapshot(),
+            "history": {"running": self.history.running, "status": self.history.status, "message": self.history.message},
+            "progress": self.progress(),
             "cmd": self.build_cmd(cfg),
             "identity": self.identity(),
             "board": self.board(),
@@ -631,9 +705,19 @@ class Center:
 
     def shutdown(self) -> None:
         try:
+            wanted = self.runtime.active
             self.stop(report=False)   # 退出路径上没人看快照，别再等一次远端
+            self.save_config(wanted=wanted)
         except Exception:      # noqa: BLE001 - 退出路径上不许再抛
             pass
+
+    def restore(self):
+        cfg = self.config()
+        if cfg["wanted"] and cfg["resume_on_startup"]:
+            try:
+                self.start()
+            except (CenterError, ValueError) as exc:
+                self._push(f"[center] 自动恢复失败：{exc}")
 
 
 CENTER = Center()

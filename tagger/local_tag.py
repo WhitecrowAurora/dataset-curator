@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 import zipfile
 from dataclasses import dataclass, field
@@ -105,6 +106,18 @@ class TagItem:
             with zipfile.ZipFile(self.source, "r") as zf:
                 return zf.read(self.member)
         return self.path.read_bytes()
+
+
+def reason_key(reason: str) -> str:
+    """失败原因的归类键：抹掉具体数字，只留"是哪一类问题"。
+
+    失败原因里常带每张不同的数（`tag 过少（8 < 12）`、`tag 覆盖率 45% < 60%`），
+    原样当键的话，同一类问题会按数字裂成几十行，Top 列表全是变体、看不出
+    到底哪种原因最该修。数字换成 `#` 之后，`tag 过少（# < #）` 才是一个类。
+    """
+    head = (reason or "未知原因").split(":")[0].split(";")[0].strip()
+    head = re.sub(r"\d+(?:\.\d+)?", "#", head)
+    return head[:60] or "未知原因"
 
 
 @dataclass(slots=True)
@@ -208,7 +221,7 @@ def _payload(item: TagItem, pred, backend, *, precision: str,
         "image_path": item.rel,
         # merge 读的就是这个字段，必须是逗号分隔的字符串
         "tag": ", ".join(names),
-        "tags": [[t, round(float(p), 4)] for t, p in pred.tags],
+        "tags": names,
         "tag_backend": getattr(backend, "name", "") or pred.backend or "unknown",
         "ok": True,
         "provenance": {
@@ -329,7 +342,7 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
     def fail(item: TagItem, reason: str) -> None:
         work.release(item.image_id)
         stats.failed += 1
-        key = reason.split(":")[0].strip()[:60]
+        key = reason_key(reason)
         stats.by_reason[key] = stats.by_reason.get(key, 0) + 1
         emit("failed", item, reason)
 

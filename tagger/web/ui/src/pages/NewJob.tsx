@@ -22,6 +22,7 @@ import {
   Tags,
   TriangleAlert,
   ChevronDown,
+  CloudUpload,
 } from 'lucide-react'
 import {
   api,
@@ -41,10 +42,12 @@ import {
   type VllmSlotPlan,
   type VllmState,
 } from '../lib/api'
-import { ENDPOINT_PRESETS, endpointPresetOf } from '../lib/endpoint'
 import { basename, fmtBytes, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/ui/launcher'
 import { ChoiceGrid, ChoiceMulti, ErrorBox, ToggleRow } from '../components/ui/controls'
+import { FieldNotice } from '../components/ui/FieldNotice'
+import { failureAdvice, httpUrlError } from '../lib/guidance'
+import { enginePrecisions, GGUF_TARGETS } from '../lib/nlEngines'
 import { useFolderPicker } from '../components/FolderPicker'
 import { LlamaSetup } from '../components/LlamaSetup'
 import { MultiGpuPanel } from '../components/MultiGpuPanel'
@@ -101,15 +104,14 @@ const GGUF_PRECISION_LABELS: Record<(typeof GGUF_PRECISIONS)[number], string> = 
 //   AWQ，然后模型页仍提示"还没本地量化，缺 xxx-Q4_K_M.gguf"——因为那条提示
 //   说的是另一个引擎要的文件。所以这里按引擎只给合法的档，切引擎时自动纠到
 //   该引擎的默认档。
-const PRECISIONS_BY_ENGINE: Record<string, readonly string[]> = {
-  llamacpp: GGUF_PRECISIONS,
-  vllm: VLLM_PRECISIONS,
-}
 const ENGINE_DEFAULT_PRECISION: Record<string, string> = {
+  native: 'q6',
   llamacpp: 'f16',
   vllm: 'bf16',
 }
 const ALL_PRECISION_LABELS: Record<string, string> = {
+  q5: 'Q5_K_M',
+  fp16: 'FP16', int8: 'INT8',
   ...VLLM_PRECISION_LABELS,
   ...GGUF_PRECISION_LABELS,
 }
@@ -295,11 +297,15 @@ function vllmStatusLabel(s: VllmState | null): string {
 
 export function NewJob({
   active,
+  configuredForm,
+  configuring = false,
   onStarted,
   onOpenModels,
 }: {
   /** 当前是否在这个页面。切回来自动刷新一次模型清单（模型管理页可能刚改过） */
   active: boolean
+  configuredForm?: Record<string, unknown> | null
+  configuring?: boolean
   onStarted: (id: string) => void
   onOpenModels: () => void
 }) {
@@ -346,6 +352,7 @@ export function NewJob({
   // 推理来源。apiBase/apiKey 只在 openai / anthropic 下用：前者留空按来源
   // 取默认域名，后者只在提交那一次请求里走一趟（快照里会被抹成 ***）。
   const [vlmProvider, setVlmProvider] = useState<VlmProvider>('local')
+  const [setupInferenceSource, setSetupInferenceSource] = useState('local')
   const [apiBase, setApiBase] = useState('')
   const [apiKey, setApiKey] = useState('')
   // 探测结果与「记住密钥」。存档只回脱敏值：浏览器的内存里永远只有用户
@@ -433,6 +440,7 @@ export function NewJob({
   // 且两者指纹不同（换引擎等于换一代数据），所以它跟着服务一起锁。
   // 默认与后端 nl_engine.normalize_engine 保持一致：llama.cpp。
   const [vllmEngine, setVllmEngine] = useState('llamacpp')
+  const [vllmDevice, setVllmDevice] = useState('auto')
   // 这个引擎在本机能不能跑。下拉一改就重新问：快照里的 local_ok 只按
   // "当前引擎"算，而还没启动时它的答案来自默认引擎，切换后必须重查。
   const [engineCap, setEngineCap] = useState<{ ok: boolean; reason: string } | null>(null)
@@ -468,7 +476,7 @@ export function NewJob({
   // 只在"当前值非法"时动手，所以可以安全地把 vllmPrecision 也放进依赖：
   // 恢复旧存档/旧方案带进来的非法组合，靠这一条也能纠回来。
   useEffect(() => {
-    const allowed = PRECISIONS_BY_ENGINE[vllmEngine] ?? GGUF_PRECISIONS
+    const allowed = enginePrecisions(vllmEngine)
     if (!allowed.includes(vllmPrecision)) {
       setVllmPrecision(ENGINE_DEFAULT_PRECISION[vllmEngine] ?? 'f16')
     }
@@ -523,7 +531,7 @@ export function NewJob({
   const [rememberHf, setRememberHf] = useState(false)
   // undefined = 还没动过，用 defaults 里那份；null = 明确没有存档。
   const [savedHfOverride, setSavedHfOverride] = useState<
-    { repo: string; token_masked: string } | null | undefined
+    { repo: string; token_masked: string; scope?: 'global' } | null | undefined
   >(undefined)
   const [hfRevision, setHfRevision] = useState('main')
   const [hfAvailable, setHfAvailable] = useState<string[] | null>(null)
@@ -571,15 +579,6 @@ export function NewJob({
   // 后端解析出来的缓存目录绝对路径（相对路径按服务进程的 cwd 解释），显示用
   const [cachePath, setCachePath] = useState('')
 
-  // ---- 下载源（镜像站）
-  // 这是**全局**设置（与模型页共用 configs/models.json 那一份），不是本次任务的
-  // 参数；放在底部是因为"填了在线仓库 → 发现下不动 → 就地换镜像"是最常见的顺序。
-  const [endpointPick, setEndpointPick] = useState('')
-  const [endpointDraft, setEndpointDraft] = useState('')
-  const [endpointNow, setEndpointNow] = useState('')
-  const [endpointMsg, setEndpointMsg] = useState('')
-  const [endpointBusy, setEndpointBusy] = useState(false)
-
   // ---- 产物形态（engine="vlm"）
   // 默认跟 CLI 一致用 json：每张图一份，断点续跑就看文件在不在，出问题也
   // 能直接打开一份看。parquet 是给"千万级 / 要回传"的场景攒片用的。
@@ -595,6 +594,11 @@ export function NewJob({
   const [guard, setGuard] = useState(true)
   // 开跑前按"预计产出 + 20% 冗余"判盘。只对本地引擎有效（VLM 走流式写出）。
   const [checkSpace, setCheckSpace] = useState(true)
+  // 打标完成后自动回传。空地址 = 不回传（默认）；回传失败只记日志，不改任务状态。
+  const [autoUpload, setAutoUpload] = useState(false)
+  const [autoUploadUrl, setAutoUploadUrl] = useState('')
+  const [autoUploadToken, setAutoUploadToken] = useState('')
+  const [autoUploadDir, setAutoUploadDir] = useState('')
   // 硬件保护的阈值。初值来自 /api/defaults（= tiers.yaml 的 limits 段），
   // 只放 guard 真认的那几项；磁盘两项归「盘位预算」，闭环的 kp/ki 留在配置里。
   const [guardPolicy, setGuardPolicy] = useState<Record<string, number>>({})
@@ -646,6 +650,10 @@ export function NewJob({
     modelRepo,
     guard,
     checkSpace,
+    // 只存地址与目录；令牌与 apiKey/hfToken 同规格，不进快照
+    autoUpload,
+    autoUploadUrl,
+    autoUploadDir,
     guardPolicy,
     artist,
     artistDepth,
@@ -660,6 +668,19 @@ export function NewJob({
     vlmUrl,
     vlmModel,
     vlmProvider,
+    setupInferenceSource,
+    vllmEngine,
+    vllmDevice,
+    vllmModelKey,
+    vllmPrecision,
+    vllmPort,
+    vllmTier,
+    vllmMaxLen,
+    vllmSeqs,
+    vllmBatched,
+    vllmGpuMem,
+    vllmSlots,
+    vllmMediaRoot,
     apiBase,
     concurrency,
     temperature,
@@ -716,14 +737,14 @@ export function NewJob({
   formRef.current = formSnapshot
   useEffect(() => {
     // 恢复完成前别写——那会儿表单还是默认值，写下去等于把存档冲掉。
-    if (!active || !restoredRef.current) return
+    if (!active || configuring || !restoredRef.current) return
     const timer = setTimeout(() => {
       api.saveJobForm({ form: formSnapshot }).catch(() => undefined)
       // 自动保存开着就顺手写一份具名快照（内部节流，关着是空操作）
       usePresets.getState().notifyChanged(formSnapshot)
     }, 700)
     return () => clearTimeout(timer)
-  }, [formJson, active])
+  }, [formJson, active, configuring])
 
   const isVlm = mode !== 'tag'
   const hasTag = mode !== 'nl'
@@ -763,7 +784,7 @@ export function NewJob({
   // 免得用户以为"已记住"是全局的。
   const savedHf = savedHfOverride !== undefined ? savedHfOverride : (defaults?.hf_saved ?? null)
   const savedHfApplies =
-    !!savedHf && !!hfRepo.trim() && savedHf.repo.toLowerCase() === hfRepo.trim().toLowerCase()
+    !!savedHf && !!hfRepo.trim() && (savedHf.scope === 'global' || savedHf.repo.toLowerCase() === hfRepo.trim().toLowerCase())
 
   // tiers.yaml 的 models 段就是可选权重的唯一真相源：页面不写死名字，
   // 配置里加一个（比如换成本地量化版）下拉里就多一项。
@@ -1069,6 +1090,15 @@ export function NewJob({
     if (Object.keys(saved.form).length) applyStateForm(saved.form)
   }, [active, defaults, saved])
 
+  const appliedSetup = useRef<Record<string, unknown> | null>(null)
+  useEffect(() => {
+    if (!configuredForm || !restoredRef.current || appliedSetup.current === configuredForm) return
+    appliedSetup.current = configuredForm
+    applyStateForm(configuredForm)
+    setSavedHfOverride(undefined)
+    api.defaults().then(setDefaults).catch(() => undefined)
+  }, [configuredForm, active, defaults, saved])
+
   // 顶栏「配置方案」的读写口：顶栏只管按钮，不认识表单里有什么；
   // 以后加字段也不用改顶栏（快照是整份灌回去的）。
   useEffect(() => {
@@ -1092,35 +1122,6 @@ export function NewJob({
       .catch(() => setPacks([]))
   }, [active])
 
-  // 下载源：进页面读一次"当前生效"。页面设置 > HF_ENDPOINT > 默认镜像，
-  // 这里的 effective 是后端算完的那一个，前端不重复推导优先级。
-  useEffect(() => {
-    if (!active) return
-    api
-      .models()
-      .then((d) => {
-        setEndpointPick(endpointPresetOf(d.endpoint))
-        setEndpointDraft(d.endpoint)
-        setEndpointNow(d.effective_endpoint)
-      })
-      .catch(() => undefined)
-  }, [active])
-
-  async function saveEndpoint(url: string) {
-    setEndpointBusy(true)
-    setEndpointMsg('')
-    try {
-      const res = await api.saveEndpoint(url)
-      setEndpointNow(res.effective)
-      setEndpointPick(endpointPresetOf(url))
-      setEndpointDraft(url)
-      setEndpointMsg('已保存')
-    } catch (err) {
-      setEndpointMsg(err instanceof Error ? err.message : String(err))
-    } finally {
-      setEndpointBusy(false)
-    }
-  }
 
   // 本机 vLLM 的状态。只选 VLM 引擎时才轮询：首次加载要几分钟，
   // 页面上必须能看见"启动中/就绪/失败 + 日志尾巴"，否则只有一个转不完的圈。
@@ -1135,7 +1136,9 @@ export function NewJob({
         .then((s) => {
           if (!alive) return
           setVllm(s)
-          setVllmPort(s.port)
+          // 已有服务的地址与参数由用户配置，本机状态只更新服务管理面板。
+          if (setupInferenceSource === 'existing') return
+          if (s.status === 'ready' || s.status === 'starting') setVllmPort(s.port)
           // 服务在跑时精度以服务端实际参数为准：页面刷新后本地 state 会回到
           // 默认 BF16，而服务可能正跑着 FP8。只在 running 时同步——停止后
           // 用户还要接着改，不能被上一轮的旧值反复覆盖。
@@ -1143,9 +1146,10 @@ export function NewJob({
           if (
             (s.status === 'ready' || s.status === 'starting') &&
             runningPrecision &&
-            (VLLM_PRECISIONS as readonly string[]).includes(runningPrecision)
+            s.overrides?.engine === vllmEngine &&
+            enginePrecisions(vllmEngine).includes(runningPrecision)
           ) {
-            setVllmPrecision(runningPrecision as (typeof VLLM_PRECISIONS)[number])
+            setVllmPrecision(runningPrecision)
           }
           // 本机服务就绪而表单还指着默认地址时，自动对齐端口——用户改了
           // 端口却忘了同步表单，症状是任务跑起来全部超时。
@@ -1158,7 +1162,7 @@ export function NewJob({
       alive = false
       window.clearInterval(t)
     }
-  }, [active, isVlm])
+  }, [active, isVlm, setupInferenceSource, vllmEngine])
 
   // 参数一改就重算"会起成什么"。防抖是为了别让每个按键都去调一次
   // nvidia-smi（服务端按参数组合缓存 30 秒，来回切不会真的重算）。
@@ -1169,6 +1173,7 @@ export function NewJob({
       api
         .vllmPlan({
           engine: vllmEngine,
+          device: vllmDevice,
           model: vllmModelKey || undefined,
           // custom 不是真实分档名：它等价于"不指定档位、全按下面自填的来"
           tier: vllmTier === 'custom' ? undefined : vllmTier || undefined,
@@ -1180,7 +1185,7 @@ export function NewJob({
           max_num_batched_tokens:
             vllmEngine === 'vllm' ? vllmBatched || undefined : undefined,
           gpu_mem: vllmEngine === 'vllm' ? vllmGpuMem || undefined : undefined,
-          slots: vllmEngine === 'llamacpp' ? vllmSlots || undefined : undefined,
+          slots: vllmEngine !== 'vllm' ? vllmSlots || undefined : undefined,
         })
         .then((p) => alive && setPlanPreview(p))
         .catch(() => alive && setPlanPreview(null))
@@ -1201,6 +1206,7 @@ export function NewJob({
     vllmBatched,
     vllmGpuMem,
     vllmSlots,
+    vllmDevice,
   ])
 
   // 服务起着的时候，真正在跑的是服务端那组参数，不是表单里正在编辑的这组。
@@ -1230,11 +1236,14 @@ export function NewJob({
   // 没压出来就不能选；vLLM 的 bf16/fp8 是加载方式（有原始权重就能跑），
   // 只有 W4A16 需要预量化权重。这两句话以前只体现在"启动后报错"里。
   const modelUsable = (m: VllmModelOption): boolean => {
+    if (vllmEngine === 'native') return Boolean(m.raw_ready
+      || enginePrecisions('native').some((p) => (m.gguf_ready ?? []).includes(p)))
     if (vllmEngine === 'vllm') return Boolean(m.raw_ready || m.quantized)
     return (m.gguf_ready ?? []).length > 0
   }
   const modelStatusText = (m: VllmModelOption): string => {
     if (!m.exists) return '未下载'
+    if (vllmEngine === 'native') return m.raw_ready ? '原始权重已就绪' : modelUsable(m) ? 'GGUF 权重已就绪' : '缺少所选引擎可用的权重'
     if (vllmEngine === 'vllm') {
       if (m.quantized) return 'W4A16 权重已就绪'
       return m.raw_ready ? '原始权重已就绪（bf16 / fp8 可用）' : '目录里没有可用权重'
@@ -1253,6 +1262,7 @@ export function NewJob({
   /** 这一档精度现在真能用吗。清单里找不到这条模型时不灰（不乱猜）。 */
   const precisionUsable = (p: string): boolean => {
     if (!picked) return true
+    if (vllmEngine === 'native' && !(p in GGUF_TARGETS)) return Boolean(picked.raw_ready)
     if (vllmEngine === 'vllm') return p !== 'w4a16' || Boolean(picked.quantized)
     return (picked.gguf_ready ?? []).includes(p)
   }
@@ -1286,7 +1296,7 @@ export function NewJob({
     if (concurrency > 0) return Math.max(1, concurrency)
     if (isApiMode) return Math.max(1, providerMeta(vlmProvider)?.concurrency ?? 4)
     const raw =
-      vllmEngine === 'llamacpp'
+      vllmEngine !== 'vllm'
         ? Number(vllm?.fingerprint?.slots ?? slotPlan?.slots ?? 0)
         : Number(vllm?.fingerprint?.max_num_seqs ?? 0)
     if (!Number.isFinite(raw) || raw <= 0) return 4
@@ -1346,10 +1356,12 @@ export function NewJob({
         local_media_root: vllmEngine === 'vllm' ? vllmMediaRoot.trim() || undefined : undefined,
         // 槽位：0 不传 = 服务端按显存自动。它只对 llama.cpp 有效，
         // 传了给 vLLM 会被后端直接拒绝（那边该用 max_num_seqs）。
-        slots: vllmEngine === 'llamacpp' ? vllmSlots || undefined : undefined,
+        slots: vllmEngine !== 'vllm' ? vllmSlots || undefined : undefined,
+        device: vllmDevice,
       })
       setVllm(s)
       setVlmUrl(s.url)
+      setSetupInferenceSource('local')
     } catch (err) {
       setVllmError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1627,6 +1639,10 @@ export function NewJob({
     putS('model_repo', setModelRepo)
     putB('guard', setGuard)
     putB('check_space', setCheckSpace)
+    // 只还原"有没有开"和远端子目录：令牌不进快照，地址按开关状态还原
+    putB('autoUpload', setAutoUpload)
+    putS('autoUploadUrl', setAutoUploadUrl)
+    putS('autoUploadDir', setAutoUploadDir)
     if (Array.isArray(s.keep_categories)) {
       setKeepCategories(
         s.keep_categories.filter((x): x is string => typeof x === 'string'),
@@ -1833,6 +1849,9 @@ export function NewJob({
     putS('modelRepo', setModelRepo)
     putB('guard', setGuard)
     putB('checkSpace', setCheckSpace)
+    putB('autoUpload', setAutoUpload)
+    putS('autoUploadUrl', setAutoUploadUrl)
+    putS('autoUploadDir', setAutoUploadDir)
     putB('artist', setArtist)
     putN('artistDepth', setArtistDepth)
     putB('artistInject', setArtistInject)
@@ -1844,6 +1863,19 @@ export function NewJob({
     putN('seqWidth', setSeqWidth)
     putS('vlmUrl', setVlmUrl)
     putS('vlmModel', setVlmModel)
+    putS('setupInferenceSource', setSetupInferenceSource)
+    putS('vllmEngine', setVllmEngine)
+    putS('vllmDevice', setVllmDevice)
+    putS('vllmModelKey', setVllmModelKey)
+    putS('vllmPrecision', setVllmPrecision)
+    putN('vllmPort', setVllmPort)
+    putS('vllmTier', setVllmTier)
+    putN('vllmMaxLen', setVllmMaxLen)
+    putN('vllmSeqs', setVllmSeqs)
+    putN('vllmBatched', setVllmBatched)
+    putN('vllmGpuMem', setVllmGpuMem)
+    putN('vllmSlots', setVllmSlots)
+    putS('vllmMediaRoot', setVllmMediaRoot)
     putS('apiBase', setApiBase)
     putN('concurrency', setConcurrency)
     putN('temperature', setTemperature)
@@ -1884,6 +1916,8 @@ export function NewJob({
     putB('multiGpu', setMultiGpu)
     putN('perCardSeqs', setPerCardSeqs)
     putS('hfRepo', setHfRepo)
+    if (typeof f.hfRepo === 'string') setInputMode(f.hfRepo.trim() ? 'hf' : 'local')
+    if (Array.isArray(f.packShardSel)) setPackShardSel(f.packShardSel.filter((v): v is string => typeof v === 'string'))
     putS('hfRevision', setHfRevision)
     putN('hfPrefetch', setHfPrefetch)
     putB('hfMulti', setHfMulti)
@@ -1925,6 +1959,11 @@ export function NewJob({
         model_repo: modelRepo,
         guard,
         check_space: checkSpace,
+        // 没勾自动回传就发空串：后端只认"有地址"这件事，一个空串比三个
+        // undefined 更明确，也免得旧快照里残留的地址被静默带上
+        auto_upload_url: autoUpload ? autoUploadUrl.trim() : '',
+        auto_upload_token: autoUpload ? autoUploadToken.trim() : '',
+        auto_upload_dir: autoUpload ? autoUploadDir.trim() : '',
         // 关掉保护就不必把阈值发过去（发了也不生效，只会让快照里多一份噪声）
         guard_policy: guard ? guardPolicy : {},
       }
@@ -2116,7 +2155,15 @@ export function NewJob({
               type="button"
               className="lx-btn-primary lx-launch-glow inline-flex items-center gap-1.5"
               disabled={missingInput || apiIncomplete || busy}
-              title={apiIncomplete ? 'API 模式要填地址和模型名' : undefined}
+              title={
+                missingInput
+                  ? isVlm
+                    ? '还差输入：填仓库名，或选本地分片包'
+                    : '还差输入：选图片目录，或 .zip / .tar 素材包'
+                  : apiIncomplete
+                    ? '还差 API 配置：填写服务地址和模型 ID'
+                    : undefined
+              }
               onClick={() => void submit()}
             >
               <Play size={14} />
@@ -2130,6 +2177,7 @@ export function NewJob({
         <ErrorBox
           error={error}
           title={errorKind === 'hf' ? '读取仓库分片失败' : '创建任务失败'}
+          nextStep={failureAdvice(error, errorKind === 'hf' ? 'download' : 'task')}
         />
       )}
       {conflict && (
@@ -2244,6 +2292,7 @@ export function NewJob({
               <>
                 <SettingRow
                   label="HF 团队仓库"
+                  notice={!hfRepo.trim() ? '请填写要读取的 HF 仓库，格式为 org/name。' : ''}
                   description="org/name"
                   icon={<Cloud size={14} />}
                 >
@@ -2270,6 +2319,8 @@ export function NewJob({
                   <>
                     <SettingRow
                       label="访问令牌"
+                      notice={errorKind === 'hf' && error && /401|403|gated|unauthorized|forbidden|鉴权|受限/i.test(error)
+                        && !hfToken.trim() ? failureAdvice(error, 'download') : ''}
                       // "换了仓库就不沿用"必须常驻显示，不能只放 help：用户
                       // 明明记住过令牌、这里却要重填，不说出来他会以为存档坏了。
                       description={
@@ -2510,9 +2561,15 @@ export function NewJob({
                   </>
                 )}
 
+              </>
+            )}
+
+            {isVlm && inputMode === 'local' && (
+              <>
                 <SettingRow
-                  label="本地分片（可选）"
-                  help="分片文件或目录；填了 HF 仓库则忽略"
+                  label="本地分片"
+                  notice={!hfRepo.trim() && !inputDir.trim() ? '请选择本地分片文件或存放分片的目录。' : ''}
+                  help="分片文件或存放分片的目录"
                   icon={<HardDrive size={14} />}
                 >
                   <div className="flex gap-2">
@@ -2555,6 +2612,7 @@ export function NewJob({
             {!isVlm && (
               <SettingRow
                 label="输入路径"
+                notice={!inputDir.trim() ? '请选择素材目录或素材包。' : ''}
                 required
                 description={
                   scan
@@ -2759,6 +2817,7 @@ export function NewJob({
                 >
                   <option value="vllm">vLLM（Linux / WSL2）</option>
                   <option value="llamacpp">llama.cpp（Windows 原生）</option>
+                  <option value="native">lulynx 专用（实验）</option>
                 </select>
               </SettingRow>
 
@@ -2767,6 +2826,14 @@ export function NewJob({
               {vllmEngine === 'llamacpp' && (
                 <LlamaSetup onInstalled={() => setCapTick((n) => n + 1)} />
               )}
+              {vllmEngine === 'native' && <SettingRow label="NL 计算设备">
+                <select className="lx-select" value={vllmDevice} disabled={vllmLocked}
+                  onChange={(e) => setVllmDevice(e.target.value)} aria-label="专用引擎设备">
+                  <option value="auto">GPU 优先（自动）</option><option value="cpu">CPU</option>
+                  {(defaults?.devices || []).filter((d) => d.startsWith('cuda:')).map((d) =>
+                    <option key={d} value={d}>{d}</option>)}
+                </select>
+              </SettingRow>}
 
               {/* 多卡：一台机器插了多张卡时，一卡一进程各打各的。
                   放在「引擎」下面是因为它复用同一个引擎选择——换引擎等于
@@ -2830,7 +2897,7 @@ export function NewJob({
                     }}
                     className={`rounded-lx-sm border px-2.5 py-1.5 text-left text-[12.5px] ${
                       vllmModelKey === ''
-                        ? 'border-lx-accent bg-lx-accent-subtle text-lx'
+                        ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
                         : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
                     } ${vllmLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                   >
@@ -2952,7 +3019,7 @@ export function NewJob({
               </SettingRow>
 
               {/* 精度覆盖分档表。只有当前引擎认的档会被列出来（详见
-                  PRECISIONS_BY_ENGINE 上的注释）；换档等于换一代数据
+                  enginePrecisions 的共享清单）；换档等于换一代数据
                   （model_id 里带 precision），所以服务运行中锁住，必须先停止。 */}
               <SettingRow
                 label="权重精度"
@@ -2960,6 +3027,7 @@ export function NewJob({
                 help={
                   vllmEngine === 'vllm'
                     ? 'W4A16 需要预量化的 AWQ / GPTQ 权重'
+                    : vllmEngine === 'native' ? 'Q4 / Q5 / Q6 / Q8 使用 GGUF；FP8 / INT8 可从原始权重量化'
                     : '每档对应一个 .gguf 文件'
                 }
                 description={
@@ -2967,6 +3035,8 @@ export function NewJob({
                     ? '完整权重 · 8B 约 15.6G'
                     : vllmPrecision === 'q4'
                       ? '8B 约 4.7G · 最省显存'
+                      : vllmPrecision === 'q5'
+                        ? '8B 约 5.4G · 显存与精度折中'
                       : vllmPrecision === 'q6'
                         ? '8B 约 6.4G · 长尾 tag 比 Q4 稳'
                         : vllmPrecision === 'q8'
@@ -2974,12 +3044,13 @@ export function NewJob({
                           : vllmPrecision === 'fp8'
                             ? '显存约省一半 · 长尾 tag 可能少量改判'
                             : vllmPrecision === 'w4a16'
-                              ? '4bit 权重 · 没有量化权重会回退 BF16'
+                              ? vllmEngine === 'native' ? '4bit 权重 · 需要已有 packed W4A16 文件' : '4bit 权重 · 没有量化权重会回退 BF16'
+                              : vllmPrecision === 'int8' ? '8bit 权重与激活 · 运行时量化'
                               : '原精度 · 精度最稳、显存最贵'
                 }
               >
                 <ChoiceGrid
-                  options={PRECISIONS_BY_ENGINE[vllmEngine] ?? GGUF_PRECISIONS}
+                  options={enginePrecisions(vllmEngine)}
                   value={vllmPrecision}
                   onChange={choosePrecision}
                   className="grid-cols-3"
@@ -3043,7 +3114,11 @@ export function NewJob({
                       ? slotPlan && (
                           <span className="ml-1.5 text-lx-dim">· 当前 {slotPlan.slots} 槽</span>
                         )
-                      : vllm.overrides.max_num_seqs != null && (
+                      : vllmEngine === 'native' ? (
+                          <span className="ml-1.5 text-lx-dim">
+                            · 当前 {activePlan?.ok ? activePlan.max_num_seqs : vllm.overrides.slots ?? 4} 槽
+                          </span>
+                        ) : vllm.overrides.max_num_seqs != null && (
                           <span className="ml-1.5 text-lx-dim">
                             · 当前 seqs {vllm.overrides.max_num_seqs}
                             {vllm.overrides.max_num_batched_tokens != null &&
@@ -3057,6 +3132,7 @@ export function NewJob({
                     help={
                       vllmEngine === 'llamacpp'
                         ? '0 = 分档表的值。每槽最多 3072，低于约 1400 放不下一张图'
+                        : vllmEngine === 'native' ? '0 = 默认 2048，可调整。调大占更多 KV 显存'
                         : '0 = 分档表的值（16G 档 4096）。调大占更多显存，过大会 OOM'
                     }
                   >
@@ -3099,11 +3175,12 @@ export function NewJob({
                   )}
                   {/* 只对 llama.cpp 显示：vLLM 的并发由调度器动态分配，
                       给一个 -np 输入框等于让人以为改了，其实没生效。 */}
-                  {vllmEngine === 'llamacpp' && (
+                  {vllmEngine !== 'vllm' && (
                     <SettingRow
-                      label="槽位（-np）"
+                      label={vllmEngine === 'native' ? '并发槽位' : '槽位（-np）'}
                       help={
-                        slotPlan
+                        vllmEngine === 'native' ? '0 = 默认 4。完成后自动补入新请求；调小可减少 KV 显存'
+                        : slotPlan
                           ? `0 = 自动（本机给 ${slotPlan.slots_default ?? '?'}）。想给别的程序让显存就调小，调「任务并发」没用`
                           : '0 = 自动。想给别的程序让显存就调小'
                       }
@@ -3120,7 +3197,7 @@ export function NewJob({
                             Math.min(64, Math.max(0, Math.round(Number(e.target.value) || 0))),
                           )
                         }
-                        aria-label="llama.cpp 槽位数"
+                        aria-label={vllmEngine === 'native' ? '专用引擎并发槽位' : 'llama.cpp 槽位数'}
                       />
                     </SettingRow>
                   )}
@@ -3219,10 +3296,10 @@ export function NewJob({
               </details>
 
               {vllmError && (
-                <p className="border-b border-lx py-2.5 text-[11px] leading-relaxed text-lx-danger">
-                  {vllmError}
-                </p>
+                <ErrorBox error={vllmError} title="推理服务操作失败" nextStep={failureAdvice(vllmError, 'service')} />
               )}
+              {vllm?.status === 'failed' && !vllmError && <FieldNotice
+                message={failureAdvice(vllm.error || vllm.log_tail.slice(-3).join('\n'), 'service')} />}
 
               {/* 环境原因常常是好几行（"WSL2 / 换台机器"两条路），
                   一整段塞在左栏会把表单挤乱，收起来看完整版。 */}
@@ -3275,6 +3352,7 @@ export function NewJob({
                 <>
                   <SettingRow
                     label="API 地址"
+                    notice={httpUrlError(apiBase, 'API 地址')}
                     required={isApiMode}
                     help="留空用默认域名；自建网关填自己的地址"
                   >
@@ -3316,6 +3394,8 @@ export function NewJob({
                   </SettingRow>
                   <SettingRow
                     label="API 密钥"
+                    notice={apiProbe && !apiProbe.ok && /401|403|unauthorized|forbidden|鉴权/i.test(apiProbe.error)
+                      && !apiKey.trim() ? failureAdvice(apiProbe.error, 'task') : ''}
                     help={
                       savedKey
                         ? `已记住 ${savedKey.key_masked}，留空即用它`
@@ -3351,6 +3431,7 @@ export function NewJob({
                 <>
               <SettingRow
                 label="服务地址"
+                notice={httpUrlError(vlmUrl, '推理服务地址')}
                 help="本机服务就绪后自动填；远程填 IP"
               >
                 <div className="flex gap-2">
@@ -3406,6 +3487,7 @@ export function NewJob({
 
               <SettingRow
                 label="模型名"
+                notice={isApiMode && !vlmModel.trim() ? '请填写 API 提供的模型 ID。' : ''}
                 required={isApiMode}
                 help={
                   isApiMode
@@ -3856,7 +3938,7 @@ export function NewJob({
 
                   <SettingRow
                     label="失败跳过阈值"
-                    help="累计失败几次后跳过这张图（0 = 不限）"
+                    help="同一张图累计失败几次后不再尝试（0 = 不限）"
                   >
                     <input
                       type="number"
@@ -4615,7 +4697,7 @@ export function NewJob({
                         aria-pressed={active}
                         className={`rounded-lx-sm border px-2 py-1 font-mono text-[11px] transition-colors ${
                           active
-                            ? 'border-lx-accent bg-lx-accent-subtle text-lx'
+                            ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
                             : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
                         }`}
                       >
@@ -4779,6 +4861,50 @@ export function NewJob({
                 <ToggleRow checked={checkSpace} onChange={setCheckSpace} label="开跑前检查磁盘" />
               </SettingRow>
             )}
+
+            {/* 打标完成后自动回传。默认关：回传是"另一件事"，失败了不该影响
+                "打标成功"这个结论，所以它只往日志里写一条，不改任务状态。 */}
+            <SettingRow
+              label="完成后自动回传"
+              help="走分块通道；重传只会补缺的块，回传失败不影响任务状态"
+              icon={<CloudUpload size={14} />}
+            >
+              <ToggleRow
+                checked={autoUpload}
+                onChange={setAutoUpload}
+                label="打标完成后把产物推到汇总机"
+              />
+              {autoUpload && (
+                <div className="mt-2.5 space-y-2">
+                  <input
+                    className="lx-input font-mono text-xs"
+                    value={autoUploadUrl}
+                    onChange={(e) => setAutoUploadUrl(e.target.value)}
+                    placeholder="http://192.168.1.10:8000"
+                    spellCheck={false}
+                    aria-label="回传地址"
+                  />
+                  <FieldNotice message={httpUrlError(autoUploadUrl, '回传地址')} />
+                  <input
+                    className="lx-input font-mono text-xs"
+                    type="password"
+                    value={autoUploadToken}
+                    onChange={(e) => setAutoUploadToken(e.target.value)}
+                    placeholder="令牌（对端开了鉴权时必填）"
+                    autoComplete="off"
+                    aria-label="回传令牌"
+                  />
+                  <input
+                    className="lx-input font-mono text-xs"
+                    value={autoUploadDir}
+                    onChange={(e) => setAutoUploadDir(e.target.value)}
+                    placeholder="远端子目录（留空 = 仓库根）"
+                    spellCheck={false}
+                    aria-label="远端子目录"
+                  />
+                </div>
+              )}
+            </SettingRow>
 
             {/* 阈值的默认值来自 tiers.yaml 的 limits 段（后端 /api/defaults 转出来），
                 这里改只影响本次任务，不写回配置文件——配置文件是"团队的默认口径"，
@@ -5061,9 +5187,9 @@ export function NewJob({
             </p>
           </SectionPanel>
 
-          {/* 「产物」改成「统计和状态」：用户在这个页面真正想确认的是
+          {/* 「产物」改成「磁盘与后端」：用户在这个页面真正想确认的是
               "这盘放得下吗 / 后端还活着吗"，而不是产物文件名长得什么样。 */}
-          <SectionPanel title="统计和状态">
+          <SectionPanel title="磁盘与后端">
             <dl className="space-y-2.5 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-lx-muted" title="分片缓存的盘，下载真正受它限制">
@@ -5127,85 +5253,6 @@ export function NewJob({
                 </>
               )}
             </div>
-          </SectionPanel>
-
-          {/* 下载源。放在提交入口上方：填了在线仓库、发现下不动的时候，
-              就地换镜像，不必折回模型页。它是全局设置，不是本次任务的参数。 */}
-          <SectionPanel title="下载源（镜像）">
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-[11px] text-lx-muted">镜像</span>
-                <select
-                  className="lx-select text-xs"
-                  value={endpointPick}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setEndpointPick(v)
-                    setEndpointMsg('')
-                    if (v === 'custom') setEndpointDraft(endpointDraft || 'https://')
-                  }}
-                >
-                  {ENDPOINT_PRESETS.map((p) => (
-                    <option key={p.key || 'default'} value={p.key}>
-                      {p.label}
-                    </option>
-                  ))}
-                  <option value="custom">自定义…</option>
-                </select>
-              </label>
-              {endpointPick === 'custom' && (
-                <label className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="text-[11px] text-lx-muted">地址</span>
-                  <input
-                    className="lx-input font-mono text-xs"
-                    spellCheck={false}
-                    value={endpointDraft}
-                    placeholder="https://hf-mirror.com"
-                    onChange={(e) => {
-                      setEndpointDraft(e.target.value)
-                      setEndpointMsg('')
-                    }}
-                  />
-                </label>
-              )}
-              <button
-                type="button"
-                className="lx-btn-ghost shrink-0 px-3 py-1.5 text-[11px]"
-                disabled={endpointBusy}
-                onClick={() =>
-                  void saveEndpoint(
-                    (endpointPick === 'custom' ? endpointDraft : endpointPick).trim(),
-                  )
-                }
-              >
-                {endpointBusy ? '保存中…' : '保存'}
-              </button>
-            </div>
-            <p className="mt-2 text-[11px] leading-relaxed text-lx-dim">
-              当前生效：<span className="font-mono">{endpointNow || '—'}</span>
-            </p>
-            {endpointMsg && <p className="mt-1 text-[11px] text-lx-muted">{endpointMsg}</p>}
-          </SectionPanel>
-
-          {/* 左下角的提交入口。页顶那个按钮在长表单滚到底以后就看不见了，
-              这里再放一个同样的入口，顺带把「还差什么」直接写出来。 */}
-          <SectionPanel title="提交">
-            <p className="mb-2.5 text-[11px] leading-relaxed text-lx-muted">
-              {missingInput
-                ? isVlm
-                  ? '还差输入：填仓库名，或选本地分片包'
-                  : '还差输入：选图片目录，或 .zip / .tar 素材包'
-                : '提交后到「运行中」看进度'}
-            </p>
-            <button
-              type="button"
-              className="lx-btn-primary lx-launch-glow flex w-full items-center justify-center gap-1.5"
-              disabled={missingInput || busy}
-              onClick={() => void submit()}
-            >
-              <Play size={13} />
-              {busy ? '创建中…' : '开始打标'}
-            </button>
           </SectionPanel>
 
           {!health?.ui_built && (

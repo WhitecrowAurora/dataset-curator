@@ -1,12 +1,6 @@
 /**
- * 调度中心：把 fox-label v3 的 worker 托管成一个可启停的子进程。
- *
- * 这一页刻意只做三件事——填身份、按开始/停止、看日志。派工、心跳、预锁、
- * 租约回收全在 worker 里，这边一行都不复刻：网页里再实现一遍，两边就会
- * 各说各话（谁在续约、谁算数的租约），而"到底哪条算数"是没法从界面上看出来的。
- *
- * 「当前租约」是**只读**看板：后端拿同一套凭据打一次 status，不派工、不续约。
- * 所以打开这一页不会顺手领走一个包——这点很关键，否则"看一眼"就等于开工。
+ * 本机模型准备、主动领片与被动托管。任务和租约仍由 worker 处理；
+ * 打开页面只读取状态，不领片。托管期间本机执行配置锁定。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -20,8 +14,13 @@ import {
   Square,
   Terminal,
 } from 'lucide-react'
-import { api, ApiError, type CenterState } from '../lib/api'
+import { api, ApiError, type CenterState, type CenterExecution } from '../lib/api'
+import { DEFAULT_EXECUTION, ExecutionSettings } from '../components/center/ExecutionSettings'
+import { WorkspacePackages } from '../components/center/WorkspacePackages'
+import { OfflineTasks } from '../components/center/OfflineTasks'
+import { HistoryArtifacts } from '../components/center/HistoryArtifacts'
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
+import { failureAdvice, httpUrlError, localServiceUrlError, latestCenterFailure } from '../lib/guidance'
 import { useFolderPicker } from '../components/FolderPicker'
 import {
   MiniMetricCard,
@@ -32,7 +31,7 @@ import {
 } from '../components/ui/launcher'
 
 const MODES = ['both', 'tag', 'nl']
-const MODE_LABEL: Record<string, string> = { both: 'tag + NL', tag: '只出 tag', nl: '只出 NL' }
+const MODE_LABEL: Record<string, string> = { both: 'TAG + NL', tag: 'TAG', nl: 'NL' }
 
 /**
  * 派工倾向。**不是**"产出什么"，而是"服务端把哪种片排在我前面"——
@@ -40,12 +39,12 @@ const MODE_LABEL: Record<string, string> = { both: 'tag + NL', tag: '只出 tag'
  *   只出 tag + 优先 NL  = 我只会做 tag，却想先拿缺 NL 的片 → 接不到能交的活
  * 所以下面按产出模式筛选项，把这类矛盾直接藏起来而不是让它报错。
  */
-const PREF_OPTIONS: { value: string; label: string; hint: string }[] = [
-  { value: '', label: '不挑', hint: '接任何还欠内容的片（两侧都做）' },
-  { value: 'pref-tag', label: '优先 tag', hint: '先接缺 tag 的片；另一侧也能做，会兜底' },
-  { value: 'pref-nl', label: '优先 NL', hint: '先接缺 NL 的片；另一侧也能做，会兜底' },
-  { value: 'tag', label: '只接 tag', hint: '只接缺 tag 的片；没有就空转等，不白下载' },
-  { value: 'nl', label: '只接 NL', hint: '只接缺 NL 的片；没有就空转等，不白下载' },
+const PREF_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '不挑' },
+  { value: 'pref-tag', label: '优先 TAG' },
+  { value: 'pref-nl', label: '优先 NL' },
+  { value: 'tag', label: '仅 TAG' },
+  { value: 'nl', label: '仅 NL' },
 ]
 
 /** 某个倾向是否与产出模式相容：倾向指向的侧必须真能产出来。 */
@@ -64,6 +63,9 @@ function fmtUptime(sec: number): string {
 
 export function Center({ onLinked }: { onLinked?: () => void }) {
   const [state, setState] = useState<CenterState | null>(null)
+  const [execution, setExecution] = useState<CenterExecution>(DEFAULT_EXECUTION)
+  const [hfToken, setHfToken] = useState('')
+  const [rememberHf, setRememberHf] = useState(false)
   // 两种错误分开存：
   // pollError 是"这一轮没拉到数据"，下一轮成功就该消失；
   // actionError 是"你刚点的那个按钮失败了"，得留着让人看清为什么——
@@ -89,6 +91,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   // 下载口径：连接数同样存字符串（清空后按默认 4 处理），选优是开关
   const [dlConns, setDlConns] = useState('4')
   const [cdnProbe, setCdnProbe] = useState(true)
+  const [autoUpload, setAutoUpload] = useState(true)
   const seeded = useRef(false)
   const folder = useFolderPicker()
 
@@ -100,6 +103,9 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
       if (!seeded.current) {
         seeded.current = true
         setServer(s.config.server)
+        setExecution(Object.fromEntries(Object.keys(DEFAULT_EXECUTION).map((key) =>
+          [key, s.config[key as keyof CenterExecution] ?? DEFAULT_EXECUTION[key as keyof CenterExecution]])) as CenterExecution)
+        setRememberHf(s.credentials?.remember_hf ?? false)
         setUserId(s.config.user_id)
         setMode(s.config.mode || 'both')
         setPartsPref(s.config.parts_pref ?? '')
@@ -109,6 +115,14 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         setMaxPkgs(String(s.config.max_packages ?? 0))
         setDlConns(String(s.config.download_conns ?? 4))
         setCdnProbe(s.config.cdn_probe ?? true)
+        setAutoUpload(s.config.auto_upload ?? true)
+      }
+      if (s.runtime?.active && s.runtime.hosting_mode === 'passive') {
+        setExecution(Object.fromEntries(Object.keys(DEFAULT_EXECUTION).map((key) =>
+          [key, s.config[key as keyof CenterExecution] ?? DEFAULT_EXECUTION[key as keyof CenterExecution]])) as CenterExecution)
+        setMode(s.config.mode)
+        setPartsPref(s.config.parts_pref ?? '')
+        setTagUrl(s.config.tag_url)
       }
     } catch (e) {
       setPollError(e instanceof ApiError ? e.message : String(e))
@@ -134,7 +148,10 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
     setBusy(key)
     setActionError('')
     try {
-      setState(await fn())
+      const s = await fn()
+      setState(s)
+      setRememberHf(s.credentials?.remember_hf ?? false)
+      if (key === 'start' || key === 'save' || key === 'clear-token') setHfToken('')
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -142,22 +159,34 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
     }
   }
 
-  const running = state?.running ?? false
+  const running = Boolean(state?.runtime?.active || state?.runtime?.preparing || state?.running || state?.history?.running)
   const ident = state?.identity ?? {}
   const board = state?.board
-  const cfg = state?.config
   const leases = board?.leases ?? []
   // 只有连上看板、且服务端真的给了这项统计才显示（老服务端 → undefined）
   const pool = board?.ok ? board.parts : undefined
+  const serverNotice = seeded.current ? httpUrlError(server, '调度中心地址') : ''
+  const idNotice = seeded.current && !userId.trim() ? '请填写用户 ID，调度中心按这个 ID 记录产出。' : ''
+  const serviceNotice = seeded.current && mode !== 'tag'
+    ? httpUrlError(tagUrl, '推理服务地址') || (execution.inference_source === 'local' ? localServiceUrlError(tagUrl) : '') : ''
+  const outNotice = seeded.current && !outDir.trim() ? '请选择产物目录，下载的分片和打标结果会保存到这里。' : ''
+  const runtimeFailure = state?.runtime?.error || (state?.runtime?.status === 'failed' ? state.runtime.message || '本轮调度执行失败' : '')
+  const failureDetail = state?.runtime?.error || (runtimeFailure && state?.last_rc != null ? latestCenterFailure(state.log) : '') || runtimeFailure
   // 打标服务与产物目录空着就不让开始：后端对空串是"保持原值"（免得把配置
   // 清成空以后再起不来），所以输入框显示空、实际却用着旧地址，是更难查的错。
   const startBlocked = !ident.device_id
     ? '先在上面连接'
-    : !tagUrl.trim()
+    : mode !== 'tag' && !tagUrl.trim()
       ? '打标服务地址不能为空'
       : !outDir.trim()
         ? '产物目录不能为空'
         : ''
+  const payload = () => ({ ...execution, tag_url: tagUrl, mode, out_dir: outDir,
+    wait: waitMode, max_packages: Number(maxPkgs || 0),
+    download_conns: Math.max(1, Math.min(16, Number(dlConns) || 4)),
+    cdn_probe: cdnProbe, parts_pref: partsPref, auto_upload: autoUpload,
+    remember_hf: rememberHf, ...(hfToken.trim() ? { hf_token: hfToken.trim() } : {}),
+  })
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5">
@@ -168,7 +197,8 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         description="自动分工，分到的分片在本机打标"
         badges={
           running ? (
-            <StatusChip tone="success">运行中 · {fmtUptime(state?.uptime_s ?? 0)}</StatusChip>
+            <StatusChip tone="success">{state?.running ? `运行中 · ${fmtUptime(state?.uptime_s ?? 0)}`
+              : state?.runtime?.hosting_mode === 'passive' ? '托管中' : '准备中'}</StatusChip>
           ) : (
             <StatusChip tone="neutral">已停止</StatusChip>
           )
@@ -185,7 +215,26 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         }
       />
 
-      {(actionError || pollError) && <ErrorBox error={actionError || pollError} />}
+      <WorkspacePackages connected={!!ident.device_id} onChanged={() => void pull()} />
+      <OfflineTasks />
+      <HistoryArtifacts locked={running || Boolean(state?.history?.running)} />
+      {(actionError || pollError) && <ErrorBox error={actionError || pollError}
+        nextStep={failureAdvice(actionError || pollError, 'center')} />}
+      {runtimeFailure && <ErrorBox error={failureDetail} title="调度运行失败"
+        nextStep={failureAdvice(failureDetail, 'center')}
+        actions={<button type="button" className="lx-btn-ghost"
+          onClick={() => document.getElementById('center-logs')?.scrollIntoView({ block: 'start' })}>查看调度日志</button>} />}
+      {state?.runtime?.message && <p className="text-xs text-lx-muted">{state.runtime.message}</p>}
+      {state?.runtime?.managed && <div className="rounded-lx-sm border border-lx p-3 text-xs text-lx-muted">
+        托管连接：{({ online: '已连接', connecting: '连接中', unsupported: '等待服务端升级',
+          offline: '连接中断，自动重连', released: '已退出托管' } as Record<string, string>)[state.runtime.managed.status]
+          ?? state.runtime.managed.status}
+        {state.runtime.managed.error && <p className="mt-1 text-lx-warning">{state.runtime.managed.error}</p>}
+        {state.runtime.managed.results.slice(-3).map((r) => <p key={r.id} className="mt-1">
+          指令 {r.seq}：{({ accepted: '准备执行', applied: '已执行', failed: '失败', canceled: '已取消' } as Record<string, string>)[r.status] ?? r.status}
+          {r.error && ` · ${r.error}`}
+        </p>)}
+      </div>}
 
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <MiniMetricCard
@@ -250,22 +299,27 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
       >
         <SettingRow
           label="调度中心地址"
+          notice={serverNotice}
           help="形如 http://1.2.3.4:31831"
           required
         >
           <input
             className="lx-input font-mono text-xs"
             value={server}
+            aria-label="调度中心地址"
+            aria-invalid={Boolean(serverNotice)}
             onChange={(e) => setServer(e.target.value)}
             placeholder="http://1.2.3.4:31831"
             spellCheck={false}
             disabled={running}
           />
         </SettingRow>
-        <SettingRow label="ID" help="服务端按它记录你的产出" required>
+        <SettingRow label="ID" help="服务端按它记录你的产出" required notice={idNotice}>
           <input
             className="lx-input text-xs"
             value={userId}
+            aria-label="用户 ID"
+            aria-invalid={Boolean(idNotice)}
             onChange={(e) => setUserId(e.target.value)}
             placeholder="zhangsan"
             spellCheck={false}
@@ -370,45 +424,41 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
               ) : (
                 <Square size={13} />
               )}
-              <span className="ml-1.5">停止</span>
+              <span className="ml-1.5">{state?.runtime?.hosting_mode === 'passive' ? '退出托管' : '停止'}</span>
             </button>
           ) : (
+            <div className="flex gap-2">
+            <button type="button" className="lx-btn-ghost" disabled={Boolean(busy) || !seeded.current}
+              onClick={() => void act('save', () => api.centerConfigure(payload()))}>保存配置</button>
             <button
               type="button"
               className="lx-btn-primary"
-              disabled={busy === 'start' || Boolean(startBlocked)}
+              disabled={Boolean(busy) || !seeded.current || Boolean(startBlocked)}
               title={startBlocked}
               onClick={() =>
                 void act('start', () =>
-                  api.centerStart({
-                    tag_url: tagUrl,
-                    mode,
-                    out_dir: outDir,
-                    // 心跳留空 = 用服务端建议值；这里的数只是"上次用的"，
-                    // 页面不让人乱调（调小了对服务端是额外的负载）。
-                    interval: cfg?.interval,
-                    extra_args: cfg?.extra_args,
-                    wait: waitMode,
-                    max_packages: Number(maxPkgs || 0),
-                    download_conns: Math.max(1, Math.min(16, Number(dlConns) || 4)),
-                    cdn_probe: cdnProbe,
-                    parts_pref: partsPref,
-                  }),
+                  api.centerStart(payload()),
                 )
               }
             >
               {busy === 'start' ? <Loader2 size={14} className="animate-spin" /> : <Play size={13} />}
-              <span className="ml-1.5">开始</span>
+              <span className="ml-1.5">{execution.hosting_mode === 'passive' ? '开始托管' : '开始'}</span>
             </button>
+            </div>
           )
         }
       >
+        <ExecutionSettings value={execution} onChange={setExecution} mode={mode} disabled={running}
+          token={hfToken} onToken={setHfToken} remember={rememberHf} onRemember={setRememberHf}
+          tokenSet={state?.credentials?.hf_token_set ?? false}
+          onClear={() => void act('clear-token', () => api.centerConfigure({ hf_token: '', remember_hf: false }))} />
         <SettingRow label="产出模式" help="both 出 tag 与 NL；单模式更快">
           <ChoiceGrid
             options={MODES}
             value={mode}
             onChange={(v) => {
               setMode(v)
+              if (v === 'tag' && execution.tag_backend === 'none') setExecution({ ...execution, tag_backend: 'wd-eva02' })
               // 切成单侧时，指向另一侧的倾向当场清掉。留着的话表单看起来
               // 正常，点「开始」才被后端 400 拦下——那是最难自查的一类错。
               if (!prefFitsMode(partsPref, v)) setPartsPref('')
@@ -444,9 +494,6 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
                   </option>
                 ))}
               </select>
-              <span className="text-[10.5px] leading-relaxed text-lx-dim">
-                {PREF_OPTIONS.find((o) => o.value === partsPref)?.hint}
-              </span>
             </div>
           ) : (
             <span className="text-xs text-lx-muted">
@@ -454,7 +501,9 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             </span>
           )}
         </SettingRow>
-        <SettingRow label="打标服务" help="worker 调用的 serve 地址">
+        {mode !== 'tag' && <SettingRow label={execution.inference_source === 'local' ? '本机服务地址' : '打标服务地址'}
+          notice={serviceNotice}
+          help={execution.inference_source === 'local' ? '本机自动启动使用此端口' : '已有模型推理服务地址'}>
           <input
             className="lx-input font-mono text-xs"
             value={tagUrl}
@@ -462,10 +511,11 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             placeholder="http://127.0.0.1:8000"
             spellCheck={false}
             disabled={running}
-            aria-invalid={!tagUrl.trim()}
+            aria-label="推理服务地址"
+            aria-invalid={Boolean(serviceNotice)}
           />
-        </SettingRow>
-        <SettingRow label="产物目录" help="分片与打标产物都落这里">
+        </SettingRow>}
+        <SettingRow label="产物目录" help="分片与打标产物都落这里" notice={outNotice}>
           <div className="flex gap-2">
             <input
               className="lx-input font-mono text-xs"
@@ -474,7 +524,8 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
               placeholder="work/fox-work"
               spellCheck={false}
               disabled={running}
-              aria-invalid={!outDir.trim()}
+              aria-label="产物目录"
+              aria-invalid={Boolean(outNotice)}
             />
             <button
               type="button"
@@ -490,15 +541,20 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
 
         <div className="mt-4 border-t border-lx pt-3">
           <ToggleRow
+            checked={autoUpload}
+            onChange={setAutoUpload}
+            disabled={running}
+            label="自动回传"
+          />
+          <ToggleRow
             checked={waitMode}
             onChange={setWaitMode}
             disabled={running}
-            label="挂着等派工（池子空了也不停）"
-            hint="关掉 = 手头的干完就停"
+            label="等待派工"
           />
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-lx-muted">本次最多打多少片</span>
+              <span className="text-[11px] text-lx-muted">分片上限</span>
               <input
                 className="lx-input w-24 font-mono text-xs tabular-nums"
                 inputMode="numeric"
@@ -522,8 +578,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             checked={cdnProbe}
             onChange={setCdnProbe}
             disabled={running}
-            label="下载前测速选最快 CDN"
-            hint="每片开工前拉 2MiB 探一次，v4/v6 都测，钉住最快的那条边缘"
+            label="CDN 测速"
           />
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
@@ -575,7 +630,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
                   {l.repo}/{l.package}
                 </span>
                 <span className="shrink-0 font-mono text-[11px] tabular-nums text-lx-muted">
-                  剩 {Math.round(l.expires_in)}s
+                  {typeof l.expires_in === 'number' ? `剩 ${Math.round(l.expires_in)}s` : '待申报完成'}
                 </span>
               </div>
             ))}
@@ -583,6 +638,7 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         )}
       </SectionPanel>
 
+      <div id="center-logs" className="scroll-mt-4" />
       <SectionPanel title="日志" description="最近 120 行">
         {state && state.log.length > 0 ? (
           <pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed text-lx-muted">

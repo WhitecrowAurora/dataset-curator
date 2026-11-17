@@ -28,6 +28,10 @@ from pathlib import Path
 
 
 def main(argv: list[str]) -> None:
+    # 内嵌 Python 忽略编码环境变量，转换日志的读取端使用 UTF-8。
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     if not argv:
         raise SystemExit(
             "用法：convert_runner.py <工具目录> [convert_hf_to_gguf.py 的参数...]")

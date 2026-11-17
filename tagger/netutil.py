@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+import os
 from urllib.parse import urlsplit
+from urllib.request import getproxies
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})
 
@@ -42,3 +44,16 @@ def is_loopback_url(url: str) -> bool:
 def trust_env_for(url: str) -> bool:
     """给 httpx 的 `trust_env` 用：本机地址返回 False（不吃系统代理）。"""
     return not is_loopback_url(url)
+
+
+def curl_env(url: str) -> dict[str, str]:
+    """curl uses environment proxies; include Windows system settings used by Python."""
+    env = dict(os.environ)
+    if is_loopback_url(url):
+        env.update(no_proxy="*", NO_PROXY="*")
+    elif os.name == "nt":
+        for scheme, proxy in getproxies().items():
+            key = scheme + "_proxy"
+            if scheme in ("http", "https", "all", "no") and key not in env and key.upper() not in env:
+                env[key] = proxy
+    return env

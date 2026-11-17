@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Wand2 } from 'lucide-react'
 import { springSnappy } from '../lib/motion'
@@ -11,6 +11,11 @@ export type NavItem = {
   active: boolean
   disabled?: boolean
   hint?: string
+  /**
+   * 所属分组。只在这一组的**第一项**上写，渲染时由它带出一条分割线和组标题；
+   * 组内其余项留空。相邻两项分组名相同就不重复画线。
+   */
+  section?: string
   onClick: () => void
 }
 
@@ -21,6 +26,7 @@ export type NavItem = {
 export function Sidebar({
   items,
   actions,
+  setup,
   footer,
 }: {
   items: NavItem[]
@@ -30,10 +36,11 @@ export function Sidebar({
    * 人以为点一下只是看看。
    */
   actions?: ReactNode
+  setup?: ReactNode
   footer?: ReactNode
 }) {
   return (
-    <aside className="flex w-[196px] shrink-0 flex-col border-r border-lx bg-lx-sidebar-bg">
+    <aside className="flex min-h-0 w-[196px] shrink-0 flex-col border-r border-lx bg-lx-sidebar-bg">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-lx px-3">
         <span className="grid h-6 w-6 place-items-center rounded-lx-sm bg-lx-accent-subtle text-lx-accent">
           <Wand2 size={14} />
@@ -46,58 +53,72 @@ export function Sidebar({
         </div>
       </div>
 
-      <nav className="flex flex-col gap-px px-2 py-2" aria-label="主导航">
-        {items.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={item.onClick}
-            disabled={item.disabled}
-            aria-current={item.active ? 'page' : undefined}
-            title={item.hint}
-            className={cn(
-              'group relative flex items-center gap-2 rounded-lx-sm px-2 py-[6px] text-left text-[12.5px] transition-colors',
-              item.active ? 'text-lx' : 'text-lx-secondary',
-              item.disabled
-                ? 'cursor-not-allowed opacity-40'
-                : 'cursor-pointer hover:text-lx hover:bg-[color-mix(in_srgb,var(--lx-text)_4%,transparent)]',
-            )}
-          >
-            {item.active && (
-              <motion.span
-                layoutId="nav-active-bg"
-                className="absolute inset-0 rounded-lx-sm bg-lx-accent-subtle"
-                transition={springSnappy}
-              />
-            )}
-            {item.active && (
-              // 强调条要贴满整行高度：原来写的是 h-4 + 垂直居中，行高约 30px，
-              // 上下各空出 7px，看起来就是"只画了一半"。留 4px 是因为按钮本身
-              // 有圆角，顶满会让竖条的直角戳出圆角外。
-              <motion.span
-                layoutId="nav-active-bar"
-                className="absolute inset-y-1 left-0 w-[2px] rounded-full bg-lx-accent"
-                transition={springSnappy}
-              />
-            )}
-            <span
-              className={cn(
-                'relative z-10 shrink-0',
-                item.active ? 'text-lx-accent' : 'text-lx-muted group-hover:text-lx-secondary',
+      <nav className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 py-2" aria-label="主导航">
+        {items.map((item, index) => {
+          // 十八项平铺时只能靠图标认路。组标题兼分割线：一眼就能按"干什么"折回去找。
+          const startsSection =
+            Boolean(item.section) && item.section !== (items[index - 1]?.section ?? '')
+          return (
+            <Fragment key={item.key}>
+              {startsSection && (
+                <div className="mt-1.5 border-t border-lx px-2 pt-1.5 first:mt-0 first:border-t-0 first:pt-0">
+                  <span className="text-[9.5px] font-medium tracking-[0.08em] text-lx-muted">
+                    {item.section}
+                  </span>
+                </div>
               )}
-            >
-              {item.icon}
-            </span>
-            <span className="relative z-10 min-w-0 flex-1 truncate">{item.label}</span>
-          </button>
-        ))}
+              <button
+                type="button"
+                onClick={item.onClick}
+                disabled={item.disabled}
+                aria-current={item.active ? 'page' : undefined}
+                title={item.hint}
+                className={cn(
+                  'group relative flex items-center gap-2 rounded-lx-sm px-2 py-[6px] text-left text-[12.5px] transition-colors',
+                  item.active ? 'text-lx' : 'text-lx-secondary',
+                  item.disabled
+                    ? 'cursor-not-allowed opacity-40'
+                    : 'cursor-pointer hover:text-lx hover:bg-[color-mix(in_srgb,var(--lx-text)_4%,transparent)]',
+                )}
+              >
+                {item.active && (
+                  <motion.span
+                    layoutId="nav-active-bg"
+                    className="absolute inset-0 rounded-lx-sm bg-lx-accent-subtle"
+                    transition={springSnappy}
+                  />
+                )}
+                {item.active && (
+                  // 强调条要贴满整行高度：原来写的是 h-4 + 垂直居中，行高约 30px，
+                  // 上下各空出 7px，看起来就是"只画了一半"。留 4px 是因为按钮本身
+                  // 有圆角，顶满会让竖条的直角戳出圆角外。
+                  <motion.span
+                    layoutId="nav-active-bar"
+                    className="absolute inset-y-1 left-0 w-[2px] rounded-full bg-lx-accent"
+                    transition={springSnappy}
+                  />
+                )}
+                <span
+                  className={cn(
+                    'relative z-10 shrink-0',
+                    item.active ? 'text-lx-accent' : 'text-lx-muted group-hover:text-lx-secondary',
+                  )}
+                >
+                  {item.icon}
+                </span>
+                <span className="relative z-10 min-w-0 flex-1 truncate">{item.label}</span>
+              </button>
+            </Fragment>
+          )
+        })}
       </nav>
 
       {actions && (
-        <div className="border-t border-lx px-2 py-2">{actions}</div>
+        <div className="shrink-0 border-t border-lx px-2 py-2">{actions}</div>
       )}
 
-      <div className="mt-auto border-t border-lx px-2.5 py-2.5">{footer}</div>
+      {setup && <div className="shrink-0 border-t border-lx px-2 py-2">{setup}</div>}
+      <div className="shrink-0 border-t border-lx px-2.5 py-2.5">{footer}</div>
     </aside>
   )
 }

@@ -364,7 +364,7 @@ function describe(item: Activity): { pct: number; parts: string[]; hint: string 
   const parts: string[] = []
   if (total > 0) parts.push(`${fmtCount(done)}/${fmtCount(total)}`)
   else parts.push(done > 0 ? fmtCount(done) : '--')
-  parts.push(rate > 0 ? `${rate.toFixed(0)}/s` : '--')
+  parts.push(rate > 0 ? `${rate.toFixed(2)}/s` : '--')
   parts.push(eta_s !== null && eta_s !== undefined && eta_s > 0 ? `剩 ${fmtEta(eta_s)}` : '--')
 
   const hint = [item.detail, stageLabel(item)].filter(Boolean).join(' · ')
@@ -372,6 +372,7 @@ function describe(item: Activity): { pct: number; parts: string[]; hint: string 
 }
 
 function stageLabel(item: Activity): string {
+  if (item.status === 'paused') return '已暂停'
   if (item.kind === 'check') return item.phase === 'read' ? '读入中' : '核对中'
   if (item.kind === 'merge') return item.phase === 'read' ? '读入中' : '写出中'
   if (item.kind === 'tag') return item.phase === 'pack' ? '封包中' : '打标中'

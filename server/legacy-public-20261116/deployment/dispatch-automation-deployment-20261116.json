@@ -1,0 +1,154 @@
+{
+  "date": "2026-11-16",
+  "backup": "/tagger/.delete/dispatch-automation-20261116-022359",
+  "source_files": {
+    "fox-label/assignments/store.py": {
+      "before": "c20935ad6a0703a9fbb41ec4c1fddb5568e58fae56f6130bc3797e1e4c3ef201",
+      "after": "baf7ae301e3537cade5d561027acb7b75e3e621c403db3a8c51d8b007805b823"
+    },
+    "fox-label/delivery/reconciliation.py": {
+      "before": null,
+      "after": "508657b5410cf89ae00cda7bbe8ffa74010e59ec590d7c8de43252583d3a5cfb"
+    },
+    "fox-label/delivery/routes.py": {
+      "before": "ba06d24d7431bcaa9b37fd46d80e7049acd3453e419a8a29b4ecbd12a624b225",
+      "after": "a57b189ea04a33329bdcdd15885b613982f843e6e5d9a5941fb5c505b8a28fc9"
+    },
+    "fox-label/delivery/service.py": {
+      "before": "14e64445cd604d1a898182b4749533e62e12449384b57326f59d4fa89cf427c4",
+      "after": "b617b3ed0e1b438e18b075fd60da5de8554afb3ffa70e3034a854e4da2cb6a5e"
+    },
+    "fox-label/delivery/uploads.py": {
+      "before": null,
+      "after": "e443d15be40bad5fed7c35d45ccb33c6d24502c93c7da1b0e710323f387390c7"
+    },
+    "fox-label/dispatch.py": {
+      "before": "970169a1eb9eada3c07a16f814ec035da79cfab3dc7137cf33692547b326bca3",
+      "after": "0c978a44d3c4fbfa5e8b3541ee2cddd10e2cb3d1ce5e068b407a269a1daf9c20"
+    },
+    "fox-label/history/store.py": {
+      "before": "220ccf75082cb9bd55b8a7c9c45a77d9f64c3ce1babd73e0edbc312f9d0c1451",
+      "after": "37967f8de3edd5fcd66f3baea27f0be878b47cc07c4f955dc923e39eaea2454d"
+    },
+    "fox-label/managed/automation.py": {
+      "before": null,
+      "after": "5d71c8b350b36c7b420eab9a9a68bb5a56fcd128cc92d2121f29b22ec795d1b9"
+    },
+    "fox-label/managed/store.py": {
+      "before": "9b6695d968f46cfbb5546b1cb9754cecf8356b037592136ee0ea5f7db0210ab7",
+      "after": "d0ebf9ec5f31ef698fe8fac5e1a898fe783700cf138d40f635c7f8de92ef96ab"
+    },
+    "fox-label/scheduling/__init__.py": {
+      "before": null,
+      "after": "3b1e8fb0d2d12010f6902f8162b5645c8f241fee8976dab77efd77fda9bfb532"
+    },
+    "fox-label/scheduling/leases.py": {
+      "before": null,
+      "after": "03b6d876754c8092592d3cb1bdb7227aaafb5a14aafe7b136b2769e07b5e5977"
+    },
+    "fox-label/scheduling/maintenance.py": {
+      "before": null,
+      "after": "ec4ac4bd7430b4bfeda7fb521c1c4d2a34ed01060512d674ff55296253ee413a"
+    },
+    "fox-label/scheduling/packages.py": {
+      "before": null,
+      "after": "2c20099af465a4d40edf0cf7a28fc4e8882af28b9f61bda70ab16e1b80132ce6"
+    },
+    "fox-label/scheduling/policies.py": {
+      "before": null,
+      "after": "c1cee6890e5fc345a3a7c945ceb7734f67af14bf371d2caef11f94474fa220ff"
+    },
+    "fox-label/scheduling/reservations.py": {
+      "before": null,
+      "after": "988dba7a9cc6ef2aefe71c6490dd2c93b78e2e0b6bda3af4d61db00ad8eb3a35"
+    },
+    "fox-label/scheduling/routes.py": {
+      "before": null,
+      "after": "4fb2dd876d89fc659f945c6c06891b7e4df82da6e0d500894ef54c1da9716814"
+    },
+    "fox-label/scheduling/selection.py": {
+      "before": null,
+      "after": "ca363c333f5fbd6dd5ac39541feb5c80ed5703acb5c703fbb070741dc4a1e299"
+    },
+    "fox-label/server.py": {
+      "before": "b50a324794ab9983709b0775388100638f353ab49b6d5d0aec0050e46339ad98",
+      "after": "e14c142ea09cf84a270f10cc1547ed31e4bf798f1333943079da09491eb91d66"
+    },
+    "fox-label/verification/history.py": {
+      "before": "8330519d2435567128f0c9d1795c93ea9e4b4989f73cbe76b552bd7a2db5523a",
+      "after": "a13a1f21d0c1b3084426762fa4ad704ee0ee29db5efc581127a25351b0cefa9b"
+    },
+    "fox-label/worker-sources.json": {
+      "before": null,
+      "after": "4b1aa16787d8870c279afc5cb20d7a1d17f28b51353cab6d77a17c3b288ac4d2"
+    },
+    "fox-label/worker.py": {
+      "before": "c5087a1e55fdf4ae4281e9b74d257c4b7a5153b65713e2b6ae2dd0c67c6929ee",
+      "after": "0a57e531db0f2b1bf8d2139c9e112d05510c54408ef849ecf789cc9d82197297"
+    },
+    "fox-panel/panel.py": {
+      "before": "721deae13c0e82d0af15c650f863b8b002315cb6a752fc664b91f8da32be49e9",
+      "after": "9bd4a04dd7ce0260b8995ddfaabfe6f7ce9ea7e8efffe69823a41a8e04972074"
+    },
+    "fox-panel/web/app.js": {
+      "before": "8040bd6c74ffbb4ca0461477faeb35a637ae81ac0c6ec2a80a5022c318761e6e",
+      "after": "888506405453ba680636dddbb033c4470aa3347a1dc074996c10dde66acbd7af"
+    },
+    "fox-panel/web/index.html": {
+      "before": "7756fe0e909e808691b7bce013f1aef7f3a238f46e05df21f4ddcdcf710c9835",
+      "after": "b67ea32820a104f9715d0a45b564b3e6eeb34b403b19292b7fc2007ac0af4766"
+    },
+    "fox-panel/web/managed.js": {
+      "before": "0bae5f69656bdbef8ddcdccbeaa71fc37e483762bc2b38a8547bc85f5a4fa93a",
+      "after": "c56456877579344f686b29f8439c714a14a3afd1cd33a31a5e77a38731e548fd"
+    },
+    "fox-panel/web/scheduling.js": {
+      "before": null,
+      "after": "7293b34316f57a70caabf6919331b67675a582bc578b441b421bd5306df0a3c9"
+    },
+    "fox-panel/web/workspace.js": {
+      "before": "4aa470af0f3079cb748b67ac33cd2becd9cfa531f102c6e5c6e784ce04afa9e0",
+      "after": "8f6ac85f30112825a59ad975297a215630ed6fab52d39f4f55cf36b5c04e6ec6"
+    }
+  },
+  "source_files_changed": 27,
+  "http": {
+    "/api/summary": 200,
+    "/api/workspaces": 200,
+    "/api/scheduling": 200,
+    "/api/managed/devices": 200,
+    "/api/workspace-packages?ws_id=fox768": 200,
+    "nginx/health": 200,
+    "nginx/static/scheduling.js": 200,
+    "nginx/static/workspace.js": 200,
+    "nginx/api/scheduling": 200
+  },
+  "services": [
+    "active",
+    "active"
+  ],
+  "inventory_before": {
+    "repos": 2,
+    "packages": 135,
+    "users": 11,
+    "devices": 13,
+    "leases": 256
+  },
+  "inventory_after": {
+    "repos": 2,
+    "packages": 135,
+    "users": 11,
+    "devices": 13,
+    "leases": 256
+  },
+  "open_active_preserved": 1,
+  "integrity": "ok",
+  "test_accounts_created": 0,
+  "test_uploads_created": 0,
+  "delivery_integrity": "ok",
+  "delivery_files": 0,
+  "all_deployed_sha_verified": true,
+  "test_fixture_stopped": true,
+  "workspace_refresh": true,
+  "remote_test_files_removed": true
+}

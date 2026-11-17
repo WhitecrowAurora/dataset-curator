@@ -106,7 +106,7 @@ export function ChoiceGrid<T extends string>({
             onClick={() => (blocked ? onBlocked?.(opt) : onChange(opt))}
             className={`${sizeClass} rounded-lx-sm font-medium transition-colors border ${mono ? 'font-mono' : ''} ${
               active
-                ? 'bg-lx-accent-subtle border-lx-accent text-lx'
+                ? 'bg-lx-accent-subtle border-lx-accent text-lx-selected'
                 : 'bg-lx-surface-raised border-lx text-lx-muted hover:text-lx'
             } ${blocked ? 'opacity-45 line-through decoration-lx-dim decoration-1' : ''} ${
               disabled || blocked ? 'cursor-not-allowed' : 'cursor-pointer'
@@ -201,7 +201,7 @@ export function ChoiceMulti<T extends string>({
               mono ? 'font-mono' : ''
             } ${
               active
-                ? 'bg-lx-accent-subtle border-lx-accent text-lx'
+                ? 'bg-lx-accent-subtle border-lx-accent text-lx-selected'
                 : 'bg-lx-surface-raised border-lx text-lx-muted hover:text-lx'
             } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           >
@@ -275,10 +275,14 @@ export function ErrorBox({
   error,
   tone = 'danger',
   title,
+  nextStep,
+  actions,
 }: {
   error: string
   tone?: ErrorBoxTone
   title?: string
+  nextStep?: string
+  actions?: React.ReactNode
 }) {
   if (!error) return null
   const palette = ERROR_BOX_PALETTE[tone]
@@ -295,6 +299,8 @@ export function ErrorBox({
         <pre className={`mt-1 text-xs ${palette.textSoft} whitespace-pre-wrap break-all font-mono`}>
           {error}
         </pre>
+        {nextStep && <p className={`mt-2 text-xs leading-relaxed ${palette.textSoft}`}>{nextStep}</p>}
+        {actions && <div className="mt-2 flex flex-wrap gap-2">{actions}</div>}
       </div>
     </div>
   )

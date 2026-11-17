@@ -42,6 +42,9 @@
   --lx-accent-text:     #f4735a;
   --lx-accent-glow:     rgba(238, 76, 44, 0.38);
   --lx-on-accent:       #ffffff;
+  /* 选中项文字：深色下与正文同色即可（底色已经把它托起来了），
+     浅色下必须换成深橙，否则淡底 + 灰字 = 看不出哪个被选中。 */
+  --lx-selected-fg:     #e7eaef;
 
   /* 状态色 */
   --lx-secondary:         #7c8ba1;
@@ -67,6 +70,9 @@
   /* 中性进度条：accent 只留给"正在发生"和告警 */
   --lx-bar-track:       #1c232c;
   --lx-bar-fill:        #3a4553;
+
+  /* 卡片悬停阴影。深色底上用纯黑才压得住，浅色底上纯黑会糊成一团，所以走 token。 */
+  --lx-shadow-hover:    0 10px 22px -6px rgba(0, 0, 0, 0.55);
 
   /* 圆角 */
   --lx-radius:          8px;
@@ -114,19 +120,24 @@
 
   --lx-text:            #161b22;
   --lx-text-secondary:  #48525f;
-  --lx-text-muted:      #78838f;
-  --lx-text-dim:        #aab4c0;
+  /* 白底上三档灰各自都要够读：原来的 #78838f 只有 3.9:1、#aab4c0 只有 2.2:1，
+     小字提示与 placeholder 看起来发虚。 */
+  --lx-text-muted:      #5c6875;
+  --lx-text-dim:        #6e7986;
 
   --lx-accent:          #ee4c2c;
   --lx-accent-light:    #f4694c;
   --lx-accent-dark:     #d33d20;
-  --lx-accent-subtle:   rgba(238, 76, 44, 0.09);
+  /* 0.09 在深色里当"选中底"够用，在白纸上几乎透明：分段控件选中的那一格
+     会和没选的一样白。浅色单独加到 0.14。 */
+  --lx-accent-subtle:   rgba(238, 76, 44, 0.14);
   --lx-accent-border:   rgba(238, 76, 44, 0.32);
   --lx-accent-ring:     rgba(238, 76, 44, 0.14);
   --lx-accent-shadow:   rgba(238, 76, 44, 0.18);
   --lx-accent-text:     #cf3d1c;
   --lx-accent-glow:     rgba(238, 76, 44, 0.30);
   --lx-on-accent:       #ffffff;
+  --lx-selected-fg:     #c8371a;
 
   --lx-secondary:         #64748b;
   --lx-secondary-text:    #52606f;
@@ -148,4 +159,6 @@
   --lx-console-bg:      #f7f9fb;
   --lx-bar-track:       #e6eaf0;
   --lx-bar-fill:        #b9c2ce;
+
+  --lx-shadow-hover:    0 12px 24px -10px rgba(15, 23, 42, 0.18);
 }

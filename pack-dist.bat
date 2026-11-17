@@ -7,6 +7,7 @@ rem  new in the repo is ignored until it is added here -- that is deliberate.
 rem  models\ is 42GB and work\ run\ node_modules are junk for the receiver, and
 rem  a blacklist would need updating every time one of those grows a new folder.
 rem
+rem  Requires Python to generate the standalone worker (env\python preferred).
 rem  Usage:
 rem    pack-dist.bat                    zip without env\python (~60MB)
 rem    pack-dist.bat -WithEnv           zip with a pruned env\python
@@ -155,7 +156,9 @@ set "RC=0"
 robocopy "%ROOT%\tagger" "%STAGE%\tagger" /E /XD node_modules __pycache__ dist.bak .vite /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto copy_failed
 
-robocopy "%ROOT%\devtools" "%STAGE%\devtools" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
+robocopy "%ROOT%\devtools" "%STAGE%\devtools" setup_embedded_env.ps1 embedded-env.md /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto copy_failed
+robocopy "%ROOT%\devtools\release" "%STAGE%\devtools\release" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto copy_failed
 
 rem MCP server for the receiver's own AI assistant. Pure stdlib Python, so it
@@ -166,16 +169,20 @@ if exist "%ROOT%\mcp" (
 )
 
 if exist "%ROOT%\configs" (
-    robocopy "%ROOT%\configs" "%STAGE%\configs" /E /XD __pycache__ /XF *.pyc /NFL /NDL /NJH /NJS /NP >nul
+    robocopy "%ROOT%\configs" "%STAGE%\configs" tiers.yaml /NFL /NDL /NJH /NJS /NP >nul
     if errorlevel 8 goto copy_failed
     rem models.json is the receiver's OWN overlay: models they added, custom
     rem download dirs, proxy, notes, and the gguf_quants entries written by
     rem local quantization. Shipping ours means "upgrade once, lose all of it"
     rem (ours is usually just {}). Ship tiers.yaml, never this file.
-    if exist "%STAGE%\configs\models.json" del /q "%STAGE%\configs\models.json"
     rem ui-form.json is the "last used form" memory: material paths, VRAM
     rem knobs, concurrency. Same reasoning -- never ship ours over theirs.
-    if exist "%STAGE%\configs\ui-form.json" del /q "%STAGE%\configs\ui-form.json"
+    rem nl_api.json is PLAINTEXT SECRETS: provider api keys, prices and the HF
+    rem token, written by the NL-API card on the service page. This one is not a
+    rem lost-settings problem, it is a leak -- whoever packs must never hand out
+    rem their key with the build. Anyone who really wants a pre-filled receiver
+    rem can paste it in once after install.
+    rem setup.json is also machine state; only tiers.yaml is distributed.
 )
 
 rem NL prompt presets: prompt\*.json, one file per preset. The FILE NAME is what
@@ -193,6 +200,29 @@ if exist "%ROOT%\prompt" (
     )
 ) else (
     echo  [pack] WARNING: prompt\ is missing, the receiver gets no presets.
+)
+
+rem prompts\*.md are the RULE files (tag / caption / on-image text / dense retry),
+rem read by tagger\prompt_rules.py. Missing them is silent: the client falls back
+rem to the built-in rules, which carry no on-image-text clause and no dense-retry
+rem wording -- so on text-heavy shards the model transcribes every small label as
+rem a tag, blows max_tokens in the TAGS block and never gets to write a caption.
+rem That shipped as "almost every image in that pack failed on truncation" on
+rem 2026-11-13; this block is the fix. Not to be confused with prompt\ above
+rem -- that one is the JSON presets for the NL prompt dropdown, both must ship.
+rem NOTE: no parentheses inside these echo lines. A stray ) closes the enclosing
+rem block early and cmd dies with ". was unexpected at this time", which looks
+rem nothing like an echo problem.
+if exist "%ROOT%\prompts" (
+    robocopy "%ROOT%\prompts" "%STAGE%\prompts" /E /XF *.tmp *.log /NFL /NDL /NJH /NJS /NP >nul
+    if errorlevel 8 goto copy_failed
+    if not exist "%STAGE%\prompts\*.md" (
+        echo  [pack] WARNING: prompts\ has no .md rule file. Receivers would run on
+        echo         the built-in rules, which carry no on-image-text clause and no
+        echo         dense-retry wording.
+    )
+) else (
+    echo  [pack] WARNING: prompts\ is missing. Receivers get built-in rules only.
 )
 
 rem desktop\ is source only: bin\ and obj\ hold last build's intermediate
@@ -246,9 +276,6 @@ if "%WITHLLAMA%"=="1" (
 for %%F in (install.bat install.sh tagger.cmd tagger.sh run-web.cmd run-web.sh) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
 )
-rem HANDOFF.md lives in devtools\ (it is shipped there by the devtools copy
-rem above). It used to be listed here as a root file, which silently did
-rem nothing -- "if exist" hides a moved file, so that entry was dead.
 rem agent.md is the AI-facing guide that goes with the mcp\ folder above.
 for %%F in (requirements-embedded.txt requirements-tag.txt pyproject.toml prune-env.bat pack-dist.bat pack-readme.txt agent.md) do (
     if exist "%ROOT%\%%F" copy /y "%ROOT%\%%F" "%STAGE%\%%F" >nul
@@ -271,23 +298,21 @@ if exist "%ROOT%\pack-readme.txt" (
     copy /y "%ROOT%\pack-readme.txt" "%STAGE%\README-FIRST.txt" >nul
 )
 
+rem Generate worker from the same sources; relocate only the staged environment.
+set "PAYLOAD_ARGS="
+if "%WITHENV%"=="1" set "PAYLOAD_ARGS=-WithEnv"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\devtools\release\prepare_payload.ps1" -Stage "%STAGE%" %PAYLOAD_ARGS%
+if errorlevel 1 goto payload_failed
+
 rem tmp\ is this machine's scratch (extracted archives, sqlite spills, child
 rem process caches -- see tagger\tmpdir.py). It is recreated on first use, so
 rem shipping it only adds whatever junk happened to be lying around.
-if exist "%STAGE%\tmp" rd /s /q "%STAGE%\tmp" 2>nul
+rem tmp is outside the whitelist and is never staged.
 
 rem ---------------------------------------------------------------- zip
-where tar >nul 2>nul
-if errorlevel 1 goto zip_via_ps
-
 echo  [pack] compressing...
-tar -a -c -f "!OUT!" -C "%TMPBASE%" "%NAME%"
-if errorlevel 1 goto zip_failed
-goto zipped
-
-:zip_via_ps
-echo  [pack] tar not found, falling back to Compress-Archive...
-powershell -NoProfile -Command "Compress-Archive -Path '%STAGE%' -DestinationPath '%OUT%' -Force -CompressionLevel Optimal"
+rem Explicit UTF-8 ZIP names keep Chinese prompt names portable.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\devtools\release\create_archive.ps1" -Stage "%STAGE%" -OutputPath "%OUT%"
 if errorlevel 1 goto zip_failed
 
 :zipped
@@ -309,7 +334,8 @@ if "%WITHENV%"=="0" (
     echo         which downloads dependencies ^(needs a network connection^).
 )
 
-rd /s /q "%TMPBASE%" 2>nul
+call :archive_stage
+if errorlevel 1 exit /b 1
 echo.
 echo  [pack] hand this file to the other machine, then:
 echo            1. unzip anywhere outside Program Files
@@ -324,16 +350,27 @@ rem ---------------------------------------------------------------- errors
 echo.
 echo  [ERROR] copying files into the staging dir failed.
 echo          Check free space on %TEMP%, or an antivirus blocking robocopy.
-rd /s /q "%TMPBASE%" 2>nul
+call :archive_stage
 endlocal
 exit /b 1
 
 :zip_failed
 echo.
 echo  [ERROR] compression failed.
-rd /s /q "%TMPBASE%" 2>nul
+call :archive_stage
 endlocal
 exit /b 1
+
+:payload_failed
+echo.
+echo  [ERROR] preparing the worker or portable environment failed.
+call :archive_stage
+endlocal
+exit /b 1
+
+:archive_stage
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\devtools\release\archive_stage.ps1" -Stage "%TMPBASE%"
+exit /b %errorlevel%
 
 :usage
 echo.
@@ -347,6 +384,8 @@ echo    pack-dist.bat -Out D:\x.zip      explicit output path
 echo.
 echo   Always included: vendor\llama-convert (GGUF convert script, ~2MB)
 echo                    prompt\ (NL prompt presets, one .json per preset)
+echo                    prompts\ (annotation rules)
+echo                    worker.py and worker-sources.json (generated from source)
 echo.
 echo  Always excluded: models\ work\ run\ tmp\ .pytest_cache node_modules
 echo                   env\python\Lib\site-packages (unless pruned and -WithEnv)

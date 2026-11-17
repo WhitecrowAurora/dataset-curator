@@ -1,16 +1,17 @@
-"""GGUF 量化（Q4_K_M / Q6_K）：**我们自己的 numpy 实现**。
+"""GGUF 量化（Q4_K_M / Q6_K / Q8_0）：内置 numpy 实现。
 
 和 quantize.py 的 W4A16 是两条独立的链路：
 
     W4A16  → llm-compressor（Python + CUDA）→ safetensors 目录 → vLLM 加载
-    Q4/Q6  → 本文件 + kquant/gguf_file      → 单个 .gguf 文件 → llama.cpp 加载
+    Q4/Q6/Q8 → 本文件 + 量化内核/gguf_file → 单个 .gguf 文件 → llama.cpp 加载
 
 第一版是调 llama.cpp 的 `llama-quantize.exe`，但那意味着用户为了压一个模型，
 得先下 200MB 的运行时。K-quant 本身只是"256 个权重一组、算 scale/min、
 按固定字节布局打包"，用 numpy 完全能自己做，所以改成内置实现：
 
-    gguf_file.py  读原 GGUF（元数据原样搬运）、按新类型写回去
+    gguf_file.py  读原 GGUF、更新精度元数据、按新类型写回去
     kquant.py     Q4_K / Q6_K 的量化与反量化
+    inference/q8_quant.py  Q8_0 的参考字节布局
 
 代价是速度：numpy 逐张量跑，8B 模型大约几分钟（llama-quantize 是几十秒），
 而且没有做 K-quant 的迭代最优 scale（见 kquant.py 顶部说明），同 bit 下误差
@@ -38,11 +39,13 @@ from .gguf_file import (
     GGML_TYPE_F32,
     GGML_TYPE_Q4_K,
     GGML_TYPE_Q6_K,
+    GGML_TYPE_Q8_0,
     Reader,
     TensorInfo,
     write_gguf,
 )
 from .kquant import QK_K, quantize_q4k, quantize_q6k
+from .inference.q8_quant import BLOCK_SIZE as Q8_BLOCK_SIZE, quantize_q8_0
 from .quantize import MODELS_ROOT, _guard_out
 
 try:                                    # 内核加载失败也别让整个模块 import 崩
@@ -52,7 +55,7 @@ except Exception:                       # noqa: BLE001
     HAS_KQUANT = False
 
 # 我们自己实现了的档位（不是 llama-quantize 的全集）
-_IMPLEMENTED = {"Q4_K_M", "Q4_K", "Q6_K"}
+_IMPLEMENTED = {"Q4_K_M", "Q4_K", "Q6_K", "Q8_0"}
 
 # 层名形如 `blk.17.ffn_down.weight`，用来实现"首尾层用更高精度"的规则
 _LAYER_RE = re.compile(r"blk\.(\d+)\.")
@@ -75,6 +78,11 @@ def _pair(done: float, total: float) -> str:
 # 数字来自 devtools/nl-quant-ab.md（126 张真实素材、同 prompt 的 A/B），
 # 不是凭印象写的：Q4 的 caption 系统性短 12%，Q6 的长度反而和 Q8 齐平。
 TARGETS: dict[str, dict[str, str]] = {
+    "q8_0": {
+        "flag": "Q8_0",
+        "label": "Q8_0",
+        "note": "8bit 权重量化（8B 约 8.1 GB），显存开销高于 Q4/Q6。",
+    },
     "q4_k_m": {
         "flag": "Q4_K_M",
         "label": "Q4_K_M",
@@ -141,6 +149,7 @@ class GgufTask:
     finished_at: float = 0.0
     cancel: bool = False
     log: deque[str] = field(default_factory=lambda: deque(maxlen=_LOG_LINES))
+    done: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def state(self) -> dict[str, Any]:
         elapsed = (self.finished_at or time.time()) - self.started_at
@@ -181,7 +190,7 @@ class GgufQuant:
             "available": ok,
             "reason": reason,
             # 不再有外部可执行文件；这个字段留给页面显示"谁在算"
-            "engine": "内置 numpy（Q4_K / Q6_K）",
+            "engine": "内置 numpy（Q4_K / Q6_K / Q8_0）",
             "targets": [
                 {"key": key, "flag": spec["flag"], "label": spec["label"],
                  "note": spec["note"]}
@@ -221,7 +230,7 @@ class GgufQuant:
             raise RuntimeError(reason)
 
         with self._lock:
-            if self._task is not None and self._task.status == "running":
+            if self._task is not None and not self._task.done.is_set():
                 return self._task.state()
             task = GgufTask(source=src, out_file=out, target=flag)
             self._task = task
@@ -240,11 +249,14 @@ class GgufQuant:
             # 只是置标志：量化循环每处理完一个张量检查一次，自己退出并删掉
             # .part 文件。没有子进程可杀——taskkill 那套已经不需要了。
             task.cancel = True
-            task.status = "canceled"
-            task.stage = "已取消"
-            task.message = "已取消；半成品文件已丢弃"
-            task.finished_at = time.time()
+            task.stage = "正在取消"
+            task.message = "正在等待量化退出并清理半成品"
         return task.state()
+
+    def wait_done(self, timeout: float = 10.0) -> bool:
+        with self._lock:
+            task = self._task
+        return task is None or task.done.wait(timeout)
 
     def _run(self, task: GgufTask) -> None:
         try:
@@ -278,7 +290,12 @@ class GgufQuant:
             task.message = f"{type(exc).__name__}: {exc}"
             task.log.append(task.message)
         finally:
+            if task.cancel:
+                task.status = "canceled"
+                task.stage = "已取消"
+                task.message = "已取消；半成品文件已丢弃"
             task.finished_at = time.time()
+            task.done.set()
 
 
 def _set_progress(task: GgufTask, pct: float, stage: str) -> None:
@@ -303,6 +320,8 @@ def _plan(name: str, flag: str, n_layer: int | None = None) -> str:
 
     `n_layer` 为 None 表示不按层分配（单测里用），全部走 Q4_K。
     """
+    if flag == "Q8_0":
+        return "q8_0"
     if flag == "Q6_K":
         return "q6k"
     if flag == "Q4_K":
@@ -364,7 +383,8 @@ def quantize_file(src: Path, out: Path, flag: str,
             if should_stop():
                 raise CancelledError()
             kind = _plan(info.name, flag, n_layer)
-            if not kind or info.n_elements % QK_K != 0 or len(info.dims) == 1:
+            block_size = Q8_BLOCK_SIZE if kind == "q8_0" else QK_K
+            if not kind or len(info.dims) < 2 or info.dims[0] % block_size != 0:
                 # **1D 张量一律不量化**：norm/bias 是逐层的缩放/偏移量，
                 # 误差会顺着残差流一路累积。llama.cpp 也这么做——官方
                 # Q6_K 里 145 个 F32 全是 1D 张量（含 4096 元素的 norm，
@@ -374,14 +394,18 @@ def quantize_file(src: Path, out: Path, flag: str,
                 log(f"跳过 {info.name}（{info.n_elements} 个元素，保持原精度）")
             else:
                 x = reader.read_float(info)
-                if kind == "q6k":
+                if kind == "q8_0":
+                    body = quantize_q8_0(x)
+                    ttype = GGML_TYPE_Q8_0
+                elif kind == "q6k":
                     _, body = quantize_q6k(x)
                     ttype = GGML_TYPE_Q6_K
                 else:
                     _, _, body = quantize_q4k(x)
                     ttype = GGML_TYPE_Q4_K
                 out_tensors.append((TensorInfo(info.name, info.dims, ttype, 0), body))
-                log(f"{info.name} → {'Q6_K' if kind == 'q6k' else 'Q4_K'}")
+                type_name = {"q8_0": "Q8_0", "q6k": "Q6_K", "q4k": "Q4_K"}[kind]
+                log(f"{info.name} → {type_name}")
             progress(index * _QUANT_SPAN / total, f"量化中 {index}/{total}")
 
         # 落盘单独占 10%：量化阶段先走到 90，剩下的由 write_gguf 每写完一个
@@ -396,7 +420,8 @@ def quantize_file(src: Path, out: Path, flag: str,
             progress(_QUANT_SPAN + (100.0 - _QUANT_SPAN) * frac,
                      f"写入文件 {_pair(done, total_bytes)}")
 
-        write_gguf(tmp, reader.metadata_bytes(), reader.kv_count,
+        file_type = {"Q4_K": 14, "Q4_K_M": 15, "Q6_K": 18, "Q8_0": 7}[flag]
+        write_gguf(tmp, reader.metadata_bytes(file_type=file_type), reader.kv_count,
                    out_tensors, reader.alignment, on_write=_report_write)
         tmp.replace(out)
     except BaseException:

@@ -3345,7 +3345,8 @@ vLLM 上开多卡前，先把该值降到 ~0.85。
 
 ### 41.1 --max-num-seqs 对 llama.cpp 完全无效
 
-链路：_load_profile → esolve_profile(max_num_seqs_override=) → 只落到
+链路：_load_profile → 
+esolve_profile(max_num_seqs_override=) → 只落到
 profile.max_num_seqs（vLLM 命令行与指纹用）→ 而 
 l_engine.build_command 的
 -np 只认 slots_override，cmd_serve 又没传它。于是用户传 12，日志里仍是
@@ -3353,7 +3354,8 @@ l_engine.build_command 的
 
 修法（不是"再透传一个参数"，而是让两个引擎共用一个用户输入）：
 
-- TierSpec / RunProfile 加 slots 字段；esolve_profile 的取值顺序是
+- TierSpec / RunProfile 加 slots 字段；
+esolve_profile 的取值顺序是
   **分档表 slots > 用户覆盖 > 分档 max_num_seqs**，即 --max-num-seqs 12
   在 llama.cpp 上也得到 12。分档表写 slots: 则优先（那是给 llama.cpp 单调的）。
 - 
@@ -3382,3 +3384,99 @@ query_gpus() 列的是 nvidia-smi 的**物理序**，CUDA 认的是环境变量�
 
 **校验**：pytest tests/test_serve_slots_gpu.py 11 条（槽位 4、选卡 7）；
 真实分档表上 --max-num-seqs 12 → slots=12 → -np 12。
+
+---
+
+## 42. 2026-11-13：MONET 103.8M 素材包的落盘选型（实测结论 + 两个硬约束）
+
+**背景**：要把 `jasperai/monet` 全量拉到服务器 I 盘，需求是「按 2MP 上限保留全部图 + 保留全部 caption（省掉重打标）」。
+下面每个数字都是今天实测的，**换人接手不要再重新估一遍**。
+
+### 42.1 仓库事实
+
+- **103.81M 张，64.4 TB**：tar(webdataset) 58.35 TB + parquet 6.23 TB，各 10880 个文件，**路径 1:1 对应**；
+  parquet 的 `__key__` == tar 成员名前缀（已验，4/4 命中）。
+- **parquet 配置里只有缩略图**：`thumbnail` = 最大边 <384px 的 WEBP（14.4 KB/行）。想要 2MP 必须走 tar。
+- parquet 每文件 10000 行、**单 row group**、37 列。**只读筛选列极便宜**：`width/height/source/aesthetic×2/nsfw/__key__`
+  全表只要 **4.55 GB**；只读 `width`+`height` 全表约 1.3 GB。想「先筛后取」就走这条路，不要下 6.23 TB 全量。
+- 每行 5 条 caption。**`commoncatalog-cc-by` 和 `megalith10m` 的 parquet 里没有 `caption_original` 列**
+  （tar 的 json 里也是空）——这两个源没有原始 alt-text，只有 4 条 VLM caption。
+  单分片观察：commoncatalog 的 `caption_gemini` 约 14.8% 为空（**待多点样本确认**）；
+  laion/coyo 各 caption 空值率均 ≤0.8%。
+- tar 每条记录 6 个成员：`.jpg`（占 79.9% 字节）+ 4 个 `.embedding_*.pth`（48.2 KB，占 18.6%）+ `.json`（3.9 KB）。
+  **`.pth` 是预计算 embedding，取图时用 HTTP Range 直接跳读，一个字节都不需要下。**
+
+### 42.2 编码选型
+
+- **源图 100% 是 JPEG baseline + 4:2:0 + 量化表全 1（= IJG quality 100）**，7 个源一致，无 EXIF/ICC。
+  → 亮度几乎无损，唯一实质损失是 4:2:0 的色度降采样。
+- **有损 WebP 做不到 4:4:4**：VP8 位流只有 4:2:0，Pillow 的 `subsampling` 参数被静默忽略（三种取值字节数完全一致）。要真 444 只能 AVIF 或 JPEG。
+- **4:4:4 对这个库是白花钱**：源已是 420，再编 420 近乎幂等（色度高频 420 的 58.29 dB 还略高于 444 的 57.82）。
+  `jpeg q92 4:2:0` 在 PSNR 与体积上双杀 `q90 4:4:4`：**48.21 dB / 129.7 KB** vs 46.51 dB / 143.1 KB。
+- 加权 PSNR（参考 = 取 2MP 上限后的原图）：**q92 4:2:0 = 48.21**（中位 48.04、p10 44.28、
+  9.3% 低于 44 dB、最差 37.33）；q90 4:2:0 46.24；avif q82 4:4:4 46.04；webp q95 45.39；avif q80 4:4:4 45.16。
+- **误差性质比量级重要**：JPEG = 加性振铃（细节在、周围多噪点，gradEner +1.5%）；
+  AVIF/WebP = 减性涂抹（细节消失，−1.9%~−6.9%）。**细节/存在性敏感的 infer 选 JPEG。**
+- 编码耗时：JPEG q90 **3.6 ms/张** vs AVIF 137 ms、WebP 162~185 ms（差 38 倍）；解码 7.6 vs 15.6 ms。
+  AVIF 的 `speed` 调到 8/10 反而更差且更大，不是省时间的杠杆。
+
+### 42.3 分辨率 / 宽高比 / 小图（990 分片 · 852 万行实测，0 失败）
+
+分辨率（MP）：`<0.25` 0% ｜ `0.25-0.5` 33.15% ｜ `0.5-0.75` 22.57% ｜ `0.75-1.0` 9.08% ｜
+`1.0-1.5` 19.13% ｜ `1.5-2.0` 1.66% ｜ `2-3` 1.83% ｜ `3-5` 2.57% ｜ `5-8` 4.08% ｜
+`8-12` 2.50% ｜ `12-20` 3.03% ｜ `20+` 0.40%。
+→ **64.8% 在 1MP 以下，超过 2MP 的仅 14.4%**。这是个低分辨率为主的库。
+
+宽高比：方形(0.95-1.05) **25.93%** ｜ 4:3 18.10% ｜ **3:2 28.10%** ｜ 16:9 6.35% ｜ 竖幅 17.53% ｜ 横幅 56.55%。
+方形占比远高于 synthetic 的 13.3% 份额，说明原生方图（512²、600²、800²、1000²）很多。
+最常见尺寸：`1024x1024` 16.97%（主要 synthetic）、`1024x683` 6.58%、`1024x768` 2.79%、`512x512` 1.87%。
+
+小图：**面积 <512² 的图 = 0 张**（清洗按面积过滤，852 万行零例外）；
+但**短边 <512 的有 12.32%（约 12.8M）**，如 `720x481`、`1024x408`。
+
+其他源画像：**synthetic 100% 是 1024×1024 方形**（588k 行零例外，不是切出来的，原生如此，无宽高比多样性）；
+**commoncatalog-cc-by 均值 6.45 MP、71.51% 超 2MP**（1170 文件全量精确扫描）、`612x612` 仅 1.43%——
+它是全库唯一的高分辨率真实素材来源（3264×2448 / 4000×3000 / 5184×3456），**不能砍**。
+区间 `1024²–2MP` 只有 16.42M 张（15.8%），其中 13.8M 是 synthetic，真实照片仅约 2.6M。
+
+### 42.4 体积：15.9 TB，两条独立路径互证
+
+- 路径 A（逐源用 tar 精确字节校准）：图像 **15.74 TB**
+- 路径 B（精确像素分布 × 实测字节/MP）：原始 1.77 MP/张 → 取 2MP 上限后 **0.86 MP/张**（压掉 51.1%），
+  全库 89.7 Gpx → **15.87 TB**
+- 两者差 0.8%，可当结论用。加 caption（JSON 约 0.16 TB）≈ **16.1 TB**，建议报 **18 TB**。
+
+**⚠ 踩过的坑**：不要用少量样本的绝对尺寸外推。我抽的 laion/coyo 样本比真实原图小 36%/34%，
+而这两源占 62% 张数，直接外推把总量低估了 20%（算成 12.5 TB）。必须逐源用 tar 精确字节反推。
+
+### 42.5 两个硬约束（都不是磁盘）
+
+1. **下载量 ≈53.4 TB，不是产出的 16 TB。** tar 58.35 − `.pth` 4.55 − json 0.37 ≈ 53.4 TB jpg。
+   本机到 hf-mirror 聚合仅 **12 MB/s**（16 并发实测）→ **54 天**；50 MB/s → 13 天；100 MB/s → 6.5 天；200 MB/s → 3.2 天。
+   **服务器 121.225.25.33 的带宽尚未测**（用户说先不管）。编码不是瓶颈：解码+编码 10.6 ms/张 → 306 单核小时。
+2. **1.04 亿个散文件在 NTFS 上不可行**：MFT 记录约 1 KB/文件 ≈ 104 GB，超出 NTFS 预留 MFT 区会碎片化；
+   单目录超 10 万文件后 dir/复制/统计全部崩掉。二选一：
+   **A. 按 key 前 2 字节分 65536 桶**（每桶约 1585 个，可随机访问）；
+   **B. 重打包成 webdataset tar**（每 1 万张一个，约 10400 个文件，顺序读取对训练最友好）——MONET 自己就是这么干的。
+
+### 42.6 已定 + 复现
+
+**已拍板**（2026-11-13）：保留全部 103.81M 张；格式 **JPEG q92 / 4:2:0 / optimize=True**；
+>2MP 按面积等比缩到 ≤2MP（只影响 14.4% 的图），其余保原生；盘不够就加盘（用户接受）。
+
+**产物位置**（本机）
+- `I:\anlia\monet_samples\synthetic_100\` — 99 张 AI 生成图原图 + `_contactsheet.jpg` + `manifest.csv`
+- `I:\anlia\monet_samples\caption_review\` — 72 张（9 个文件夹各 1 随机分片 × 片内随机 8 张），
+  **`index.html` 打开可图文并排看 5 条 caption**，另有 `captions.csv`
+- `I:\anlia\monet_samples\resolution_profile.md` — 分辨率/宽高比分布报告，可直接转人
+
+**脚本**（`h:\tagger\tmp\`，都是一次性探针，可复用）：
+`monet_probe.py`（parquet 行组范围读）、`monet_quality.py`（PSNR/SSIM/体积）、
+`monet_detail2.py`（色度保真 + 相对原图体积）、`monet_dims2.py`（逐源精确尺寸分布，含修好的 RFile）、
+`monet_profile.py`（分辨率/宽高比分布 + 像素总量）、`monet_caption_review.py`（打标抽查）、
+`monet_jpegq.py` / `monet_dqt.py`（JPEG 量化表反推质量）。
+
+**环境**：用 `C:\Python314\python.exe`（有 pyarrow 24 / skimage 0.26 / Pillow 12 + libavif 1.3.0 / fsspec / hf_hub 2.4）。
+**`I:\ComfyUI-aki-v1.6\python\python.exe` 不存在**——别再写这个路径。
+请求 hf-mirror 前必须清空 `HTTPS_PROXY/HTTP_PROXY`；Range 读取要校验 `content-range` 起始偏移，
+否则 CDN 返回长度正确但起点偏移的字节段，pyarrow 会报 `Parquet magic bytes not found in footer`。

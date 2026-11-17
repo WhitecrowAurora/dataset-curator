@@ -48,6 +48,7 @@ import httpx
 
 from . import gguf_quant, llama_runtime, tmpdir
 from .config import ConfigError
+from .runtime.processes import spawn_owned
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_ROOT = ROOT / "models"
@@ -350,8 +351,7 @@ def snapshot(model: str = "") -> dict[str, Any]:
         # 用的是随包发的那份（不需要联网）还是下载的那份
         "bundled": _complete(BUNDLED_DIR),
         "tag": installed_tag(),
-        # 三个档：F16 是"只转不压"（完整权重，就是 tiers.yaml 的默认档，
-        # 8B 约 15.6 G）；Q4/Q6 是压缩档。少放一档只会让"我这模型到底有几档"
+        # F16 是只转不压；Q4/Q6/Q8 是压缩档。少放一档只会让"我这模型到底有几档"
         # 更混乱，而清单里的映射键也只有 f16/q4/q6/q8。
         "targets": [
             {"key": "f16", "label": "F16（完整权重）",
@@ -359,7 +359,7 @@ def snapshot(model: str = "") -> dict[str, Any]:
             *[
                 {"key": key, "label": gguf_quant.TARGETS[key]["label"],
                  "note": gguf_quant.TARGETS[key]["note"]}
-                for key in ("q4_k_m", "q6_k")
+                for key in ("q4_k_m", "q6_k", "q8_0")
             ],
         ],
         "source": source,
@@ -375,9 +375,9 @@ def source_dir(key: str) -> Path:
     """原始 safetensors 目录。
 
     两种来源：`path` 本身就是本地目录；或者它在 HF 上，用户已经下到
-    `models/nl/<key>/`（下载清单选「原始权重」时就是整仓库落这里）。
+    模型管理配置的下载目录（未配置时为 `models/nl/<key>/`）。
     """
-    from .config import DEFAULT_TIERS, load_tier_table
+    from .config import DEFAULT_TIERS, load_model_overlay, load_tier_table
     from .web import downloads as dl
 
     spec = (load_tier_table(DEFAULT_TIERS).get("models") or {}).get(key)
@@ -395,7 +395,8 @@ def source_dir(key: str) -> Path:
                        or declared.startswith((".", "models/", "models\\")))
         if looks_local:
             candidates.append(given if given.is_absolute() else ROOT / given)
-    candidates.append(dl.resolve_dir("vlm", key, None))
+    dirs = load_model_overlay().get("dirs") or {}
+    candidates.append(dl.resolve_dir("vlm", key, dirs.get(f"vlm:{key}")))
 
     for path in candidates:
         if (path / "config.json").is_file() and any(path.glob("*.safetensors")):
@@ -497,6 +498,7 @@ class ConvertTask:
     finished_at: float = 0.0
     cancel: bool = False
     log: deque[str] = field(default_factory=lambda: deque(maxlen=_LOG_LINES))
+    done: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def state(self) -> dict[str, Any]:
         elapsed = (self.finished_at or time.time()) - self.started_at
@@ -566,7 +568,7 @@ class Converter:
             raise ConfigError("输出和中间文件重名，换个档位再试")
 
         with self._lock:
-            if self._task is not None and self._task.status == "running":
+            if self._task is not None and not self._task.done.is_set():
                 return self._task.state()
             task = ConvertTask(model_key=key, target=target, src=src,
                                f16=f16, mmproj=mmproj, out=out)
@@ -582,10 +584,8 @@ class Converter:
             return None
         if task.status == "running":
             task.cancel = True
-            task.status = "canceled"
-            task.stage = "已取消"
-            task.message = "已取消；中间文件已删除"
-            task.finished_at = time.time()
+            task.stage = "正在取消"
+            task.message = "正在等待转换／量化退出并清理中间文件"
             # 转换是子进程，必须真杀掉，否则它会把剩下的张量算完
             if proc is not None and proc.poll() is None:
                 try:
@@ -593,6 +593,11 @@ class Converter:
                 except OSError:
                     pass
         return task.state()
+
+    def wait_done(self, timeout: float = 10.0) -> bool:
+        with self._lock:
+            task = self._task
+        return task is None or task.done.wait(timeout)
 
     # -------------------------------------------------------------- 内部
     def _run(self, task: ConvertTask, flag: str) -> None:
@@ -632,7 +637,10 @@ class Converter:
             task.message = f"{type(exc).__name__}: {exc}"
             task.log.append(task.message)
         finally:
-            task.finished_at = time.time()
+            if task.cancel:
+                task.status = "canceled"
+                task.stage = "已取消"
+                task.message = "已取消"
             failed = task.status in ("canceled", "error")
             if failed:
                 # 半截产物比"没有产物"更坏：页面/清单都以为这一档好了，直到起
@@ -656,6 +664,8 @@ class Converter:
                     pass
             with self._lock:
                 self._proc = None
+                task.finished_at = time.time()
+                task.done.set()
 
     def _convert(self, task: ConvertTask) -> None:
         """跑官方脚本。视觉模型要跑两遍：文本塔一遍、视觉塔（mmproj）一遍。
@@ -711,7 +721,7 @@ class Converter:
         env = dict(os.environ)
         # -u 之外的保险：有些库自己重设 stdout 缓冲
         env["PYTHONUNBUFFERED"] = "1"
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+        proc = spawn_owned(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True,
                                 encoding="utf-8", errors="replace", env=env,
                                 creationflags=creation)
@@ -740,6 +750,7 @@ class Converter:
                     proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                    proc.wait()
                 raise gguf_quant.CancelledError()
             if target.is_file():
                 # 用输出文件大小对源文件大小估进度：转换是逐张量写的，
@@ -857,7 +868,7 @@ class Converter:
                 entry[field_name] = value
         quants.update({str(k): str(v) for k, v in (spec.get("gguf_quants") or {}).items()})
 
-        tier_key = {"q4_k_m": "q4", "q6_k": "q6"}.get(task.target, task.target)
+        tier_key = {"q4_k_m": "q4", "q6_k": "q6", "q8_0": "q8"}.get(task.target, task.target)
         quants[tier_key] = rel(task.out)
         entry["gguf_quants"] = quants
         # 默认那档如果还是空的（或指向一个不存在的文件），就把新的顶上去，

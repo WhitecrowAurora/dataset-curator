@@ -1,0 +1,17 @@
+{
+  "repo": "MatchaCuratio/Anime-Fox768-400k",
+  "revision": "ca9441fcb5dbcb2908408c189195b787fab82611",
+  "package": "shard-000000.tar",
+  "bytes": 1846251520,
+  "sha256": "63879e9b86717765bb68cd12684f9cfd8d824dcb6f083dc30ee65cd939f47b9c",
+  "tree_sha256": "63879e9b86717765bb68cd12684f9cfd8d824dcb6f083dc30ee65cd939f47b9c",
+  "images": 10940,
+  "ids_count": 10940,
+  "ids_first": [
+    "Cbmus-000001",
+    "Cbmus-000002",
+    "Cbmus-000003"
+  ],
+  "metadata": [],
+  "seconds": 305.2
+}

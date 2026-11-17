@@ -26,13 +26,15 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
+from .center_runtime.config import ExecutionConfig
+from .center_runtime.inference import options as center_options
 
 from .. import llama_runtime, nl_api
 from ..config import ConfigError
@@ -41,6 +43,9 @@ from ..pipeline import plan_inputs, plan_stats
 from ..quantize import QUANT
 from ..gguf_convert import CONVERTER as GGUF_CONVERT
 from ..gguf_convert import snapshot as gguf_snapshot
+from .blob_api import router as BLOB_ROUTER
+from .setup import router as SETUP_ROUTER
+from .blob_gc import JANITOR
 from .jobs import GUARD_KNOBS, MANAGER, STAT_FINE, Job, JobSpec
 from .models import MODELS
 from .uploads import UPLOADS, shard_rows
@@ -104,6 +109,12 @@ class JobRequest(BaseModel):
     guard_policy: dict[str, float] = Field(default_factory=dict)
     # 开跑前/封包中按"预计产出 + 20% 冗余"判盘够不够（取代 guard 的固定阈值）
     check_space: bool = True
+
+    # ---- 打标完成后自动回传（分块通道）。空 url = 不回传
+    auto_upload_url: str = ""
+    # 令牌：进 JobSpec 但不进快照（_redacted_spec 会抹成 ***）
+    auto_upload_token: str = ""
+    auto_upload_dir: str = ""
 
     # ---- VLM 服务（engine="vlm"）
     # 推理来源：local = 本机/自建服务；openai = OpenAI 兼容 API；
@@ -253,6 +264,7 @@ class ModelTarget(BaseModel):
     key: str
     # 只对下载有意义：q4/q5/q6/q8 时只下这一档 + 配套 mmproj，空 = 按清单下。
     precision: str | None = None
+    token: str | None = Field(default=None, repr=False)
 
 
 class ProxyRequest(BaseModel):
@@ -377,6 +389,7 @@ class VllmStartRequest(BaseModel):
     # 这是**唯一**能让出显存的旋钮：KV 在启动时按槽位数预留，任务并发调小
     # 只是让 slot 空着。"边打标边玩游戏"就是把它从 12 降到 4。
     slots: int | None = None
+    device: str | None = None
 
 
 class LlamaInstallRequest(BaseModel):
@@ -419,12 +432,13 @@ class NlApiKeyRequest(BaseModel):
 class HfTokenRequest(BaseModel):
     """记住 / 忘记 HF 令牌。token 传空 = 删掉存档。
 
-    repo 必须给：存档只在这一个仓库上生效（理由见 nl_api.resolve_hf_token，
-    避免把私有仓库的令牌自动带去别的仓库）。
+    默认只在 repo 仓库上生效；快速配置可明确授权 scope=global，
+    让模型和分片下载共用。明文令牌不回显。
     """
     token: str = ""
     repo: str = ""
     remember: bool = True
+    scope: Literal["repo", "global"] = "repo"
 
 
 class MultiStartRequest(BaseModel):
@@ -489,7 +503,13 @@ class CenterLoginRequest(BaseModel):
     secret: str = ""
 
 
-class CenterRunRequest(BaseModel):
+CenterExecutionPatch = create_model("CenterExecutionPatch", **{
+    name: (field.annotation | None, None)
+    for name, field in ExecutionConfig.model_fields.items()
+})
+
+
+class CenterRunRequest(CenterExecutionPatch):
     """托管 fox worker 的运行参数。全部可省略 = 沿用上次保存的配置。"""
     tag_url: str | None = None
     mode: str | None = None
@@ -507,6 +527,9 @@ class CenterRunRequest(BaseModel):
     # 分片下载：并发连接数（1 = 单流）与"开工前测速选最快 CDN 边缘"开关
     download_conns: int | None = None
     cdn_probe: bool | None = None
+    hf_token: str | None = None
+    remember_hf: bool | None = None
+    auto_upload: bool | None = None
 
 
 # ---------------------------------------------------------------- 环境信息
@@ -737,7 +760,8 @@ def _defaults() -> dict:
         # 脱敏值，用来显示"已记住 hf_xx…yy / 仓库名"，明文永远不下发。
         # 以前这项哪里都不存，用户每开一个 HF 任务都要重贴一次。
         "hf_saved": ({"repo": entry.get("repo", ""),
-                      "token_masked": nl_api.mask_hf(entry)}
+                      "token_masked": nl_api.mask_hf(entry),
+                      **({"scope": "global"} if entry.get("scope") == "global" else {})}
                      if (entry := nl_api.saved_hf()) else None),
         "guard": guard,
         # 质检的配置默认值。0 在这套表单里是"不覆盖"的哨兵值，所以页面
@@ -1268,7 +1292,7 @@ def _artist_context_default(enabled: bool, depth: int, inject: bool = True,
 
 # 单卡服务与多卡组共用一把启动锁：抢的是同一批显卡，两边同时起来时谁先
 # OOM 取决于加载顺序，而报错只会指向模型或显存，看不出是冲突。
-_GPU_START_LOCK = threading.Lock()
+from .gpu_start import GPU_START_LOCK as _GPU_START_LOCK
 
 
 def _gpu_busy(status: str) -> bool:
@@ -1300,7 +1324,22 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             plans()
         except Exception:               # noqa: BLE001 - 计划坏了不该让服务起不来
             pass
+        # 孤儿块定时清扫：分块仓库只按内容存，没人引用的块纯占盘，而"手动
+        # 记得去点 gc"在真机上从来没发生过。默认 6 小时一次、宽限 48 小时，
+        # TAGGER_BLOB_GC_INTERVAL_H=0 可关。
+        try:
+            JANITOR.start()
+        except Exception:               # noqa: BLE001 - 清扫起不来不该拦服务
+            pass
+        CENTER.restore()
         yield
+        CENTER.shutdown()
+        # 先停清扫线程再收其它进程：它是唯一会碰块仓库的后台线程，
+        # 留着会在下面删成品/目录时和它抢文件。
+        try:
+            JANITOR.stop()
+        except Exception:               # noqa: BLE001 - 退出路径上不值得再报错
+            pass
         # Web 进程退出时收掉自己拉起的 vllm 子进程。不收的话它会继续占着
         # 显存（子进程在自己的进程组里，Ctrl+C 打不到），下次启动报显存不足，
         # 而人只会觉得"这机器有问题"。只收本进程拉起的：命令行 `tagger serve`
@@ -1321,15 +1360,14 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             QUANT.cancel()
         except Exception:               # noqa: BLE001
             pass
-        # 调度中心的 worker 子进程也要收：它手上可能还握着租约，进程留着不放，
-        # 包会一直显示"有人在跑"，而那个"人"已经不是本机了。
-        try:
-            CENTER.shutdown()
-        except Exception:               # noqa: BLE001
-            pass
-
     app = FastAPI(title="Tagger UI", version="0.1.0", docs_url="/api/docs",
                   lifespan=lifespan)
+    # 分块回传通道：块寻址 + 秒传 + 提交成文件。与 FTP 并存，两者互不影响——
+    # FTP 是"给你个账号就能用"，这条要求对端跑着本服务，能力更强（见 blobs.py）。
+    app.include_router(BLOB_ROUTER)
+    app.include_router(SETUP_ROUTER)
+    from .tools import router as tools_router
+    app.include_router(tools_router)
     dist = Path(ui_dist) if ui_dist else DIST_DIR
 
     @app.get("/api/health")
@@ -1389,7 +1427,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def start_model_download(req: ModelTarget) -> dict:
         try:
             # precision 可选：传了就只下这一档 + 配套 mmproj；不传按条目清单下。
-            return MODELS.start_download(req.kind, req.key, req.precision)
+            return MODELS.start_download(req.kind, req.key, req.precision, token=req.token)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -1570,7 +1608,10 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
             raise HTTPException(400, "form 必须是一个对象")
         if spec is not None and not isinstance(spec, dict):
             raise HTTPException(400, "spec 必须是一个对象")
-        return ui_form.save(form=form, spec=spec)
+        try:
+            return ui_form.save(form=form, spec=spec, strict=payload.get("strict") is True)
+        except OSError as exc:
+            raise HTTPException(500, "任务配置保存失败，请检查配置目录是否可写") from exc
 
     # ---- NL 提示词（仓库根 prompt/*.json）
 
@@ -2268,25 +2309,27 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         items: list[dict] = []
 
         for job in MANAGER.all():
-            if job.status not in ("pending", "running"):
+            if job.status not in ("pending", "running", "paused"):
                 continue
             s = job.snapshot()
-            counts = s.get("counts") or {}
-            done = int(counts.get("done") or 0) + int(counts.get("skipped") or 0) \
-                + int(counts.get("failed") or 0)
-            total = int(counts.get("total") or 0)
+            packing = s.get("phase") == "pack"
+            counts = (s.get("pack") if packing else s.get("counts")) or {}
+            total_known = bool(counts.get("total")) if packing else s.get(
+                "total_known", s.get("progress") is not None)
+            paused = s["status"] == "paused"
             spec = s.get("spec") or {}
             items.append({
                 "kind": "tag",
                 "id": s["id"],
-                "title": "打标",
-                "detail": str(spec.get("input_dir") or ""),
+                "title": ("封包" if packing else "打标") + ("（已暂停）" if paused else ""),
+                "detail": str(spec.get("hf_repo") or spec.get("input_dir") or ""),
                 "phase": str(s.get("phase") or ""),
-                "done": done,
-                "total": total,
+                "status": s["status"],
+                "done": int(counts.get("settled") or 0),
+                "total": int(counts.get("total") or 0) if total_known else 0,
                 "progress": s.get("progress"),
-                "rate": s.get("rate") or 0,
-                "eta_s": s.get("eta_s"),
+                "rate": 0 if paused else (counts if packing else s).get("rate_per_s") or 0,
+                "eta_s": None if paused or packing else s.get("eta_s"),
                 "href": f"/run/{s['id']}",
             })
 
@@ -2677,7 +2720,8 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
                                   max_num_batched_tokens=req.max_num_batched_tokens,
                                   gpu_mem=req.gpu_mem,
                                   local_media_root=req.local_media_root,
-                                  slots=req.slots)
+                                  slots=req.slots,
+                                  **({"device": req.device} if req.device is not None else {}))
             except RuntimeError as exc:
                 raise HTTPException(409, str(exc)) from exc
             except (ValueError, ConfigError) as exc:
@@ -2690,7 +2734,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
                   max_num_seqs: int | None = None,
                   max_num_batched_tokens: int | None = None,
                   gpu_mem: float | None = None,
-                  slots: int | None = None) -> dict:
+                  slots: int | None = None, device: str = "auto") -> dict:
         """这组参数会解析成哪个分档 / 哪套权重。点启动之前就要能看见。
 
         参数与 /start 同名同义，只是不真的起进程。解析失败（模型 key 写错、
@@ -2706,7 +2750,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
                          max_num_seqs=max_num_seqs,
                          max_num_batched_tokens=max_num_batched_tokens,
                          gpu_mem=gpu_mem,
-                         slots_override=slots)
+                         slots_override=slots, device=device)
 
     @app.post("/api/vllm/stop")
     def vllm_stop() -> dict:
@@ -2869,24 +2913,26 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         """已记住的 HF 令牌（脱敏）。明文永远不出后端。"""
         entry = nl_api.saved_hf()
         return {"saved": ({"repo": entry.get("repo", ""),
-                           "token_masked": nl_api.mask_hf(entry)}
+                           "token_masked": nl_api.mask_hf(entry),
+                           **({"scope": "global"} if entry.get("scope") == "global" else {})}
                           if entry else None)}
 
     @app.post("/api/hf/token")
     def hf_token_save(req: HfTokenRequest) -> dict:
         """记住 / 忘记。remember=false 或 token 为空都表示删掉存档。
 
-        repo 只在要记住时才有意义：存档绑仓库，换仓库不自动沿用。
+        默认存档绑仓库；scope=global 是明确选择的全局授权。
         """
         try:
             token = req.token.strip() if req.remember else ""
             repo = req.repo.strip() if token else ""
-            nl_api.store_hf_token(token, repo)
+            nl_api.store_hf_token(token, repo, scope=req.scope)
         except OSError as exc:
             raise HTTPException(500, f"写不进 {nl_api.SAVED_CONFIG}：{exc}") from exc
         entry = nl_api.saved_hf()
         return {"saved": ({"repo": entry.get("repo", ""),
-                           "token_masked": nl_api.mask_hf(entry)}
+                           "token_masked": nl_api.mask_hf(entry),
+                           **({"scope": "global"} if entry.get("scope") == "global" else {})}
                           if entry else None)}
 
     # ---- 多卡（数据并行）
@@ -3140,6 +3186,10 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         await ws.close()
 
     # ---- 调度中心（托管 fox-label v3 worker 子进程）
+    from .center_runtime.workspace import router as center_workspace_router
+    app.include_router(center_workspace_router(CENTER))
+    from .center_runtime.history import router as center_history_router
+    app.include_router(center_history_router(CENTER))
 
     @app.get("/api/center")
     def center_state() -> dict:
@@ -3149,6 +3199,17 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def center_brief() -> dict:
         # 顶栏的灯用这个：只读本地身份，不去问远端（见 Center.brief 的注释）。
         return CENTER.brief()
+
+    @app.get("/api/center/options")
+    def center_execution_options() -> dict:
+        return center_options()
+
+    @app.put("/api/center")
+    def center_configure(req: CenterRunRequest) -> dict:
+        try:
+            return CENTER.configure(**req.model_dump(exclude_none=True))
+        except (CenterError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.post("/api/center/login")
     def center_login(req: CenterLoginRequest) -> dict:
@@ -3162,7 +3223,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def center_start(req: CenterRunRequest) -> dict:
         try:
             return CENTER.start(**req.model_dump(exclude_none=True))
-        except CenterError as exc:
+        except (CenterError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/api/center/logout")

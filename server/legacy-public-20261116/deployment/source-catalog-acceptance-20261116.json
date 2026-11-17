@@ -1,0 +1,193 @@
+{
+  "date": "2026-11-16",
+  "suites": {
+    "acceptance": {
+      "passed": 12,
+      "checks": [
+        "client claimed complete is provisional",
+        "request queued outside importer",
+        "authority catches omitted image",
+        "authoritative complete side",
+        "persistent conflicts block completion",
+        "conflicts survive repeated reconcile",
+        "foreign IDs retained as rejection evidence",
+        "tag lease assigned",
+        "pending finish releases device execution slot",
+        "pending submission retains only assigned side",
+        "incomplete authority releases pending side",
+        "JSONL field mapping"
+      ]
+    },
+    "integration": {
+      "passed": 13,
+      "checks": [
+        "background JSONL field mapping",
+        "background revalidates incomplete proof",
+        "import does not retain downloaded manifest",
+        "same source cached without download",
+        "member field derives client ID",
+        "streaming JSON rows key",
+        "Parquet numeric ID mapping",
+        "HTTP upload artifacts-s-delivery.jsonl",
+        "HTTP upload proof.json",
+        "HTTP provisional report",
+        "download does not block health",
+        "HTTP pending finish acknowledged",
+        "HTTP background missing image prevents done"
+      ]
+    },
+    "lifecycle": {
+      "passed": 9,
+      "checks": [
+        "history registers both sides after authority",
+        "history updates package completion",
+        "conflict revokes only affected side",
+        "config invalidates previous list",
+        "restart requeues interrupted import",
+        "restart removes only old task temporary files",
+        "failure waits for explicit retry",
+        "explicit retry requeues",
+        "schema migration idempotent"
+      ]
+    },
+    "panel": {
+      "passed": 6,
+      "checks": [
+        "panel source configuration GET",
+        "panel configure through CSRF",
+        "panel retry forwards authenticated request",
+        "panel JS asset reachable",
+        "panel HTML includes script",
+        "panel rejects unauthenticated mutation"
+      ]
+    },
+    "edges": {
+      "passed": 6,
+      "checks": [
+        "admin list preserves pending TAG occupation",
+        "two pending sides cannot be assigned again",
+        "background completes both submissions independently",
+        "completed package has no pending occupation",
+        "automatic template uses small per-package index",
+        "new hosting session receives prior history result"
+      ]
+    }
+  },
+  "real_hf": {
+    "repo": "MatchaCuratio/Anime-Fox768-400k",
+    "package": "shard-000000.tar",
+    "revision": "ca9441fcb5dbcb2908408c189195b787fab82611",
+    "size": 1846251520,
+    "sha256": "63879e9b86717765bb68cd12684f9cfd8d824dcb6f083dc30ee65cd939f47b9c",
+    "images": 10940,
+    "ids_sha256": "045dab25d35f6e7236b97ff9eec66f2b31cbc1c93e657d5b28ab8895840c4921",
+    "origin": "archive",
+    "omission_detected": true,
+    "tag_complete": true,
+    "nl_missing": 10940,
+    "temporary_sources_removed": true,
+    "seconds": 176.0
+  },
+  "production": {
+    "checks": [
+      "/health",
+      "/",
+      "/static/source-catalog.js",
+      "/api/source-catalog",
+      "/api/workspaces",
+      "/api/workspace-packages?ws_id=fox768",
+      "/api/history",
+      "/api/managed/devices",
+      "/api/summary"
+    ],
+    "passed": 9,
+    "counts": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 13,
+      "leases": 256
+    },
+    "open_leases_preserved": true,
+    "integrity": "ok",
+    "artifacts": 0,
+    "services": [
+      "active",
+      "active"
+    ]
+  },
+  "deployment": {
+    "backup": "/tagger/.delete/source-catalog-20261116-034704",
+    "source_files": {
+      "fox-label/server.py": "cd383c567190e85b6b60f9a7091c3e24eaf440fd859840e654cc5288744542d7",
+      "fox-label/dispatch.py": "9d594a6ba025e7a62d2610b403751aa2cffdcc080ada4cbc217920c92018a709",
+      "fox-label/history/store.py": "1f436320b97da8f978867ebbeb972f9aeb8d2b87b909c7fbad717a24cb698b1f",
+      "fox-label/managed/store.py": "e7aa1548d7602547a2a3be8e16bdbe268682da779051ed6b2cb6265d2f0a3511",
+      "fox-label/delivery/reconciliation.py": "4738d1310cda2aeee851acaadbc1af130d7b472273bc47e6ebff0b89e50bfb24",
+      "fox-label/delivery/routes.py": "cad9cbd8131d3818338e1692bcd779bad2b753e73c49933bbb4f5d84850421f4",
+      "fox-label/scheduling/leases.py": "43080f5bf77d8e81dd092b5110ecd2c6da31d89d6ddcb66efb5b5e544c1e00d4",
+      "fox-label/scheduling/packages.py": "92bdcd2290caf0ef83b30fd3059e077151171159eeee1c65bb2798fe5b5fdda9",
+      "fox-label/assignments/offline.py": "e052bb6af6915b9dc466307b86e3c3c529546e5b047dbf042331b20620687951",
+      "fox-label/verification/naming.py": "4f617a46388a0e17a2b20ee8cda95f5b1d3ad400d7a37d17eaf3c9d81b82bca0",
+      "fox-panel/panel.py": "91572901362fe1db5ebf9b3ff10c9df4cd9cbc1d80573fac97923790e6e20819",
+      "fox-panel/web/index.html": "86b327d7dd8bcddb6a03a0ad2c04c804b4b783bfbb120d016536e1ccc5d4fe76",
+      "fox-panel/web/workspace.js": "c36d4d2570e4a962a10bb2c9da5c009bdbf2c2f3a1db2c00d1fd6ea30cf73bea",
+      "fox-panel/web/scheduling.js": "a0047476a28c9c1c20c2a8bfe9b1673b10c3dbf7dcf47046178286f49776428e",
+      "fox-panel/web/source-catalog.js": "a0c30cd130c0e5aed12bbace015e4ceaf57a3802b44ad256ef0d8140b1120949",
+      "fox-label/source_catalog/__init__.py": "12593d37cd18727976de787a8273b22ca2627807eea7cca913e226cc947a63ad",
+      "fox-label/source_catalog/archive.py": "83351d4db93c042708138723282d0c7b516a24c4efc2e596eae84ddff990c1ea",
+      "fox-label/source_catalog/config.py": "6b4e8d55e6129b37ed84e02e66a2ec1e161fda488bad989002e2d15b3affd779",
+      "fox-label/source_catalog/importer.py": "14c5d1797712777188bb365faa49776fc7fd00cd97722a06cbc84c7b07e54e40",
+      "fox-label/source_catalog/manager.py": "7b82506e3398f6a1ac0285154aff41379c2b496b26e7fff208972bfd7b679191",
+      "fox-label/source_catalog/network.py": "99b4df9e1fdf0568d979596f08bf50e58a33156de08ada54cb539cf8c3f24e85",
+      "fox-label/source_catalog/readers.py": "3509565247a1f5cc882259eca02bc5a5eb4fe1c015647dfdc0877a1927ff58e0",
+      "fox-label/source_catalog/revalidation.py": "263a110631f3bae55db4a7354a4295bbd38d6bf52d7b1f27772536440fffb8d8",
+      "fox-label/source_catalog/routes.py": "83747f2837fd9dc0eaf18a17305bb472a1e716f9723ffda80c2747119c16c33c",
+      "fox-label/source_catalog/store.py": "e10281b25535c594e70e1ab3776b6b56eb43c707042ad5e9a917ce755a59c1ca",
+      "fox-label/source_catalog/requirements.txt": "05bf55fdd7a9873cb0b82ca39f9e80c4d2dbce1d61c59e1188c7b104327395bf",
+      "fox-label/worker.py": "78377d9a2446405ecb75f229035937d1de02092f454d6fb5d0c89dfc736af27d",
+      "fox-label/worker-sources.json": "0cf9e914ce97d0e424e039b8464564e5c51594614de8488a687e818701cb5bf8"
+    },
+    "migration_idempotent": true,
+    "counts_before": {
+      "repos": 2,
+      "packages": 135,
+      "users": 11,
+      "devices": 13,
+      "leases": 256
+    },
+    "open_before": [
+      {
+        "lease_id": "Le2b161af69c0",
+        "repo": "MatchaCuratio/Anime-Fox768-400k",
+        "pkg": "shard-000000.tar",
+        "kind": "active",
+        "device_id": "0d8273dba0b5",
+        "parts_json": "[\"tag\",\"nl\"]"
+      }
+    ]
+  },
+  "client_regressions": 58,
+  "frontend_build": true,
+  "browser_clicks": false,
+  "gpu_inference": false,
+  "hf_test_uploads": 0,
+  "scale_skipped": true,
+  "source_checks_passed": 46,
+  "activation": {
+    "MatchaCuratio/Anime-2024Dru768-8M": {
+      "enabled": false,
+      "verified_packages": 0,
+      "revision": "main",
+      "job_state": null
+    },
+    "MatchaCuratio/Anime-Fox768-400k": {
+      "enabled": true,
+      "verified_packages": 1,
+      "revision": "ca9441fcb5dbcb2908408c189195b787fab82611",
+      "job_state": "ready"
+    }
+  },
+  "encrypted_hf_token_read_verified": true,
+  "client_checks": 6
+}

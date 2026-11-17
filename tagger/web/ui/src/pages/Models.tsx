@@ -29,7 +29,6 @@ import {
   type TagModelEntry,
   type VlmModelEntry,
 } from '../lib/api'
-import { ENDPOINT_PRESETS, endpointPresetOf } from '../lib/endpoint'
 import { PageHeader, SectionPanel, StatusChip } from '../components/ui/launcher'
 import { QuantizeDialog } from '../components/QuantizeDialog'
 import { GgufConvertDialog } from '../components/GgufConvertDialog'
@@ -425,11 +424,8 @@ export function Models() {
   const [proxyMsg, setProxyMsg] = useState('')
   const [proxyOk, setProxyOk] = useState<boolean | null>(null)
   const [proxyBusy, setProxyBusy] = useState('')
-  // 下载源（镜像站）：跟代理是替代关系——设了镜像就不用再走梯子。
-  const [endpointPick, setEndpointPick] = useState('')
-  const [endpointDraft, setEndpointDraft] = useState('')
-  const [endpointMsg, setEndpointMsg] = useState('')
-  const [endpointBusy, setEndpointBusy] = useState(false)
+  // 下载源已搬到「设置」页，这里只留连接数保存的回执。
+  const [connsMsg, setConnsMsg] = useState('')
   // 大文件下载连接数：镜像站总速随连接数线性涨，改一次 16G 差好几个小时。
   const [conns, setConns] = useState(4)
   const [connsBusy, setConnsBusy] = useState(false)
@@ -448,8 +444,6 @@ export function Models() {
     setTag(d.tag.map((t) => ({ ...t })))
     if (syncProxy) {
       setProxy(d.proxy)
-      setEndpointPick(endpointPresetOf(d.endpoint))
-      setEndpointDraft(d.endpoint)
       setConns(d.conns ?? 4)
     }
     setDirty(false)
@@ -618,29 +612,15 @@ export function Models() {
     }
   }
 
-  async function saveEndpoint(url: string) {
-    setEndpointBusy(true)
-    setEndpointMsg('')
-    try {
-      const res = await api.saveEndpoint(url)
-      apply(res.catalog, true)
-      setEndpointMsg(`已保存，当前生效：${res.effective}`)
-    } catch (err) {
-      setEndpointMsg(err instanceof Error ? err.message : String(err))
-    } finally {
-      setEndpointBusy(false)
-    }
-  }
-
   async function saveConns(n: number) {
     setConnsBusy(true)
-    setEndpointMsg('')
+    setConnsMsg('')
     try {
       const res = await api.saveConns(n)
       apply(res.catalog, true)
-      setEndpointMsg(`连接数已设为 ${res.conns}，下次下载生效`)
+      setConnsMsg(`连接数已设为 ${res.conns}，下次下载生效`)
     } catch (err) {
-      setEndpointMsg(err instanceof Error ? err.message : String(err))
+      setConnsMsg(err instanceof Error ? err.message : String(err))
     } finally {
       setConnsBusy(false)
     }
@@ -1058,7 +1038,7 @@ export function Models() {
 
       <SectionPanel
         title="下载网络"
-        description="只作用于本页的权重下载"
+        description="代理与连接数只作用于本页的权重下载"
         trailing={
           <span className="text-[11px] text-lx-dim">
             {proxy ? <span className="text-lx-accent">{proxy}</span> : '未设置'}
@@ -1066,46 +1046,28 @@ export function Models() {
         }
       >
         <div className="flex flex-col gap-2">
-          {/* 下载源：设了镜像就不必再挂梯子——梯子按流量计费，16G 一份权重
-              走代理是很难受的；镜像站国内直连通常也更快。 */}
+          {/* 下载源是全局设置（configs/models.json），统一在「设置」页改。
+              这里再摆一个下拉，同一件事就有两个入口，还容易让人以为它只作用于本页。 */}
+          <p className="flex flex-wrap items-center gap-2 text-[11px] text-lx-dim">
+            下载源
+            <span className="font-mono text-lx-secondary">
+              {catalog?.effective_endpoint ?? '—'}
+            </span>
+            {catalog?.env_endpoint && <span>（环境变量 HF_ENDPOINT）</span>}
+            <button
+              type="button"
+              className="cursor-pointer text-lx-accent underline-offset-2 hover:underline"
+              onClick={() => {
+                location.hash = '/settings'
+              }}
+            >
+              去设置改
+            </button>
+          </p>
+
+          {/* 连接数：镜像站实测"单条约 0.35 MB/s、总速随连接数线性涨"，
+              16.3 G 在 4 条下要 4 小时、16 条约 45 分钟。改完下次下载生效。 */}
           <div className="flex flex-wrap items-end gap-2">
-            <label className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-[11px] text-lx-muted">下载源</span>
-              <select
-                className="lx-select text-xs"
-                value={endpointPick}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setEndpointPick(v)
-                  setEndpointMsg('')
-                  if (v === 'custom') setEndpointDraft(catalog?.endpoint || 'https://')
-                }}
-              >
-                {ENDPOINT_PRESETS.map((p) => (
-                  <option key={p.key || 'default'} value={p.key}>
-                    {p.label}
-                  </option>
-                ))}
-                <option value="custom">自定义…</option>
-              </select>
-            </label>
-            {endpointPick === 'custom' && (
-              <label className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-[11px] text-lx-muted">地址</span>
-                <input
-                  className="lx-input font-mono text-xs"
-                  spellCheck={false}
-                  value={endpointDraft}
-                  placeholder="https://hf-mirror.com"
-                  onChange={(e) => {
-                    setEndpointDraft(e.target.value)
-                    setEndpointMsg('')
-                  }}
-                />
-              </label>
-            )}
-            {/* 连接数：镜像站实测"单条约 0.35 MB/s、总速随连接数线性涨"，
-                16.3 G 在 4 条下要 4 小时、16 条约 45 分钟。改完下次下载生效。 */}
             <label className="flex w-[84px] shrink-0 flex-col gap-1">
               <span className="text-[11px] text-lx-muted">连接数</span>
               <select
@@ -1125,22 +1087,8 @@ export function Models() {
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              className="lx-btn-primary px-2.5 py-1.5 text-[11px]"
-              disabled={endpointBusy}
-              onClick={() =>
-                void saveEndpoint(endpointPick === 'custom' ? endpointDraft : endpointPick)
-              }
-            >
-              {endpointBusy ? '保存中…' : '保存下载源'}
-            </button>
           </div>
-          <p className="text-[11px] text-lx-dim">
-            当前生效：<span className="font-mono">{catalog?.effective_endpoint ?? '—'}</span>
-            {catalog?.env_endpoint && '（来自环境变量 HF_ENDPOINT；页面设置优先）'}
-          </p>
-          {endpointMsg && <p className="text-[11px] text-lx-muted">{endpointMsg}</p>}
+          {connsMsg && <p className="text-[11px] text-lx-muted">{connsMsg}</p>}
 
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex min-w-0 flex-1 flex-col gap-1">

@@ -1,65 +1,74 @@
-﻿Tagger 打标器 —— 解压之后怎么跑
-================================
+lulynx 打标器 —— 安装与调度中心
+===============================
 
-第 1 步   解压
-    放哪个盘都行（路径带空格、带中文都没问题），但别放进 C:\Program Files，
-    那里普通权限写不进去，安装会失败。
-
-第 2 步   运行 install.bat（只跑一次，首次约 10 分钟）
-    它做四件事：解出仓库自带的 Python（env\python）、装依赖包、装打标运行时
-    （torch 系，约 2.5 GB）、装 llama.cpp（llama-server，约 570 MB）。
-    这一步不能省——跳过的话双击 exe 只会看到"本地服务刚启动就退出了"。
-
-    机器没网的话，如果包里带了 env\initialization\wheels，改成：
-        install.bat -WheelDir env\initialization\wheels
-    只想打 tag、不跑 NL 描述：install.bat -SkipTag
-    不想装 llama.cpp（570 MB）：install.bat -NoLlama
-
-第 3 步   双击 Tagger.Shell.exe
-    它会起一个本地服务，然后在窗口里打开界面。关窗口即停止服务。
-
-第 4 步   下载模型权重（只跑一次，几 GB）
-    进界面 →「模型管理」→ 找到默认那条（破限版 abliterated），点「下载」。
-    权重不在安装包里，必须单独下；没下的话点「启动服务」会报
-    "GGUF 权重不存在"，那不是在让你去装依赖，是缺权重文件。
-    机器没网：把别人 models\nl\ 下的整个目录拷过来即可。
-
-让 AI 帮你操作（可选）
---------------------
-    包里有 mcp\ 和 agent.md。支持 MCP 的 AI 客户端（Claude Desktop、
-    Cursor、CodeBuddy 等）照 agent.md 里的片段加一个服务器，就能让它
-    替你建任务、看进度、封包；片段里三处路径换成这台电脑的解压路径。
-    用之前先按第 3 步把服务开起来。
-
-环境要求
+首次使用
 --------
-* Windows 10 / 11，64 位
-* .NET 8 桌面运行时（Desktop Runtime）
-  缺了会弹窗说明，点"确定"直接跳到微软官方下载页。
-  注意是 Desktop Runtime，只装 Console 或 ASP.NET Core 运行时不够。
-* Microsoft Edge WebView2 运行时
-  近几年的 Windows 基本都预装了，没装的话壳子会提示并提供下载入口。
+1. 解压到可写目录，例如 D:\lulynx-tagger；不要放进 Program Files。
+2. 运行 install.bat。安装包自带 Python 初始化文件，依赖与 llama.cpp 联网安装。
+   只做 TAG、不需要 llama.cpp：install.bat -NoLlama
+   只做封包或使用已有 GGUF 做 NL：install.bat -SkipTag
+   -SkipTag 会跳过 torch/transformers，不能用于 TAG 或从原始模型转换 GGUF。
+   离线依赖包：install.bat -WheelDir env\initialization\wheels
+3. 双击 Tagger.Shell.exe；也可运行 run-web.cmd，在浏览器打开本地界面。
+   Windows 10/11 64 位；壳子需要 Edge WebView2 运行时。
+   自包含版无需单独安装 .NET；依赖框架版需要 .NET 8+ Desktop Runtime。
+   Linux 使用 install.sh 和 run-web.sh；桌面 exe 只适用于 Windows。
 
-出问题看这里
-------------
-* 窗口一闪而过，或提示"本地服务刚启动就退出了"
-  → install.bat 没跑，或者跑失败了。重跑一次，看它的输出。
+调度中心自动化
+--------------
+进入「调度中心」，填写中心地址（http://119.28.16.93）、用户身份、
+打标模式（TAG/NL/两者）、TAG/NL 模型、设备、精度/量化和并发，保存配置。
+原始 NL 模型可自动下载、转换和量化；已有 GGUF 会复用本机文件。
+设备和精度应与本机硬件、所选引擎相符。
 
-* 点「启动服务」报"GGUF 权重不存在"
-  → 权重没下。见第 4 步。（注意看报错里给的完整路径，确认是不是
-    「模型管理」里那条你下过的模型。）
+主动模式：启动后向中心请求分包，自动准备模型、下载素材、打标、回传和申报。
+被动托管：保存配置后另点开始托管，中心自动安排分片并控制开始／停止／检查。
+托管期间本机模型、设备、精度与并发冻结；本机可随时停止或退出托管。
+HF Token、本机路径和自定义命令由本机管理，不能由中心任意改写。
 
-* 想确认 llama-server 装没装
-  → env\python\python.exe -m tagger.cli llama status
-    没装就：env\python\python.exe -m tagger.cli llama install
+HF 授权
+-------
+访问受限仓库时填入有权限的 HF Token；下载和上传分别需要相应权限。
+仓库列表能浏览不代表数据文件可匿名下载。manual gated 仓库还需账号获准访问。
+Token 默认只在当前进程使用，勾选记住才保存到本机；不随发布包分发。
+未勾选记住时，重新打开客户端需要再次填 Token。
 
-* 想排查具体原因
-  → 日志在 %LOCALAPPDATA%\Tagger\shell.log
+停止与恢复
+----------
+崩溃/强制退出后重新打开客户端，可按保存的运行意图续接任务，复用已校验分片。
+自动回传成功后才申报完成；回传失败保留任务等待恢复。
+用户主动停止会归还未完成租约；再次打开保持停止。
+Windows 宿主退出时回收它启动的模型、worker 和转换子进程。
+Linux 宿主崩溃后的进程自动回收尚未验收。
 
-* 界面能打开但里面是"前端还没构建"的说明页
-  → 打包时漏了 tagger\web\ui\dist。正常的包里应该有
-    tagger\web\ui\dist\index.html。
+升级
+----
+关闭旧客户端，将新版程序文件覆盖到原目录。发布包不带 configs/models.json、
+configs/ui-form.json、configs/nl_api.json、configs/setup.json、work、models 或运行凭据，
+保留本机原有目录与设置。内置 tiers.yaml、提示词预设会随版本更新，自行修改过的
+预设请先备份。不要把旧目录的模型和工作目录覆盖成空目录。
 
-* 用的不是自己电脑，想确认环境对不对
-  → 在仓库目录里跑：env\python\python.exe -m tagger.cli --help
-    能打出帮助就说明 Python 这边是好的。
+独立 worker（无需安装完整 WebUI）
+--------------------------------
+包内 worker.py 与客户端同源，调度中心当前入口为 http://119.28.16.93。
+Python 3.10+，无需 pip；worker-sources.json 记录内嵌模块的 SHA256。
+分片下载需要 curl，自定义打标命令所需的模型环境另行安装。
+python worker.py login --server http://119.28.16.93 --user-id 你的名字
+python worker.py run --help
+run --cmd 指定外部执行命令；--auto-upload 开启产物回传，成功后才申报完成。
+--wait 常驻等待；--download-conns 4 多连接下载；--parts 选择派工倾向。
+被动托管请使用完整客户端。先保存本机环境，再点击开始托管；托管期间模型、设备
+和精度锁定，中心安排仓库、分片及开始／停止／检查。退出托管后可修改本机环境。
+勾选自动回传后，中心按分片分别统计 TAG／NL 成功、排除、失败、漏项及完成状态。
+失败或漏项不会登记完成；已有结果按来源归并，可由下一台设备增量续作。
+历史手动产物先关联原分片和产物目录，再由面板下发检查。未回传验收的旧结果
+显示未验收，中心不会推测成功数量。分项分配和检查之后可点击刷新分片查看结果。
+
+排错
+----
+安装失败先看 install.bat 输出，依赖没装齐请重跑安装。
+模型下载、转换、启动进度在界面显示，核对错误里的路径和剩余磁盘空间。
+检查命令：env\python\python.exe -m tagger.cli --help
+llama.cpp 状态：env\python\python.exe -m tagger.cli llama status
+桌面日志：%LOCALAPPDATA%\Tagger\shell.log
+MCP 操作支持见包内 agent.md（需先打开本地服务）。

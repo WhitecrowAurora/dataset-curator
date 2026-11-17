@@ -22,6 +22,18 @@ dependencies = [
 #                 runtime/llama.cpp；也可以用 TAGGER_LLAMA_SERVER 指向现成的一份）。
 #                 两个平台的成员机都不需要装这个 extra。
 serve = ["vllm>=0.9.0"]
+# 专用 Qwen3-VL；sm80+ 优化按需使用 triton / triton-windows。
+# V100 / Turing 的 GGUF 加速使用 PyTorch CUDA 随附的 NVRTC，无需 nvcc。
+# V100 须安装仍包含 sm_70 的 PyTorch CUDA 12 构建。
+native-nl = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "transformers==5.14.1",
+    "safetensors>=0.4",
+    "gguf>=0.17",
+]
 # parquet 是打包的默认输出格式（Packer.formats 默认 parquet）。
 # 写/复核用 pyarrow；**读**分片（本地或 HF）走 datasets 的 streaming——
 # 两条路都在这一个 extra 里，否则会出现"能打包、打不了 NL"的半残状态。
@@ -70,6 +82,9 @@ tagger = "tagger.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["tagger*"]
+
+[tool.setuptools.package-data]
+"tagger.inference.qwen3vl.kernels.cuda" = ["*.cu"]
 
 [tool.pytest.ini_options]
 # 测试是安全网，不该靠"记得哪个目录"来跑。pytest 直接读这里。

@@ -32,8 +32,9 @@ import json
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from .tag_preprocess import normalize_preprocess, tensor_prep_plan as _tensor_prep_plan
 
@@ -123,6 +124,8 @@ class TagPrediction:
     # 却描述的是"这张图的审核等级"）。但它也不该被扔掉——分类头每张图都
     # 算了，拿来做数据集清洗/剔除误标是白捡的。所以单列一个字段往下传。
     rating: dict[str, float] = field(default_factory=dict)
+    rescore: Callable[[dict[str, float] | None], dict[str, float]] | None = field(
+        default=None, repr=False, compare=False)
 
 
 @dataclass(slots=True)
@@ -177,7 +180,7 @@ class TagBackend(ABC):
         self.last_timings: dict[str, int] = {"total": 0, "decode": 0, "forward": 0}
         # 子类在 _predict_many 里写 (解码 ms, 前向 ms)；基类负责清零。
         self._split_ms: tuple[int, int] = (0, 0)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._ready = False
 
     # -------------------------------------------------------------- 生命周期
@@ -219,17 +222,22 @@ class TagBackend(ABC):
         取不到快照（后端不支持、或 index 越界）返回空 dict，调用方自己退回
         到"直接放弃"。
         """
-        probs = getattr(self, "last_probs", None)
-        if not probs or not (0 <= index < len(probs)):
-            return {}
-        saved_thr, saved_key = self.thresholds, self._plan_key
-        try:
-            self.thresholds = dict(thresholds or {})
-            self._plan_key = None
-            return self._filter(probs[index])
-        finally:
-            self.thresholds = saved_thr
-            self._plan_key = saved_key
+        with self._lock:
+            probs = getattr(self, "last_probs", None)
+            if not probs or not (0 <= index < len(probs)):
+                return {}
+            return self._rescore_scores(probs[index], thresholds)
+
+    def _rescore_scores(self, scores, thresholds) -> dict[str, float]:
+        with self._lock:
+            saved_thr = self.thresholds
+            try:
+                self.thresholds = dict(thresholds or {})
+                self._plan_key = None
+                return self._filter(scores)
+            finally:
+                self.thresholds = saved_thr
+                self._plan_key = None
 
     def predict_batch_with(self, images: Sequence,
                           thresholds: dict[str, float] | None
@@ -245,7 +253,7 @@ class TagBackend(ABC):
         """
         self.load()
         with self._lock:
-            saved_plan = self._plan_override
+            saved_plan = getattr(self, "_plan_override", None)
             saved_thr = self.thresholds
             try:
                 self.thresholds = dict(thresholds or {})
@@ -275,34 +283,34 @@ class TagBackend(ABC):
         if not imgs:
             return []
         self.load()
-        self._split_ms = (0, 0)
         t0 = time.perf_counter()
         with self._lock:
+            self._split_ms = (0, 0)
             raws = self._predict_many(imgs)
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-        # 拆分耗时。decode 是子类自己报的；没报（pixai / onnx）就把全部算进
-        # forward——宁可粗，也不要凭空编一个解码占比出来。
-        dec, fwd = self._split_ms
-        self.last_timings = {
-            "total": elapsed_ms,
-            "decode": dec,
-            "forward": fwd or max(0, elapsed_ms - dec),
-        }
-        # 单张时把整段耗时记在那一张上；多张时按张均摊，免得 latency_ms
-        # 看着像"每张花了 N 倍时间"。吞吐看的是总时长，这里只是不让它误导。
-        per = max(1, elapsed_ms // len(imgs))
-        # 子类若额外产出了按张对齐的信号（当前只有 rating），这里顺手带上。
-        ratings = list(getattr(self, "_last_ratings", ()) or ())
-        out = []
-        for i, raw in enumerate(raws):
-            pairs = sorted(raw.items(), key=lambda kv: -kv[1])[: self.max_tags]
-            out.append(TagPrediction(
-                tags=[(t, round(float(p), 4)) for t, p in pairs],
-                backend=self.name,
-                latency_ms=per,
-                rating=ratings[i] if i < len(ratings) else {},
-            ))
-        return out
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            dec, fwd = self._split_ms
+            self.last_timings = {
+                "total": elapsed_ms,
+                "decode": dec,
+                "forward": fwd or max(0, elapsed_ms - dec),
+            }
+            per = max(1, elapsed_ms // len(imgs))
+            ratings = list(getattr(self, "_last_ratings", ()) or ())
+            # 分数跟着每张图的结果走，后续批次更新 last_probs 不会串图。
+            scores = (getattr(self, "last_probs", None)
+                      or getattr(self, "last_scores", None) or ())
+            out = []
+            for i, raw in enumerate(raws):
+                pairs = sorted(raw.items(), key=lambda kv: -kv[1])[: self.max_tags]
+                out.append(TagPrediction(
+                    tags=[(t, round(float(p), 4)) for t, p in pairs],
+                    backend=self.name,
+                    latency_ms=per,
+                    rating=ratings[i] if i < len(ratings) else {},
+                    rescore=(partial(self._rescore_scores, scores[i])
+                             if i < len(scores) else None),
+                ))
+            return out
 
     def _predict_many(self, images: Sequence) -> list[dict[str, float]]:
         """默认逐张跑。能真正攒批的后端覆写这个方法。"""
@@ -689,17 +697,20 @@ class PixAITagger(TagBackend):
         等结果时才发现 tag 太少，分数其实就在手上，再算一遍纯属白烧。
         快照由 `_predict_many` 在阈值 0 的那一次留下（见那边的说明）。
         """
-        probs = getattr(self, "last_scores", None)
-        if not probs or not (0 <= index < len(probs)):
-            return {}
-        saved_thr, saved_key = self.thresholds, self._plan_key
-        try:
-            self.thresholds = dict(thresholds or {})
-            self._plan_key = None
-            return self._apply_thresholds(probs[index])
-        finally:
-            self.thresholds = saved_thr
-            self._plan_key = saved_key
+        with self._lock:
+            probs = getattr(self, "last_scores", None)
+            if not probs or not (0 <= index < len(probs)):
+                return {}
+            return self._rescore_scores(probs[index], thresholds)
+
+    def _rescore_scores(self, scores, thresholds) -> dict[str, float]:
+        with self._lock:
+            saved_thr = self.thresholds
+            try:
+                self.thresholds = dict(thresholds or {})
+                return self._apply_thresholds(scores)
+            finally:
+                self.thresholds = saved_thr
 
     def _apply_thresholds(self, scores: dict[str, float]) -> dict[str, float]:
         """按当前阈值表筛全量分数（= pipeline 自己那套 mask 的等价实现）。
@@ -1107,6 +1118,7 @@ class WDEva02Tagger(TagBackend):
         chunk = max(1, self.batch_size)
         parts = [list(images[i:i + chunk]) for i in range(0, len(images), chunk)]
         self._last_ratings = []
+        all_probs = []
 
         use_prefetch = (self.prefetch and len(parts) > 1
                         and str(self.device).startswith("cuda"))
@@ -1118,6 +1130,7 @@ class WDEva02Tagger(TagBackend):
             for part in parts:
                 tensors, dms = self._decode_batch(part)
                 tags, ratings, fms = self._forward_chunk(tensors)
+                all_probs.extend(self.last_probs or [])
                 decode_ms += dms
                 fwd_ms += fms
                 out.extend(tags)
@@ -1135,6 +1148,7 @@ class WDEva02Tagger(TagBackend):
                     tensors, dms = cur.result()
                     decode_ms += dms
                     tags, ratings, fms = self._forward_chunk(tensors)
+                    all_probs.extend(self.last_probs or [])
                     fwd_ms += fms
                     out.extend(tags)
                     self._last_ratings.extend(ratings)
@@ -1143,6 +1157,7 @@ class WDEva02Tagger(TagBackend):
         # 注意：预取生效时 decode 与 forward **互相重叠**，两者相加会大于
         # 墙钟 total。这不是统计 bug，是重叠的直接体现——判断是否还在串行，
         # 看 decode+forward 是否明显大于 total 即可。
+        self.last_probs = all_probs
         self._split_ms = (decode_ms, fwd_ms)
         return out
 
@@ -1719,7 +1734,7 @@ class MultiDeviceTagBackend:
         parts = _split_even(imgs, len(self._subs))
         pool = self._executor()
         futures = [pool.submit(sub.predict_batch_with, part, thresholds)
-                   for sub, part in zip(self._subs, parts)]
+                   for sub, part in zip(self._subs, parts) if part]
         merged: list = []
         for fut in futures:
             merged.extend(fut.result())

@@ -19,14 +19,15 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import httpx
 
 from .config import ConfigError, RunProfile
 from .netutil import trust_env_for
-from .nl_engine import normalize_engine
+from .nl_engine import KV_TYPE, normalize_engine
+from .runtime.processes import spawn_owned
 
 
 DEFAULT_PORT = 8000
@@ -50,6 +51,8 @@ class ServerHandle:
     engine: str = "vllm"
     # llama.cpp 实际生效的槽位数；vLLM 下为 None（它没有这个概念）。
     slots: int | None = None
+    gpu_layers: int | None = None
+    native_runtime: dict | None = None
 
     def stop(self) -> None:
         if self.process is None:
@@ -137,7 +140,7 @@ def build_command(
     cmd: list[str] = [
         "vllm",
         "serve",
-        profile.model.resolved_path,
+        profile.weights_path,
         "--served-model-name",
         served_name,
         "--port",
@@ -298,8 +301,9 @@ def start_server(
     timeout_s: int = 900,
     served_name: str = "tagger",
     engine: str = "vllm",
-    device_index: int = 0,
+    device_index: int | None = None,
     slots_override: int | None = None,
+    gpu_layers: int | None = None,
 ) -> ServerHandle:
     """起一个推理服务并等待就绪（vLLM 或 llama.cpp）。
 
@@ -315,14 +319,30 @@ def start_server(
     每个 slot 启起来就按 CTX_PER_SLOT 预留 KV，想让出显存给别的程序就把
     这个数调小——调小任务并发是没用的，那些 slot 照样占着。
 
-    device_index 只对 llama.cpp 有效（CUDA_VISIBLE_DEVICES），多卡时一张卡
-    一份服务；vLLM 走自己的张量并行，不看这个。
+    device_index 是物理卡号；两个引擎均通过 CUDA_VISIBLE_DEVICES 选择设备。
+    留空时继承父进程的可见设备配置。
     """
     resolved = normalize_engine(engine)
     base_url = f"http://127.0.0.1:{port}"
     slots_used: int | None = None
 
-    if resolved == "llamacpp":
+    if resolved == "native":
+        from .inference.qwen3vl.runtime import build_command as native_command
+        from .inference.qwen3vl.runtime import check_environment, specification
+
+        check_environment()
+        spec = specification(profile, slots=slots_override, served_name=served_name or "tagger")
+        field = "quantized_path" if profile.precision == "w4a16" else "path"
+        profile = replace(profile, model=replace(profile.model, **{field: spec["model_dir"]}),
+                          max_num_seqs=spec["batch_size"], slots=spec["batch_size"], max_num_batched_tokens=0)
+        cmd = native_command(spec, port)
+        slots_used = spec["batch_size"]
+        child_env = dict(os.environ)
+        if spec["device"] == "cpu":
+            child_env["CUDA_VISIBLE_DEVICES"] = "-1"
+        elif device_index is not None:
+            child_env["CUDA_VISIBLE_DEVICES"] = str(device_index)
+    elif resolved == "llamacpp":
         from . import nl_engine
 
         nl_engine.check_engine(resolved)
@@ -331,6 +351,7 @@ def start_server(
             profile, port=port, served_name=served_name or "tagger",
             gguf=gguf, mmproj=mmproj,
             vram_gb=profile.vram_gb, slots_override=slots_override,
+            **({"gpu_layers": gpu_layers} if gpu_layers is not None else {}),
         )
         # 从刚拼好的命令里回读 -np，而不是再算一遍 slot_plan：指纹要记的是
         # "实际启动的那条命令"，另算一份就有了两个真相源。
@@ -357,15 +378,17 @@ def start_server(
         check_environment()
         cmd = build_command(profile, port=port, data_root=data_root,
                             served_name=served_name or "tagger")
-        child_env = None
+        child_env = dict(os.environ) if device_index is not None else None
+        if child_env is not None:
+            child_env["CUDA_VISIBLE_DEVICES"] = str(device_index)
 
     # 日志必须落文件。stdout=PIPE 又从不读的话，管道缓冲（约 64KB）被
     # vLLM 的启动日志写满后子进程会被自己的输出卡死——症状是"服务起着
     # 起着就冻结了"，而且排查时一条日志都拿不到。默认写 run/ 下，
     # 等待失败时把尾巴打出来。
     if log_path is None:
-        log_path = Path("run") / f"vllm-{port}.log"
-        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        log_path = Path("run") / f"{resolved}-{port}.log"
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "a", encoding="utf-8", buffering=1)
     print(f"[tagger] 服务日志: {Path(log_path).resolve()}")
 
@@ -377,7 +400,7 @@ def start_server(
         print(f"[tagger] 槽位: {slots_used}（-np）  "
               f"卡: {(child_env or {}).get('CUDA_VISIBLE_DEVICES', '继承环境')}")
     try:
-        process = subprocess.Popen(
+        process = spawn_owned(
             cmd,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -398,8 +421,11 @@ def start_server(
     handle = ServerHandle(process=process, base_url=base_url, port=port,
                           profile=profile,
                           local_media_root=(str(Path(data_root).resolve())
-                                            if data_root else ""),
+                                            if data_root and resolved == "vllm" else ""),
                           engine=resolved, slots=slots_used)
+    handle.gpu_layers = gpu_layers
+    if resolved == "native":
+        handle.native_runtime = spec
 
     if not wait:
         log_file.close()
@@ -446,7 +472,7 @@ def fingerprint_env(handle: ServerHandle) -> dict:
     p = handle.profile
     return {
         "model_id": p.model_id,
-        "model_path": p.model.resolved_path,
+        "model_path": p.weights_path,
         "model_revision": p.model.revision,
         # 引擎决定这套参数怎么落地（两套命令行完全不通用），也决定下面
         # 哪个字段才是"服务端并发"。
@@ -456,20 +482,23 @@ def fingerprint_env(handle: ServerHandle) -> dict:
         # 换桶等于换一套输入尺寸分布，必须进指纹，否则两批数据无法判断是否同源
         "bucket_spec": p.bucket_spec,
         "max_model_len": p.max_model_len,
-        "max_num_seqs": p.max_num_seqs,
+        "max_num_seqs": handle.slots if handle.engine == "native" else p.max_num_seqs,
         # llama.cpp 的服务端并发是 -np（slots），上面那行对 llama-server
         # 一个字节都不生效——它是分档表按 vLLM 口径写的数。客户端要按
         # engine 选字段，否则 16G 卡 12 槽会按 8 条在途跑（白丢约三成吞吐）。
         "slots": handle.slots,
-        "max_num_batched_tokens": p.max_num_batched_tokens,
-        "gpu_memory_utilization": p.gpu_memory_utilization,
+        "max_num_batched_tokens": 0 if handle.engine == "native" else p.max_num_batched_tokens,
+        "gpu_memory_utilization": None if handle.engine == "native" else p.gpu_memory_utilization,
         "temperature": p.temperature,
         "top_p": p.top_p,
         "max_tokens": p.max_tokens,
         "vllm_version": handle.vllm_version,
         "python": sys.version.split()[0],
         "device": p.device_name,
+        "gpu_layers": getattr(handle, "gpu_layers", None),
+        "kv_type": ("f16" if getattr(handle, "gpu_layers", None) == 0 else KV_TYPE) if handle.engine == "llamacpp" else None,
         # 空串 = 服务端不接受 file://。客户端据此决定能不能开 --use-file-url：
         # 放行目录与实际产物目录不匹配时报的是 400，而不是"路径不对"。
         "local_media_root": handle.local_media_root,
+        **({"native_runtime": handle.native_runtime} if handle.engine == "native" else {}),
     }

@@ -1,0 +1,25 @@
+{
+  "file": "worker.py",
+  "sha256": "618e2fcf15981bd0c79c6ff0c0175796f1e61d807474501b06f73f9d5646f4bb",
+  "sources": {
+    "tagger/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tagger/artifacts.py": "7d469d794a60cadb5e9b88c17ffef5d59f99f96c550b6d2766d6a54f2cbde4aa",
+    "tagger/blob_client.py": "e015ede349b237f32a5e2aad13ec4766b2c392e26924177596959825a3ce6ebc",
+    "tagger/center_delivery.py": "c34e5ed76bc431571aa71a799f5368783cee28a80576a99ce033b5820a50cc67",
+    "tagger/center_runtime/__init__.py": "5527c6c88beb83ec2b95b012aa765d9d2f3460ee16644cfeece3fc5c16722d91",
+    "tagger/center_runtime/artifacts.py": "b3c06812964c57c1cb03b909072efa7af8ccd4ea8c49f30b971505eedd476d9a",
+    "tagger/center_runtime/liveness.py": "4868dd1429cf88066eca5a363dafbcb10a460ccd6250f0abb6ffe57c68997ad1",
+    "tagger/fox_worker.py": "7cee978a093a67a456dec1db506ff701a0738ea4d71f7da3c03f1f03d7a8104f",
+    "tagger/hardware.py": "4ef64584d9a110dcba59a1d2ce7fdd96d1e8e9e0ce3e7a52ff2efba0aab1355c",
+    "tagger/naming.py": "4f617a46388a0e17a2b20ee8cda95f5b1d3ad400d7a37d17eaf3c9d81b82bca0",
+    "tagger/netutil.py": "9f71211a486d76d9f40e35e89e27220a62b60298375812633fbbce30f410e483",
+    "tagger/nl_api.py": "3c9d9cbf4748c8deea58416abeae62113b936d278b8999e97864bacf51264bbb",
+    "tagger/storage/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tagger/storage/atomic.py": "42962dcbce7511f31def0863d47779ae962246a89f6ac28b4c5a6aabba2b414b",
+    "tagger/verification/__init__.py": "01b2f9d2ff7eeeeef071bb2f6185340af00e4e9ba191735fbb049366775182a8",
+    "tagger/verification/history.py": "79fe385893cc5ed375532066372533881b0db073c8a0c88bb8aa42aee44ea280",
+    "tagger/verification/local.py": "66fc497098da2c3de759a0450f9dc1fefa4f11d9664703a9f038d82fe65db140",
+    "tagger/verification/payload.py": "1d040b4cf1c2d1cb7f24a8bb1ba90ea7eddf97deb0485090e4fe04012141a45f",
+    "tagger/verification/source.py": "26e80f42f19b7fc2b0b678722ae8ed0bfd7e66a03760a990d30fd188caf8e9cb"
+  }
+}

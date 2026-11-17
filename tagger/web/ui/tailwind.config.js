@@ -38,6 +38,7 @@ export default {
           muted: lx('--lx-text-muted'),
           dim: lx('--lx-text-dim'),
           accent: lx('--lx-accent-text'),
+          selected: lx('--lx-selected-fg'),
           'on-accent': lx('--lx-on-accent'),
           success: lx('--lx-success-text'),
           warning: lx('--lx-warning-text'),
@@ -57,6 +58,7 @@ export default {
         },
       },
       boxShadow: {
+        'lx-hover': 'var(--lx-shadow-hover)',
         'lx-glow': '0 0 20px var(--lx-accent-shadow), 0 4px 12px var(--lx-accent-shadow)',
         'lx-card-hover': '0 8px 24px rgba(0,0,0,0.15), 0 0 0 1px var(--lx-accent-ring)',
         'lx-btn': '0 2px 8px var(--lx-accent-glow)',

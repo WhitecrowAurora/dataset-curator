@@ -1,0 +1,5 @@
+.fp-allocation { margin-block: 12px; padding: 12px; border: 1px solid var(--fp-border); border-radius: var(--fp-radius-md); }
+.fp-allocation-toolbar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.fp-allocation-repo { padding: 12px; margin-bottom: 12px; border: 1px solid var(--fp-border); border-radius: var(--fp-radius-md); }
+.fp-allocation-repo > p { margin-bottom: 8px; color: var(--fp-text-3); }
+.fp-allocation [hidden] { display: none; }

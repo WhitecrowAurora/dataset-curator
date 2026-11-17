@@ -4,6 +4,7 @@ import { ChevronRight, CircleHelp } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { ProgressBar } from './ProgressBar'
+import { FieldNotice } from './FieldNotice'
 import { cardHover, cardTap } from '../../lib/motion'
 import { cn as cx } from '../../lib/cn'
 
@@ -208,6 +209,7 @@ export function SettingRow({
   icon,
   required = false,
   wide = false,
+  notice,
   children,
 }: {
   label: string
@@ -230,6 +232,7 @@ export function SettingRow({
    * 一个「下载」按钮），塞进窄列只会全部折行。
    */
   wide?: boolean
+  notice?: string
   children: ReactNode
 }) {
   return (
@@ -269,7 +272,7 @@ export function SettingRow({
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-lx-muted">{description}</p>
         )}
       </div>
-      <div className="min-w-0">{children}</div>
+      <div className="min-w-0">{children}<FieldNotice message={notice} /></div>
     </div>
   )
 }

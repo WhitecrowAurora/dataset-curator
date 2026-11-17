@@ -104,6 +104,7 @@ function TorchHintChip({
 export function AppShell({
   items,
   actions,
+  setup,
   health,
   center,
   onOpenCenter,
@@ -117,6 +118,7 @@ export function AppShell({
   items: NavItem[]
   /** 侧栏导航下方的操作按钮（重试失败项等），与页面切换不是一类 */
   actions?: ReactNode
+  setup?: ReactNode
   health: Health | null
   /** 调度中心的连接状态；null = 还没问到（按"没连上"显示） */
   center: CenterBrief | null
@@ -143,7 +145,7 @@ export function AppShell({
         : '还没连调度中心：点这里填地址和姓名'
   return (
     <div className="flex h-screen w-full overflow-hidden bg-lx-bg font-sans text-lx">
-      <Sidebar items={items} actions={actions} footer={footer} />
+      <Sidebar items={items} actions={actions} setup={setup} footer={footer} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* relative z-30：backdrop-blur 会自建一层 stacking context，不抬 z-index 的

@@ -1,6 +1,6 @@
 # Tagger 打标器 · AI 接入与使用手册
 
-> 本文读者是 **AI 助手**（以及替它做配置的人）。人类上手看 `README-FIRST.txt`，开发细节看 `devtools/HANDOFF.md`。
+> 本文读者是 **AI 助手**（以及替它做配置的人）。人类上手看 `README-FIRST.txt`，安装说明看 `devtools/embedded-env.md`。
 
 ## 1. 先对齐结论
 

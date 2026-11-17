@@ -2,10 +2,10 @@
 
 只做三件事：读出张量、把张量换成量化后的字节、原样写回。
 
-**元数据整段原样搬运**，不解析再编码。理由：GGUF 的元数据有十几种类型
+元数据保持原样，量化时仅更新已有的 `general.file_type`。理由：GGUF 的元数据有十几种类型
 （字符串、数组、嵌套数组……），Qwen 这类模型还塞了 tokenizer 词表和 chat
 template。解析一遍再拼回去，任何一个类型编码写错，llama.cpp 就直接拒绝加载；
-而量化根本不需要理解它们，只需要保证字节不变。
+量化不需要重新编码这些内容。
 
 张量信息（名字/维度/类型/偏移）要重写，因为类型变了；数据段按 `general.alignment`
 重新对齐。
@@ -27,6 +27,7 @@ DEFAULT_ALIGNMENT = 32
 # 我们认识的张量类型（其余遇到就跳过不量化）
 GGML_TYPE_F32 = 0
 GGML_TYPE_F16 = 1
+GGML_TYPE_Q8_0 = 8
 GGML_TYPE_BF16 = 30
 GGML_TYPE_Q4_K = 12
 GGML_TYPE_Q6_K = 14
@@ -150,8 +151,19 @@ class Reader:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def metadata_bytes(self) -> bytes:
-        return self._buf[self.metadata_start:self.metadata_end]
+    def metadata_bytes(self, *, file_type: int | None = None) -> bytes:
+        """保留元数据；量化时仅更新已有的 general.file_type。"""
+        metadata = self._buf[self.metadata_start:self.metadata_end]
+        if file_type is not None:
+            pos = 0
+            for _ in range(self.kv_count):
+                key, pos = _read_string(metadata, pos)
+                vtype = struct.unpack_from("<I", metadata, pos)[0]
+                pos += 4
+                if key == "general.file_type" and vtype == 4:
+                    return metadata[:pos] + struct.pack("<I", file_type) + metadata[pos + 4:]
+                pos = _skip_value(metadata, pos, vtype)
+        return metadata
 
     def tensor_bytes(self, info: TensorInfo, size: int) -> bytes:
         start = self.data_start + info.offset

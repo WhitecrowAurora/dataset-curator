@@ -15,6 +15,7 @@ __pycache__/
 
 # 本机设置与任务历史：含素材路径、显存参数，换台机器就没意义
 /configs/ui-form.json
+/configs/setup.json
 /run/history/
 
 # 运维留档：含执行机 IP、HF 账号等信息，不入库
@@ -68,3 +69,7 @@ __pycache__/
 /tmp
 /.delete
 /tagger/web/__pycache__
+/.playwright-cli
+/dist
+/docs
+/fixed

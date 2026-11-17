@@ -17,10 +17,14 @@ const LAST_THRESH_KEY = 'tagger-stats-thresholds'
 const C_RETRY = '#38a3a5'
 const C_LOW = '#b58ad9'
 const C_HIGH = '#4e9dd9'
+// 跳过按原因拆开后线变多，再补两个中间调；三色循环会在同屏时撞色
+const C_SKIP_BLANK = '#8a8f98'
+const C_SKIP_ARTIST = '#c08a4e'
 
 const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   pending: { label: '排队中', tone: 'neutral' },
   running: { label: '运行中', tone: 'accent' },
+  paused: { label: '已暂停', tone: 'warning' },
   done: { label: '已完成', tone: 'success' },
   stopped: { label: '已停止', tone: 'warning' },
   failed: { label: '失败', tone: 'danger' },
@@ -39,6 +43,10 @@ function clamp(v: number, lo: number, hi: number) {
 /** 阈值 → 直方图格数：bin i 的中心分是 1 + i*0.1，"< 阈值"即中心更小的格 */
 function lowCutOf(low: number) {
   return clamp(Math.ceil((low - 1) * 10), 0, 41)
+}
+
+function inferenceCount(b: JobStatsBucket) {
+  return b.done_first + b.done_retry + b.failed
 }
 
 export function Stats() {
@@ -103,7 +111,7 @@ export function Stats() {
   }, [jobId, bucket])
   useEffect(() => { void refresh() }, [refresh])
 
-  const live = stats !== null && (stats.status === 'running' || stats.status === 'pending')
+  const live = stats !== null && ['running', 'pending', 'paused'].includes(stats.status)
   useEffect(() => {
     if (!live) return
     const t = window.setInterval(() => { void refresh() }, 3000)
@@ -113,32 +121,52 @@ export function Stats() {
   const series = useMemo<TrendSeries[]>(() => {
     if (!stats || stats.buckets.length === 0) return []
     const bs = stats.buckets
-    const pctVals = (pick: (b: JobStatsBucket) => number): (number | null)[] =>
-      bs.map((b) => (b.settled > 0 ? pick(b) / b.settled : null))
+    const pctVals = (
+      pick: (b: JobStatsBucket) => number,
+      denominator: (b: JobStatsBucket) => number = (b) => b.settled,
+    ): (number | null)[] => bs.map((b) => {
+      const n = denominator(b)
+      return n > 0 ? pick(b) / n : null
+    })
     const histSum = (b: JobStatsBucket, from: number, to: number) =>
       b.score_hist.slice(from, to).reduce((a, v) => a + v, 0)
     const lowCut = lowCutOf(thresh.low)
     const highCut = clamp(Math.ceil((thresh.high - 1) * 10), 0, 41)
     const list: TrendSeries[] = [
       {
-        key: 'first', label: '一次通过', color: 'var(--lx-success)', kind: 'pct',
-        values: pctVals((b) => b.done_first), counts: bs.map((b) => b.done_first),
+        key: 'first', label: '一次通过率', color: 'var(--lx-success)', kind: 'pct',
+        values: pctVals((b) => b.done_first, inferenceCount), counts: bs.map((b) => b.done_first),
       },
       {
-        key: 'retry', label: '重试后通过', color: C_RETRY, kind: 'pct',
-        values: pctVals((b) => b.done_retry), counts: bs.map((b) => b.done_retry),
+        key: 'retry', label: '重试后通过率', color: C_RETRY, kind: 'pct',
+        values: pctVals((b) => b.done_retry, inferenceCount), counts: bs.map((b) => b.done_retry),
       },
       {
-        key: 'skipped', label: '跳过', color: 'var(--lx-bar-fill)', kind: 'pct',
+        key: 'skipped', label: '已有产物占比', color: 'var(--lx-bar-fill)', kind: 'pct',
         values: pctVals((b) => b.skipped), counts: bs.map((b) => b.skipped),
       },
+      // 跳过按原因分线：产物已有是正常续跑，图太小 / 没画师是"永远做不成"。
+      // 合成一条的话后者会被前者压平——194 张已有 + 5 张图太小，曲线只报
+      // "跳过 99.5%"，看着一切正常，漏的那 5 张永远没人发现。
       {
-        key: 'blacklisted', label: '拉黑', color: 'var(--lx-warning)', kind: 'pct',
+        key: 'blank_skipped', label: '图太小占比', color: C_SKIP_BLANK, kind: 'pct',
+        values: pctVals((b) => b.blank_skipped), counts: bs.map((b) => b.blank_skipped),
+      },
+      {
+        key: 'artist_skipped', label: '无画师占比', color: C_SKIP_ARTIST, kind: 'pct',
+        values: pctVals((b) => b.artist_skipped), counts: bs.map((b) => b.artist_skipped),
+      },
+      {
+        key: 'excused', label: '重试剔除占比', color: C_HIGH, kind: 'pct',
+        values: pctVals((b) => b.excused), counts: bs.map((b) => b.excused),
+      },
+      {
+        key: 'blacklisted', label: '达到失败上限占比', color: 'var(--lx-warning)', kind: 'pct',
         values: pctVals((b) => b.blacklisted), counts: bs.map((b) => b.blacklisted),
       },
       {
-        key: 'failed', label: '失败', color: 'var(--lx-danger)', kind: 'pct',
-        values: pctVals((b) => b.failed), counts: bs.map((b) => b.failed),
+        key: 'failed', label: '失败率', color: 'var(--lx-danger)', kind: 'pct',
+        values: pctVals((b) => b.failed, inferenceCount), counts: bs.map((b) => b.failed),
       },
       {
         key: 'low', label: `低分 <${thresh.low.toFixed(1)}`, color: C_LOW, kind: 'pct',
@@ -162,8 +190,9 @@ export function Stats() {
   const visible = series.filter((s) => !off[s.key])
 
   const t = stats?.totals
-  const passRate = t && t.settled > 0 ? (t.done_first + t.done_retry) / t.settled : null
-  const failRate = t && t.settled > 0 ? t.failed / t.settled : null
+  const inferred = t ? inferenceCount(t) : 0
+  const passRate = t && inferred > 0 ? (t.done_first + t.done_retry) / inferred : null
+  const failRate = t && inferred > 0 ? t.failed / inferred : null
   const avgScore = t && t.score_n > 0 ? t.score_sum / t.score_n : null
   const status = STATUS[stats?.status ?? 'pending'] ?? STATUS.pending
 
@@ -217,13 +246,15 @@ export function Stats() {
             note={`/ ${fmtCount(stats.total)}`}
           />
           <OverviewFigure
-            label="通过率"
+            label="本次通过率"
             value={passRate === null ? '—' : fmtPct(passRate)}
+            note="成功 ÷（成功＋失败）"
             tone={passRate !== null && passRate < 0.8 ? 'warning' : undefined}
           />
           <OverviewFigure
-            label="失败率"
+            label="本次失败率"
             value={failRate === null ? '—' : fmtPct(failRate)}
+            note="跳过与剔除不计入"
             tone={failRate !== null && failRate > 0.1 ? 'danger' : undefined}
           />
           <OverviewFigure
@@ -231,13 +262,38 @@ export function Stats() {
             value={avgScore === null ? '—' : avgScore.toFixed(2)}
             note={t.score_n > 0 ? `${fmtCount(t.score_n)} 张有分` : '仅 NL 任务'}
           />
+          {(t.skipped > 0) && (
+            <OverviewFigure label="跳过（已有）" value={fmtCount(t.skipped)} />
+          )}
+          {/* 跳过按原因分列：只给一个总数，看不出是"续跑正常"还是"素材/配置有问题" */}
+          {(t.blank_skipped > 0 || t.artist_skipped > 0 || t.excused > 0
+            || t.blacklisted > 0) && (
+            <OverviewFigure
+              label="跳过（非已有）"
+              value={fmtCount(t.blank_skipped + t.artist_skipped + t.excused + t.blacklisted)}
+              note={[
+                t.blank_skipped ? `图太小 ${fmtCount(t.blank_skipped)}` : '',
+                t.artist_skipped ? `无画师 ${fmtCount(t.artist_skipped)}` : '',
+                t.excused ? `重试剔除 ${fmtCount(t.excused)}` : '',
+                t.blacklisted ? `重试后依然失败 ${fmtCount(t.blacklisted)}` : '',
+              ].filter(Boolean).join(' · ')}
+              tone={t.blank_skipped + t.artist_skipped + t.excused + t.blacklisted > 0
+                ? 'warning' : undefined}
+            />
+          )}
         </OverviewFigureRow>
       )}
 
       <SectionPanel
         title="趋势"
-        description="桶内占比，质检分走右轴；X 轴是完成顺序"
+        description={
+          jobs.length === 0
+            ? undefined
+            : '通过与失败按成功＋失败计算；跳过按已结算计算；高低分按有分图片计算。质检分走右轴，X 轴是完成顺序。'
+        }
         trailing={
+          // 没有任务时这些筛选控件没有可作用的对象，空态里留着只会让人以为图没画出来。
+          jobs.length === 0 ? undefined : (
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="text-xs text-lx-muted">桶宽</span>
@@ -278,12 +334,37 @@ export function Stats() {
               />
             </div>
           </div>
+          )
         }
       >
         <div className="flex flex-col gap-3">
           {jobs.length === 0 ? (
-            <div className="flex h-40 items-center justify-center text-xs text-lx-dim">
-              还没有任务
+            <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+              <ChartSpline size={28} className="text-lx-dim" />
+              <p className="text-sm text-lx-secondary">未运行未产生日志</p>
+              <p className="max-w-md text-[11px] leading-relaxed text-lx-muted">
+                任务记录只存在服务运行期间，重启后为空；跑过的批次在「历史任务」里
+              </p>
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="lx-btn-primary px-3 py-1.5 text-[11px]"
+                  onClick={() => {
+                    location.hash = '/'
+                  }}
+                >
+                  去新建任务
+                </button>
+                <button
+                  type="button"
+                  className="lx-btn-ghost px-3 py-1.5 text-[11px]"
+                  onClick={() => {
+                    location.hash = '/history'
+                  }}
+                >
+                  看历史任务
+                </button>
+              </div>
             </div>
           ) : (
             <>

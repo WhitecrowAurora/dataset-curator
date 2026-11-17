@@ -53,6 +53,11 @@ def _load_profile(args: argparse.Namespace):
     # "第 0 张"指的是他选中的第一张，不是物理 0 号（两张卡显存可能差 4 倍，
     # 按错了整档都错）。见 hardware.visible_gpus。
     gpus = visible_gpus()
+    native = getattr(args, "engine", None) == "native"
+    if native and (getattr(args, "device", None) == "cpu" or not gpus):
+        from .hardware import GPUInfo
+
+        gpus = [GPUInfo(-1, "CPU", 64, None)]
     if not gpus:
         # 先问是不是环境变量把人挡在外面（"指定了不存在的卡号"与"真没卡"
         # 是两种完全不同的修法，报同一句会让人去重装驱动）。
@@ -72,7 +77,7 @@ def _load_profile(args: argparse.Namespace):
               f"换卡请设 CUDA_VISIBLE_DEVICES）")
 
     table = load_tier_table(args.tiers)
-    return resolve_profile(
+    profile = resolve_profile(
         table,
         gpu,
         model_override=args.model,
@@ -81,7 +86,12 @@ def _load_profile(args: argparse.Namespace):
         max_num_seqs_override=getattr(args, "max_num_seqs", None),
         max_num_batched_tokens_override=getattr(args, "max_num_batched_tokens", None),
         gpu_mem_override=getattr(args, "gpu_mem", None),
+        **({"engine": "native", "precision_override": getattr(args, "precision", None)} if native else {}),
     )
+    if native and gpu.index == -1:
+        from dataclasses import replace
+        profile = replace(profile, vram_gb=0)
+    return profile
 
 
 # ---------------------------------------------------------------- doctor
@@ -1122,7 +1132,7 @@ def _make_progress_writer(path: Path):
     state = {"last": 0.0}
 
     def hook(kind: str, task, outcome, stats) -> None:
-        # 有归属的条目都算"过了这一张"：完成 / 跳过 / 失败 / 拉黑 / 被别的进程
+        # 有归属的条目都算"过了这一张"：完成 / 跳过 / 失败 / 重试后依然失败 / 被别的进程
         # 占着 / 无内容图被剔除。最后那个不能漏：它既不在 done 也不在 skipped，
         # 漏了就会永远显示"差 N 张"，而主循环其实早跑完了。
         # getattr 兜底：测试和外部脚本会塞只实现这几个字段的假 stats 对象，
@@ -1145,11 +1155,20 @@ def _make_progress_writer(path: Path):
 def cmd_client(args: argparse.Namespace) -> int:
     """成员端：照分发包的 manifest 顺序打标，产出 -tag.json / -nl.json 交回总机。
 
-    这条命令不查显卡、不做分档匹配：它连的是**已经把模型跑起来的那个服务**
-    （自己的机器起、或者用 --url 连别人的都可以）。硬件体检是 serve 的事，
-    客户端只需要知道服务在哪、叫什么名字。
+    NL 推理连接已就绪的服务；TAG-only 可直接使用分类后端。调度中心通过
+    已解析的执行配置复用此入口，模型服务的准备仍由服务层负责。
     """
     from .client import run_client
+
+    import os
+    center_execution = os.environ.get("LULYNX_CENTER_EXECUTION")
+    if center_execution:
+        resolved = json.loads(center_execution)
+        allowed = {"url", "model_name", "mode", "tag_backend", "tag_device",
+                   "tag_precision", "tag_batch", "tag_model_dir", "tag_model", "concurrency"}
+        for name, value in resolved.items():
+            if name in allowed:
+                setattr(args, name, value)
 
     table = load_tier_table(args.tiers)
     ops = load_ops(table)
@@ -2018,12 +2037,13 @@ def build_parser() -> argparse.ArgumentParser:
                           help="已经装过也重装（换构建时用）")
     sp_llama.set_defaults(func=cmd_llama)
 
-    sp_serve = sub.add_parser("serve", help="启动 NL 推理服务（vLLM / llama.cpp）")
+    sp_serve = sub.add_parser("serve", help="启动 NL 推理服务（vLLM / llama.cpp / lulynx 专用）")
     add_common(sp_serve)
-    sp_serve.add_argument("--engine", choices=["vllm", "llamacpp"], default="llamacpp",
-                          help="推理引擎，默认 llamacpp（Windows 原生唯一能上 GPU 的路）"
-                               "；vLLM 只有 Linux 版，需 WSL2")
+    sp_serve.add_argument("--engine", choices=["vllm", "llamacpp", "native"], default="llamacpp",
+                          help="默认 llamacpp；native 是专用实验路径；vLLM 需要 Linux / WSL2")
     sp_serve.add_argument("--port", type=int, default=8000)
+    sp_serve.add_argument("--precision", default=None, help="专用引擎的 FP16/BF16/FP8/INT8/W4A16 或 GGUF 档")
+    sp_serve.add_argument("--device", choices=["auto", "cpu"], default="auto", help="native 执行设备；GPU 换卡使用 CUDA_VISIBLE_DEVICES")
     sp_serve.add_argument("--data-root", default=None, dest="data_root",
                           help="允许 file:// 访问的图片根目录")
     sp_serve.add_argument("--log", default=None, help="服务日志输出文件")
@@ -2364,7 +2384,7 @@ def build_parser() -> argparse.ArgumentParser:
                            help="--only-failed 时允许重试几轮；0=不剔除，失败仍记账。"
                                 "不传则用 output.retry_failed_rounds（默认 2）")
     sp_client.add_argument("--max-failures", type=int, default=3, dest="max_failures",
-                           help="同一 id 累计失败多少次后跳过（跨运行累计，0=不限制）")
+                           help="同一 id 累计失败多少次后不再尝试（跨运行累计，0=不限制）")
     sp_client.add_argument("--no-guard", action="store_true", dest="no_guard",
                            help="关闭资源守护（不建议：这是唯一能防跑坏卡的一层）")
     sp_client.add_argument("--variant", default="",

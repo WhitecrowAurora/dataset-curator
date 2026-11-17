@@ -1,0 +1,16 @@
+{
+  "repo": "MatchaCuratio/Universal-Train2MP-0.1B",
+  "prefix": "lulynx-validation/reliability-20261116",
+  "files_deleted": 15,
+  "delete_commit": "ddc555b75c5555ce3f98fd3ede139801c0b7b398",
+  "hf_prefix_absent": true,
+  "remote_test_directory_absent": true,
+  "remote_followup_directory_absent": true,
+  "local_test_directories": [
+    "H:/tagger/backend/smoke/reliability-20261116",
+    "D:/tagger-validation/reliability-20261116"
+  ],
+  "local_test_directories_absent": true,
+  "local_test_web_stopped": true,
+  "ssh_test_tunnel_closed": true
+}

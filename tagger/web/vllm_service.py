@@ -134,7 +134,7 @@ class VllmService:
             from ..nl_engine import check_engine
 
             check_engine(engine)
-            if not visible_gpus():
+            if engine == "vllm" and not visible_gpus():
                 # 区分"环境变量指错了"与"真没卡"：前者的修法完全不同。
                 return False, (visible_gpus_error()
                                or "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）")
@@ -166,7 +166,8 @@ class VllmService:
              max_num_seqs: int | None = None,
              max_num_batched_tokens: int | None = None,
              gpu_mem: float | None = None,
-             slots_override: int | None = None) -> dict:
+             slots_override: int | None = None,
+             device_index: int | None = None, device: str | None = None) -> dict:
         """当前这组参数会解析成什么（分档 / 权重 / 批调度 / 显存）。
 
         页面在点启动**之前**就要能看见选了 8B 会发生什么：16G 卡上仍落在
@@ -178,7 +179,7 @@ class VllmService:
         key = (normalize_engine(engine), model or None, tier or None,
                precision or None, max_model_len,
                max_num_seqs, max_num_batched_tokens, gpu_mem,
-               slots_override)
+               slots_override, device_index, device)
         now = time.time()
         cached = self._plan_cache
         if cached is not None and cached[1] == key and now - cached[0] < CAP_TTL_S:
@@ -194,13 +195,21 @@ class VllmService:
                       max_num_seqs: int | None,
                       max_num_batched_tokens: int | None,
                       gpu_mem: float | None,
-                      slots_override: int | None = None) -> dict:
+                      slots_override: int | None = None,
+                      device_index: int | None = None, device: str | None = None) -> dict:
         # 精度档与引擎是绑死的两套：bf16/fp8/w4a16 给 vLLM，q4/q6/q8 给
         # llama.cpp。摆在一起选是为了不让人去别处找，但选错要说清是选错，
         # 而不是等启动几分钟后报一句「未知精度」。
         from ..config import GGUF_PRECISIONS
 
         p = (precision or "").strip().lower()
+        if engine == "native":
+            from ..inference.qwen3vl.runtime import plan
+
+            return plan(model_override=model, tier_override=tier, precision_override=precision,
+                        max_model_len_override=max_model_len, max_num_seqs_override=max_num_seqs,
+                        max_num_batched_tokens_override=max_num_batched_tokens, gpu_mem_override=gpu_mem,
+                        slots_override=slots_override, device_index=device_index, device=device or "auto")
         if engine == "llamacpp" and p and p not in GGUF_PRECISIONS:
             return {"ok": False,
                     "error": f"llama.cpp 只能配 GGUF 档（{' / '.join(GGUF_PRECISIONS)}），"
@@ -214,6 +223,10 @@ class VllmService:
             from ..hardware import visible_gpus, visible_gpus_error
 
             gpus = visible_gpus()
+            if device_index is not None:
+                from ..hardware import query_gpus
+
+                gpus = [g for g in query_gpus() if g.index == device_index]
             if not gpus:
                 return {"ok": False,
                         "error": visible_gpus_error()
@@ -304,13 +317,17 @@ class VllmService:
         disk_fp = read_fingerprint()
         # 这一组参数（含"还没启动时的默认档"）解析出来是什么。页面靠它
         # 在点启动之前显示"会起哪个档、哪套权重、可能有什么问题"。
-        plan = self.plan(model=overrides.get("model"),
+        plan = self.plan(engine=engine, model=overrides.get("model"),
                          tier=overrides.get("tier"),
                          precision=overrides.get("precision"),
+                         max_model_len=overrides.get("max_model_len"),
                          max_num_seqs=overrides.get("max_num_seqs"),
                          max_num_batched_tokens=overrides.get("max_num_batched_tokens"),
                          gpu_mem=overrides.get("gpu_mem"),
-                         slots_override=overrides.get("slots"))
+                         slots_override=overrides.get("slots"),
+                         device_index=overrides.get("device_index"), device=overrides.get("device"))
+        if overrides.get("model_path"):
+            plan["model_path"] = overrides["model_path"]
         return {
             "status": status,
             "error": error,
@@ -344,7 +361,10 @@ class VllmService:
               max_num_batched_tokens: int | None = None,
               gpu_mem: float | None = None,
               local_media_root: str | None = None,
-              slots: int | None = None) -> dict:
+              slots: int | None = None,
+              device_index: int | None = None,
+              model_path: str | None = None,
+              device: str | None = None) -> dict:
         """起服务。立刻返回快照，等就绪在后台线程里做。
 
         model 选哪套权重（None = 按显存落档）；tier 指定分档（决定
@@ -365,6 +385,22 @@ class VllmService:
         from ..nl_engine import normalize_engine
 
         engine = normalize_engine(engine)
+        if device is not None:
+            device = (device or "auto").strip()
+        if device is not None and device not in ("auto", "cpu") and not (device.startswith("cuda:") and device[5:].isdigit()):
+            raise ValueError("NL 设备请选择自动、CPU 或有效 CUDA 设备")
+        if device == "cpu" and engine == "vllm":
+            raise ValueError("CPU 推理请使用 llama.cpp")
+        if model_path is not None:
+            local = Path(model_path).resolve()
+            if not local.is_dir():
+                raise ValueError(f"模型目录不存在：{local}")
+            model_path = str(local)
+        if device_index is not None:
+            from ..hardware import query_gpus
+
+            if device_index not in {g.index for g in query_gpus()}:
+                raise ValueError(f"设备 cuda:{device_index} 不存在")
         port = int(port or DEFAULT_PORT)
         if not 1024 <= port <= 65535:
             raise ValueError(f"端口 {port} 不合法：vLLM 需要 1024~65535（<1024 需要 root 权限）")
@@ -391,7 +427,7 @@ class VllmService:
         # 后页面上一个"启动失败 + traceback"。
         from ..config import normalize_quant_precision
 
-        precision = normalize_quant_precision(precision)
+        precision = normalize_quant_precision(precision, engine=engine)
         served_name = (served_name or "").strip() or "tagger"
         seqs = None if max_num_seqs is None else int(max_num_seqs)
         if seqs is not None and not 1 <= seqs <= 512:
@@ -421,7 +457,7 @@ class VllmService:
         if eng == "llamacpp" and p and p not in GGUF_PRECISIONS:
             raise ValueError(
                 f"llama.cpp 只能配 GGUF 档（{' / '.join(GGUF_PRECISIONS)}），当前选的是 {precision}。")
-        if eng != "llamacpp" and p in GGUF_PRECISIONS:
+        if eng == "vllm" and p in GGUF_PRECISIONS:
             raise ValueError(
                 f"{precision} 是 GGUF 的压缩档，只能用于 llama.cpp 引擎。")
         # 槽位：0 / None = 按显存自动。上限 64 与 slot_plan 一致——再多
@@ -429,7 +465,7 @@ class VllmService:
         slots_n = None if slots in (None, 0, "") else int(slots)
         if slots_n is not None and not 1 <= slots_n <= 64:
             raise ValueError(f"槽位 slots={slots} 不合理：取 1~64（留空 = 按显存自动）")
-        if slots_n is not None and eng != "llamacpp":
+        if slots_n is not None and eng == "vllm":
             # vLLM 的并发是 max_num_seqs，由调度器按批排；硬给它一个 -np
             # 等于让用户以为改了，其实一个字都没生效。
             raise ValueError(
@@ -470,7 +506,11 @@ class VllmService:
                                "max_num_batched_tokens": batched,
                                "gpu_mem": mem,
                                "local_media_root": media,
-                               "slots": slots_n}
+                               "slots": slots_n,
+                               "device_index": device_index,
+                               "model_path": model_path}
+            if device is not None:
+                self._overrides["device"] = device
             self.log_path = str(FINGERPRINT_PATH.parent / f"vllm-{port}.log")
             self._notes.clear()
             # 批调度三件套是 vLLM 的，llama-server 没有对应开关。静默吞掉
@@ -547,19 +587,42 @@ class VllmService:
             # 必须是 visible_gpus：这台进程自己设了 CUDA_VISIBLE_DEVICES 时
             # 服务跑在选中那张卡上，分档/槽位也必须按它算（见 Bug 2）。
             gpus = visible_gpus()
-            if not gpus:
+            if overrides.get("device_index") is not None:
+                from ..hardware import query_gpus
+
+                gpus = [g for g in query_gpus() if g.index == overrides["device_index"]]
+            auto_device = engine == "llamacpp" and "device" in overrides
+            profile_options = dict(
+                model_override=overrides.get("model"), tier_override=overrides.get("tier"),
+                precision_override=overrides.get("precision"), max_model_len_override=overrides.get("max_model_len"),
+                max_num_seqs_override=overrides.get("max_num_seqs"), max_num_batched_tokens_override=overrides.get("max_num_batched_tokens"),
+                gpu_mem_override=overrides.get("gpu_mem"))
+            device_index = overrides.get("device_index")
+            if engine == "native":
+                from ..inference.qwen3vl.runtime import resolve_device_profile as resolve_native
+
+                profile, device_index = resolve_native(overrides.get("device") or "auto",
+                                                      device_index=device_index, **profile_options)
+            elif auto_device:
+                from .service_start import resolve_device_profile
+                profile, device_index = resolve_device_profile(overrides["device"], **profile_options)
+            elif not gpus:
                 raise ConfigError(visible_gpus_error()
                                   or "没有检测到 NVIDIA 显卡（nvidia-smi 不可用）")
-            profile = resolve_profile(
-                load_tier_table(DEFAULT_TIERS), gpus[0],
-                model_override=overrides.get("model"),
-                tier_override=overrides.get("tier"),
-                precision_override=overrides.get("precision"),
-                max_model_len_override=overrides.get("max_model_len"),
-                max_num_seqs_override=overrides.get("max_num_seqs"),
-                max_num_batched_tokens_override=overrides.get("max_num_batched_tokens"),
-                gpu_mem_override=overrides.get("gpu_mem"),
-            )
+            else:
+                if overrides.get("device", "").startswith("cuda:"):
+                    idx = int(overrides["device"][5:])
+                    if idx >= len(gpus):
+                        raise ConfigError(f"设备 {overrides['device']} 不存在")
+                    gpus = [gpus[idx]]
+                    device_index = gpus[0].index
+                profile = resolve_profile(load_tier_table(DEFAULT_TIERS), gpus[0], **profile_options)
+            if overrides.get("model_path"):
+                from dataclasses import replace
+
+                field = "quantized_path" if profile.precision == "w4a16" else "path"
+                profile = replace(profile, model=replace(profile.model,
+                                  **{field: overrides["model_path"]}))
             log_path = Path(self.log_path)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with self._lock:
@@ -567,11 +630,36 @@ class VllmService:
 
             # wait=False：不等就绪就返回，等就绪放到本线程里自己轮询，
             # 这样停止请求能在两次轮询之间生效。
-            handle = start_server(profile, port=port, log_path=log_path, wait=False,
+            def cancelled(_remaining=0):
+                if self._stop_flag.is_set() or not current():
+                    raise _Cancelled()
+
+            def on_handle(value):
+                with self._lock:
+                    if current():
+                        self._handle = value
+
+            if auto_device:
+                from .service_start import start_llama
+                handle = start_llama(profile, device=overrides["device"], device_index=device_index,
+                                     port=port, log_path=log_path, timeout_s=timeout_s,
+                                     served_name=overrides.get("served_name") or "tagger",
+                                     slots=overrides.get("slots"), tick=cancelled,
+                                     log=self._append_log, on_handle=on_handle)
+                with self._lock:
+                    if current():
+                        self.profile = handle.profile.summary()
+            else:
+                handle = start_server(profile, port=port, log_path=log_path, wait=False,
                                   served_name=overrides.get("served_name") or "tagger",
                                   data_root=overrides.get("local_media_root"),
                                   engine=engine,
-                                  slots_override=overrides.get("slots"))
+                                  slots_override=overrides.get("slots"),
+                                  device_index=device_index)
+                if engine == "native":
+                    with self._lock:
+                        if current():
+                            self.profile = handle.profile.summary()
             if not current():
                 # 起进程的这几秒里已经被叫停：status 已是 stopped，但进程刚建出来。
                 raise _Cancelled()
@@ -586,7 +674,8 @@ class VllmService:
                     # vLLM 起动就崩时 wait_ready 会傻等到超时；早发现早报错。
                     raise RuntimeError(f"vllm 进程已退出（code={proc.returncode}）")
 
-            wait_ready(handle.base_url, timeout_s=timeout_s, on_tick=tick)
+            if not auto_device:
+                wait_ready(handle.base_url, timeout_s=timeout_s, on_tick=tick)
             # 就绪与"被停止"可能同时发生：晚到的 ready 会把 stopped 覆盖回去，
             # 页面上就成了"已停止但显示运行中"。
             if self._stop_flag.is_set() or not current():

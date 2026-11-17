@@ -56,6 +56,7 @@ def _caption_already_has_artist(caption: str, payload: dict) -> bool:
 
 from .local_tag import TagItem, artifact_path, read_artifact
 from .naming import archive_name, make_image_id, normalize_ext, sanitize
+from .schema import tag_names
 from .storage.discovery import check_stopped
 from .storage.pack_state import artifact_signature
 from .pack import (ContainerReader, InputItem, PackOptions, PackState, Packer,
@@ -808,7 +809,7 @@ def pack_items(
                     "source": Path(item.source).name if item.source else "",
                     "width": w,
                     "height": h,
-                    "tags": payload.get("tags") or [],
+                    "tags": tag_names(payload.get("tags")),
                     "rating": payload.get("rating") or {},
                     "tag_backend": payload.get("tag_backend") or "",
                     "provenance": payload.get("provenance") or {},

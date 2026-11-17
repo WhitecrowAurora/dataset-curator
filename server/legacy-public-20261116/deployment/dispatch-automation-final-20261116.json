@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-16",
+  "client": {
+    "ok": true,
+    "count": 11,
+    "checks": [
+      "default-json-and-aggregate-upload",
+      "independent-nl-failures",
+      "resume-splits-done-by-part",
+      "real-run-batch-only-missing-part",
+      "source-isolation",
+      "history-json-filter-and-individual",
+      "isolated-progress",
+      "side-specific-failure-ledger",
+      "both-side-failures-preserved",
+      "one-side-resolution-preserves-other",
+      "both-side-exclusions-preserved"
+    ]
+  },
+  "existing_tests": {
+    "passed": 58,
+    "files": [
+      "test_artifacts.py",
+      "test_artifacts_jsonl.py",
+      "test_web_history.py"
+    ]
+  },
+  "python_syntax_files": 55,
+  "panel_js_syntax": true,
+  "production_source_files": 27,
+  "archive": {
+    "file": "lulynx-tagger-20261116.zip",
+    "bytes": 76337200,
+    "sha256": "fe60891099f3d16d58c98991fe253691347c4bc57b2898d73abcb1637c11f3a9",
+    "files": 552,
+    "required_modules": [
+      "tagger/center_runtime/__init__.py",
+      "tagger/center_runtime/artifacts.py",
+      "tagger/center_runtime/liveness.py",
+      "tagger/verification/__init__.py",
+      "tagger/verification/history.py",
+      "tagger/verification/payload.py",
+      "tagger/verification/source.py",
+      "tagger/verification/local.py",
+      "worker.py",
+      "worker-sources.json",
+      "tagger/web/ui/dist/index.html",
+      "vendor/llama-convert/convert_hf_to_gguf.py"
+    ],
+    "worker_sources_equal": true,
+    "excluded_local_state": true
+  },
+  "browser_clicks": {
+    "passed": false,
+    "error": "codex/sandbox-state-meta: missing field sandboxPolicy"
+  },
+  "gpu_inference_this_round": false,
+  "hf_upload_this_round": false,
+  "local_client_restarted": true,
+  "local_client_identity_preserved": true,
+  "local_client_running": false,
+  "remote_test_files_removed": true,
+  "local_test_files_removed": true
+}

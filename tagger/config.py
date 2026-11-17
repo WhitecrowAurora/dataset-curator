@@ -101,7 +101,7 @@ QUANT_PRECISIONS = ("bf16", "fp8", "w4a16")
 GGUF_PRECISIONS = ("f16", "q4", "q5", "q6", "q8")
 
 
-def normalize_quant_precision(value: str | None) -> str | None:
+def normalize_quant_precision(value: str | None, *, engine: str | None = None) -> str | None:
     """把各种写法归一成 bf16 / fp8 / w4a16。None 或空串表示"没指定"。"""
     if value is None:
         return None
@@ -110,6 +110,14 @@ def normalize_quant_precision(value: str | None) -> str | None:
         return None
     if key in ("bf16", "bfloat16"):
         return "bf16"
+    if key in ("fp16", "float16"):
+        if engine is not None and engine != "native":
+            raise ConfigError(f"未知精度档位: {value!r}。FP16 safetensors 请使用专用引擎。")
+        return "fp16"
+    if key in ("int8", "w8a8"):
+        if engine is not None and engine != "native":
+            raise ConfigError(f"未知精度档位: {value!r}。INT8 请使用专用引擎。")
+        return "int8"
     if key in ("fp8", "fp8_e4m3", "fp8_dynamic"):
         return "fp8"
     if key in ("w4a16", "int4", "awq", "gptq"):
@@ -121,7 +129,7 @@ def normalize_quant_precision(value: str | None) -> str | None:
         return key
     raise ConfigError(
         f"未知精度档位: {value!r}。可选：bf16 / fp8 / w4a16，"
-        f"或 GGUF 档 {' / '.join(GGUF_PRECISIONS)}（仅 llama.cpp）。")
+        f"或 GGUF 档 {' / '.join(GGUF_PRECISIONS)}；专用引擎另支持 fp16 / int8。")
 
 
 def detect_quant_method(model: "ModelSpec") -> str | None:
@@ -303,9 +311,9 @@ def _estimate_vram_headroom_check(profile: RunProfile, gpu: GPUInfo) -> list[str
     warns: list[str] = []
     small = "4b" in profile.model.key.lower()
     tb = 0.5 if small else 1.0  # 每 B 参数 int4 约 0.5GB
-    if profile.precision.lower() in ("bf16", "bfloat16", "f16"):
+    if profile.precision.lower() in ("bf16", "bfloat16", "fp16", "f16"):
         tb = 2.2 if small else 4.4
-    elif "fp8" in profile.precision.lower():
+    elif "fp8" in profile.precision.lower() or profile.precision == "int8":
         tb = 1.1 if small else 2.2
     elif (profile.precision.lower() in ("int4", "awq", "gptq", "w4a16")
           and not profile.model.quantized_path):
@@ -847,6 +855,7 @@ def resolve_profile(
     max_num_seqs_override: int | None = None,
     max_num_batched_tokens_override: int | None = None,
     gpu_mem_override: float | None = None,
+    engine: str = "vllm",
 ) -> RunProfile:
     """把分档表和硬件合成为一个可直接启动的 profile。"""
 
@@ -930,9 +939,17 @@ def resolve_profile(
     # 归一化（bf16/fp8/w4a16），否则同一个 fp8 会以 fp8_e4m3、fp8_dynamic
     # 等几种写法进指纹，事后没法按精度对账。未指定时保持分档表原样，避免
     # 把已有的 int4 口径改成新名字。
-    wanted = normalize_quant_precision(precision_override)
-    precision = wanted or (tier.precision or model.precision or "int4").lower()
-    _check_precision_supported(precision, gpu, model_key=model.key)
+    wanted = normalize_quant_precision(precision_override, engine=engine)
+    precision = wanted or ("q6" if engine == "native" else (tier.precision or model.precision or "int4").lower())
+    if engine == "native":
+        from .inference.qwen3vl.runtime import PRECISIONS
+
+        if precision not in PRECISIONS:
+            raise ConfigError(f"专用引擎精度请选择 {' / '.join(PRECISIONS)}")
+        if precision == "bf16" and gpu.compute_cap and gpu.compute_cap < (8, 0):
+            raise ConfigError("本设备不支持 BF16，请选择 FP16 或量化精度")
+    else:
+        _check_precision_supported(precision, gpu, model_key=model.key)
 
     max_pixels = int(max_pixels_override or defaults.get("max_pixels", 589824))
     buckets = resolve_buckets(defaults.get("buckets", True), max_pixels)
@@ -944,9 +961,9 @@ def resolve_profile(
         max_pixels=max_pixels,
         # 上下文长度可以自己填：分档表只有三档粗粒度，而"这张卡到底能开多大"
         # 取决于权重精度和预留显存，用户比配置更清楚。
-        max_model_len=int(max_model_len_override or tier.max_model_len),
+        max_model_len=int(max_model_len_override or (min(2048, tier.max_model_len) if engine == "native" else tier.max_model_len)),
         max_num_seqs=(_positive(max_num_seqs_override, name="--max-num-seqs")
-                      or tier.max_num_seqs),
+                      or (min(4, tier.max_num_seqs) if engine == "native" else tier.max_num_seqs)),
         # 槽位沿用同一个用户输入：`--max-num-seqs 12` 在两个引擎上都该是 12。
         # ★优先级必须是**用户 > 分档表**。反过来写（tier.slots 在前）会造出
         #   一模一样的 Bug 1：某档配了 slots: 6 之后，用户传 --max-num-seqs 12

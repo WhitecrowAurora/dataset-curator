@@ -96,6 +96,7 @@ _TAG_RULES = """<TAGS> rules:
 - Most images land around {anchor_lo}-{anchor_hi} tags; go higher only when the image really is that dense.
 - Never pad the list to reach {lo}: near-duplicates and restatements of the same fact waste slots. On a simple image, spend the slots on framing, lighting and background instead.
 - Only tag what is clearly visible: subject count and type, hair, eyes, clothing, pose, action, setting, props, camera angle, framing, lighting, colour palette, art style.
+- Do not tag the image's text: no words, signs, labels, prices, dates or bubble lines. One `text` tag covers a text-heavy image.
 - Do not output quality or score words (masterpiece, best quality, 8k, highres, ultra detailed).
 - Do not output the artist name, the character name, or the series name: you cannot know them and guessing poisons the label."""
 
@@ -280,7 +281,8 @@ _FORCE_OUTPUT_ZH = (
 
 
 def _prompt_for(output: OutputSpec, *, zh: bool = False,
-                extra_rules: str = "", force_output: bool = False) -> str:
+                extra_rules: str = "", force_output: bool = False,
+                tag_hi: int | None = None) -> str:
     """按配置里的预算生成 prompt。
 
     ★这里的长度引导与质检硬线刻意不是一个数：
@@ -292,6 +294,10 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
     `extra_rules` 非空表示"这是被截断后的重打"：caption 侧换成
     `prompts/*.md` 的 `## CAPTION_DENSE` 那一节（收窄版），而不是追加条款。
     空串 = 正常路径。
+
+    `tag_hi` 只在截断重打那一轮给：把 tag 上限**写进指令**。解析后再截
+    （`TaggerClient._tag_cap`）是来不及的——回复是按模型写下的 token 算的，
+    它先写满 TAGS 段，caption 那边就已经没预算了。
     """
     if output.caption_chars:
         # 显式给了长度引导就用它，不再从 token 闸门派生 —— 两者回答的
@@ -302,6 +308,10 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
         char_hi = max(char_lo + 200, min(1200, output.nl_max_tokens * 4))
 
     lo, hi = output.tag_min_count, output.tag_max_count
+    if tag_hi and 0 < int(tag_hi) < hi:
+        # 截断重打：上限压到 dense_retry_tag_max。★必须压在这里（指令里），
+        # 不能只压解析结果——否则模型照旧写满 TAGS 段，重打一次原地再撞。
+        hi = max(lo, int(tag_hi))
     anchor_lo = min(max(30, lo), hi)
     anchor_hi = min(max(60, anchor_lo), hi)
     fill = dict(lo=lo, hi=hi, anchor_lo=anchor_lo, anchor_hi=anchor_hi,
@@ -613,6 +623,13 @@ class Outcome:
     # 两者混在一起，失败率这个数就永远说不清，而这批数据里 5638 字节的
     # 纯色图恰好有一串（同一张占位图被复制了多次），量足以污染统计。
     skipped: bool = False
+    # 跳过的**原因**，给统计页分线用（Web 那边 skip_kind_of 按它归类）。
+    # 不用 "skipped=True 就一定是产物已有" 去猜：输入图过小也是 skipped，
+    # 两者在趋势图里混成一条线的话，"永远做不成"的那批会被"续跑正常"
+    # 的那批彻底淹没——真实形态是 194 张已有 + 5 张图太小，图上只显示
+    # 跳过 99.5%，看着一切正常。
+    skipped_blank: bool = False     # 输入图过小（纯色/空图）
+    skipped_artist: bool = False    # 开关了 skip_when_missing 但取不到画师
     # 模型拒答（`quality.looks_like_refusal` 命中）。
     #
     # 单独一个标记而不是从 error 串里回查：重试那条路必须先判"这是不是拒答"
@@ -635,9 +652,10 @@ class Outcome:
 
 # 进度回调。kind ∈ {"done", "failed", "skipped", "blacklisted", "excused"}：
 #   done / failed 带 outcome（failed 里含写盘失败，那种同样没有产物）；
-#   skipped / blacklisted 一般不带 outcome——这两张根本没去推理，编一个出来
-#   只会骗人。唯一的例外是"输入图过小"：它有 outcome（带 skipped=True 与
-#   原因），因为订阅方要靠它区分"产物已有"和"这张永远不会产出"。
+#   skipped / blacklisted（重试后依然失败的那批）一般不带 outcome——这两张
+#   根本没去推理，编一个出来只会骗人。例外是"输入图过小"和"无画师"：它们
+#   有 outcome（skipped=True + skipped_blank / skipped_artist），因为订阅方
+#   要靠它把"产物已有"和"这张永远不会产出"分开记账。
 #   excused = 重试后仍失败、已从分母剔除的坏样本，带 outcome（ok=False）。
 # 订阅方（Web UI 或任何前端）靠它推实时进度，CLI 不传就等于没有。
 ProgressHook = Callable[[str, TaskRow, "Outcome | None", "ClientStats"], None]
@@ -702,8 +720,9 @@ class ClientStats:
     done: int = 0
     skipped: int = 0
     failed: int = 0
-    # 累计失败过多次、这次直接不理的。单列出来，否则"跳过"里混着
-    # "已完成"和"永远做不成"，看报告的人会以为进度正常。
+    # 重试过多次、每次都同样失败，这次按条件跳过的。单列出来，否则"跳过"里
+    # 混着"已完成"和"永远做不成"，看报告的人会以为进度正常。
+    # 字段名沿用 blacklisted（对外 API、落盘账本、前端都在用，改名会全线破）。
     blacklisted: int = 0
     busy: int = 0  # 其他进程正在处理，不能算已完成或写整片完成标记。
     # 因为 `skip_when_missing` 而整张跳过的数量。
@@ -729,6 +748,8 @@ class ClientStats:
     # done 里有多少条是直接拿缓存、一张图都没送进模型的。
     cached: int = 0
     by_reason: dict[str, int] = field(default_factory=dict)
+    # 整趟输入已读完；total 在此之前只是已读取的数量，不能作为进度分母。
+    input_complete: bool = False
 
     def effective_total(self) -> int:
         """分母：真正应该出产物的张数。
@@ -745,7 +766,7 @@ class ClientStats:
             f"完成       : {self.done}",
             f"其中缓存   : {self.cached}",
             f"跳过（已有）: {self.skipped}",
-            f"跳过（拉黑）: {self.blacklisted}",
+            f"跳过（重试后依然失败）: {self.blacklisted}",
         ]
         if self.artist_skipped:
             lines.append(f"跳过（无画师）: {self.artist_skipped}")
@@ -1005,6 +1026,7 @@ class TaggerClient:
         caption_zh_ratio: float = 0.0,
         ref_grouped: bool = False,
         repeat_penalty: float = 0.0,
+        on_part: Callable[[str, TaskRow], None] | None = None,
     ):
         # 推理来源："" = 本机/自建（OpenAI 兼容 + 环境指纹）；
         # openai / anthropic = 外部 API。方言差异全在 nl_api，这里只记下来。
@@ -1013,6 +1035,7 @@ class TaggerClient:
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
         self.output = output
+        self.on_part = on_part
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
@@ -1067,23 +1090,32 @@ class TaggerClient:
                 if self.caption_zh_ratio > 0 and not prompt_text and output.wants_nl
                 else ""
             )
-        # 截断重打用的"不复述小字"版指令。只在配置给了 dense_retry_rules、
-        # 且主指令不是整段替换（自定义 prompt）时才生成——自定义 prompt 是
-        # "整段替换"的语义，往里插规则会让操作者看到的文字与实际发出去的不符。
+        # 截断重打用的"不复述小字"版指令。主指令是自定义 prompt（整段替换）
+        # 时不生成——往里插规则会让操作者看到的文字与实际发出去的不符。
+        #
+        # ★两种收窄手段是**各自独立**的，有一种能生效就值得重打：
+        #   · caption 侧换成 CAPTION_DENSE（`prompts/*.md` 里的一节，措辞归主创改）
+        #   · TAGS 上限压到 dense_retry_tag_max（配置里的一个数，不依赖任何文件）
+        # 以前要求"规则文件必须存在"才准备这条指令，结果分发包漏发 prompts/ 时
+        # 量机上整条截断重打路径静默消失（见 prompt_rules.default_dir 的注释），
+        # 现象就是用户报的"重打一次还是截断"。
         self._dense_prompt = ""
         self._dense_prompt_zh = ""
-        if output.dense_retry_rules and not prompt_text and output.wants_nl:
-            # 收窄版 caption 规则是 `prompts/` 里的一节（CAPTION_DENSE）。
-            # 只有真的存在才准备重打指令：读不到就用常规规则重打一次等于原地
-            # 再撞一次上限，白白多花一次 800 token。
-            if _dense_caption(False):
+        if not prompt_text and output.wants_nl:
+            zh_on = self.caption_zh_ratio > 0
+            cap_en = bool(output.dense_retry_rules) and bool(_dense_caption(False))
+            cap_zh = zh_on and bool(output.dense_retry_rules) and bool(_dense_caption(True))
+            if cap_en or output.dense_retry_tag_max:
                 self._dense_prompt = _prompt_for(
-                    output, extra_rules=output.dense_retry_rules)
+                    output, extra_rules=output.dense_retry_rules if cap_en else "",
+                    tag_hi=output.dense_retry_tag_max)
             # 中文版也要一份：中文图的正文指令与英文不同（字数按汉字算），
             # 拿英文那份去配中文图，模型会按英文口径写，长度直接失控。
-            if self.caption_zh_ratio > 0 and _dense_caption(True):
+            if zh_on and (cap_zh or output.dense_retry_tag_max):
                 self._dense_prompt_zh = _prompt_for(
-                    output, zh=True, extra_rules=output.dense_retry_rules)
+                    output, zh=True,
+                    extra_rules=output.dense_retry_rules if cap_zh else "",
+                    tag_hi=output.dense_retry_tag_max)
         self.variant = variant
         # 参考 tag 是平铺还是分组。默认平铺——分组是规范 §7.1 的做法，
         # 主创确认不需要。两种形态渲染出的 prompt 不同，指纹里要分开。
@@ -1157,10 +1189,8 @@ class TaggerClient:
         而是"换参数重跑拿到旧结果、还标成了新参数"，那种污染事后查不出来。
         """
         parts = {
-            # 3：加入 min_bytes / refusal_retry / dense_retry_tag_max 三项。
-            # 抬版本等于让老缓存整体失效——这三项都改变"哪些图出产物"，
-            # 靠新增字段名区分不够：老缓存里根本没有这几个键，比不出来。
-            "cache_schema": 3,
+            # 4：区分本地引擎、版本、实际权重路径和专用运行配置。
+            "cache_schema": 4,
             "prompt": hashlib.sha256(self.prompt.encode("utf-8")).hexdigest(),
             # 自定义提示词可以连 system 一起换：同一条 prompt 配不同 system
             # 是两套指令，不进指纹就会跨套命中缓存。
@@ -1195,9 +1225,13 @@ class TaggerClient:
             # 两者的产出集合不同，不能跨口径命中。
             "refusal_retry": bool(self.output.refusal_retry),
             "model": [self.prov_base.get("model_id"),
+                      self.prov_base.get("model_path"),
                       self.prov_base.get("model_revision"),
                       self.prov_base.get("precision"),
                       self.prov_base.get("quantization")],
+            "runtime": [self.prov_base.get("engine"),
+                        self.prov_base.get("vllm_version"),
+                        self.prov_base.get("runtime_sha")],
             "pixels": self.prov_base.get("max_pixels"),
             "caption_chars": self.prov_base.get("caption_chars"),
             # 同一个模型名在"本机 vLLM"和"云端 API"上是两套输出（量化/版本/
@@ -1297,6 +1331,8 @@ class TaggerClient:
             "model_id": self.prov_base.get("model_id"),
             "model_revision": self.prov_base.get("model_revision"),
             "precision": self.prov_base.get("precision"),
+            "engine": self.prov_base.get("engine"),
+            "runtime_sha": self.prov_base.get("runtime_sha"),
             "max_pixels": self.prov_base.get("max_pixels"),
             "prompt_sha": hashlib.sha256(
                 self.prompt.encode("utf-8")).hexdigest()[:12],
@@ -1557,7 +1593,7 @@ class TaggerClient:
         """
         names, _ = self._artist_names(task)
         zh = self._wants_zh(task)
-        base = self._prompt_for(self.output, zh=zh, force_output=True) \
+        base = _prompt_for(self.output, zh=zh, force_output=True) \
             if not (self._prompt_is_custom or (zh and self._prompt_zh_is_custom)) \
             else None
         if base is None:
@@ -1609,17 +1645,12 @@ class TaggerClient:
         thr = self._thresholds_at(line)
         if thr is None or self.tag_backend is None:
             return []
-        # 快照的下标是"这张图在本批里的位置"。tag 执行器一次只提交一张，
-        # 所以恒为 0；改成整批提交时这里必须跟着变（rescore_last 会返回空，
-        # 退回重算，结果仍然对，只是慢）。
-        idx = self._last_tag_index or 0
-        # ★只对"装得下快照"的后端走快照路径：MultiDevice 没有 rescore_last，
-        #   而 wd-eva02 / pixai 各有各的分数结构（列表 / 字典），所以这里只
-        #   判断"有没有这个方法"，不猜结构——方法自己知道怎么筛。
         pick: dict[str, float] = {}
         try:
-            if hasattr(self.tag_backend, "rescore_last"):
-                pick = self.tag_backend.rescore_last(idx, thr) or {}
+            # 快照属于当前图的 Future，不能读取后端被下一批覆盖的分数。
+            rescore = getattr(tag_future.result(), "rescore", None) if tag_future else None
+            if rescore is not None:
+                pick = rescore(thr) or {}
             if not pick and data is not None and hasattr(
                     self.tag_backend, "predict_batch_with"):
                 preds = self.tag_backend.predict_batch_with([data], thr)
@@ -1831,9 +1862,14 @@ class TaggerClient:
         floor = int(self.output.min_image_bytes or 0)
         if floor and len(data) < floor:
             return Outcome(
-                task.image_id, False, skipped=True,
+                task.image_id, False, skipped=True, skipped_blank=True,
                 error=(f"输入图过小（{len(data)} < {floor} 字节），"
                        f"按无内容图跳过"))
+
+        if self.tag_backend is not None and not self.output.wants_nl:
+            from .inference.classifier import classify
+
+            return classify(self, task, data, started, cache_key)
 
         mime = _mime_of(task.file)
         # 基线像素预算（attempt 0 的口径）。重试时按质检给出的 RetryPlan
@@ -1851,13 +1887,37 @@ class TaggerClient:
         # 提交原始字节：tag 后端有自己的输入口径（如 wd-eva02 的 448²），
         # VLM 的像素预算不该改变 tag 的输入。
         tag_future = None
+        reported: set[str] = set()
+        part_lock = threading.Lock()
+        closed = False
+
+        def part_ready(part: str) -> None:
+            with part_lock:
+                if closed or part in reported:
+                    return
+                reported.add(part)
+                try:
+                    self.on_part(part, task)
+                except Exception as exc:  # 进度订阅失败不能改变推理结果
+                    print(f"[client][on_part 异常] {type(exc).__name__}: {exc}",
+                          file=sys.stderr, flush=True)
+
+        def tag_ready(future: Future) -> None:
+            if not future.cancelled() and future.exception() is None:
+                part_ready("tag")
+
         if self.tag_backend is not None and self.need_tags:
             tag_future = self._tag_executor().submit(data)
+            if self.on_part is not None:
+                tag_future.add_done_callback(tag_ready)
 
         try:
             return self._run(task, image, started, tag_future, data=data,
-                             cache_key=cache_key, context=context)
+                             cache_key=cache_key, context=context,
+                             on_part=part_ready if self.on_part is not None else None)
         finally:
+            with part_lock:
+                closed = True
             # spool 文件只在 --use-file-url 时存在。必须每张都删：
             # 一万张图的副本能吃掉几十 GB，而它们全都已经躺在 zip 里了。
             if spool is not None:
@@ -1870,7 +1930,8 @@ class TaggerClient:
              tag_future: Future | None = None, *,
              data: bytes | None = None,
              cache_key: str | None = None,
-             context: tuple | None = None) -> Outcome:
+             context: tuple | None = None,
+             on_part: Callable[[str], None] | None = None) -> Outcome:
         """重试循环。拆出来是为了让 spool 清理只在 process 的 finally 里写一次。
 
         `data` 是原始图片字节：重试提分辨率时要按抬高的预算重新组装
@@ -1915,10 +1976,6 @@ class TaggerClient:
         # 拒答被重打救回来之后 text 已经成了正常产出，事后再判会漏掉"它拒过"
         # 这个事实，而拒答计数是要上报的。
         refused_hit = False
-        # 快照里"这张图"的下标：tag 执行器一次只跑一张，所以恒为 0；留着变量
-        # 是为了哪天改回整块提交时不至于悄悄错位（rescore_last 会返回空）。
-        self._last_tag_index = 0
-
         while True:
             attempts += 1
             try:
@@ -2010,7 +2067,6 @@ class TaggerClient:
             #   少了降线（tag_fallback_threshold）、多了抬线（tag_retry_threshold）。
             #   0 = 关，行为与老版本完全一致。
             tag_rescored = 0        # >0 表示这一条换过线重筛（只是留痕用）
-            tag_capped = False
             low_tag = False
             # 这一轮的上限：截断重打时会临时压到 dense_retry_tag_max。
             # ★必须是"这一轮"的局部值，不能改进 output：output 是整批共用的，
@@ -2042,9 +2098,14 @@ class TaggerClient:
                         tag_rescored += 1
                 if len(tags) > cap:
                     tags = tags[: cap]
-                    tag_capped = True
 
             if reasons:
+                refused = looks_like_refusal(text or "")
+                if refused:
+                    refused_hit = True
+                    if not self.output.refusal_retry:
+                        reasons.append("疑似拒答")
+                        break
                 if attempts > self.max_attempts:
                     break
                 if artist_flags:
@@ -2063,7 +2124,7 @@ class TaggerClient:
                 # 这条要走在下面质检的 drop 判定**之前**才有意义——质检那边
                 # 已经改成把拒答判 retry（见 quality.evaluate），但这里靠的是
                 # 文本里的拒答特征，不依赖质检有没有开。
-                if (looks_like_refusal(text or "") and force_swapped < 1
+                if (refused and force_swapped < 1
                         and force_prompt is None):
                     # 已生成过（哪怕是空串=自定义提示词不让改）就不再试，
                     # 用 None 当"还没生成过"、"" 当"生成过但不可用"。
@@ -2124,6 +2185,11 @@ class TaggerClient:
                     "疑似拒答" in r for r in verdict.reasons):
                 verdict.level = "drop"
             if verdict.level == "pass":
+                if on_part is not None:
+                    if want_nl:
+                        on_part("nl")
+                    if want_tag:
+                        on_part("tag")
                 tags_with_prob: list[tuple[str, float]] = [(t, 1.0) for t in tags]
                 # 评级分数（只有 wd-eva02 这类分级头后端会给）。它不进 tag 串，
                 # 只作为独立字段落进产物，供数据集清洗/剔除误标用。
@@ -2140,40 +2206,16 @@ class TaggerClient:
                             wall_ms=int((time.perf_counter() - started) * 1000),
                             attempts=attempts, tokens=tokens_total,
                         )
-                    # 分类头是确定性的：同一张图再算一次结果不变，数量不够就
-                    # 重试是纯浪费。补救只能换判定线，见 _rescore_at。
-                    if len(tags_with_prob) < self.output.tag_min_count:
-                        tags_with_prob = self._rescore_at(
-                            data, tag_future, self.output.tag_fallback_threshold,
-                            with_prob=True) or tags_with_prob
-                        tag_rescored += 1
-                    elif (len(tags_with_prob) > cap
-                          and self.output.tag_retry_threshold
-                          and len(tags_with_prob) > max(
-                              cap, self.output.tag_overflow_count or 0)):
-                        tags_with_prob = self._rescore_at(
-                            data, tag_future, self.output.tag_retry_threshold,
-                            with_prob=True) or tags_with_prob
-                        tag_rescored += 1
-                    if len(tags_with_prob) > cap:
-                        tags_with_prob = tags_with_prob[: cap]
-                        tag_capped = True
-                    # 这里的判定必须与上面 VLM 分支**同口径**，否则同一个问题会
-                    # 按"tag 走 CPU"还是"tag 走 VLM"给出两种结论。
-                    if len(tags_with_prob) < self.output.tag_min_count:
-                        if (self.output.tag_min_accept
-                                and len(tags_with_prob) >= self.output.tag_min_accept):
-                            low_tag = True
-                        else:
-                            return Outcome(
-                                task.image_id, False,
-                                error=(f"tag 过少（{len(tags_with_prob)} < "
-                                       f"{self.output.tag_min_count}），"
-                                       f"后端 {self.tag_backend.name if self.tag_backend else '?'}"
-                                       f" 的阈值偏低"),
-                                wall_ms=int((time.perf_counter() - started) * 1000),
-                                attempts=attempts, tokens=tokens_total,
-                            )
+                    from .inference.classifier import finish_tags
+
+                    try:
+                        tags_with_prob, rescored, low_tag = finish_tags(
+                            self, data, tag_future, tags_with_prob, cap)
+                        tag_rescored += rescored
+                    except ValueError as exc:
+                        return Outcome(task.image_id, False, error=str(exc),
+                                       wall_ms=int((time.perf_counter() - started) * 1000),
+                                       attempts=attempts, tokens=tokens_total)
 
                 # 只写本模式该产的文件：tag 模式下多写一个 -nl.json，
                 # 会让 merge 在 require=tag 时多找一条"本不该存在"的记录，
@@ -2343,22 +2385,17 @@ class TaggerClient:
                      tag_rescored: int = 0) -> dict:
         fields = self._artist_fields(task)
         names = [t for t, _ in tags]
-        pairs = [[t, round(float(p), 4)] for t, p in tags]
         if fields["artist_tag"] and self.artist_rule.inject_tags:
             # 画师标签也进 tag 串，并且放最前：训练时 tag 是条件，
             # 只有写进文本才能把"这个作者的画风"绑到 @name 上，只放 JSON
-            # 字段训练侧读不到。它不是 danbooru 词汇，所以给 1.0 固定分、
-            # 排在最前，下游靠 @ 前缀就能和普通 tag 区分开。
+            # 字段训练侧读不到。排在最前，下游靠 @ 前缀区分画师与普通 tag。
             names = [fields["artist_tag"], *names]
-            pairs = [[fields["artist_tag"], 1.0], *pairs]
         payload = {
             "image_id": task.image_id,
             # merge 读的就是这个字段，必须是逗号分隔的字符串
             "tag": ", ".join(names),
-            # prob 是有真值的：CPU tagger（分类头）会给分数。
-            # VLM 出 tag 时只能填 1.0，那时 tag_backend="vlm"，
-            # 下游看到这个字段就知道概率该不该当真。
-            "tags": pairs,
+            # 置信度留在内部预测和缓存中，产物只写标签名称。
+            "tags": names,
             "tag_backend": self.tag_backend.name if self.tag_backend else "vlm",
             **fields,
             # 溯源四件套。tag 侧也带 `caption_language`：同图两份文件同值，
@@ -2395,7 +2432,7 @@ class TaggerClient:
         if flags:
             payload["flags"] = list(flags)
         if tag_rescored:
-            payload["tag_rescored"] = "fallback" if low_tag else "count"
+            payload["tag_rescored"] = "fallback" if TAG_FLAG_LOW_COUNT in flags else "count"
         return payload
 
     def _inject_artist_caption(self, caption: str, fields: dict,
@@ -2716,7 +2753,7 @@ def run_batch(
     这么分是因为"目录里多一个文件"与"两个线程同时 rename"这两件事凑在一起
     调试成本极高，而写两个小 json 根本不值得并行。
 
-    `on_progress` 在**主线程**上逐张回调（跳过/拉黑也算），所以订阅方可以直接
+    `on_progress` 在**主线程**上逐张回调（跳过/重试后依然失败也算），订阅方可以直接
     改自己的状态，不必加锁；传 None 就是 CLI 的老行为，一个字都不变。
 
     `should_stop` 是协作式停止（Web 的停止按钮）：串行路径当场抛 `Stopped`；
@@ -2762,6 +2799,16 @@ def run_batch(
     if parts_env not in ("tag", "nl"):
         parts_env = ""
     allow_parts = bool(parts_env)
+    resume_file = out_dir / '.center-resume.json'
+    center_done = set()
+    center_redo = set()
+    if resume_file.is_file() and parts_env:
+        resume_data = json.loads(resume_file.read_text(encoding='utf-8'))
+        center_done = set(resume_data.get(parts_env, []))
+        decisions = out_dir / '.center-resolutions.json'
+        if decisions.is_file():
+            center_redo = {r['image_id'] for r in json.loads(decisions.read_text(encoding='utf-8'))
+                           if r['part'] == parts_env and r['state'] == 'redone'}
     # 产出模式必须能产出被点名的那一侧。指向反了（parts=nl 而 mode=tag）时
     # 本侧**永远产不出**：跳过判定按本侧查、产物里却没有本侧，于是每张图
     # 白跑一遍还照常计入 done——"跑得很正常、账本也在涨、就是没补上"。
@@ -2817,6 +2864,34 @@ def run_batch(
                 skipped_path.open("a", encoding="utf-8", buffering=1))
         return skipped_holder[0]
 
+    def note_skip(task: TaskRow, kind: str, reason: str) -> None:
+        """一行图"永远不会出产物"的三处记账，必须一起做。
+
+        三处缺一不可，各管一件事：
+          1. skipped.jsonl —— 本机账本，续跑/重试靠它不再捞回来；
+          2. 产物分片的 excluded 行 —— **跟着数据走**。最终产物是所有人上传
+             后合并成一整份，那时本机这份 skipped.jsonl 早就不在手边了，
+             只有跟着分片走，合并侧/服务器侧才知道"这张是跳过的、不是漏做的"；
+          3. resolve_failure —— 冲销失败账里可能存在的旧行。
+
+        ★为什么抽出来：两个调用点（输入无效 / 无画师）原来只做了其中一部分。
+          `skipped_artist` 以前**一处都没写**，只在 stats 里加个数，进程一退就
+          没了痕迹——服务器拿到分片后无法区分"这图没画师"和"这图被漏掉了"，
+          校验器只能把它报成缺失。合并成一处，两边口径才不会漂。
+        """
+        fh = skipped_fh()
+        if fh is not None:
+            from .storage.locking import FileLock
+            with FileLock(skipped_path.with_suffix(".lock")):
+                fh.write(json.dumps({
+                    "image_id": task.image_id, "file": task.file,
+                    "shard": Path(task.shard).name,
+                    "kind": kind, "error": reason, "ts": time.time(), "parts": [parts_env] if parts_env else ['tag','nl'],
+                }, ensure_ascii=False) + "\n")
+                fh.flush()
+        resolve_failure(task)
+        _write_excluded_row(sink, task, kind, reason)
+
     def resolve_failure(task: TaskRow) -> None:
         """往失败账追加一条"这张已经了结"的冲销行（重试成功 / 被跳过）。
 
@@ -2838,6 +2913,7 @@ def run_batch(
         if fh is None:
             return
         line = json.dumps({"image_id": task.image_id, "resolved": True,
+                           "shard": Path(task.shard).name, "parts": [parts_env] if parts_env else ['tag','nl'],
                            "ts": time.time()}, ensure_ascii=False)
         from .storage.locking import FileLock
         with FileLock(failures.with_suffix(".lock")):
@@ -2887,25 +2963,8 @@ def run_batch(
                 stats.wall_ms += outcome.wall_ms
                 print(f"[client][跳过] {task.image_id}  {outcome.error}",
                       file=sys.stderr, flush=True)
-                # 明细单独归档：这类图永远不会有产物，验收/封包侧要能查到
-                # "它不是漏做了，是输入无效"，否则会被当成缺失而卡住整批。
-                fh = skipped_fh()
-                if fh is not None:
-                    from .storage.locking import FileLock
-                    with FileLock(skipped_path.with_suffix(".lock")):
-                        fh.write(json.dumps({
-                            "image_id": task.image_id, "file": task.file,
-                            "shard": Path(task.shard).name,
-                            "error": outcome.error, "ts": time.time(),
-                        }, ensure_ascii=False) + "\n")
-                        fh.flush()
-                # 小图被字节门槛拦下也是"了结"：不冲销的话，它会永远留在
-                # 失败账里，每次点「重试失败」都被捞出来再跳一次。
-                resolve_failure(task)
-                # 也写进产物 jsonl：最终产物是所有人上传后合并成一整份，
-                # 到时本机这份 skipped.jsonl 早就不在手上了，只有跟着行走，
-                # 合并侧才知道"这张是输入无效、不是漏做"。
-                _write_excluded_row(sink, task, "skipped", outcome.error)
+                # 明细归档（本机账 + 分片 excluded 行 + 冲销失败账）
+                note_skip(task, "skipped", outcome.error)
                 emit("skipped", task, outcome)
                 return
             # 已彻底剔除的老样本：不重跑、不算失败、不进任何一本账。
@@ -2917,7 +2976,7 @@ def run_batch(
                 return
             line = json.dumps({
                 "image_id": task.image_id, "file": task.file,
-                "shard": Path(task.shard).name, "error": outcome.error,
+                "shard": Path(task.shard).name, "error": outcome.error, "parts": [parts_env] if parts_env else ['tag','nl'],
                 "attempts": outcome.attempts, "ts": time.time(),
             }, ensure_ascii=False)
             # 坏样本剔除：重试轮次已经用完，仍失败。
@@ -2943,8 +3002,10 @@ def run_batch(
                 return
             stats.failed += 1
             stats.wall_ms += outcome.wall_ms
+            from .local_tag import reason_key as _reason_key
+
             for r in (outcome.error or "未知原因").split("; ")[:3]:
-                key = r.split(":")[0].strip()[:60]
+                key = _reason_key(r)
                 stats.by_reason[key] = stats.by_reason.get(key, 0) + 1
             if outcome.fatal:
                 fatal_streak[0] += 1
@@ -3044,13 +3105,23 @@ def run_batch(
             if only_ids is not None and task.image_id not in only_ids:
                 continue
             stats.total += 1
-            # 先查黑名单：字典查找比读两个 json 便宜，也更能说明问题
-            if (max_failures and fail_counts
+            task_force = force or task.image_id in center_redo
+            if not task_force and task.image_id in center_done:
+                stats.skipped += 1
+                emit("skipped", task, None)
+                continue
+            # 先查失败账：字典查找比读两个 json 便宜，也更能说明问题。
+            # 累计到上限的这张**这次不再尝试**——它已经重试过很多次，每次都
+            # 以同样的方式失败，再烧一遍推理只是浪费。
+            if (not task_force and max_failures and fail_counts
                     and fail_counts.get(task.image_id, 0) >= max_failures):
                 stats.blacklisted += 1
+                _write_excluded_row(sink, task, "excused",
+                                    f"累计失败 {fail_counts[task.image_id]} 次，达到重试上限")
                 if verbose:
-                    print(f"  [拉黑] {task.image_id}"
-                          f"（累计失败 {fail_counts[task.image_id]} 次）", flush=True)
+                    print(f"  [跳过] {task.image_id}"
+                          f"（重试后依然失败，累计 {fail_counts[task.image_id]} 次）",
+                          flush=True)
                 emit("blacklisted", task, None)
                 continue
             # parquet 模式下"文件存在"这条判定不成立（一个分片里有很多行），
@@ -3060,13 +3131,13 @@ def run_batch(
             #   sink 形态没有逐图文件可查，只能靠下面的 claim 锁互斥，
             #   重复劳动由 reclaim + 落锁保证不冲突。
             if sink is not None and not allow_parts:
-                if not force and task.image_id in done_ids:
+                if not task_force and task.image_id in done_ids:
                     stats.skipped += 1
                     if verbose:
                         print(f"  [跳过] {task.image_id}（产物里已有）", flush=True)
                     emit("skipped", task, None)
                     continue
-            elif sink is None and not force and _already_done(
+            elif sink is None and not task_force and _already_done(
                     client, task, out_dir, layout, require=parts_env):
                 stats.skipped += 1
                 if verbose:
@@ -3083,13 +3154,21 @@ def run_batch(
                 stats.artist_skipped += 1
                 if verbose:
                     print(f"  [跳过] {task.image_id}（无画师）", flush=True)
-                emit("skipped", task, None)
+                _reason = "无画师标注，按 artist.skip_when_missing 跳过"
+                # ★这类图以前只在 stats 里加个计数，一处都不落盘：进程一退就
+                #   没有痕迹了。服务器/合并侧因此无法区分"这图没画师"和"这图
+                #   被漏掉了"，校验只能把它报成缺失。走与"输入无效"同一函数。
+                note_skip(task, "artist", _reason)
+                # 带 outcome：订阅方要靠它把"没画师"和"产物已有"分开记
+                emit("skipped", task, Outcome(
+                    task.image_id, False, skipped=True, skipped_artist=True,
+                    error=_reason))
                 continue
             # 只补一侧时，完成索引（work / done_ids 都是"任一侧有产物就算完成"）
             # 不能当判据：它会把这个 id 判成 done，tag 侧那空缺就永远补不上。
             # 此时改为直接看本侧产物文件——这条路跟上面 sink 分支同一个理由，
             # 只是"哪一侧算有效"由派工点名。
-            if allow_parts and not force and _already_done(
+            if allow_parts and not task_force and _already_done(
                     client, task, out_dir, layout, require=parts_env):
                 stats.skipped += 1
                 if verbose:
@@ -3097,7 +3176,7 @@ def run_batch(
                 emit("skipped", task, None)
                 continue
             if work is not None:
-                status = work.claim(task.image_id, force=force)
+                status = work.claim(task.image_id, force=task_force)
                 if status != "claimed":
                     if status == "busy":
                         # 别人正在做：不管补哪一侧都得让开，两个进程同时写
@@ -3124,7 +3203,7 @@ def run_batch(
                 # 另一个进程可能在初次检查之后、领取之前刚刚完成逐图文件。
                 # （sink 形态下产物在分片里，逐图文件查不到，只能靠 claim 的锁
                 #   互斥，所以这里仍只查 sink is None 的那条路。）
-                if sink is None and not force and _already_done(
+                if sink is None and not task_force and _already_done(
                         client, task, out_dir, layout, require=parts_env):
                     work.release(task.image_id)
                     stats.skipped += 1
@@ -3301,7 +3380,7 @@ def resolve_concurrency(value: int | None, fp: dict, provider: str = "") -> int:
     """
     if value is not None:
         return max(1, int(value))
-    if str(fp.get("engine") or "") == "llamacpp":
+    if str(fp.get("engine") or "") in ("llamacpp", "native"):
         try:
             slots = int(fp.get("slots") or 0)
         except (TypeError, ValueError):
@@ -3349,11 +3428,18 @@ def load_fingerprint(path: str | Path | None) -> dict:
 def _prov_base(fp: dict, *, model_id: str, max_pixels: int, tier: str,
                caption_chars: tuple[int, int] | None = None) -> dict:
     """Provenance 的固定部分。每张都带一份，几百字节换可追溯性，值。"""
+    runtime = fp.get("native_runtime")
+    # 完整配置保存在服务指纹，每条产物只携带摘要，避免亿级数据重复存储。
+    runtime_sha = (hashlib.sha256(json.dumps(
+        {"version": fp.get("vllm_version"), "runtime": runtime},
+        sort_keys=True).encode("utf-8")).hexdigest()[:16] if runtime else "")
     return {
         # 推理来源。`local` 是本机/自建 vLLM·llama.cpp；`openai` / `anthropic`
         # 是外部 API。同一个 model_id 在两处是两套输出（量化、版本、上下文都
         # 不同），所以它和 precision 同级记下来——否则混批事后无从分辨。
         "provider": str(fp.get("provider") or "local"),
+        "engine": str(fp.get("engine") or ""),
+        "runtime_sha": runtime_sha,
         "model_id": model_id or str(fp.get("model_id") or "unknown"),
         "model_path": str(fp.get("model_path") or "unknown"),
         "model_revision": fp.get("model_revision"),
@@ -3576,6 +3662,20 @@ def _filter_shards(names: list[str], wanted) -> list[str]:
     return hit
 
 
+def _exit_code(code: int, stats: ClientStats) -> int:
+    """整趟跑完后的退出码：只有**这次真没做成**才算没跑完。
+
+    `failed` 是"这次推理/写盘失败"，`busy` 是"别的进程还在写"，两者都意味着
+    账没结清。`blacklisted`（重试后依然失败、这次按条件跳过）和 `excused`（重试
+    后剔除）是**结论**，不给产物是预期内的——算进退出码会让"续做时一张都不用
+    重做"的批次红着报"打标未完整跑完"，而面板上失败还是 0，用户只能去查模型。
+    对应口径：封包那边同样把这两类算作"合法无产物"（web.jobs._excluded_ids）。
+    """
+    if code == 0 and (stats.failed or stats.busy):
+        return 1
+    return code
+
+
 def run_client(args, ops: OpsConfig, table: dict,
                on_progress: ProgressHook | None = None, *,
                should_stop: Callable[[], bool] | None = None,
@@ -3630,6 +3730,12 @@ def run_client(args, ops: OpsConfig, table: dict,
     mode = str(args.mode or output.mode).lower()
     if mode not in ("nl", "tag", "both"):
         raise ConfigError(f"--mode 只能是 nl / tag / both，收到 {mode!r}")
+    parts_want = str(parts_env or os.environ.get("FOXLABEL_PARTS", "")).strip().lower()
+    if mode == "both" and parts_want in ("tag", "nl"):
+        mode = parts_want
+    from dataclasses import replace
+
+    output = replace(output, mode=mode)
 
     # ---- 推理来源。三种走同一套主循环，只有方言与"有没有环境指纹"不同。
     try:
@@ -3654,16 +3760,7 @@ def run_client(args, ops: OpsConfig, table: dict,
     caption_chars = output.caption_chars
     if getattr(args, "caption_chars", None):
         caption_chars = parse_caption_chars(args.caption_chars)
-    output = OutputSpec(mode=mode, nl_min_tokens=output.nl_min_tokens,
-                        nl_max_tokens=output.nl_max_tokens,
-                        tag_min_count=output.tag_min_count,
-                        tag_max_count=output.tag_max_count,
-                        caption_chars=caption_chars,
-                        # ★重建 OutputSpec 时每个字段都要抄过来。漏 caption_zh_ratio
-                        # 的后果是"表单/命令行给了比例、跑出来一个中文字都没有"，
-                        # 而且不报错——这一条是被真实分片测出来的。
-                        caption_zh_ratio=output.caption_zh_ratio,
-                        text_rules=output.text_rules)
+    output = replace(output, caption_chars=caption_chars)
 
     quality: QualityPolicy = ops.quality_policy()
     artist_rule: ArtistRule = ops.artist_rule()
@@ -3679,6 +3776,8 @@ def run_client(args, ops: OpsConfig, table: dict,
     # ---- 双线：CPU 出 tag，GPU 出 NL
     tagging = ops.tagging or {}
     backend_name = str(args.tag_backend or tagging.get("backend") or "pixai")
+    if mode == "nl":
+        backend_name = "none"
     need_tags = output.wants_tag
     # 模型名必须跟后端绑定：配置里只有一个 `model` 字段时，切后端就会把
     # pixai 的仓库名喂给 wd-eva02（实测直接报"不像 WD 仓库"）。
@@ -3719,14 +3818,15 @@ def run_client(args, ops: OpsConfig, table: dict,
         preprocess=tag_preprocess,
     )
     if tag_backend is not None:
-        if not output.wants_nl:
-            raise ConfigError(
-                "--mode tag 不能配 CPU tag 后端：tag 由后端产出，VLM 就没有活干了。\n"
-                "          用 --mode nl 或 both，或者 --tag-backend none 让 VLM 出 tag。")
         # 预加载：缺依赖、下不到模型、权重对不上，现在就说，
         # 别等跑到第 500 张才发现整批 tag 全是空的。
         try:
-            tag_backend.load()
+            from .inference.devices import load_tag_backend
+
+            preference = args.tag_device or tagging.get("device") or "auto"
+            automatic = "auto" in (preference if isinstance(preference, (list, tuple)) else str(preference).split(","))
+            tag_backend = load_tag_backend(tag_backend, automatic=automatic, log=_log)
+            tag_devices = list(getattr(tag_backend, "devices", [getattr(tag_backend, "device", "cpu")]))
         except TaggerUnavailable as exc:
             raise ConfigError(f"tag 后端加载失败：{exc}") from exc
 
@@ -3743,14 +3843,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                   "（约 2.3 秒/张，16473 词表）。",
                   file=sys.stderr)
         # VLM 收窄成只出 NL；tag_min/max 保留下来给数量校验用
-        output = OutputSpec(mode="nl",
-                            nl_min_tokens=output.nl_min_tokens,
-                            nl_max_tokens=output.nl_max_tokens,
-                            tag_min_count=output.tag_min_count,
-                            tag_max_count=output.tag_max_count,
-                            caption_chars=output.caption_chars,
-                            caption_zh_ratio=output.caption_zh_ratio,
-                            text_rules=output.text_rules)
+        output = replace(output, mode="nl" if output.wants_nl else "tag")
 
     # 变体可以带自己的生成上限与温度；命令行显式给了就以命令行为准。
     variant_max_tokens = variant.max_tokens if variant is not None else None
@@ -3758,11 +3851,11 @@ def run_client(args, ops: OpsConfig, table: dict,
                      or defaults.get("max_tokens", 800))
     # 生成上限必须放得下"NL 全量 + tag 全量 + 两段标记"。放不下时的表现是
     # `<CAPTION>` 说到一半断掉或后面几十个 tag 直接消失——两种都不会报错，
-    # 只会静默产出一条短数据。所以这里按最坏情况估一次，不够就抬。
+    # 只会静默产出一条短数据。只兜底隐式预算；显式上限由调用方决定。
     need_tokens = 64 + (output.nl_max_tokens if output.wants_nl else 0)
     if output.wants_tag:
         need_tokens += output.tag_max_count * 3      # 一个 danbooru tag ≈ 2~3 token
-    if max_tokens < need_tokens:
+    if max_tokens < need_tokens and not (args.max_tokens or variant_max_tokens):
         print(f"[client][警告] max_tokens={max_tokens} 放不下 "
               f"{output.tag_max_count} 个 tag + {output.nl_max_tokens} token 的 NL，"
               f"本次抬到 {need_tokens}（根治请改 configs/tiers.yaml 的 "
@@ -3782,6 +3875,12 @@ def run_client(args, ops: OpsConfig, table: dict,
     chosen_prompt = str(getattr(args, "prompt_text", "") or "").strip()
     if chosen_prompt:
         prompt_text = chosen_prompt
+    if chosen_prompt and (output.dense_retry_rules or output.dense_retry_tag_max):
+        # 自定义提示词是"整段替换"，规则文件与重打指令都插不进去。截断重打
+        # 因此整条失效，而现象只是"文字密集的包失败率特别高"——说出来。
+        print("[client][警告] 本次用的是自定义提示词（整段替换）：prompts/ 里的规则"
+              "与截断重打指令都不生效。文字密集的批次请改用规则文件，"
+              "或把「不要为图中文字出 tag」这条自己写进提示词。", file=sys.stderr)
     prompt_zh_text = str(getattr(args, "prompt_zh_text", "") or "").strip() or None
     system_text = str(getattr(args, "system_text", "") or "").strip() or None
     if (chosen_prompt and not prompt_zh_text
@@ -3792,10 +3891,24 @@ def run_client(args, ops: OpsConfig, table: dict,
         print("[client][警告] 这份自定义提示词没有中文版（prompt_zh），"
               "本次 caption_zh_ratio 不生效，全部出英文。", file=sys.stderr)
 
+    # 规则文件读不到时一定说出来。它退化得很安静：内置兜底照样能出活，
+    # 只是 tag 段没有小字约束、截断重打没有收窄指令——量机上曾因此跑了整批
+    # "重打还是截断"的数据，页面上除了失败率什么都看不出来。
+    from . import prompt_rules as _rules_mod
+
+    if not _rules_mod.load_rules().sources:
+        print(f"[client][警告] 没读到任何 prompt 规则文件（{_rules_mod.RULES_DIR} 下没有 "
+              f"*.md），本次用内置兜底：tag 段没有删/改文字的约束，截断重打只剩"
+              f"「压 tag 上限」这一招。检查安装目录里是否带了 prompts/。",
+              file=sys.stderr)
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if provider:
+    if tag_backend is not None and not output.wants_nl:
+        fp = {"model_id": tag_backend.model_id, "precision": tag_precision,
+              "device": ", ".join(tag_devices)}
+    elif provider:
         # 外部 API 没有 `tagger serve` 写下的指纹，别去读那个文件——
         # 读不到会打一句"建议先跑 serve"，而这里根本不该跑 serve。
         # 需要的三项（来源 / 模型 / 精度）就地造出来。
@@ -3932,6 +4045,10 @@ def run_client(args, ops: OpsConfig, table: dict,
             clients = clients[:1]
 
     stats = ClientStats()
+    on_part = getattr(on_progress, "on_part", None)
+    if on_part is not None:
+        for slot_client in clients:
+            slot_client.on_part = lambda part, task: on_part(part, task, stats)
     cache_info: dict = {}
     failures = Path(args.failures) if args.failures else out_dir / "failures.jsonl"
     layout = str(args.layout or (ops.distribute or {}).get("layout", "flat"))
@@ -3985,7 +4102,7 @@ def run_client(args, ops: OpsConfig, table: dict,
         for _c in (clients or ([client] if client is not None else [])):
             if _c is not None:
                 _c._retrying_failed = True
-        # 「已失败过 3 次就拉黑」在这条路上必须关掉，否则一条都做不了：
+        # 「失败过 3 次就不再尝试」在这条路上必须关掉，否则一条都做不了：
         # 这些图本来就是因为失败过才被选出来的，用同一个上限拦自己是自相矛盾。
         max_failures = 0
         fail_counts = {}
@@ -4000,6 +4117,8 @@ def run_client(args, ops: OpsConfig, table: dict,
     done_dir = out_dir / ".hf-done"
 
     def shard_done(name: str) -> bool:
+        if parts_want and (out_dir / '.center-resume.json').is_file():
+            return False
         # 旧版在中止或 Parquet 未落盘时也会写标记，需逐图核验一次。
         # complete-v3 = "有条件完成"（剔过坏样本），同样算完成——但多一段
         # 剔除数，重跑日志里能对上是哪几片。
@@ -4266,7 +4385,7 @@ def run_client(args, ops: OpsConfig, table: dict,
     # tag 这侧才是本机参数。混在一起时，用户会以为改 --tag-device 能挪动 LLM。
     _log(f"[client] NL 设备  : {fp.get('device') or '(由服务端 vLLM 决定)'}")
     if tag_backend:
-        _log(f"[client] tag 设备 : {tag_device}（{tag_backend.precision}"
+        _log(f"[client] tag 设备 : {', '.join(tag_devices)}（{tag_backend.precision}"
              f"{f'，batch={tag_backend.batch_size}' if tag_backend.batch_size > 1 else ''}）")
     else:
         _log("[client] tag 设备 : 未启用（tag 由 VLM 出）")
@@ -4460,6 +4579,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                     print("[client] 分发包里没有任务。检查 --shard 是否指对了包。")
                     code = 1
 
+        stats.input_complete = not (should_stop is not None and should_stop())
     except hf_source.HFError as exc:
         # 必须走 _log 而不是裸 print(stderr)：任务页只消费 on_log 发出去的事件，
         # 401/404 那句"该去填 token / 该检查仓库名"的指引写进 stderr 等于没写，
@@ -4582,8 +4702,14 @@ def run_client(args, ops: OpsConfig, table: dict,
         print(f"[client] {stats.failed} 张失败，明细在 {failures}")
         print("         失败行不会写产物文件，所以重跑时会被自动重做——"
               "先把原因修掉再跑，别让它们一直循环。")
-    if code == 0 and (stats.failed or stats.busy or stats.blacklisted):
-        code = 1
+    if stats.blacklisted:
+        # 与 excused 同一类：这张图重试过很多次、每次都同样失败，以后不再碰，
+        # 是**结论**不是这次跑挂了。单说出来，让"有条件完成"在日志里看得见。
+        print(f"[client] 有条件完成：{stats.blacklisted} 张重试后依然失败、按条件"
+              f"跳过（这次不再尝试，明细见 {failures}）")
+    # ★重试后依然失败的那批不进退出码，见 _exit_code 的说明：放弃是结论，
+    #   不是本次跑挂了。
+    code = _exit_code(code, stats)
 
     if code == 0:
         print()

@@ -65,11 +65,39 @@ TAG / CAPTION / CAPTION_ZH 是**强制**的：只要 mode 要产这个东西，�
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
+def default_dir() -> Path:
+    """规则目录的默认位置：**按安装位置找**，不按当前工作目录。
+
+    以前这里是 `Path("prompts")`，意思是"从哪儿启动就从哪儿找"。命令行里
+    `cd 到别的目录 && tagger client`、或者被别人的调度脚本以别的 cwd 拉起，
+    就一份规则都读不到——而表现只是"prompt 好像变简单了"：内置兜底照常能
+    出活，谁也不报错。
+
+    2026-11-13 查"某些包几乎全部撞 max_tokens"时才发现这件事的严重程度：
+    分发包里压根没带 `prompts/`（`pack-dist.bat` 只带了 NL 预设的 `prompt/`），
+    于是量机上跑的一直是内置兜底——tag 段没有小字约束、截断重打用的收窄
+    指令也不存在，"重打一次"等于拿同一份指令再撞一次上限。
+    """
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", "") or ""
+    if meipass:                       # 单文件运行：资源被解到临时目录
+        candidates.append(Path(meipass) / "prompts")
+    candidates.append(Path(__file__).resolve().parents[1] / "prompts")
+    candidates.append(Path("prompts"))
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    # 一个都不存在：留"包旁边"这个确定的路径，日志里写出来才知道该往哪放。
+    return candidates[1] if not meipass else candidates[0]
+
+
 _env = os.environ.get("TAGGER_RULES_DIR", "").strip()
-RULES_DIR = Path(_env) if _env else Path("prompts")
+RULES_DIR = Path(_env) if _env else default_dir()
 
 SECTION_TAG = "TAG"
 SECTION_CAPTION = "CAPTION"

@@ -615,6 +615,8 @@ _GROUPS = [
 # 但它们**不进**「安装缺失」那个批量动作：serve 在 Windows 上装了也跑不起来，
 # llmcompressor 几百 MB，一次全装是误伤。所以每组只给自己的按钮。
 _EXTRA_GROUPS: list[tuple[str, str, str]] = [
+    ("native-nl", "lulynx 专用推理（实验）",
+     "Qwen3-VL 专用运行时；支持 CPU 和 CUDA，复用现有打标服务。"),
     ("convert", "本地量化（GGUF）",
      "safetensors → F16 → Q4_K_M/Q6_K。torch / transformers / safetensors 与"
      "「打标运行时」共用同一份，卸载了打标也会停。"),

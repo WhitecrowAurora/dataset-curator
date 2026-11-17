@@ -50,10 +50,12 @@ from ..nl_api import default_base as api_default_base
 from ..nl_api import normalize_provider
 from ..nl_api import resolve_hf_token
 from ..pack import PackOptions
+from ..schema import tag_names
 from ..pipeline import (MemberReader, PackReport, PackSpaceError, Plan,
                         estimate_job_bytes, existing_ancestor, free_bytes,
                         pack_items, plan_inputs, plan_stats, space_error)
 from .vllm_service import FINGERPRINT_PATH
+from .job_progress import OutputProgress, OutputProgressHook
 
 # 环形缓冲上限。超出就丢最老的：UI 只关心最近的，补齐靠产物文件而不是事件。
 MAX_EVENTS = 5000
@@ -77,27 +79,58 @@ STAT_FINE = 100
 # 后端只存原始分布，占比由前端现算，改阈值立刻全曲线生效。
 SCORE_BINS = 41
 
+# 落盘曾有 7 列计数和 41 格直方图；新行在直方图前增加了 3 列。
+# 读回时按行长迁移，保留旧分数的原始格位。
 _ROW_COLS = ("settled", "done_first", "done_retry",
-             "skipped", "blacklisted", "failed", "score_sum")
+             "skipped", "blacklisted", "failed", "score_sum",
+             # 以下为后加：跳过要分原因，否则"产物已有"会把另外三类吃掉
+             "blank_skipped", "artist_skipped", "excused")
 _ROW_LEN = len(_ROW_COLS) + SCORE_BINS
+# 分数直方图的起点：新增列之后它不再等于 len(_ROW_COLS)，别再拿它当偏移
+_HIST_OFF = len(_ROW_COLS)
+
+
+def normalize_stats_row(row: list[int]) -> list[int]:
+    if len(row) == 7 + SCORE_BINS:
+        row = row[:7] + [0, 0, 0] + row[7:]
+    return (row + [0] * max(0, _ROW_LEN - len(row)))[:_ROW_LEN]
+
+
+def skip_kind_of(outcome) -> str:
+    """把一次 skipped 事件按原因归类，给统计分桶用。
+
+    client 侧只发一个 "skipped"，靠 outcome 上的两个标记区分：
+      skipped_blank  —— 输入图过小（纯色/空图），永远不会有产物
+      skipped_artist —— 开关了 skip_when_missing 但取不到画师
+    其余（无 outcome 或两个标记都没置）= 产物已在盘上。
+    """
+    if outcome is None:
+        return "skipped"
+    if getattr(outcome, "skipped_blank", False):
+        return "blank_skipped"
+    if getattr(outcome, "skipped_artist", False):
+        return "artist_skipped"
+    return "skipped"
 
 
 def merge_buckets(rows: list[list[int]], bucket: int) -> list[dict]:
     """细桶行合并成 bucket 宽的粗桶字典。纯函数，方便单测。
 
-    行布局见 _ROW_COLS：6 个计数器 + 累计质检分（×100 存整）+ 分数直方图。
+    行布局见 _ROW_COLS：9 个计数器 + 累计质检分（×100 存整）+ 分数直方图。
     end 按真实结算数收口（尾桶常常不满），tooltip 里"第 N–M 张"不说大话。
+    短行（老版本落盘的）在这里补齐：调用方（build_readonly）也会补，
+    但纯函数自己守一道，单测和外部脚本直接调时不会越界。
     """
     step = max(1, bucket // STAT_FINE)
     out: list[dict] = []
     for i in range(0, len(rows), step):
         acc = [0] * _ROW_LEN
         for row in rows[i:i + step]:
-            for j, v in enumerate(row):
+            for j, v in enumerate(normalize_stats_row(row)):
                 acc[j] += v
         start = i * STAT_FINE
         settled = acc[0]
-        hist = acc[len(_ROW_COLS):]
+        hist = acc[_HIST_OFF:]
         out.append({
             "start": start,
             "end": start + settled - 1,
@@ -105,6 +138,9 @@ def merge_buckets(rows: list[list[int]], bucket: int) -> list[dict]:
             "done_first": acc[1],
             "done_retry": acc[2],
             "skipped": acc[3],
+            "blank_skipped": acc[7],
+            "artist_skipped": acc[8],
+            "excused": acc[9],
             "blacklisted": acc[4],
             "failed": acc[5],
             "score_sum": acc[6] / 100.0,
@@ -338,6 +374,8 @@ def _redacted_spec(spec: "JobSpec") -> dict:
         d["hf_token"] = "***"
     if d.get("api_key"):
         d["api_key"] = "***"
+    if d.get("auto_upload_token"):
+        d["auto_upload_token"] = "***"
     if d.get("hf_proxy"):
         d["hf_proxy"] = _redact_url(str(d["hf_proxy"]))
     return d
@@ -582,6 +620,16 @@ class JobSpec:
     # 对大批量太松，所以磁盘这一项默认改走估算，guard 只管温度/占空比。
     check_space: bool = True
 
+    # ---- 打标完成后自动回传（分块通道）
+    #
+    # 空 url = 不回传。为什么默认关：回传失败不该影响"打标成功"这个事实，
+    # 而自动做一件可能失败的事，会让人误以为任务本身没收尾。开着就只推日志。
+    auto_upload_url: str = ""
+    # 令牌。与 api_key/hf_token 一样，快照里必须抹掉（见 _redacted_spec）。
+    auto_upload_token: str = ""
+    # 远端子目录，空 = 仓库根
+    auto_upload_dir: str = ""
+
     def resolved_out_dir(self) -> Path:
         if self.out_dir:
             return Path(self.out_dir)
@@ -716,17 +764,30 @@ def _id_set(path: Path) -> set[str]:
     return out
 
 
-def _excluded_ids(out_dir: Path) -> set[str]:
+def _excluded_ids(out_dir: Path, max_failures: int = 0) -> set[str]:
     """已确认不会有打标产物的图，封包时从"应产出"里排除。
 
-    两本账各管一类，都不是"漏做了"：
+    三本账各管一类，都不是"漏做了"：
       skipped.jsonl —— 输入无效（< min_image_bytes 的纯色图），入口就跳过
       excused.jsonl —— 重试后仍失败、已从分母剔除的坏样本
-    ★不从 failures.jsonl 取：那本是追加账，重试成功的图也在里面，按它排除
-      会把真正打好的产物漏出训练包。
+      failures.jsonl（累计到上限的那部分）—— 重试后依然失败的 id，按条件跳过
+
+    ★不能拿 failures.jsonl 整个当排除依据：那本是追加账，重试成功的图也在
+      里面，按它排除会把真正打好的产物漏出训练包。所以只取**累计到
+      max_failures** 的那部分，而且判据用与打标侧完全相同的
+      `load_failure_counts` + 阈值——两边口径一分叉，就会出现"打标跳过了、
+      封包又说缺产物"的二次误报。
+      max_failures 为 0 = 这次不按失败次数跳过任何图（「继续补做」会把上限
+      设成 0），那就一个都不排除。
     """
-    return (_id_set(Path(out_dir) / "skipped.jsonl")
-            | _id_set(Path(out_dir) / "excused.jsonl"))
+    ids = (_id_set(Path(out_dir) / "skipped.jsonl")
+           | _id_set(Path(out_dir) / "excused.jsonl"))
+    if max_failures > 0:
+        from ..client import load_failure_counts
+
+        counts = load_failure_counts(Path(out_dir) / "failures.jsonl")
+        ids |= {i for i, n in counts.items() if n >= max_failures}
+    return ids
 
 
 def _append_fine_row(job_id: str, row: list[int]) -> None:
@@ -755,6 +816,8 @@ class Job:
         self.guard = None
         # vlm 引擎的实时计数（hook 每次都带同一个 ClientStats 实例，存引用即可）
         self.client_stats = None
+        self.client_stats_parts = None
+        self.output_progress = OutputProgress()
         # pending | running | paused | done | stopped | failed
         self.status = "pending"
         # "" | tag | pack
@@ -823,8 +886,14 @@ class Job:
                   score: float | None = None) -> None:
         """逐项统计入口，两个引擎的结算 hook 都要调。
 
-        kind ∈ done/failed/skipped/blacklisted；attempts 用来区分首过与
+        kind ∈ done/failed/skipped/blacklisted/excused；attempts 用来区分首过与
         重试过（本地引擎没有重试，恒为 1）；score 是质检分（1~5，仅 VLM）。
+
+        ★skipped 必须分原因记账，不能几类共用一个 row[3]。统计页只有一条
+          "跳过"线，产物已有一多它就到 90%+，而图太小 / 没画师 / 重试后
+          剔除这些本该看的"没做成"也被吃掉——真实形态：194 张产物已有
+          + 5 张图太小，曲线显示"跳过 99.5%"，看着一切正常，实际漏了 5 张。
+          口径与 counts 那边一一对应，两条路上的数字才对得上。
         """
         with self._lock:
             if not self._fine or self._fine[-1][0] >= STAT_FINE:
@@ -840,20 +909,25 @@ class Job:
                 row[1 if attempts <= 1 else 2] += 1
             elif kind == "skipped":
                 row[3] += 1
+            elif kind == "blank_skipped":
+                row[7] += 1
+            elif kind == "artist_skipped":
+                row[8] += 1
             elif kind == "blacklisted":
                 row[4] += 1
             elif kind == "excused":
                 # 剔除的样本算"已结算"，但**不算失败**：它已经从分母里扣掉了，
                 # 记进 failed 会让统计页的失败率永远含着一批"确定救不回来"的图，
-                # 曲线再也降不到 0，看起来像模型一直没好。
-                row[3] += 1
+                # 曲线再也降不到 0，看起来像模型一直没好。以前它混在 skipped
+                # 里，把"产物已有"这条线抬得老高，自己却看不见——现在单列。
+                row[9] += 1
             else:
                 row[5] += 1
             if score is not None:
                 row[6] += int(round(min(5.0, max(1.0, float(score))) * 100))
                 # 越界截到边上：直方图只用于看占比，不用于复原原值
                 bin_ = int(round((min(5.0, max(1.0, float(score))) - 1.0) * 10))
-                row[len(_ROW_COLS) + bin_] += 1
+                row[_HIST_OFF + bin_] += 1
 
     def stats_buckets(self, bucket: int = 1000) -> dict:
         """统计页数据：完成顺序分桶 + 全程汇总。
@@ -877,6 +951,9 @@ class Job:
                 "settled": counts["settled"],
                 "done_first": counts["done"], "done_retry": 0,
                 "skipped": counts["skipped"],
+                "blank_skipped": counts.get("blank_skipped", 0),
+                "artist_skipped": counts.get("artist_skipped", 0),
+                "excused": counts.get("excused", 0),
                 "blacklisted": counts["blacklisted"],
                 "failed": counts["failed"],
                 "score_sum": 0.0, "score_hist": [0] * SCORE_BINS, "score_n": 0,
@@ -893,6 +970,7 @@ class Job:
         for b in buckets:
             b["score_hist"] = b["score_hist"][:cut + 1]
         keys = ("settled", "done_first", "done_retry", "skipped",
+                "blank_skipped", "artist_skipped", "excused",
                 "blacklisted", "failed", "score_sum", "score_n")
         totals = {k: sum(b[k] for b in buckets) for k in keys}
         totals["score_hist"] = [
@@ -925,6 +1003,14 @@ class Job:
             pack_bytes = self.pack_bytes
             packs = list(self.packs)
             client_stats = self.client_stats
+            client_stats_parts = self.client_stats_parts
+
+        if client_stats_parts is not None:
+            from ..client import ClientStats
+
+            client_stats = ClientStats()
+            pack_parallel.merge_client_stats(
+                client_stats, [part for part in client_stats_parts if part is not None])
 
         # vlm 引擎的实时计数在 ClientStats 里（流式任务的 total 逐张累加）；
         # local 引擎用 TagStats。两边的字段名刚好同形。
@@ -933,6 +1019,11 @@ class Job:
             done, skipped, failed, total = cs.done, cs.skipped, cs.failed, cs.total
             blacklisted = cs.blacklisted
             busy = cs.busy
+            # 三类"合法无产物"的跳过各算各的账，前端要分开显示：只说一个
+            # "跳过 194"，用户分不清是"产物已有"还是"图太小/没画师/救不回来"。
+            blank_skipped = cs.blank_skipped
+            artist_skipped = cs.artist_skipped
+            excused = cs.excused
             by_reason = dict(cs.by_reason)
             usage = {"prompt_tokens": cs.prompt_tokens, "completion_tokens": cs.tokens,
                      "rate_limited": cs.rate_limited, "cost": cs.cost}
@@ -941,10 +1032,21 @@ class Job:
                                             stats.failed, stats.total)
             blacklisted = 0
             busy = stats.busy
+            # 本机引擎没有这几类：它不做小图跳过、不按画师跳、也不做重试剔除。
+            blank_skipped = artist_skipped = excused = 0
             by_reason = dict(stats.by_reason)
             usage = {"prompt_tokens": 0, "completion_tokens": 0,
                      "rate_limited": 0, "cost": None}
-        settled = done + skipped + failed + blacklisted
+        total_known = self.spec.engine != "vlm" or self.status == "done" or self.phase == "pack"
+        if not total_known:
+            total_known = (all(part is not None and part.input_complete
+                               for part in client_stats_parts)
+                           if client_stats_parts else bool(
+                               client_stats is not None and client_stats.input_complete))
+        # 这几类也**结算过**了（有结论、不会再变），漏掉之后进度会永远差一截：
+        # 一批里有 5 张图太小，进度条就停在 97.5% 不动，看着像卡死。
+        settled = (done + skipped + failed + blacklisted
+                   + blank_skipped + artist_skipped + excused)
         elapsed = (self.ended or time.time()) - self.started if self.started else 0.0
         # 速率只按"真正打过"的算：跳过的图不花时间，算进去会把 ETA 说得太好听。
         # 分母从**第一张产出**起算，而不是 started：后者含模型加载（本机实测
@@ -955,15 +1057,14 @@ class Job:
         run_elapsed = (self.ended or time.time()) - run_started if run_started else 0.0
         rate = done / run_elapsed if run_elapsed > 0 and done else 0.0
         remaining = max(0, total - settled)
-        # 流式任务（HF parquet）总量事先未知：eta/progress 都给 None，
-        # 前端按"计数 + 速率"显示，不硬造百分比。
-        eta = remaining / rate if rate > 0 and total else None
+        # VLM 输入逐张计数；只有整趟读完后才知道总量。
+        eta = remaining / rate if total_known and rate > 0 and total else None
 
         pack_total = total if (self.options is not None and total) else 0
         pack_settled = packed + pack_skipped + pack_missing + pack_failed
         if self.phase == "pack" and pack_total:
             progress: float | None = min(1.0, pack_settled / pack_total)
-        elif total:
+        elif total_known and total:
             progress = min(1.0, settled / total)
         else:
             progress = None
@@ -984,16 +1085,27 @@ class Job:
             "counts": {
                 "total": total,
                 "done": done,
+                # skipped 只算"产物已有"；下面三个是分别结的账，别混进 skipped
+                # 再让前端拿总数去减——减出来的余数说明不了任何事。
                 "skipped": skipped,
+                "blank_skipped": blank_skipped,
+                "artist_skipped": artist_skipped,
+                "excused": excused,
                 "failed": failed,
                 "blacklisted": blacklisted,
                 "busy": busy,
                 "settled": settled,
             },
             "progress": progress,
+            "total_known": total_known,
             "elapsed_s": round(elapsed, 1),
             "rate_per_s": round(rate, 2),
             "eta_s": round(eta, 1) if eta is not None else None,
+            "output_progress": self.output_progress.snapshot(
+                total, self.started,
+                finished=self.status in ("done", "stopped", "failed") or self.phase == "pack",
+                total_known=total_known,
+            ) if self.spec.engine == "vlm" and self.spec.output_mode == "both" else None,
             "timings_ms": {"decode": stats.decode_ms, "forward": stats.forward_ms},
             # 云端按量计费：token 与撞限流次数要能在运行中看到，不能等日志。
             # cost 为 None = 没配价目（configs/nl_api.json 的 prices 段）。
@@ -1040,7 +1152,7 @@ class Job:
             # 这里不去猜（产物里本来就没有原因，编一个只会误导）。
             return {**base, "ok": False, "tags": [], "tag": "",
                     "rating": {}, "tag_backend": ""}
-        tags = [[str(t), float(p)] for t, p in (payload.get("tags") or [])]
+        tags = tag_names(payload.get("tags"))
         return {
             **base,
             "ok": bool(payload.get("ok")),
@@ -1204,7 +1316,7 @@ class Job:
     def _artifact_item(self, row: dict) -> dict:
         tag = row.get("tag") or {}
         nl = row.get("nl") or {}
-        tags = [[str(t), float(p)] for t, p in (tag.get("tags") or [])]
+        tags = tag_names(tag.get("tags"))
         return {
             "image_id": row["image_id"],
             "rel": str(tag.get("image_path") or nl.get("image_path") or ""),
@@ -1526,11 +1638,7 @@ class JobManager:
 
         rows = history_store.load_stats(job_id)
         if rows:
-            fixed: list[list[int]] = []
-            for row in rows:
-                if len(row) < _ROW_LEN:
-                    row = row + [0] * (_ROW_LEN - len(row))
-                fixed.append(row[:_ROW_LEN])
+            fixed = [normalize_stats_row(row) for row in rows]
             job._fine = fixed
             job._fine_saved = len(fixed)
         return job
@@ -1983,7 +2091,7 @@ class JobManager:
             guard = self._make_guard(job)
             job.guard = guard
             if spec.engine == "vlm":
-                # VLM 引擎的整条主流程在 run_client 里（重试升级/黑名单/
+                # VLM 引擎的整条主流程在 run_client 里（重试升级/失败累计上限/
                 # 断点续做/HF 流式读），guard 的 start/stop 也归它管。
                 self._run_vlm(job, guard)
                 return
@@ -2044,7 +2152,10 @@ class JobManager:
                 job.push("log", message=f"加载后端 {backend.name}（{spec.precision}"
                                          f"，batch={spec.batch}"
                                          f"，{getattr(backend, 'preprocess', 'pil')} 预处理）…")
-                backend.load()
+                from ..inference.devices import load_tag_backend
+
+                backend = load_tag_backend(backend, automatic="auto" in spec.tag_device_list(),
+                    log=lambda message: job.push("log", message=message))
                 job.model_id = str(getattr(backend, "model_id", "") or "")
                 job.push("log", message=f"后端就绪：{len(job.items)} 张待处理")
 
@@ -2082,6 +2193,8 @@ class JobManager:
             job.status = "failed"
             job.error = f"{type(exc).__name__}: {exc}"
         finally:
+            if job.status == "done":
+                self._auto_upload(job)
             with job._lock:
                 job.thread_done = True
                 # ★"暂停"的前提是线程里那个循环还活着、还读得到 pause_flag。
@@ -2120,6 +2233,37 @@ class JobManager:
                 # vlm 路径里 run_client 已经停过；stop 幂等，这里兜底。
                 guard.stop()
 
+    def _auto_upload(self, job: Job) -> None:
+        """打标完成后按 spec 自动回传产物。**回传失败绝不改任务状态**。
+
+        为什么不做成 Job 的 phase：回传不占 GPU、可以中途停、可以重复跑
+        （块寻址天然幂等），把它塞进任务状态机会让"任务是否成功"变含糊。
+        这里只复用 `BLOB_UPLOADS` 那套任务，页面上仍能在回传页看到进度。
+        """
+        url = str(getattr(job.spec, "auto_upload_url", "") or "").strip()
+        if not url:
+            return
+        try:
+            from .blob_upload import BLOB_UPLOADS, list_uploadable
+
+            targets = list_uploadable(job.out_dir)
+            if not targets:
+                job.push("log", message="自动回传：产物目录里没有可传的分片，跳过")
+                return
+            names = [p.name for p in targets]
+            sub = BLOB_UPLOADS.create(
+                str(job.out_dir), names, url=url,
+                token=str(getattr(job.spec, "auto_upload_token", "") or ""),
+                remote_dir=str(getattr(job.spec, "auto_upload_dir", "") or ""))
+            job.push("log", message=(
+                f"自动回传已开始：{len(names)} 个分片 → {url}"
+                f"（回传任务 {sub.id}，详情见「回传」页）"))
+        except RuntimeError as exc:
+            # 已经有回传在跑：不排队，说清楚让人自己去回传页补
+            job.push("log", message=f"自动回传未启动：{exc}")
+        except Exception as exc:           # noqa: BLE001 - 回传绝不能拖垮任务收尾
+            job.push("log", message=f"自动回传失败：{type(exc).__name__}: {exc}")
+
     def _make_guard(self, job: Job) -> ResourceGuard | None:
         """两种引擎共用一个 guard。打标在块边界、封包在循环头各挂一次
         before_unit；级别变化经 on_state 推成 guard 事件，页面上直接能
@@ -2149,7 +2293,7 @@ class JobManager:
     def _run_vlm(self, job: Job, guard: ResourceGuard | None) -> None:
         """VLM 引擎：整体复用 CLI 的 run_client 主流程，web 只做三件事——
         组 argparse.Namespace、把 ProgressHook 桥成事件、把 ClientStats
-        接进快照。重试升级/失败黑名单/断点续做/guard 熔断全在主流程里。"""
+        接进快照。重试升级/失败累计上限/断点续做/guard 熔断全在主流程里。"""
         import argparse
 
         from ..client import ClientStats, run_client
@@ -2376,6 +2520,11 @@ class JobManager:
         def hook(kind: str, task, outcome, stats) -> None:
             job.client_stats = stats
             job.current = task.image_id
+            if kind in ("tag_ready", "nl_ready"):
+                job.output_progress.ready(kind.removesuffix("_ready"), task)
+                return
+            if mode == "both":
+                job.output_progress.settle(kind, task, outcome)
             if kind in ("done", "failed"):
                 if not job.first_settled:
                     job.first_settled = time.time()
@@ -2392,7 +2541,7 @@ class JobManager:
             score = None
             if kind == "done":
                 payload = (outcome.tag if outcome is not None else None) or {}
-                names = [str(t) for t, _ in (payload.get("tags") or [])]
+                names = tag_names(payload.get("tags"))
                 # 质检分在 nl 产物里（tag-only 模式没有）：统计页要它画趋势
                 nl = getattr(outcome, "nl", None) or {}
                 score = nl.get("score")
@@ -2402,9 +2551,12 @@ class JobManager:
             elif kind == "skipped":
                 job.push("item", image_id=task.image_id, ok=True, skipped=True,
                          tag_count=0, tags=[])
+                # 统计页要分开画：产物已有是正常的，图太小 / 没画师是"永远
+                # 做不成"。两者挤在同一条"跳过"线上，后者永远被前者淹没。
+                kind = skip_kind_of(outcome)
             elif kind == "blacklisted":
                 job.push("item", image_id=task.image_id, ok=False,
-                         error="连续失败达到上限，本批拉黑跳过", tags=[])
+                         error="重试后依然失败（已达重试上限），本次跳过", tags=[])
             elif kind == "excused":
                 # 重试后仍失败、已从分母剔除。界面上要**看得见它去哪了**：
                 # 只从"失败"里消失、不给一行说明，用户会以为它悄悄被丢了。
@@ -2428,7 +2580,8 @@ class JobManager:
             f"  模型 {spec.vlm_model}  产物 {spec.artifact_format}"
             + (f"  HF 仓库 {spec.hf_repo}" if spec.hf_repo else "  本地分片输入")))
         def _one_run(lane_args, lane_hook) -> int:
-            return run_client(lane_args, ops, table, on_progress=lane_hook,
+            progress_hook = OutputProgressHook(lane_hook) if mode == "both" else lane_hook
+            return run_client(lane_args, ops, table, on_progress=progress_hook,
                               should_stop=job.stop_flag.is_set,
                               paused=job.pause_flag.is_set,
                               on_log=lambda message: job.push("log", message=message),
@@ -2472,6 +2625,7 @@ class JobManager:
                 f"（{len(lane_packs)} 个包，NL 服务 {len(lane_urls)} 个）"))
             codes = [0] * lanes
             captured: list = [None] * lanes
+            job.client_stats_parts = captured
 
             def _lane(i: int, halt) -> None:
                 if halt.is_set():
@@ -2517,6 +2671,14 @@ class JobManager:
         elif code == 0:
             if job.status == "running":
                 job.status = "done"
+            stats = job.client_stats
+            if stats is not None and stats.blacklisted:
+                # 有条件完成：有图没出产物，但那是"重试后依然失败、按条件跳过"
+                # 的结论，不是这次跑挂了。状态仍是 done，把构成说清楚即可——
+                # 标成 failed 会让"一张都不用重做"的续做批次永远红着。
+                job.push("log", message=(
+                    f"有条件完成：{stats.blacklisted} 张重试后依然失败、按条件跳过"
+                    f"（本次不再尝试，明细见 failures.jsonl）；其余产物完整"))
         else:
             job.status = "failed"
             job.error = "打标未完整跑完（详见日志与失败统计）；已写盘的部分可续做"
@@ -2535,11 +2697,11 @@ class JobManager:
         # 几张坏图就卡住整批——正是「重试失败」这条线要解决的问题。
         # 从磁盘读而不靠打标阶段的事件：两个引擎各自有 hook，跨重启后事件
         # 也没了，账本才是唯一一直存在的东西。
-        excluded = _excluded_ids(job.out_dir)
+        excluded = _excluded_ids(job.out_dir, int(spec.max_failures or 0))
         if excluded:
             job.push("log", message=(
                 f"封包排除 {len(excluded)} 张已确认无产物的图"
-                f"（输入无效 / 重试后剔除）"))
+                f"（输入无效 / 重试后剔除 / 重试后依然失败）"))
         try:
             report = pack_items(
                 job.items, job.out_dir, options,
@@ -2602,7 +2764,7 @@ class JobManager:
             job.first_settled = time.time()
         if kind == "done":
             payload = extra if isinstance(extra, dict) else {}
-            names = [str(t) for t, _ in (payload.get("tags") or [])]
+            names = tag_names(payload.get("tags"))
             job.push("item", image_id=item.image_id, ok=True,
                      tag_count=len(names), tags=names[:10])
         elif kind == "skipped":

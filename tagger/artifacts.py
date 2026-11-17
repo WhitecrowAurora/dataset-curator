@@ -43,6 +43,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
+from .schema import tag_names
+from .verification.payload import payload_done as _payload_done
 
 ARTIFACT_PREFIX = "artifacts-"
 ARTIFACT_SUFFIX = ".parquet"
@@ -130,6 +132,8 @@ def _row(image_id: str, tag: dict | None, nl: dict | None) -> dict:
     tag / nl 存 JSON 字符串而不是拆开的列：merge 的对账全建立在 payload 上，
     拆开等于把那段逻辑复制两份。空串表示该侧这一张没产出（例如只跑 tag）。
     """
+    if tag is not None and "tags" in tag:
+        tag = {**tag, "tags": tag_names(tag["tags"])}
     return {
         "image_id": str(image_id),
         "tag": json.dumps(tag, ensure_ascii=False) if tag is not None else "",
@@ -148,7 +152,13 @@ EXCLUDED_KEY = "excluded"
 
 
 def excluded_row(image_id: str, kind: str, reason: str = "") -> dict:
-    """一条"确定为无产物"的记录。kind 取 skipped / excused / excluded。
+    """一条"确定为无产物"的记录。
+
+    kind 的取值口径（服务器/合并侧按它分桶，改这里就是改统计口径）：
+      - `skipped` —— 输入无效（纯色图/过小），永远不会有产物
+      - `artist`  —— 无画师标注，按 artist.skip_when_missing 跳过
+      - `excused` —— 重试后仍失败，按坏样本剔除
+      - `excluded`—— 兜底，别的地方判定的"无产物"
 
     tag/nl 留空串是刻意的：下游所有"有内容才算产出"的判定都维持原样，
     不会把一张没有标注的图当成有标注。识别只靠 EXCLUDED_KEY。
@@ -561,34 +571,6 @@ def find_artifacts(root: str | Path) -> list[Path]:
     return sorted(p for p in base.rglob("*") if p.is_file() and is_artifact(p))
 
 
-def _payload_done(kind: str, raw: object) -> bool:
-    """续做判定：兼容旧正文，但坏 JSON 和明确失败不能算完成。"""
-    obj = raw
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            return False
-        try:
-            obj = json.loads(text)
-        except ValueError:
-            return text[0] not in '{["'
-    if isinstance(obj, str):
-        return bool(obj.strip())
-    if not isinstance(obj, dict) or obj.get("ok") is False:
-        return False
-    value = obj.get("tag") if kind == "tag" else (obj.get("caption") or obj.get("nl"))
-    if not isinstance(value, str):
-        return False
-    if value.strip():
-        return True
-    # 分类头阈值以上没有标签是合法结果；空的 VLM 回复不是。
-    prov = obj.get("provenance")
-    prov = prov if isinstance(prov, dict) else {}
-    backend = obj.get("tag_backend") or prov.get("tag_backend")
-    return (kind == "tag" and obj.get("ok") is True
-            and (prov.get("mode") == "local-tag"
-                 or (bool(backend) and backend != "vlm" and obj.get("tags") == [])))
-
 
 def _row_done(row: object, require: str | None = None) -> bool:
     """这条记录算不算"做完了"。
@@ -608,6 +590,9 @@ def _row_done(row: object, require: str | None = None) -> bool:
         # 再跑一遍、再失败一遍。
         return True
     if require in ("tag", "nl"):
+        outcome = (row.get("outcomes") or {}).get(require, {})
+        if outcome.get("status") == "excluded" and str(outcome.get("reason") or "").strip():
+            return True
         return _payload_done(require, row.get(require))
     return any(_payload_done(kind, row.get(kind)) for kind in ("tag", "nl"))
 

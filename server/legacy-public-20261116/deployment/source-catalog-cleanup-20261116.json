@@ -1,0 +1,11 @@
+{
+  "remote_test_root_removed": true,
+  "removed_bytes": 16341855,
+  "hf_test_uploads": 0,
+  "production_source_lists_retained": 1,
+  "production_test_artifacts": 0,
+  "services": [
+    "active",
+    "active"
+  ]
+}

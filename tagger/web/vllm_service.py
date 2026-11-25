@@ -61,7 +61,11 @@ class VllmService:
         self.started = 0.0
         self.ready_at = 0.0
         self.profile = ""
-        self.log_path = str(FINGERPRINT_PATH.parent / f"vllm-{self.port}.log")
+        log_dir = FINGERPRINT_PATH.parent / 'logs'
+        saved_logs = sorted(log_dir.glob('*.log'), key=lambda p: p.stat().st_mtime_ns)
+        if not saved_logs:
+            saved_logs = sorted(FINGERPRINT_PATH.parent.glob('vllm-*.log'), key=lambda p: p.stat().st_mtime_ns)
+        self.log_path = str(saved_logs[-1] if saved_logs else log_dir / 'service.log')
         self._fingerprint: dict = {}
         # 启动时传的参数（None = 用分档表）。放进 snapshot 是为了让页面
         # 能显示"现在跑的到底是默认值还是我调过的值"——改了没重启最难查。
@@ -157,7 +161,8 @@ class VllmService:
         with self._lock:
             if self.status == "ready":
                 self.status = "failed"
-                self.error = f"vllm 进程已退出（code={code}）"
+                self.error = f"{self._overrides.get('engine') or 'NL'} 进程已退出（code={code}）；日志：{Path(self.log_path).resolve()}"
+                self._append_log(self.error)
 
     def plan(self, *, engine: str | None = None,
              model: str | None = None, tier: str | None = None,
@@ -201,6 +206,10 @@ class VllmService:
         # llama.cpp。摆在一起选是为了不让人去别处找，但选错要说清是选错，
         # 而不是等启动几分钟后报一句「未知精度」。
         from ..config import GGUF_PRECISIONS
+        from . import torii_service
+
+        if model == torii_service.KEY:
+            return torii_service.plan(engine, precision, slots_override)
 
         p = (precision or "").strip().lower()
         if engine == "native":
@@ -393,7 +402,8 @@ class VllmService:
             raise ValueError("CPU 推理请使用 llama.cpp")
         if model_path is not None:
             local = Path(model_path).resolve()
-            if not local.is_dir():
+            from .torii_service import KEY as TORII_KEY
+            if not local.is_dir() and not (model == TORII_KEY and local.is_file()):
                 raise ValueError(f"模型目录不存在：{local}")
             model_path = str(local)
         if device_index is not None:
@@ -414,7 +424,8 @@ class VllmService:
 
             table = load_tier_table(DEFAULT_TIERS)
             known = table.get("models") or {}
-            if model is not None and model not in known:
+            from .torii_service import KEY as TORII_KEY
+            if model is not None and model not in known and model != TORII_KEY:
                 raise ValueError(
                     f"未知模型 {model!r}，可选：{', '.join(map(str, known)) or '（分档表 models 段为空）'}")
             tiers = [str(t.get("name")) for t in (table.get("tiers") or [])
@@ -428,6 +439,12 @@ class VllmService:
         from ..config import normalize_quant_precision
 
         precision = normalize_quant_precision(precision, engine=engine)
+        from . import torii_service
+        if model == torii_service.KEY:
+            torii_plan = torii_service.plan(engine, precision, slots)
+            if not torii_plan["ok"]:
+                raise ValueError(torii_plan["error"])
+            precision = "q6"
         served_name = (served_name or "").strip() or "tagger"
         seqs = None if max_num_seqs is None else int(max_num_seqs)
         if seqs is not None and not 1 <= seqs <= 512:
@@ -511,8 +528,10 @@ class VllmService:
                                "model_path": model_path}
             if device is not None:
                 self._overrides["device"] = device
-            self.log_path = str(FINGERPRINT_PATH.parent / f"vllm-{port}.log")
+            from ..storage.logs import new_path
+            self.log_path = str(new_path(FINGERPRINT_PATH.parent / 'logs', f'{eng}-{port}'))
             self._notes.clear()
+            self._append_log(f'启动引擎 {eng}；模型 {model or "自动"}；端口 {port}')
             # 批调度三件套是 vLLM 的，llama-server 没有对应开关。静默吞掉
             # 比报错更坏：页面/CLI 会以为改了。留一行痕，免得下次又对着
             # "改了没反应"排查半天。
@@ -584,6 +603,30 @@ class VllmService:
 
             engine = normalize_engine(overrides.get("engine"))
             check_engine(engine)
+            from . import torii_service
+            if overrides.get("model") == torii_service.KEY:
+                from ..hair_color.runtime import ReviewRuntime
+                from .downloads import ROOT
+
+                def torii_tick(_remaining=0):
+                    if self._stop_flag.is_set() or not current():
+                        raise _Cancelled()
+
+                handle = ReviewRuntime(ROOT)
+                with self._lock:
+                    if not current():
+                        raise _Cancelled()
+                    self._handle = handle
+                    self.profile = torii_service.plan(engine, "q6", overrides.get("slots"))["summary"]
+                fp = torii_service.start(handle, overrides, port, Path(self.log_path), torii_tick)
+                with self._lock:
+                    torii_tick()
+                    FINGERPRINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+                    FINGERPRINT_PATH.write_text(json.dumps(fp, ensure_ascii=False, indent=2), encoding="utf-8")
+                    self._fingerprint = fp
+                    self.ready_at = time.time()
+                    self.status = "ready"
+                return
             # 必须是 visible_gpus：这台进程自己设了 CUDA_VISIBLE_DEVICES 时
             # 服务跑在选中那张卡上，分档/槽位也必须按它算（见 Bug 2）。
             gpus = visible_gpus()
@@ -672,7 +715,8 @@ class VllmService:
                 proc = handle.process
                 if proc is not None and proc.poll() is not None:
                     # vLLM 起动就崩时 wait_ready 会傻等到超时；早发现早报错。
-                    raise RuntimeError(f"vllm 进程已退出（code={proc.returncode}）")
+                    detail = '\n'.join(self._tail(12))
+                    raise RuntimeError(f"{engine} 进程已退出（code={proc.returncode}）；日志：{Path(self.log_path).resolve()}\n{detail}")
 
             if not auto_device:
                 wait_ready(handle.base_url, timeout_s=timeout_s, on_tick=tick)
@@ -757,11 +801,8 @@ class VllmService:
         return "\n".join(lines)
 
     def _tail(self, lines: int = TAIL_LINES) -> list[str]:
-        try:
-            raw = Path(self.log_path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return list(self._notes)[-lines:]
-        return [ln for ln in raw.splitlines() if ln.strip()][-lines:]
+        from ..storage.logs import tail
+        return tail(self.log_path, lines) or list(self._notes)[-lines:]
 
     def _append_log(self, msg: str) -> None:
         """把 Web 侧的动作记进同一份服务日志。启动失败的原因常常不在 vllm

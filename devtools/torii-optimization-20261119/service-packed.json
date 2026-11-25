@@ -1,0 +1,122 @@
+{
+  "low_memory_simulation": true,
+  "requests": [
+    {
+      "id": "chatcmpl-2a7c1444e4c741e8941005d58c197d50",
+      "object": "chat.completion",
+      "created": 1795046123,
+      "model": "ToriiGate-0.5",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\"General\": \"A whimsical outdoor scene featuring a winding dirt path through a"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 1178,
+        "completion_tokens": 16,
+        "total_tokens": 1194
+      },
+      "key": "2",
+      "wall_s": 2.426738899997872,
+      "rss": 2340528128
+    },
+    {
+      "id": "chatcmpl-7fa40fbc48934487afb8ecc400394b25",
+      "object": "chat.completion",
+      "created": 1795046146,
+      "model": "ToriiGate-0.5",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "{\"General\": \"A girl stands outdoors on a sunny day near an ornate wrought iron gate and greenery. The scene is bathed in warm sunlight with soft lens flare effects, creating a bright and lively atmosphere. The girl wears a school uniform with a navy blazer, white shirt, red necktie, and a brown plaid pleated skirt. She carries a black backpack decorated with colorful emoji pins and a round charm with red flowers and a purple tassel. The girl holds a small, translucent white ghost plush with a joyful expression.\", \"Hu Tao (Genshin Impact)\": \"Hu Tao has long brown hair styled in twintails with an ahoge strand on top. Her hair is adorned with red plum blossom flowers and black ribbons. She has large red eyes with flower-shaped pupils and a playful expression, sticking her tongue out slightly. She wears a navy blue blazer with gold buttons over a white shirt and a red necktie, paired with a brown plaid pleated skirt. Her nails are painted black, and she wears a red bead bracelet on her right wrist. She holds the ghost plush close to her chest with her left arm while her right hand is raised near her face in a playful gesture.\", \"Ghost Plush\": \"A small, translucent white ghost with a wide, joyful smile and closed eyes, held affectionately by Hu Tao.\"}"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 806,
+        "completion_tokens": 278,
+        "total_tokens": 1084
+      },
+      "key": "hutao",
+      "wall_s": 22.5555932999996,
+      "rss": 2312388608
+    },
+    {
+      "id": "chatcmpl-9cd2db4cd719448698872f6903c786e2",
+      "object": "chat.completion",
+      "created": 1795046147,
+      "model": "ToriiGate-0.5",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\"General\": \"A whimsical outdoor scene featuring a winding dirt path through a"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 1178,
+        "completion_tokens": 16,
+        "total_tokens": 1194
+      },
+      "key": "2",
+      "wall_s": 1.5858493000014278,
+      "rss": 2395496448
+    }
+  ],
+  "load_s": 26.220456700000796,
+  "pid": 44044,
+  "fingerprint": {
+    "provider": "local",
+    "model_id": "ToriiGate-0.5",
+    "engine": "native",
+    "model_path": "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+    "precision": "gguf_packed_fp16",
+    "device": "cuda:0",
+    "max_pixels": 1000000,
+    "native_runtime": {
+      "version": "lulynx-qwen35-0.2",
+      "model_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae",
+      "metadata": "E:\\dev_model\\ToriiGate-0.5\\native-metadata",
+      "execution": {
+        "device": "cuda:0",
+        "precision": "gguf_packed_fp16",
+        "linear_attention": "fla",
+        "max_pixels": 1000000,
+        "libraries": {
+          "torch": "2.13.0+cu132",
+          "transformers": "5.14.1",
+          "flash-linear-attention": "0.6.0",
+          "triton": "3.7.1"
+        }
+      }
+    },
+    "model_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae"
+  },
+  "version": {
+    "version": "lulynx-qwen35-0.2",
+    "runtime": {
+      "device": "cuda:0",
+      "precision": "gguf_packed_fp16",
+      "linear_attention": "fla",
+      "max_pixels": 1000000,
+      "libraries": {
+        "torch": "2.13.0+cu132",
+        "transformers": "5.14.1",
+        "flash-linear-attention": "0.6.0",
+        "triton": "3.7.1"
+      }
+    }
+  },
+  "closed": true
+}

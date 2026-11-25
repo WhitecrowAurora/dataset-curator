@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "codepage": 936,
+      "action": "cli_help",
+      "ok": true,
+      "stderr_bytes": 0
+    },
+    {
+      "codepage": 65001,
+      "action": "cli_help",
+      "ok": true,
+      "stderr_bytes": 0
+    },
+    {
+      "codepage": 936,
+      "action": "browser_web",
+      "ok": true,
+      "health": 200,
+      "ui": 200
+    },
+    {
+      "codepage": 65001,
+      "action": "browser_web",
+      "ok": true,
+      "health": 200,
+      "ui": 200
+    }
+  ],
+  "files": {
+    "tagger.cmd": {
+      "ascii": true,
+      "crlf": true
+    },
+    "run-web.cmd": {
+      "ascii": true,
+      "crlf": true
+    }
+  },
+  "services_closed": true
+}

@@ -5,6 +5,7 @@ import { ENDPOINT_PRESETS, endpointPresetOf } from '../lib/endpoint'
 import { ChoiceGrid } from '../components/ui/controls'
 import { PageHeader, SectionPanel, SettingRow } from '../components/ui/launcher'
 import { PROGRESS_INTERVALS } from '../lib/prefs'
+import { DiskProtection } from '../components/settings/DiskProtection'
 
 /**
  * 设置页。两个来源刻意分开摆：界面偏好只存当前浏览器，下载源是服务端配置
@@ -67,7 +68,7 @@ export function Settings({
         icon={<Settings2 size={18} />}
         eyebrow="本机偏好"
         title="设置"
-        description="界面偏好存本机，下载源存服务端"
+        description="界面、磁盘保护和下载偏好"
       />
 
       <SectionPanel title="界面">
@@ -90,6 +91,8 @@ export function Settings({
           默认 5 秒；「暂停」只停止轮询，任务照跑
         </p>
       </SectionPanel>
+
+      <DiskProtection />
 
       <SectionPanel title="下载" description="写进服务端配置，任务与模型下载共用">
         <div className="flex flex-wrap items-end gap-2">

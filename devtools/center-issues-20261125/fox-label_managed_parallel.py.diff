@@ -1,0 +1,31 @@
+--- server/fox-label/managed/parallel.py
++++ candidate/fox-label/managed/parallel.py
+@@ -1,4 +1,4 @@
+-"""已预派任务的并发优先；执行环境仍按原模型要求匹配。"""
++"""预派吞吐建议与实际配置；模型要求单独匹配。"""
+ import json
+ 
+ FIELDS={'tag':'tag_batch','nl':'concurrency'}
+@@ -10,6 +10,7 @@
+ 
+ def sources(c,session,device,package):
+     cfg=json.loads(session['config'])
++    resolved=json.loads(session['state']).get('resolved', {})
+     expected=required(c,device,package)
+     result={}
+     for part,key in FIELDS.items():
+@@ -20,6 +21,14 @@
+                       (session['session_id'],'$.'+key)).fetchone()
+         result[key]={'value':cfg[key], 'source':'预派单' if key in expected else
+                      ('预派单（上次调整）' if row['actor']=='preassignment' else '管理员远程调整') if row else '本机配置'}
++        warnings = []
++        if key in expected and expected[key] != cfg[key]:
++            result[key]['source'] = '本机配置（预派建议尚未应用）'
++            warnings.append(f'预派建议 {expected[key]}，当前配置 {cfg[key] or "自动"}；不影响接单')
++        actual = resolved.get(key)
++        if cfg[key] and actual is not None and actual != cfg[key]:
++            warnings.append(f'配置 {cfg[key]}，本机实际使用 {actual}；按本机能力执行')
++        result[key]['warning'] = '；'.join(warnings)
+     return result
+ 
+ 

@@ -1,9 +1,11 @@
-"""分项占用；执行任务保留，离线只释放预约。"""
+"""分项占用、租约续期与包完成状态。"""
 import json
 import time
 
 
 def ensure_schema(c, dispatch):
+    from .pending_results import SCHEMA as pending_schema
+    c.executescript(pending_schema)
     dispatch._add_columns(c, "leases", (("parts_json", "TEXT NOT NULL DEFAULT '[\"tag\",\"nl\"]'"),))
     c.executescript("""
     CREATE TABLE IF NOT EXISTS lease_parts (
@@ -35,14 +37,23 @@ def ensure_schema(c, dispatch):
     END;
     """)
     c.execute("CREATE TABLE IF NOT EXISTS dispatch_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+    from .control import ensure_schema as ensure_control
+    ensure_control(c)
+    from .lifetime import ensure_schema as ensure_lifetime
+    with dispatch._Tx(c):
+        ensure_lifetime(c)
     from delivery.reconciliation import ensure_schema as ensure_artifacts
     ensure_artifacts(c)
 
 
-def held(c):
+def held(c, exclude_pending_device=None):
     busy = {}
     for r in c.execute("SELECT repo,pkg,part FROM lease_parts WHERE open=1"):
         busy.setdefault((r["repo"], r["pkg"]), set()).add(r["part"])
+    for r in c.execute('SELECT pending.repo,pending.pkg,pending.parts_json FROM pending_local_results pending'
+                       ' JOIN packages p ON p.repo=pending.repo AND p.id=pending.pkg AND p.sha256=pending.source_sha256'
+                       ' WHERE (? IS NULL OR pending.device_id<>?)',(exclude_pending_device,exclude_pending_device)):
+        busy.setdefault((r['repo'],r['pkg']),set()).update(json.loads(r['parts_json']))
     # 历史检查需要一致的全量快照，检查期间暂时保留两侧。
     for r in c.execute("SELECT h.repo,h.package FROM history_checks h JOIN managed_sessions s"
                        " ON s.session_id=h.session_id WHERE h.status='pending' AND s.released=0"):
@@ -65,14 +76,30 @@ def grace(c, default=300):
 
 
 def release_offline(c, default=300):
-    now = time.time()
-    rows = c.execute("SELECT l.lease_id FROM leases l JOIN devices d ON d.device_id=l.device_id"
-                     " WHERE l.kind='prelock' AND l.status='open' AND"
-                     " COALESCE(d.last_seen,l.last_beat_at,l.issued_at)<?", (now - grace(c, default),)).fetchall()
-    for r in rows:
-        c.execute("UPDATE leases SET status='released',closed_reason='offline_prelock' WHERE lease_id=?",
-                  (r["lease_id"],))
-    return [r["lease_id"] for r in rows]
+    # 沿用已有调度调用点；两类在线租约统一按成功上报后的截止时间回收。
+    from .lifetime import expire
+    return expire(c)
+
+
+def release_targets(c, lease):
+    """归还本租约占用的分项指定，保留其他设备及尚未领取的队列。"""
+    assigned = parts(lease)
+    if assigned:
+        c.execute("DELETE FROM part_assignments WHERE repo=? AND pkg=? AND part IN ("
+                  + ','.join('?' for _ in assigned) + ") AND ((target_type='device' AND target_id=?)"
+                  " OR (target_type='user' AND target_id=?)) AND NOT EXISTS ("
+                  "SELECT 1 FROM lease_parts p JOIN leases l ON l.lease_id=p.lease_id"
+                  " WHERE p.repo=part_assignments.repo AND p.pkg=part_assignments.pkg"
+                  " AND p.part=part_assignments.part AND p.open=1 AND l.lease_id<>?"
+                  " AND ((part_assignments.target_type='device' AND l.device_id=part_assignments.target_id)"
+                  " OR (part_assignments.target_type='user' AND l.user_id=part_assignments.target_id)))",
+                  [lease['repo'], lease['pkg'], *assigned, lease['device_id'], lease['user_id'], lease['lease_id']])
+    c.execute('DELETE FROM package_queue WHERE repo=? AND pkg=? AND device_id=?',
+              (lease['repo'], lease['pkg'], lease['device_id']))
+    c.execute('DELETE FROM package_targets WHERE repo=? AND pkg=? AND user_id=? AND NOT EXISTS ('
+              "SELECT 1 FROM leases l WHERE l.repo=package_targets.repo AND l.pkg=package_targets.pkg"
+              " AND l.user_id=package_targets.user_id AND l.status='open' AND l.lease_id<>?)",
+              (lease['repo'], lease['pkg'], lease['user_id'], lease['lease_id']))
 
 
 def refresh(c, repo, pkg):

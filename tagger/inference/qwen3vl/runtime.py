@@ -9,13 +9,16 @@ from pathlib import Path
 
 from ...config import GGUF_PRECISIONS, ConfigError
 
-VERSION = "lulynx-qwen3vl-0.25"
+VERSION = "lulynx-qwen3vl-0.26"
 PRECISIONS = ("fp16", "bf16", "fp8", "int8", "w4a16", "f16", "q4", "q5", "q6", "q8")
 OPTIMIZED_PRECISIONS = ("q4", "q5", "q6", "q8", "fp8", "int8")
 ROOT = Path(__file__).resolve().parents[3]
 
 
 def check_environment():
+    from ...runtime.python_dev import ensure as ensure_python_dev
+    if importlib.util.find_spec('triton') is not None:
+        ensure_python_dev()
     missing = [name for name in ("torch", "torchvision", "transformers", "safetensors", "gguf", "fastapi", "uvicorn")
                if importlib.util.find_spec(name) is None]
     if missing:
@@ -138,7 +141,9 @@ def specification(profile, *, slots=None, served_name="tagger", decode_attention
 
 def build_command(spec, port):
     # Embedded Python does not put cwd on sys.path. Keep this an internal worker.
-    code = f"import sys; sys.path.insert(0, {str(ROOT)!r}); from tagger.inference.qwen3vl.server import main; main()"
+    code = (f"import sys; sys.path.insert(0, {str(ROOT)!r}); "
+            "from tagger.runtime.kernel_cache import configure; configure(); "
+            "from tagger.inference.qwen3vl.server import main; main()")
     return [sys.executable, "-u", "-B", "-c", code, "--port", str(port), "--runtime", json.dumps(spec)]
 
 

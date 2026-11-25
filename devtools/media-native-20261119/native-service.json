@@ -1,0 +1,99 @@
+{
+  "device": "cpu",
+  "pixels": 65536,
+  "requests": [
+    {
+      "id": "chatcmpl-8d3749715d7540719c53229fb07136fc",
+      "object": "chat.completion",
+      "created": 1795042685,
+      "model": "ToriiGate-0.5",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\"General\": \"A bright, whimsical outdoor scene featuring a winding dirt path"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 281,
+        "completion_tokens": 16,
+        "total_tokens": 297
+      },
+      "key": "2",
+      "wall_s": 31.73632820000057,
+      "rss_bytes": 21859549184
+    },
+    {
+      "id": "chatcmpl-4a364aa4600e44c1a38f9ab0871889e8",
+      "object": "chat.completion",
+      "created": 1795042736,
+      "model": "ToriiGate-0.5",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\"General\": \"A single girl stands outdoors near a wrought iron fence with greenery and a building in the background. The scene is softly lit with natural daylight"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 277,
+        "completion_tokens": 32,
+        "total_tokens": 309
+      },
+      "key": "hutao",
+      "wall_s": 50.87505190000229,
+      "rss_bytes": 21863165952
+    },
+    {
+      "id": "chatcmpl-028b9123f4e34df3b8a84d6440496aa7",
+      "object": "chat.completion",
+      "created": 1795042764,
+      "model": "ToriiGate-0.5",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\"General\": \"A bright, whimsical outdoor scene featuring a winding dirt path"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 281,
+        "completion_tokens": 16,
+        "total_tokens": 297
+      },
+      "key": "2",
+      "wall_s": 28.748457399997278,
+      "rss_bytes": 21874610176
+    }
+  ],
+  "load_s": 94.92192360000263,
+  "pid": 26920,
+  "fingerprint": {
+    "provider": "local",
+    "model_id": "ToriiGate-0.5",
+    "engine": "native",
+    "model_path": "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+    "precision": "dequantized_fp16_or_fp32",
+    "device": "auto",
+    "max_pixels": 1000000,
+    "native_runtime": {
+      "version": "lulynx-qwen35-0.1",
+      "model_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae",
+      "metadata": "E:\\dev_model\\ToriiGate-0.5\\native-metadata"
+    },
+    "model_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae"
+  },
+  "version": {
+    "version": "lulynx-qwen35-0.1"
+  },
+  "closed": true
+}

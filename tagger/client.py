@@ -101,12 +101,13 @@ _TAG_RULES = """<TAGS> rules:
 - Do not output the artist name, the character name, or the series name: you cannot know them and guessing poisons the label."""
 
 _CAPTION_RULES = """<CAPTION> rules:
-- One paragraph of {char_lo}-{char_hi} characters (roughly {sent_lo}-{sent_hi} sentences), on a single line. Stop at the upper bound: the reply is truncated there, and a caption cut mid-sentence is thrown away.
-- Order the content: main subject; setting and background; composition and camera angle; lighting; any visible text, transcribed verbatim inside double quotes.
-- Name the colour of every object you name, and what its surface looks like (matte, glossy, metal, cloth, skin, glass, hair). A description with no colour and no material words is incomplete.
+- One paragraph of {char_lo}-{char_hi} characters (roughly {sent_lo}-{sent_hi} sentences), on a single line. This character range is a guide, not a cutoff; finish complete sentences and keep essential visible details within the training-token budget.
+- Order the content: main subject; setting and background; composition and camera angle when clear; lighting; only short, prominent, clearly legible text when useful, quoted verbatim inside double quotes.
+- Mention colour and surface/material details for the main subject and other prominent objects when they are clearly visible and useful. Omit uncertain details; do not infer material from colour, lighting or context.
+- Describe clearly visible spatial relationships between main subjects (position, overlap or contact) when they help explain the scene. Omit them when they are unclear or irrelevant.
 - Describe only what is visible. Do not speculate about anything outside the frame.
-- Do not name or guess the artist, character, series or studio. A signature or watermark is static text: quote it like any other visible text, but never resolve it into a name.
-- Name the overall art style and medium in one clause (anime illustration, watercolour, oil painting, 3D render, photograph), and say what the line work and finish look like.
+- Do not name or guess the artist, character, series or studio. A signature or watermark is visible text, not proof of authorship; quote it only if prominent and useful, and never resolve it into a name. Trusted artist metadata is added separately by the annotation system.
+- When clearly distinguishable, name the overall art style and medium in one clause (anime illustration, watercolour, oil painting, 3D render, photograph); mention line work and finish only when clearly visible.
 - English only, plain prose: no markdown, no bullet points, no headings, no "Caption:" prefix."""
 
 
@@ -119,12 +120,14 @@ _CHARS_PER_SENTENCE = 110
 # 中文版 caption 规则。只替换 caption 段，<TAGS> 规则一个字不动——
 # danbooru tag 是英文词表体系，中文 tag 在训练侧没有对应嵌入，混进去只是脏数据。
 _CAPTION_RULES_ZH = """<CAPTION> 规则：
-- 一段连续的中文散文，约 {char_lo}-{char_hi} 个汉字，单行、不换行。写到上限就停：回复会被截断，截断的 caption 一律作废。
-- 内容顺序：主体；场景与背景；构图与机位；光线；画面里可见的文字，用双引号原样抄下来。
-- 说到的每个物体都要给出颜色和表面质感（哑光、反光、金属、布料、皮肤、玻璃、发丝）。没有颜色和材质词的一段是不完整的。
+- 一段连续的中文散文，约 {char_lo}-{char_hi} 个汉字，单行、不换行。字数区间是引导，不是截断线；句子写完整，在训练 token 预算内保留必要的可见细节。
+- 内容顺序：主体；场景与背景；构图，以及清楚可辨时的机位；光线；仅在有助于理解画面时，用双引号原样引用简短、显著且清楚可辨的文字。
+- 主要主体之间有助于理解画面的相对位置、遮挡或接触关系时，简要说明；没有明显关系或看不清时无需补写。
+- 只在机位或透视清楚且有助于理解画面时说明；画面简单或角度不明确时可以省略。
+- 颜色和表面质感只写主要主体及显著物件中清晰可见且有用的特征；不确定时省略，不要根据颜色、光影或上下文推断材质。
 - 只写画面里看得见的东西，不要推测画框外的内容。
-- 不要点名或猜测画师、角色、系列、工作室。签名或水印属于"可见文字"，原样引用，但不要把它解释成人名。
-- 用一句话说明整体画风与媒介（日式插画、水彩、油画、3D 渲染、摄影），并交代线条与完成度的特征。
+- 不要点名或猜测画师、角色、系列、工作室。签名或水印属于可见文字，不能证明画师身份；只有显著且有用时才引用，不把它解释成人名。可信画师信息由标注系统另行注入。
+- 用一句话说明清楚可辨的整体画风与媒介（日式插画、水彩、油画、3D 渲染、摄影）；线条与完成度只在画面能明确看出时描述。
 - 这一段必须用简体中文写，不要用英文。纯散文：不要 markdown、不要分条、不要小标题、不要"描述："这类前缀。"""
 
 # 图中文字的条款**不在这个文件里**：它们在 `prompts/图中文字规则.md` 的
@@ -285,11 +288,8 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
                 tag_hi: int | None = None) -> str:
     """按配置里的预算生成 prompt。
 
-    ★这里的长度引导与质检硬线刻意不是一个数：
-      硬线是 32~256 token（容忍"图简单、话少"，不因此判废），
-      引导是 400~1000 字符（≈90~230 token）。
-      把引导值也降到硬线，等于告诉模型"写 32 个 token 就行"，
-      那一批数据会整体变贫——而贫是没法在质检里被抓到的。
+    字符区间只引导篇幅；训练文本另有 384 token 软目标与 512 token 硬上限。
+    硬上限在画师注入、标签确定后按真实训练 tokenizer 执行。
 
     `extra_rules` 非空表示"这是被截断后的重打"：caption 侧换成
     `prompts/*.md` 的 `## CAPTION_DENSE` 那一节（收窄版），而不是追加条款。
@@ -300,8 +300,7 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
     它先写满 TAGS 段，caption 那边就已经没预算了。
     """
     if output.caption_chars:
-        # 显式给了长度引导就用它，不再从 token 闸门派生 —— 两者回答的
-        # 是不同问题：闸门管"合格不合格"，引导管"往多长写"。
+        # 显式指定的字符引导优先，不改训练文本的 token 上限。
         char_lo, char_hi = output.caption_chars
     else:
         char_lo = max(400, output.nl_min_tokens * 4)
@@ -319,8 +318,7 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
 
     if zh:
         # 长度引导按中文口径重算：char 预算原本是"英文字符数"，直接拿去要求
-        # 中文，模型会写出 400~1000 个汉字 ≈ 400~1000 token，超过 nl_max_tokens
-        # （默认 256）被硬截断，截断的 caption 会被质检判废。
+        # 中文，模型会写出 400~1000 个汉字，容易超过训练文本预算。
         #
         # ★这段只能跑一次。曾经上下各有一份完全相同的代码，缩放在这里被连乘
         #   两遍（0.23² ≈ 0.053），中文预算掉到 40~100 汉字，实测产出的中文
@@ -328,9 +326,7 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
         #   确认没有第二份。
         char_lo = max(40, round(char_lo * _ZH_CHAR_SCALE))
         char_hi = max(char_lo + 60, round(char_hi * _ZH_CHAR_SCALE))
-        # 再按 token 闸门夹一次。上面那步只是"换成中文口径"，没有考虑闸门里
-        # 还被 tag 段吃掉一截；不夹的话上限仍会顶到 256 之上，整批中文都被打上
-        # "NL 过长"扣分（不是判废，但分数系统性低于英文，混批时就是伪特征）。
+        # 按回复长度目标收窄中文篇幅，并为可能的 tag 段留出空间。
         cap_hi = max(80, int(output.nl_max_tokens or 0) - _ZH_TAG_RESERVE_TOKENS)
         if char_hi > cap_hi:
             char_lo = max(40, round(char_lo * cap_hi / char_hi))
@@ -339,7 +335,7 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
         cap_fallback = _CAPTION_RULES_ZH
     else:
         # 句数口径：模型数不准字符，但数得准句子。它只是"roughly"，
-        # 验收仍走 token 硬线，所以取整到句就够了。
+        # 最终仍按真实 tokenizer 执行硬上限，所以取整到句就够了。
         sent_lo, sent_hi = _sentences_for(char_lo, char_hi)
         fill.update(sent_lo=sent_lo, sent_hi=sent_hi)
         cap_fallback = _CAPTION_RULES
@@ -359,6 +355,9 @@ def _prompt_for(output: OutputSpec, *, zh: bool = False,
     cap_rules = (dense_cap or file_cap or cap_fallback).format(**fill)
     if file_text:
         cap_rules = cap_rules + "\n" + file_text
+    if output.wants_nl:
+        from .text_encoding.settings import length_instruction
+        cap_rules += "\n" + length_instruction(zh=zh)
 
     mode = output.mode
     if mode == "tag":
@@ -584,6 +583,8 @@ class TaskRow:
     # HF 模式下才有值：`hf://datasets/<repo>/<shard>#<member>`。
     # 会原样写进产物，主机拿它拼总表的 image_path。
     image_path: str = ""
+    media_route: dict = field(default_factory=dict)
+    training_tags: tuple[str, ...] = ()
 
     @property
     def ext(self) -> str:
@@ -1027,6 +1028,8 @@ class TaggerClient:
         ref_grouped: bool = False,
         repeat_penalty: float = 0.0,
         on_part: Callable[[str, TaskRow], None] | None = None,
+        hair_batch=None,
+        caption_format="",
     ):
         # 推理来源："" = 本机/自建（OpenAI 兼容 + 环境指纹）；
         # openai / anthropic = 外部 API。方言差异全在 nl_api，这里只记下来。
@@ -1036,6 +1039,8 @@ class TaggerClient:
         self.model_name = model_name
         self.output = output
         self.on_part = on_part
+        self.hair_batch = hair_batch
+        self.caption_format = caption_format
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
@@ -1073,6 +1078,13 @@ class TaggerClient:
         self._prompt_is_custom = bool(prompt_text)
         # system 那句话同理：文件里写了就用文件的，否则用内置那份。
         self.system = system_text or SYSTEM_PROMPT
+        from .inference.torii_caption import is_torii
+        if (caption_format == "torii" or is_torii(model_name)) and output.wants_nl and not self.provider:
+            from .hair_color.vlm import TORII_SYSTEM
+            from .inference.torii_caption import caption_prompt
+            self.prompt, self.system = caption_prompt(), TORII_SYSTEM
+            self._prompt_is_custom = True
+            caption_zh_ratio = 0
         # 中文变体：只在真要产 NL、且没被整段替换时才生成。
         # 默认 0 = 全英文，历史行为不变；要多少由上层（JobSpec）传下来。
         self.caption_zh_ratio = max(0.0, min(1.0, float(caption_zh_ratio or 0.0)))
@@ -1189,8 +1201,8 @@ class TaggerClient:
         而是"换参数重跑拿到旧结果、还标成了新参数"，那种污染事后查不出来。
         """
         parts = {
-            # 4：区分本地引擎、版本、实际权重路径和专用运行配置。
-            "cache_schema": 4,
+            # 5：长度软目标不再降低完整度分数。
+            "cache_schema": 5,
             "prompt": hashlib.sha256(self.prompt.encode("utf-8")).hexdigest(),
             # 自定义提示词可以连 system 一起换：同一条 prompt 配不同 system
             # 是两套指令，不进指纹就会跨套命中缓存。
@@ -1311,7 +1323,8 @@ class TaggerClient:
                 int(nl_rec.get("tag_count") or 0), temperature, tokens,
                 attempts, verdict, escalated=escalated, cache_hit=True,
                 artist_flags=artist_flags,
-                prompt_tokens=prompt_tokens)
+                prompt_tokens=prompt_tokens,
+                training_tags=(tag_payload or {}).get("tags", []))
         if tag_payload is None and nl_payload is None:
             return None
         # 命中的这条没花 GPU：wall_ms 如实记成"还原产物用了多久"，
@@ -1707,6 +1720,7 @@ class TaggerClient:
         base = self.prov_base
         rev = base.get("model_revision")
         return {
+            **({"media": task.media, "media_route": task.media_route} if task.media_route else {}),
             "caption_language": "zh" if self._wants_zh(task) else "en",
             "tags_original": list(task.ref_tags),
             "annotation_model": str(base.get("model_id") or "unknown"),
@@ -1746,6 +1760,12 @@ class TaggerClient:
                 prompt=prompt or self.prompt, image=image, temperature=temperature,
                 top_p=self.top_p, max_tokens=self.max_tokens, seed=self.seed,
                 repeat_penalty=self.repeat_penalty)
+            from .inference.torii_caption import is_torii, configure_payload
+            torii = (self.caption_format == "torii" or is_torii(model_name)) and self.output.wants_nl and not self.provider
+            if torii:
+                if self.output.wants_tag and self.tag_backend is None:
+                    raise ValueError("Torii 描述模式请配合 PixAI 等分类后端生成标签")
+                configure_payload(payload)
         except ValueError as exc:
             raise InferenceError(str(exc), retryable=False) from exc
         try:
@@ -1767,7 +1787,14 @@ class TaggerClient:
                 status=r.status_code)
 
         try:
-            return nl_api.parse_response(self.provider, r.json())
+            body = r.json()
+            text, prompt_tokens, tokens = nl_api.parse_response(self.provider, body)
+            if torii:
+                if body["choices"][0].get("finish_reason") == "length":
+                    raise ValueError("Torii 描述被截断")
+                from .inference.torii_caption import caption_text
+                text = "<CAPTION>" + caption_text(text) + "</CAPTION>"
+            return text, prompt_tokens, tokens
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise InferenceError(f"响应结构不对: {type(exc).__name__}") from exc
 
@@ -1826,6 +1853,9 @@ class TaggerClient:
         给不了才回去问 reader 要（zip/tar 模式按需读，省内存）。
         """
         started = time.perf_counter()
+        prepare = getattr(self, "before_process", None)
+        if prepare is not None:
+            prepare(self)
         if data is None:
             if reader is None:
                 return Outcome(task.image_id, False,
@@ -1852,6 +1882,8 @@ class TaggerClient:
                 except (TypeError, ValueError, AttributeError):
                     hit = None
                 if hit is not None:
+                    if self.hair_batch is not None and hit.ok and hit.tag is not None:
+                        self.hair_batch.capture(data, hit.tag, task.image_id, task.file, media=task.media)
                     return hit
                 self.cache.delete(cache_key)
 
@@ -1912,9 +1944,14 @@ class TaggerClient:
                 tag_future.add_done_callback(tag_ready)
 
         try:
-            return self._run(task, image, started, tag_future, data=data,
-                             cache_key=cache_key, context=context,
-                             on_part=part_ready if self.on_part is not None else None)
+            outcome = self._run(task, image, started, tag_future, data=data,
+                                cache_key=cache_key, context=context,
+                                on_part=part_ready if self.on_part is not None else None)
+            if self.hair_batch is not None and outcome.ok and outcome.tag is not None:
+                scores = tag_future.result().hair_scores if tag_future is not None else None
+                outcome.tag["_hair_scores"] = scores
+                self.hair_batch.capture(data, outcome.tag, task.image_id, task.file, media=task.media)
+            return outcome
         finally:
             with part_lock:
                 closed = True
@@ -2033,12 +2070,8 @@ class TaggerClient:
             # 两步都只动引号和复述段，不删画面描述，长度损失很小。
             if caption:
                 with self.stage.track("text_clean"):
-                    # 最后一道是 infra 的 token 硬保险：caption 会作为单条纯文本
-                    # 送进 text encoder，超线就被无提示截断。上限从质检策略取，
-                    # 置 0 可关掉。
-                    limit = getattr(getattr(self.gate, "policy", None),
-                                    "caption_token_limit", 0)
-                    caption = tidy_caption(caption, token_limit=int(limit or 0))
+                    # 完整训练文本在画师注入、最终标签确定后统一计数。
+                    caption = tidy_caption(caption)
 
             # 显式空产出检查必须放在质检之前：质量门在 tags 为空时
             # tag_coverage 返回 1.0（"没有强 tag，视为全覆盖"），
@@ -2260,7 +2293,8 @@ class TaggerClient:
                                          temperature, tokens, attempts, verdict,
                                          escalated=escalated,
                                          artist_flags=artist_flags,
-                                         prompt_tokens=prompt_total)
+                                         prompt_tokens=prompt_total,
+                                         training_tags=[t for t, _ in tags_with_prob])
                        if want_nl else None),
                     wall_ms=int((time.perf_counter() - started) * 1000),
                     attempts=attempts, tokens=tokens_total,
@@ -2328,6 +2362,8 @@ class TaggerClient:
         """
         if not self.artist_rule.enabled:
             return [], ""
+        if self.artist_table.path is not None and self.artist_table.path.name == '.center-artist.json':
+            return list(self.artist_table.lookup(task.image_id,task.shard)), 'table'
         if task.artist_source == "table":
             packed = list(task.artists) or ([task.artist] if task.artist else [])
             if packed:
@@ -2367,14 +2403,17 @@ class TaggerClient:
         `artists` 只在多于一人才写（单画师时 artist 已经够了）。
         """
         names, source = self._artist_names(task)
+        center_table = self.artist_table.path is not None and self.artist_table.path.name == '.center-artist.json'
         out: dict = {
-            "artist": names[0] if names else task.artist,
+            "artist": names[0] if names else '' if center_table else task.artist,
             "artist_tag": format_tag(names[0], self.artist_rule) if names else "",
         }
         if len(names) > 1:
             out["artists"] = list(names)
         if source == "table":
             out["artist_source"] = "table"
+        if center_table:
+            out['artist_table_source']=self.artist_table.center_source
         return out
 
     def _tag_payload(self, task: TaskRow, tags: Sequence[tuple[str, float]],
@@ -2462,9 +2501,17 @@ class TaggerClient:
                     temperature: float, tokens: int, attempts: int, verdict,
                     *, escalated: bool = False, cache_hit: bool = False,
                     artist_flags: Sequence[str] = (),
-                    prompt_tokens: int = 0) -> dict:
+                    prompt_tokens: int = 0, training_tags: Sequence[str] = ()) -> dict:
         artist = self._artist_fields(task)
         text = self._inject_artist_caption(caption, artist, task)
+        training_tags = training_tags or task.training_tags
+        if artist.get("artist_tag") and self.artist_rule.inject_tags:
+            training_tags = list(dict.fromkeys([artist["artist_tag"], *training_tags]))
+        from .text_encoding.tokenizer import TrainingText
+        counter = TrainingText()
+        prefix = artist_templates.render(artist.get('artists') or [artist.get('artist','')],
+                                         'zh' if self._wants_zh(task) else 'en') if artist.get('artist_tag') and self.artist_rule.inject_caption and self.artist_rule.nl_style == 'template' else ''
+        text = counter.fit(text, training_tags, required_prefix=prefix)
         payload = {
             "image_id": task.image_id,
             "caption": text,
@@ -2481,6 +2528,7 @@ class TaggerClient:
             # 见 _tag_payload：本机模式不写，API 模式才有依据核算成本。
             "prompt_tokens": prompt_tokens or None,
             "chars": len(text),
+            "training_text": counter.metadata(text, training_tags),
             "score": verdict.score,
             # 质检旗标 + 画师占位符旗标（去重保序）。后者可按字符串直接检索：
             # `artist_name_leaked`（回填后正文仍出现真名）/
@@ -2698,6 +2746,8 @@ def _already_done(client: TaggerClient, task: TaskRow, out_dir: Path, layout: st
         return _existing_ok(tag_path, "tag")
     if require == "nl":
         return _existing_ok(nl_path, "caption")
+    if require == 'tag,nl':
+        return _existing_ok(tag_path, 'tag') and _existing_ok(nl_path, 'caption')
     return (_existing_ok(tag_path, "tag") or _existing_ok(nl_path, "caption"))
 
 
@@ -2747,6 +2797,8 @@ def run_batch(
     retry_budget: int = 0,
     only_ids: set[str] | None = None,
     parts_env: str = "",
+    completed_parts=None,
+    training_tags=None,
 ) -> ClientStats:
     """跑完一批。单写者：文件只在主线程写，worker 只算。
 
@@ -2795,26 +2847,25 @@ def run_batch(
     # parts_env 由调用方从 FOXLABEL_PARTS 读好传进来（见 run_client）。
     # 这里只做一次归一：不认识的取值一律当"不限制"，绝不能因为拼错就变成
     # "只做某一侧"——那会安静地把另一侧留空。
-    parts_env = str(parts_env or "").strip().lower()
-    if parts_env not in ("tag", "nl"):
-        parts_env = ""
+    from .inference.parts_resume import requested, CompletedParts
+    parts_env = requested(parts_env)
     allow_parts = bool(parts_env)
-    resume_file = out_dir / '.center-resume.json'
+    required_parts = parts_env.split(',') if parts_env else ['tag', 'nl']
+    from .center_runtime.snapshot import exists as has_snapshot, state as snapshot_state
     center_done = set()
     center_redo = set()
-    if resume_file.is_file() and parts_env:
-        resume_data = json.loads(resume_file.read_text(encoding='utf-8'))
-        center_done = set(resume_data.get(parts_env, []))
-        decisions = out_dir / '.center-resolutions.json'
-        if decisions.is_file():
-            center_redo = {r['image_id'] for r in json.loads(decisions.read_text(encoding='utf-8'))
-                           if r['part'] == parts_env and r['state'] == 'redone'}
+    if has_snapshot(out_dir) and parts_env:
+        snapshot = snapshot_state(out_dir)
+        required = parts_env.split(',')
+        center_done = set.intersection(*(set(snapshot.get('done', {}).get(p, [])) for p in required))
+        center_redo = {r['image_id'] for r in snapshot.get('resolutions', [])
+                       if r['part'] in required and r['state'] == 'redone'}
     # 产出模式必须能产出被点名的那一侧。指向反了（parts=nl 而 mode=tag）时
     # 本侧**永远产不出**：跳过判定按本侧查、产物里却没有本侧，于是每张图
     # 白跑一遍还照常计入 done——"跑得很正常、账本也在涨、就是没补上"。
     # 放在这里而不是 run_client：run_batch 才是真正的执行入口。
     _mode = str(getattr(getattr(client, "output", None), "mode", "both") or "both")
-    if allow_parts and _mode not in ("both", parts_env):
+    if allow_parts and _mode not in ("both", parts_env) and not (parts_env == 'tag,nl' and _mode == 'nl' and client.need_tags):
         raise ConfigError(
             f"派工要求这一片只补 {parts_env}，但产出模式是 {_mode}，"
             f"本侧永远不会产生内容。把产出模式改成 both 或 {parts_env}。")
@@ -2886,7 +2937,7 @@ def run_batch(
                 fh.write(json.dumps({
                     "image_id": task.image_id, "file": task.file,
                     "shard": Path(task.shard).name,
-                    "kind": kind, "error": reason, "ts": time.time(), "parts": [parts_env] if parts_env else ['tag','nl'],
+                    "kind": kind, "error": reason, "ts": time.time(), "parts": required_parts,
                 }, ensure_ascii=False) + "\n")
                 fh.flush()
         resolve_failure(task)
@@ -2913,7 +2964,7 @@ def run_batch(
         if fh is None:
             return
         line = json.dumps({"image_id": task.image_id, "resolved": True,
-                           "shard": Path(task.shard).name, "parts": [parts_env] if parts_env else ['tag','nl'],
+                           "shard": Path(task.shard).name, "parts": required_parts,
                            "ts": time.time()}, ensure_ascii=False)
         from .storage.locking import FileLock
         with FileLock(failures.with_suffix(".lock")):
@@ -2976,7 +3027,7 @@ def run_batch(
                 return
             line = json.dumps({
                 "image_id": task.image_id, "file": task.file,
-                "shard": Path(task.shard).name, "error": outcome.error, "parts": [parts_env] if parts_env else ['tag','nl'],
+                "shard": Path(task.shard).name, "error": outcome.error, "parts": required_parts,
                 "attempts": outcome.attempts, "ts": time.time(),
             }, ensure_ascii=False)
             # 坏样本剔除：重试轮次已经用完，仍失败。
@@ -3104,8 +3155,30 @@ def run_batch(
             # 看起来像任务卡死。放在 stats.total 之前是刻意的。
             if only_ids is not None and task.image_id not in only_ids:
                 continue
+            selector = getattr(client, "item_selector", None)
+            if selector is not None:
+                selected, task, data = selector(task, data, reader)
+                if not selected:
+                    continue
             stats.total += 1
-            task_force = force or task.image_id in center_redo
+            if training_tags is not None:
+                from dataclasses import replace
+                final_tag = training_tags.get(task.image_id)
+                if final_tag is None:
+                    raise ConfigError(f"训练模板包含 {{tag}}，但图片 {task.image_id} 尚无标签产物，请先完成标签阶段")
+                task = replace(task, training_tags=tuple(final_tag[0].get("tags", [])))
+            task_force = force or (task.image_id in center_redo and
+                                  (completed_parts is None or task.image_id not in completed_parts))
+            if not task_force and completed_parts is not None and task.image_id in completed_parts:
+                hair = getattr(client, "hair_batch", None)
+                if hair is not None and parts_env == "tag":
+                    payload, path = completed_parts[task.image_id]
+                    from .inference.part_artifacts import attach_review
+                    attach_review(hair, task, payload,
+                                  lambda: data if data is not None else reader.read(task.shard, task.file), path)
+                stats.skipped += 1
+                emit("skipped", task, None)
+                continue
             if not task_force and task.image_id in center_done:
                 stats.skipped += 1
                 emit("skipped", task, None)
@@ -3233,6 +3306,11 @@ def run_batch(
                 raise Stopped("暂停期间收到停止请求")
             time.sleep(0.2)
 
+    def process(slot, task, data, reader):
+        if isinstance(completed_parts, CompletedParts):
+            return completed_parts.process(slots[slot], task, data, reader, force=force)
+        return slots[slot].process(task, data, reader)
+
     def _result(fut: Future, task: TaskRow) -> Outcome:
         try:
             return fut.result()
@@ -3267,7 +3345,7 @@ def run_batch(
                     _wait_resume()
                 if guard is not None:
                     _check_guard(guard)
-                outcome = slots[0].process(task, data, reader)
+                outcome = process(0, task, data, reader)
                 commit(task, outcome, 0)
                 if guard is not None:
                     guard.after_unit()
@@ -3298,21 +3376,27 @@ def run_batch(
                 if guard is not None:
                     _check_guard(guard)
                 # 只补回刚空出的槽，保证快卡不会把请求堆到仍在忙的慢卡。
-                fut = pool.submit(slots[slot].process, task, data, reader)
+                fut = pool.submit(process, slot, task, data, reader)
                 pending[fut] = (task, slot)
                 return True
+
+            def settle(done) -> list[int]:
+                freed = []
+                for fut in done:
+                    task, slot = pending.pop(fut)
+                    commit(task, _result(fut, task), slot)
+                    freed.append(slot)
+                return freed
 
             def drain() -> None:
                 """把在途的都结清。暂停是"这一批做完再挂起"，不是"现在就停"：
                 中途丢掉的请求不写产物，重跑会被重做，而用户点暂停时看到的
                 进度会凭空回退几张。"""
-                while pending:
+                if pending:
                     done, _ = wait(pending, return_when=ALL_COMPLETED)
-                    for fut in done:
-                        task, slot = pending.pop(fut)
-                        commit(task, _result(fut, task), slot)
-                        if guard is not None:
-                            guard.after_unit()
+                    settle(done)
+                    if guard is not None:
+                        guard.after_unit()
                 _flush_sink()
 
             for index in range(workers):
@@ -3338,12 +3422,13 @@ def run_batch(
                     break                   # 被 stop 掐住，不再补新任务
 
                 done, _ = wait(pending, return_when=FIRST_COMPLETED)
-                for fut in done:
-                    task, slot = pending.pop(fut)
-                    commit(task, _result(fut, task), slot)
-                    # 让步按批结算：一个 worker 回来 ≈ 一个批次的边界
-                    if guard is not None:
-                        guard.after_unit()
+                freed = settle(done)
+                # 先结清当前完成的图片，再按本轮忙碌时间让步一次。
+                if guard is not None:
+                    guard.after_unit()
+                # 写盘/让步期间返回的结果也一并结清，再补齐空槽，避免拆散下一批。
+                freed.extend(settle([fut for fut in pending if fut.done()]))
+                for slot in freed:
                     submit_next(slot)
         if _stopping():
             _flush_sink()
@@ -3696,8 +3781,8 @@ def run_client(args, ops: OpsConfig, table: dict,
     print 保持不变——终端里跑还是老样子，回调只是"多一份"。
 
     `guard`：外部预构造的 ResourceGuard（Web 侧带 on_state 事件接线）。
-    传了就以它为准、由本函数负责 start/stop；不传且 args.no_guard 为假
-    时按老路径自建。两个来源只会存在一个 watchdog。
+    传了就以它为准，由调用方负责结束生命周期；不传且 args.no_guard 为假
+    时按老路径自建并负责 start/stop。串行阶段共用一条 watchdog。
 
     `only_failed`：只重打 failures.jsonl 里列出的 id，而不是整片重跑。
     这是「重试失败项」按钮的落点——整片重跑虽然靠产物跳过也能达到同样的
@@ -3730,12 +3815,16 @@ def run_client(args, ops: OpsConfig, table: dict,
     mode = str(args.mode or output.mode).lower()
     if mode not in ("nl", "tag", "both"):
         raise ConfigError(f"--mode 只能是 nl / tag / both，收到 {mode!r}")
-    parts_want = str(parts_env or os.environ.get("FOXLABEL_PARTS", "")).strip().lower()
+    from .inference.parts_resume import requested
+    parts_want = requested(parts_env or os.environ.get('FOXLABEL_PARTS', ''))
     if mode == "both" and parts_want in ("tag", "nl"):
         mode = parts_want
     from dataclasses import replace
 
     output = replace(output, mode=mode)
+
+    from .text_encoding.tokenizer import require_training_text
+    require_training_text(mode)
 
     # ---- 推理来源。三种走同一套主循环，只有方言与"有没有环境指纹"不同。
     try:
@@ -3762,7 +3851,15 @@ def run_client(args, ops: OpsConfig, table: dict,
         caption_chars = parse_caption_chars(args.caption_chars)
     output = replace(output, caption_chars=caption_chars)
 
+    from .inference.torii_caption import is_torii
+    torii_caption = (getattr(args, "caption_format", "") == "torii" or is_torii(getattr(args, "model_name", ""))) and output.wants_nl and not provider
+    if torii_caption:
+        output = replace(output, nl_max_tokens=2048, caption_zh_ratio=0)
     quality: QualityPolicy = ops.quality_policy()
+    if torii_caption:
+        quality = replace(quality)
+    if torii_caption:
+        quality.nl_max_tokens = 2048
     artist_rule: ArtistRule = ops.artist_rule()
 
     # AB 变体。这里只做"取值"，渲染放到 output 收窄之后——CPU tag 模式会把
@@ -3818,6 +3915,8 @@ def run_client(args, ops: OpsConfig, table: dict,
         preprocess=tag_preprocess,
     )
     if tag_backend is not None:
+        if getattr(args, "hair_batch", None) is not None and hasattr(tag_backend, "enable_hair_scores"):
+            tag_backend.capture_hair_scores = True
         # 预加载：缺依赖、下不到模型、权重对不上，现在就说，
         # 别等跑到第 500 张才发现整批 tag 全是空的。
         try:
@@ -3918,6 +4017,8 @@ def run_client(args, ops: OpsConfig, table: dict,
         # API 侧没有服务端的 max_pixels 钳制，基线预算只能靠客户端执行；
         # server_cap 留给 0，重试提分辨率不会被钳回去。
         fp.pop("max_pixels", None)
+    elif getattr(args, "runtime_fingerprint", None) is not None:
+        fp = args.runtime_fingerprint.copy()
     else:
         fp = load_fingerprint(args.fingerprint)
     model_id = str(args.model_id
@@ -4016,6 +4117,8 @@ def run_client(args, ops: OpsConfig, table: dict,
         spool_dir=out_dir / ".spool",
         seed=args.seed,
         tag_backend=tag_backend,
+        hair_batch=getattr(args, "hair_batch", None),
+        caption_format=getattr(args, "caption_format", ""),
         need_tags=need_tags,
         prompt_text=prompt_text,
         prompt_zh_text=prompt_zh_text,
@@ -4034,6 +4137,8 @@ def run_client(args, ops: OpsConfig, table: dict,
     )
     clients = [TaggerClient(base_url=u, **client_kwargs) for u in service_urls]
     client = clients[0]
+    client.item_selector = getattr(args, "item_selector", None)
+    client.before_process = getattr(args, "before_process", None)
     if len(clients) > 1:
         _log(f"[client] 多卡服务 : {len(clients)} 个 "
              f"（{', '.join(service_urls)}）")
@@ -4044,7 +4149,7 @@ def run_client(args, ops: OpsConfig, table: dict,
             _log("[client][警告] CLIP 打分不是线程安全的，多卡降级为只用一个服务。")
             clients = clients[:1]
 
-    stats = ClientStats()
+    stats = getattr(args, "workflow_stats", None) or ClientStats()
     on_part = getattr(on_progress, "on_part", None)
     if on_part is not None:
         for slot_client in clients:
@@ -4062,11 +4167,13 @@ def run_client(args, ops: OpsConfig, table: dict,
     sink = None
     work = None
     done_ids = None
+    completed_parts = None
+    training_tags = None
     # 派工点名补哪一侧时，"已有产物"的判据要收紧（见 run_batch 的 parts_env）。
     # 归一放在这里，日志与跳过判定读的是同一个值，不会各说各话。
-    parts_want = str(parts_env or os.environ.get("FOXLABEL_PARTS", "")).strip().lower()
-    if parts_want not in ("tag", "nl"):
-        parts_want = ""
+    from .inference.parts_resume import requested, CompletedParts
+    from .center_runtime.snapshot import exists as has_snapshot, state as snapshot_state
+    parts_want = requested(parts_env or os.environ.get('FOXLABEL_PARTS', ''))
     # 跨运行累计的失败账。同一张图失败到 max_failures 次就不再碰它，
     # 否则每次重跑都要为同一批坏样本重烧 3 次推理。
     max_failures = int(getattr(args, "max_failures", 3) or 0)
@@ -4117,7 +4224,9 @@ def run_client(args, ops: OpsConfig, table: dict,
     done_dir = out_dir / ".hf-done"
 
     def shard_done(name: str) -> bool:
-        if parts_want and (out_dir / '.center-resume.json').is_file():
+        if getattr(args, "workflow_part", ""):
+            return False
+        if parts_want:
             return False
         # 旧版在中止或 Parquet 未落盘时也会写标记，需逐图核验一次。
         # complete-v3 = "有条件完成"（剔过坏样本），同样算完成——但多一段
@@ -4144,6 +4253,7 @@ def run_client(args, ops: OpsConfig, table: dict,
     # guard 的磁盘检查盯产物目录：满盘时最先坏的是正在写的 json。
     # Web 传入的 guard 优先——它带 on_state 事件接线，自建会出现两个
     # watchdog 各自采样、各自熔断的鬼畜局面。
+    owns_guard = guard is None
     if guard is None and not args.no_guard:
         guard = ResourceGuard(
             ops.guard_policy(),
@@ -4196,7 +4306,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                 clients=clients,
                 retry_budget=retry_budget,
                 only_ids=retry_ids,
-                parts_env=parts_want,
+                parts_env=parts_want, completed_parts=completed_parts, training_tags=training_tags,
             )
             return len(tasks), bool(limit_total) and full_count > len(tasks)
         finally:
@@ -4279,7 +4389,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                 clients=clients,
                 retry_budget=retry_budget,
                 only_ids=retry_ids,
-                parts_env=parts_want,
+                parts_env=parts_want, completed_parts=completed_parts, training_tags=training_tags,
             )
             if remaining:
                 remaining = max(0, remaining - counter["n"])
@@ -4370,7 +4480,7 @@ def run_client(args, ops: OpsConfig, table: dict,
     if parts_want:
         # 方向冲突由 run_batch 开头统一拦（那里是执行入口，直接调用也生效）。
         # 这里只负责把"这一趟在干什么"写清楚。
-        _log(f"[client] 分项补齐 : 这一片只补 {parts_want}"
+        _log(f"[client] 分项补齐 : 这一片补 {parts_want}"
              + ("" if output.mode == parts_want
                 else f"（产出模式 {output.mode}，另一侧已有效的图会跳过）"))
     if variant is not None:
@@ -4415,6 +4525,33 @@ def run_client(args, ops: OpsConfig, table: dict,
         work = WorkIndex(out_dir)
         work.refresh()
         done_ids = work
+        workflow_part = str(getattr(args, "workflow_part", ""))
+        resume_part = workflow_part or (parts_want if parts_want in ('tag', 'nl') else '')
+        if parts_want == 'tag,nl' and not workflow_part:
+            from .verification.local import paths as local_paths
+            completed_parts = CompletedParts(out_dir,
+                paths=local_paths(out_dir, os.environ.get('FOXLABEL_PACKAGE', ''), isolated=has_snapshot(out_dir)),
+                resolutions=snapshot_state(out_dir).get('resolutions', []))
+        elif resume_part:
+            from .inference.part_artifacts import completed_part
+            if parts_want and os.environ.get('FOXLABEL_PACKAGE'):
+                from .verification.local import paths as local_paths
+                completed_parts = completed_part(out_dir, resume_part,
+                    paths=local_paths(out_dir, os.environ['FOXLABEL_PACKAGE'], isolated=has_snapshot(out_dir)),
+                    resolutions=snapshot_state(out_dir).get('resolutions', []))
+            else:
+                completed_parts = completed_part(out_dir, resume_part)
+        if output.mode == "nl" and not need_tags:
+            from .text_encoding.settings import load as text_settings
+            if text_settings().uses_tags:
+                from .inference.part_artifacts import completed_part
+                if has_snapshot(out_dir):
+                    from .verification.local import paths as local_paths
+                    training_tags = completed_part(out_dir, 'tag',
+                        paths=local_paths(out_dir, os.environ.get('FOXLABEL_PACKAGE', ''), isolated=True),
+                        resolutions=snapshot_state(out_dir).get('resolutions', []))
+                else:
+                    training_tags = completed_part(out_dir, "tag")
         if artifact_format in ("parquet", "jsonl"):
             from . import artifacts as artifacts_mod
 
@@ -4579,7 +4716,7 @@ def run_client(args, ops: OpsConfig, table: dict,
                     print("[client] 分发包里没有任务。检查 --shard 是否指对了包。")
                     code = 1
 
-        stats.input_complete = not (should_stop is not None and should_stop())
+        stats.input_complete = bool(getattr(args, "workflow_last", True)) and not (should_stop is not None and should_stop())
     except hf_source.HFError as exc:
         # 必须走 _log 而不是裸 print(stderr)：任务页只消费 on_log 发出去的事件，
         # 401/404 那句"该去填 token / 该检查仓库名"的指引写进 stderr 等于没写，
@@ -4602,7 +4739,7 @@ def run_client(args, ops: OpsConfig, table: dict,
               "（已完成的会自动跳过；在途的几张没写产物，会被重做）。", file=sys.stderr)
         code = 1
     finally:
-        if guard is not None:
+        if guard is not None and owns_guard:
             guard.stop()
         # sink 必须在这里最后 flush 一次：末片可能不满 rows_per_file，
         # 不 flush 就等于把最后几百张悄悄丢了（而且"没报错"）。
@@ -4632,6 +4769,13 @@ def run_client(args, ops: OpsConfig, table: dict,
             # describe 要在 close 之前读：关掉连接之后连行数都查不到了。
             cache_info = cache.describe()
             cache.close()
+        if completed_parts is not None:
+            completed_parts.close()
+        if training_tags is not None:
+            training_tags.close()
+        if (getattr(args, "hair_batch", None) is not None or getattr(args, "workflow_part", "")) and tag_backend is not None:
+            from .hair_color.pixai_runtime import release_backend
+            release_backend(tag_backend)
 
     if provider:
         # 价目表只从存档里读：价格每月都变，内置一份迟早开始说谎，

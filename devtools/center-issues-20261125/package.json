@@ -1,0 +1,33 @@
+{
+  "path": "H:\\tagger\\dist\\tagger-20261125-center-issues-patch.zip",
+  "bytes": 553667,
+  "sha256": "1a9b7342d5766af7a959a66ff590801f4bc2c30fecdba5f9b785874c504b24a3",
+  "crc_ok": true,
+  "files": {
+    "center-issues-20261125.txt": "4d3776e79c89b64c6f910bae7b6188306ca54d8a154d558ca066e57ce4e9a641",
+    "tagger/fox_worker.py": "1fda4b9a968517d01624f468b7780f46e3f1e6a4ba90a4f85c4ad6d1232d3e10",
+    "tagger/web/center_runtime/inference.py": "460d3fbbfeb8ed64a1739d283dd7216f2d92e39c0022b10f0343055c2be7e227",
+    "tagger/web/center_runtime/managed.py": "d9e12447761e1c47da3ffa907744404218f3ceda156ff6fa496f9771f17f3a4a",
+    "tagger/web/ui/dist/assets/index-7Ebx__7j.css": "9478a0a2d57083723be5e853c077b10bc52c5a13c33ec52777325b14841c7ddd",
+    "tagger/web/ui/dist/assets/index-CTUn6URt.js": "23121409809b3c6eb15ea1f6f3c6ce71fbf4d1fab94e90e68cc372c790dcab1e",
+    "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-400-normal-BEIGL1Tu.woff2": "522f5827308102a9c0ea7860b5a11306043610ecf03d150ba32056a06e8c56e2",
+    "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-400-normal-ugxPyKxw.woff": "67c9cc7864b4940dbfb246c7b452c1de8e96f140f334d363fcdd87dbfeadab72",
+    "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-500-normal-DJqRU3vO.woff": "d408a664dc721f614e6346e09f3f32b2837005db28f5e4797ce8dd19da07e4ea",
+    "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-500-normal-DmUKJPL_.woff2": "26c9ed511def1f0fd3d1b5fe6d5c0c594d9ef8dd2435d2ff240ea265a416b6e4",
+    "tagger/web/ui/dist/assets/jetbrains-mono-greek-400-normal-B9oWc5Lo.woff": "09f89e8369d7745ac5fe92e62a9ea13f66f40fd95b5495fac014c54b3a1ca6cc",
+    "tagger/web/ui/dist/assets/jetbrains-mono-greek-400-normal-C190GLew.woff2": "365b7a8eaff022b13ed0561fde3890a04a30507d773ecd5adb3aca8e766a285c",
+    "tagger/web/ui/dist/assets/jetbrains-mono-greek-500-normal-D7SFKleX.woff": "89656e472646bf4d52c23d499fa2e467ad3ee73447fda24eefb96e176b1312d6",
+    "tagger/web/ui/dist/assets/jetbrains-mono-greek-500-normal-JpySY46c.woff2": "5b6dee4610cdaab7c4218c1692aa9a536414010eef4e5b3cfb25f45007811bcc",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-400-normal-6-qcROiO.woff": "658b9ee07b0249cf910a8d6f3d812d46c962bae81d7379a0355b1db35c61586f",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2": "14425ba9c695763c1547f48a206b7aa60350a33ae23de09f0407877f3fcd89eb",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-500-normal-BWZEU5yA.woff2": "cb182feeed4d798ff6961d3c79f7026279448fca0676438aaecb21f3fc39553a",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-500-normal-CJOVTJB7.woff": "a270dd0bf13d91053b8999b7c120ffadb59680cfd63fe1a6b388a13bf2809fe1",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-400-normal-Bc8Ftmh3.woff2": "505dfba8ecbe77e82765f36d317ed7ef4ac42719dc5f4ae68d1c483fd22d0d14",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-400-normal-fXTG6kC5.woff": "e7131bbf591e1ed9b74e44e162f6a39affa00ac21654cb683585d085733f6355",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-500-normal-Cut-4mMH.woff2": "879df9319f1cbf633bee1dd489e376a9e1e8c458f4abddcfe381cb83b5e6b027",
+    "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-500-normal-ckzbgY84.woff": "8006c29f8ec53d12d281774d669a02a70b599590d110ff1a4b4a40a6fd975676",
+    "tagger/web/ui/dist/assets/jetbrains-mono-vietnamese-400-normal-CqNFfHCs.woff": "1dfe0f740fa86409034058e49474b01126ae9ea8c1ecda905917b90d57f03b00",
+    "tagger/web/ui/dist/assets/jetbrains-mono-vietnamese-500-normal-DNRqzVM1.woff": "6b14186bc983291a126aa8d6d9c3044415c968262279eecbb9bb194f1daf7800",
+    "tagger/web/ui/dist/index.html": "dc6f31b62b088e1b6782ce0d9d5916afb59b64f84eb48da08e7b62078bfe0e60"
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "id": "6514180e70a7",
+  "running": false,
+  "status": "completed",
+  "phase": "measuring",
+  "message": "测试完成",
+  "error": "",
+  "rows": [
+    {
+      "series_id": "config-0",
+      "requested": 1,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 14.0,
+      "actual": 1,
+      "warmup_s": 23.81,
+      "peak_vram_mb": 7856,
+      "elapsed_s": 19.3,
+      "process_s": 20.92,
+      "log_path": "D:\\tagger-validation\\benchmark-comparison-20261125\\concurrency-tests\\6514180e70a7\\config-0\\concurrency-1\\execution.log",
+      "rate_per_s": 0.2073
+    },
+    {
+      "series_id": "config-0",
+      "requested": 2,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 6.62,
+      "actual": 2,
+      "warmup_s": 16.95,
+      "peak_vram_mb": 8083,
+      "elapsed_s": 13.8,
+      "process_s": 15.49,
+      "log_path": "D:\\tagger-validation\\benchmark-comparison-20261125\\concurrency-tests\\6514180e70a7\\config-0\\concurrency-2\\execution.log",
+      "rate_per_s": 0.2899
+    },
+    {
+      "series_id": "config-1",
+      "requested": 1,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 28.08,
+      "actual": 1,
+      "warmup_s": 101.25,
+      "peak_vram_mb": 8879,
+      "elapsed_s": 97.4,
+      "process_s": 99.14,
+      "log_path": "D:\\tagger-validation\\benchmark-comparison-20261125\\concurrency-tests\\6514180e70a7\\config-1\\concurrency-1\\execution.log",
+      "rate_per_s": 0.0411
+    },
+    {
+      "series_id": "config-1",
+      "requested": 2,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 25.03,
+      "actual": 2,
+      "warmup_s": 49.61,
+      "peak_vram_mb": 9301,
+      "elapsed_s": 46.5,
+      "process_s": 48.19,
+      "log_path": "D:\\tagger-validation\\benchmark-comparison-20261125\\concurrency-tests\\6514180e70a7\\config-1\\concurrency-2\\execution.log",
+      "rate_per_s": 0.086
+    }
+  ],
+  "request": {
+    "configurations": [
+      {
+        "model": "qwen3vl-8b-abliterated",
+        "engine": "llamacpp",
+        "precision": "q4"
+      },
+      {
+        "model": "qwen3vl-8b-abliterated",
+        "engine": "native",
+        "precision": "q4"
+      }
+    ],
+    "device": "cuda:0",
+    "source": "H:\\lulynx-trainer\\backend\\smoke\\tagger-benchmark-comparison-20261125\\real\\images",
+    "output_dir": "D:/tagger-validation/benchmark-comparison-20261125",
+    "levels": [
+      1,
+      2
+    ],
+    "sample_count": 4
+  },
+  "created_at": 1795620069.7500765,
+  "progress": {},
+  "report_path": "D:\\tagger-validation\\benchmark-comparison-20261125\\concurrency-tests\\6514180e70a7\\report.json",
+  "sample_count": 4,
+  "rejected_images": 0,
+  "source": "H:\\lulynx-trainer\\backend\\smoke\\tagger-benchmark-comparison-20261125\\real\\images",
+  "series": [
+    {
+      "id": "config-0",
+      "model": "qwen3vl-8b-abliterated",
+      "engine": "llamacpp",
+      "precision": "q4",
+      "peak_rate_per_s": 0.2899,
+      "recommended": 2
+    },
+    {
+      "id": "config-1",
+      "model": "qwen3vl-8b-abliterated",
+      "engine": "native",
+      "precision": "q4",
+      "peak_rate_per_s": 0.086,
+      "recommended": 2
+    }
+  ],
+  "current": 2,
+  "current_series": "config-1",
+  "finished_at": 1795620520.834084
+}

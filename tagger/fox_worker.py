@@ -3,21 +3,21 @@
 
 和 v3.0 的区别（申报制）
 -----------------------
-执行租约由 worker 申报或管理员回收；未开工预锁在设备离线超过宽限后释放。
+在线执行和预锁租约在每次成功上报后续期 48 小时，由 worker 申报或管理员回收。
 
-  * 执行期间上报存活，供中心回收离线预锁；执行租约不会因网络中断过期。
+  * 执行和回传期间上报存活；连续 48 小时未成功上报才会过期。
     最终进度在 finish 时带上。
   * 打标期间网络暂断也能继续工作；
     最后 finish 申报时若网络不通，本地退避重试（1/2/4…上限 300s）
-    直到成功——租约不会过期，重试总是安全的。
+    临时故障恢复后补报；租约已撤销、过期或验收拒绝时停止，保留本机产物。
   * 崩溃后重启保留租约；Ctrl-C / 主动停止归还未完成租约。重新 handshake 时
     服务端发现同设备已有 open 租约会原样返回（幂等续接），
     本地已校验通过的分片直接复用，不重复下载。
 
 保留
 ----
-IdlePinger（60s idle ping）：语义收窄为"我在，空闲"的面板三态展示信号，
-不再是续约保活。404（旧服务端）静默降级逻辑不变。
+IdlePinger（60s idle ping）上报空闲状态；成功上报也会续期有效在线租约。
+404（旧服务端）静默降级逻辑不变。
 
 身份
 ----
@@ -68,8 +68,12 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
-from .netutil import curl_env
+from .center_runtime.network import opener
+from .center_runtime.download_network import curl_env, uses_proxy
+from .center_runtime import download_transfer
+from .center_runtime.download_transfer import DownloadError, RangeUnsupported
 from .center_runtime.identity import pending_path, read_for_login, saved_path, write_identity
+from .center_runtime.download_segments import plan_path
 
 VERSION = "3.4.0"      # 3.4：CDN 选优 + 多连接分段下载 + 预取 prelock；3.3：本机重试 + 长驻不退；3.2：本机自持 secret
 DEFAULT_SERVER = "http://127.0.0.1:31831"
@@ -92,14 +96,13 @@ MAX_CONSEC_FAILS = 5
 WAIT_POLL = 30
 
 # 空转 ping（SPEC-declare §7.2，语义收窄）：手上没租约时每 60s 发一次
-# /api/v1/ping，仅作"我在，空闲"的面板三态展示信号，**不是续约**——open
-# 租约永久有效，无需保活。失败指数退避 1/2/4/8…上限 300s；成功后立即补发
+# /api/v1/ping，上报"我在，空闲"的面板三态展示信号；有效的 open
+# 在线租约成功上报续期 48 小时。失败指数退避 1/2/4/8…上限 300s；成功后立即补发
 # 一次并恢复 60s 周期。
 IDLE_PING_INTERVAL = 60
 IDLE_PING_BACKOFF_MAX = 300
 
-# finish 申报重试（SPEC-declare §7.2）：申报制下 finish 是租约唯一的客户端
-# 关闭路径，租约又不会过期，所以网络不通时本地退避重试直到成功是安全的。
+# finish 申报重试：临时网络故障退避；心跳覆盖申报阶段，撤销或过期时停止。
 FINISH_RETRY_MAX = 300.0
 
 # 预取线程收尾时的等待上限（秒）。正常情况下它在这片活跑完之前早就下完了；
@@ -107,10 +110,7 @@ FINISH_RETRY_MAX = 300.0
 PREFETCH_JOIN_WAIT = 5.0
 PREFETCH_STOP_WAIT = 30.0
 
-# 下载：多连接 + CDN 选优（v3.4）。默认按**直连**口径拉满——国内到 HF 的
-# 单连接常被长肥管道掐死在几百 KB/s，而 HF 的 CDN 对多连接是友好的
-# （hf_transfer 就是 8~16 连接）。走代理时 --resolve 会被代理忽略（不是失败），
-# 所以同一套默认值在挂梯子的机器上退化成普通下载，不会更糟。
+# 下载：默认 4 连接；直连可测速选择 CDN IP，代理出口由代理自身选择。
 DEFAULT_CONNS = 4           # 每片并发连接数；1 = 老的单流
 SEG_MIN_BYTES = 8 * 1024 * 1024   # 每段至少这么大，太小的片不值得切
 CDN_PROBE_BYTES = 2 * 1024 * 1024  # 每个候选 IP 只拉 2MiB 测速
@@ -121,7 +121,6 @@ CDN_CACHE = ".fox-cdn-pick.json"
 
 DL_CONNS = DEFAULT_CONNS    # cmd_run 按 --download-conns 覆盖
 DL_CDN_PROBE = True         # --no-cdn-probe 关闭
-_RANGE_UNSUPPORTED = False  # 碰到不认 Range 的源就永久退回单流（本进程内）
 
 
 def die(code: int, msg: str) -> None:
@@ -219,7 +218,7 @@ def api(cfg: dict, path: str, body: dict, timeout: float = 15, retries: int = 2)
         try:
             req = urllib.request.Request(url, data=data, method="POST",
                                          headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with opener(url, cfg).open(req, timeout=timeout) as r:
                 return json.loads(r.read().decode() or "{}")
         except urllib.error.HTTPError as e:
             body_txt = e.read().decode(errors="replace")
@@ -232,7 +231,10 @@ def api(cfg: dict, path: str, body: dict, timeout: float = 15, retries: int = 2)
             err = ApiError(e.code, _err(body_txt) or f"HTTP {e.code}")
             # 限流响应（SPEC-link §2.2）带 retry_after 秒数：客户端按它退避
             try:
-                err.retry_after = float(json.loads(body_txt).get("retry_after") or 0)
+                detail = json.loads(body_txt)
+                err.retry_after = float(detail.get("retry_after") or 0)
+                if isinstance(detail.get('report'), dict):
+                    err.report = detail['report']
             except Exception:
                 err.retry_after = 0.0
             raise err
@@ -325,7 +327,7 @@ def sanitize_hw(hw: dict | None) -> dict | None:
 
 # ------------------------------------------------------------------ idle ping
 # SPEC-declare §7.2：语义收窄——不再是"续约保活"，仅是"我在，空闲"的面板
-# 三态展示信号（open 租约永久有效，无需保活）。404（旧服务端）每会话至多
+# 在线状态与续期上报。404（旧服务端）每会话至多
 # 告警一次，之后静默停发；401 走既有 AuthError 停机路径；网络失败指数退避，
 # 成功后立即补发一次并恢复 60s 周期。daemon 线程，随主进程退出，不悬挂。
 
@@ -456,6 +458,7 @@ def cmd_login(args) -> int:
         print(f"[注意] 服务端回了另一把 secret，本机保留原有的不覆写（{CONFIG}）")
     cfg["device_id"] = res.get("device_id") or cfg["device_id"]
     cfg["server_id"] = res.get("server_id")
+    cfg['automation'] = res.get('automation')
     save_cfg_after_handshake(cfg, minted or bool(issued))
     # 活动身份已落盘，手动删除 CONFIG 仍应触发原有的重新生成密钥行为。
     for path in (pending_path(CONFIG), saved_path(CONFIG)):
@@ -604,25 +607,23 @@ def download(lease: dict, out_dir: Path, state: "RunState", cfg: dict) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     hdr_file = _write_hdr(lease, out_dir)
     t0 = time.time()
-    global _RANGE_UNSUPPORTED
     try:
         pick = cdn_pick(lease, out_dir, hdr_file) if DL_CDN_PROBE else None
+        def attempt(selection):
+            try:
+                return _download_once(lease, dest, hdr_file, selection, state, t0)
+            except RangeUnsupported as exc:
+                _drop_segments(dest)
+                log(f"[warn] {exc}")
+                return _download_once(lease, dest, hdr_file, selection, state, t0, ranges=False)
         try:
-            return _download_once(lease, dest, hdr_file, pick, state, t0)
-        except RangeUnsupported as e:
-            # 源不认 Range：分段这条路彻底走不通，本进程后续一律单流。
-            _RANGE_UNSUPPORTED = True
-            _drop_segments(dest)
-            log(f"[warn] {e}")
-            return _download_once(lease, dest, hdr_file, pick, state, t0)
+            return attempt(pick)
         except DownloadError:
-            if not pick:
+            if not pick or state.stop.is_set():
                 raise
-            # 钉的出口挂了 / 签名过期：清缓存退回 DNS，重来一次
-            # （段文件保留，续传接着下，不浪费已下好的部分）。
             _forget_cdn(out_dir)
-            log("[warn] 钉住的 CDN 出口下载失败，清缓存回退 DNS 重试一次")
-            return _download_once(lease, dest, hdr_file, None, state, t0)
+            log("[warn] CDN 地址下载失败，清缓存回退原地址重试一次")
+            return attempt(None)
     finally:
         if hdr_file:
             hdr_file.unlink(missing_ok=True)
@@ -645,20 +646,24 @@ def _write_hdr(lease: dict, out_dir: Path) -> Path | None:
 
 
 def _download_once(lease: dict, dest: Path, hdr_file: Path | None,
-                   pick: dict | None, state: "RunState", t0: float) -> Path:
+                   pick: dict | None, state: "RunState", t0: float, *, ranges: bool = True) -> Path:
     url = (pick or {}).get("url") or hf_url(lease)
     total = int(lease.get("size") or 0) or _remote_size(url, hdr_file)
     conns = 1
-    if total > 0 and DL_CONNS > 1 and not _RANGE_UNSUPPORTED:
+    if total > 0 and DL_CONNS > 1 and ranges:
         conns = max(1, min(DL_CONNS, total // SEG_MIN_BYTES))
     part = dest.with_suffix(dest.suffix + ".part")
+    if part.is_file() and part.stat().st_size > 0 and not plan_path(dest).is_file():
+        conns = 1  # 沿用单流已有进度，避免改并发后重下。
     state.phase = "download"
     state.done = 0
+    log("分片下载线路：" + ("代理" if uses_proxy(url) else "直连"))
     log(f"下载 {lease['package']}（{total / 2**20:.0f} MiB，{conns} 连接"
         + (f"，出口 {_tag(pick['ip'])}" if (pick or {}).get("ip") else "") + "）…")
-    if conns > 1:
+    if conns > 1 or (total > 0 and ranges and plan_path(dest).is_file()):
         part.unlink(missing_ok=True)       # 单流遗留的半截文件不参与拼接
-        _download_segments(url, dest, hdr_file, pick, total, conns, state)
+        _download_segments(url, dest, hdr_file, pick, total, conns, state,
+                           source_id=str(lease.get("sha256") or hf_url(lease)))
     else:
         _download_stream(url, part, hdr_file, pick, total, state)
     if not part.exists():
@@ -683,139 +688,14 @@ def _download_once(lease: dict, dest: Path, hdr_file: Path | None,
 
 def _download_stream(url: str, part: Path, hdr_file: Path | None,
                      pick: dict | None, total: int, state: "RunState") -> None:
-    """单连接（DL_CONNS=1 或片太小）：老逻辑，断点续传靠 curl -C -。"""
-    cmd = ["curl", "-sS", "-L", "--fail", "--retry", "3", "--retry-delay", "2",
-           "-C", "-", "-o", str(part)]
-    cmd += _resolve_args(pick)
-    if hdr_file:
-        cmd += ["-H", f"@{hdr_file}"]
-    cmd.append(url)
-    with subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=curl_env(url)) as proc:
-        while proc.poll() is None:
-            if state.stop.is_set():
-                proc.terminate()
-                break
-            if part.exists() and total:
-                state.done = min(99, int(part.stat().st_size / total * 100))
-            time.sleep(0.3)
-        rc = proc.wait()
-        if rc != 0 or not part.exists():
-            err = (proc.stderr.read().decode(errors="replace") if proc.stderr else "")[-200:]
-            raise DownloadError(f"curl 退出码 {rc} {err}")
+    download_transfer.stream(url, part, hdr_file, _resolve_args(pick), total, state, log)
 
 
 def _download_segments(url: str, dest: Path, hdr_file: Path | None,
                        pick: dict | None, total: int, conns: int,
-                       state: "RunState") -> None:
-    """把这片切成 conns 段并发下，各段独立续传，最后按序拼回 <pkg>.part。
-
-    段文件用 `.<pkg>.segNNN`（隐藏名，不会跟单流的 .part 混）。每段续传靠
-    "已有长度 + curl -r 绝对区间"，不用 -C -（-C - 自己算区间，和 -r 语义冲突）。
-    """
-    seg_len = -(-total // conns)
-    bounds = [(s, min(s + seg_len, total) - 1) for s in range(0, total, seg_len)]
-    paths = [dest.parent / f".{dest.name}.seg{i:03d}" for i in range(len(bounds))]
-    procs: list[subprocess.Popen | None] = [None] * len(bounds)
-    errors: list[Exception | None] = [None] * len(bounds)
-    stop = threading.Event()
-
-    def worker(i: int, start: int, end: int, path: Path) -> None:
-        want_len = end - start + 1
-        have = path.stat().st_size if path.exists() else 0
-        if have > want_len:                 # 上次的残渣越界了，重来
-            path.unlink(missing_ok=True)
-            have = 0
-        if have == want_len:                # 这段已经齐了
-            return
-        cmd = ["curl", "-sS", "-L", "--fail", "--retry", "3", "--retry-delay", "2",
-               "-r", f"{start + have}-{end}"]
-        cmd += _resolve_args(pick)
-        if hdr_file:
-            cmd += ["-H", f"@{hdr_file}"]
-        cmd.append(url)
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=curl_env(url))
-        except FileNotFoundError:
-            errors[i] = DownloadError("找不到 curl")
-            stop.set()
-            return
-        procs[i] = proc
-        try:
-            written = have
-            with path.open("ab") as fh:
-                while True:
-                    chunk = proc.stdout.read1(1 << 20)
-                    if not chunk:
-                        break
-                    written += len(chunk)
-                    if written > want_len:
-                        # 服务端根本没理 Range，把整个文件吐给每段了——不掐掉
-                        # 的话 4 段就能把盘写满。立刻停，让上层退回单流。
-                        proc.terminate()
-                        errors[i] = RangeUnsupported(
-                            "服务端忽略 Range（返回了整文件），退回单流下载")
-                        stop.set()
-                        return
-                    fh.write(chunk)
-                    if state.stop.is_set() or stop.is_set():
-                        break
-            stopped = state.stop.is_set() or stop.is_set()
-            if stopped:
-                # 别人先停了（停止信号/别的段出错）：这里必须先把 curl 掐掉再
-                # wait，否则它正往没人读的管道里写，wait 会永远等不到。
-                proc.terminate()
-            rc = proc.wait()
-        except Exception as e:              # noqa: BLE001 —— 任何异常都算这段失败
-            proc.kill()
-            errors[i] = e
-            stop.set()
-            return
-        if stopped:
-            if state.stop.is_set():
-                errors[i] = DownloadError("下载已中断")
-            return
-        if rc != 0:
-            err = (proc.stderr.read().decode(errors="replace") if proc.stderr else "")[-200:]
-            errors[i] = DownloadError(f"curl 退出码 {rc} {err}")
-            stop.set()
-
-    threads = [threading.Thread(target=worker, args=(i, s, e, paths[i]),
-                                daemon=True, name=f"seg{i}")
-               for i, (s, e) in enumerate(bounds)]
-    for t in threads:
-        t.start()
-    killed = False
-    while any(t.is_alive() for t in threads):
-        if not killed and (state.stop.is_set() or stop.is_set()):
-            # stop 可能是某段自己发现出错设的（Range 不支持/curl 失败）：
-            # 同样要把它和其余段的 curl 一起掐掉，不然它们卡在阻塞写里。
-            killed = True
-            for p in procs:
-                if p is not None and p.poll() is None:
-                    p.terminate()
-        got = sum(p.stat().st_size for p in paths if p.exists())
-        state.done = min(99, int(got / total * 100))
-        time.sleep(0.3)
-    for t in threads:
-        t.join()
-
-    errs = [e for e in errors if e is not None]
-    # RangeUnsupported 优先抛出：它是"这条路根本走不通"的信号，别的段大概率
-    # 只是被连带中断（"下载已中断"），拿后者当结论会让上层白白重试一遍。
-    err = next((e for e in errs if isinstance(e, RangeUnsupported)),
-               errs[0] if errs else None)
-    if err is not None:
-        raise err
-    part = dest.with_suffix(dest.suffix + ".part")
-    with part.open("wb") as out:
-        for path in paths:
-            with path.open("rb") as fh:
-                shutil.copyfileobj(fh, out, 1 << 20)
-    size = part.stat().st_size
-    if size != total:
-        part.unlink(missing_ok=True)
-        _drop_segments(dest)
-        raise DownloadError(f"拼接后大小不符：期望 {total}，实得 {size}")
+                       state: "RunState", source_id: str = "") -> None:
+    download_transfer.segments(url, dest, hdr_file, _resolve_args(pick),
+                               total, conns, state, source_id, log)
     _drop_segments(dest)
 
 
@@ -846,10 +726,14 @@ def cdn_pick(lease: dict, out_dir: Path, hdr_file: Path | None) -> dict | None:
     而且现在 v6 常常比 v4 快）。只拉 2MiB 就能分出高下，代价几秒，换来整片
     （十几个 G）的走线。
 
-    直连口径（默认）：`--resolve` 只影响 curl 自己的 DNS；走代理时被代理忽略，
-    所以挂梯子的机器不会因此失败，只是拿不到这部分收益。
+    `--resolve` 只影响 curl 自己的 DNS；代理连接跳过 IP 测速。
     """
+    if uses_proxy(hf_url(lease)):
+        log("分片下载使用代理，跳过 CDN IP 测速")
+        return None
     final = _final_url(hf_url(lease), hdr_file)
+    if final and uses_proxy(final):
+        return None
     parts = urllib.parse.urlsplit(final) if final else None
     if not parts or not parts.hostname:
         return None
@@ -981,32 +865,28 @@ def _forget_cdn(out_dir: Path) -> None:
 
 
 def _remote_size(url: str, hdr_file: Path | None) -> int:
-    """服务端没给 size 时问一次 Content-Length（拿不到就退回单流，不猜）。"""
-    cmd = ["curl", "-sS", "-L", "-I", "-o", os.devnull, "--max-time", "20"]
+    """取最终响应的 Content-Length；缺失或请求失败时使用单流。"""
+    cmd = ["curl", "-sS", "-L", "--fail", "-I", "-o", os.devnull,
+           "-D", "-", "--max-time", "20"]
     if hdr_file:
         cmd += ["-H", f"@{hdr_file}"]
     cmd.append(url)
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=30)
+        r = subprocess.run(cmd, capture_output=True, timeout=30, env=curl_env(url))
     except (OSError, subprocess.SubprocessError):
         return 0
     if r.returncode != 0:
         return 0
-    for line in reversed(r.stdout.decode(errors="replace").splitlines()):
-        if line.lower().startswith("content-length:"):
+    total = 0
+    for line in r.stdout.decode(errors="replace").splitlines():
+        if line.startswith("HTTP/"):
+            total = 0
+        elif line.lower().startswith("content-length:"):
             try:
-                return int(line.split(":", 1)[1].strip())
+                total = max(0, int(line.split(":", 1)[1].strip()))
             except ValueError:
-                return 0
-    return 0
-
-
-class DownloadError(Exception):
-    pass
-
-
-class RangeUnsupported(DownloadError):
-    """服务端不认 Range：分段这条路走不通，必须退回单流。"""
+                total = 0
+    return total
 
 
 class Prefetcher(threading.Thread):
@@ -1091,13 +971,15 @@ class RunState:
     def __init__(self) -> None:
         self.stop = threading.Event()          # 本地要停（Ctrl-C/SIGTERM）
         self.phase = "idle"
+        self.source_ready = False
         self.done = 0
         self.total = 0
+        self.detail = {}
         self.lock = threading.Lock()
 
     def progress(self) -> dict:
         with self.lock:
-            return {"phase": self.phase, "done": self.done, "total": self.total}
+            return {**self.detail, "phase": self.phase, "done": self.done, "total": self.total}
 
 
 # /done 的 stats 会写进服务端的 packages.note（dispatch._finish_impl）。
@@ -1333,13 +1215,12 @@ class SkipReporter:
 def declare_finish(cfg: dict, lease_id: str, ok: bool, reason: str,
                    progress: dict, note: str | None = None,
                    fail_kind: str = "", metrics: dict | None = None,
-                   parts: dict | None = None) -> dict:
+                   parts: dict | None = None, local_report: dict | None = None,
+                   stop: threading.Event | None = None) -> dict:
     """finish 申报（SPEC-declare §7.2）：done/failed 都必须显式申报。
 
-    申报制语义：finish 是租约唯一的客户端关闭路径，而 open 租约不会过期，
-    所以网络不通时**本地退避重试直到成功**（1/2/4…上限 300s）是安全的——
-    重试要么最终落账（好），要么一直失败一直重试（管理员会在面板看到
-    这台设备的租约仍 open，可人工干预）。
+    网络不通时本地退避重试（1/2/4…上限 300s）。心跳覆盖申报过程；
+    在线租约成功上报后续期 48 小时，被撤销或过期时停止提交。
 
     409（租约已关闭：管理员已释放/重复申报）不重试，直接抛 ApiError 给上层。
     兼容期兜底：finish 响应里的 rejected 分支按原契约保留解析，新服务端
@@ -1351,6 +1232,8 @@ def declare_finish(cfg: dict, lease_id: str, ok: bool, reason: str,
     except ValueError:
         first_wait = 1.0
     body = {"lease_id": lease_id, "progress": progress,
+            **({'local_complete':True} if ok and os.environ.get('FOXLABEL_LOCAL_COMPLETE')=='1' else {}),
+            **({'local_report':local_report} if local_report is not None else {}),
             **({"stats": note} if note else {}), **({} if ok else {"reason": reason}),
             # v3.4：失败类型枚举（服务端据此统计），原文仍在 reason 里。
             **({} if ok or not fail_kind else {"fail_kind": fail_kind}),
@@ -1362,6 +1245,8 @@ def declare_finish(cfg: dict, lease_id: str, ok: bool, reason: str,
     wait = 0.0
     tries = 0
     while True:
+        if stop is not None and stop.is_set():
+            raise ApiError(409, '租约已被中心撤销，未提交的产物保留在本地')
         try:
             # retries=0：重试完全交给上面的退避循环（可观测、有日志、受
             # FINISH_RETRY_MAX 约束），不让 api() 的内部重试把短时断网吞掉。
@@ -1376,8 +1261,11 @@ def declare_finish(cfg: dict, lease_id: str, ok: bool, reason: str,
             tries += 1
             wait = min(wait * 2 if wait else first_wait, FINISH_RETRY_MAX)
             log(f"[warn] finish 申报失败（第 {tries} 次）：{e}——"
-                f"租约不会过期，{wait:.0f}s 后重试，直到成功")
-            time.sleep(wait)
+                f"{wait:.0f}s 后重试，等待中心确认")
+            if stop is None:
+                time.sleep(wait)
+            else:
+                stop.wait(wait)
 
 def run_task(lease: dict, shard: Path, args, state: RunState, out_dir: Path) -> int:
     """跑外部命令（tagger / bridge）。--cmd 里可用占位符：
@@ -1406,6 +1294,8 @@ def run_task(lease: dict, shard: Path, args, state: RunState, out_dir: Path) -> 
                            out=str(out_dir), lease=lease["lease_id"],
                            parts=parts_arg)
     env = dict(os.environ)
+    from .center_runtime.annotation import environment as annotation_environment
+    env.update(annotation_environment(lease))
     env.update({"FOXLABEL_PACKAGE": lease["package"], "FOXLABEL_LEASE_ID": lease["lease_id"],
                 "FOXLABEL_REPO": lease["repo"], "FOXLABEL_OUT": str(out_dir),
                 "FOXLABEL_PROGRESS": str(out_dir / ".fox-progress"),
@@ -1413,7 +1303,9 @@ def run_task(lease: dict, shard: Path, args, state: RunState, out_dir: Path) -> 
                 # 任务脚本据此关掉另一侧：只补 tag 的机器不该把 NL 模型也拉起来，
                 # 那既花时间又会覆盖别人已经交好的产物。
                 "FOXLABEL_PARTS": parts_arg})
-    state.phase, state.done = "work", 0
+    with state.lock:
+        state.phase, state.done, state.total = parts_arg or "work", 0, 0
+        state.detail = {}
     log(f"执行：{argv}")
     proc = subprocess.Popen(argv, shell=True, env=env, cwd=args.cwd or None,
                             **({"start_new_session": True} if os.name != "nt" else {}))
@@ -1445,18 +1337,22 @@ def run_task(lease: dict, shard: Path, args, state: RunState, out_dir: Path) -> 
 
 
 def _wait_task(proc, prog, state, t0):
+    from .center_runtime.progress import read
+    def update():
+        data = read(prog, since=t0)
+        if data:
+            with state.lock:
+                state.done = int(data.get("done") or 0)
+                state.total = int(data.get("total") or 0)
+                state.phase = data.get("phase") or state.phase
+                state.detail = data
     while proc.poll() is None:
         # 本机停止或管理员回收执行租约时，结束本次命令。
         if state.stop.is_set():
             return -1
-        if prog.exists():
-            try:
-                data = json.loads(prog.read_text(encoding="utf-8").strip() or "{}")
-                state.done = int(data.get("done") or 0)
-                state.total = int(data.get("total") or 0)
-            except (ValueError, OSError):
-                pass
+        update()
         time.sleep(0.3)
+    update()
     log(f"命令结束，退出码 {proc.returncode}，用时 {time.time() - t0:.1f}s")
     return proc.returncode
 
@@ -1483,7 +1379,9 @@ def do_one(cfg: dict, lease: dict, args, state: RunState,
     from .storage.atomic import write_json
     root = Path(args.out) if args.out else Path.cwd() / 'fox-work'
     write_json(root / '.fox-current.json', {'directory': str(out_dir.relative_to(root)),
-                                          'lease_id': lease['lease_id']})
+                                          'lease_id': lease['lease_id'], 'repo': lease['repo'],
+                                          'package': lease['package'], 'package_index': getattr(state, 'package_index', 1),
+                                          'started_at': time.time()})
     # 本片是否成功。用可变容器是为了让 finally 能读到——局部变量在下载失败那条
     # 早退路径上还没赋值，直接读会 UnboundLocalError。
     _succeeded = {"v": False}
@@ -1500,6 +1398,8 @@ def do_one(cfg: dict, lease: dict, args, state: RunState,
     task_retries = 0
     try:
         if not args.no_download:
+            from .center_runtime.delivery_state import save as save_delivery
+            save_delivery(out_dir, lease, 'downloading')
             err: DownloadError | None = None
             for attempt in range(retries + 1):
                 try:
@@ -1518,12 +1418,18 @@ def do_one(cfg: dict, lease: dict, args, state: RunState,
                     die(EXIT_USAGE, "找不到 curl，请先安装（apt install curl）")
             if err is not None:
                 detail = f"下载失败：{err}"
+                save_delivery(out_dir, lease, 'download_failed', error=detail)
                 return (False, detail, classify_fail(detail),
                         {**_dl_stats(lease), "retries": dl_retries})
             # 本片已落地、命令还没起：正是开预取的时机（不与本片的下载抢带宽）。
             metrics.update(_dl_stats(lease))
             pre = start_prefetch(ahead, Path(args.out) if args.out else Path.cwd() / 'fox-work', cfg, args)
+        state.source_ready = True
+        from .center_runtime.delivery_state import save as save_delivery
+        save_delivery(out_dir, lease, 'processing')
         t_task = time.time()
+        from .center_runtime.artist import prepare as prepare_artist
+        prepare_artist(cfg, lease, out_dir)
         if lease.get("resume_supported"):
             from .center_runtime.artifacts import resume
             resume(cfg, lease, out_dir, shard)
@@ -1651,11 +1557,11 @@ def release_unused(cfg: dict, leases: list[dict], keep: set[str] | None = None) 
     """把手上用不到的租约还给服务端（申报制下走管理员语义的 release 端点）。
 
     只还"确定不会做"的片：收工时多派的 prelock、--once/--max-packages 到配额
-    后服务端新派来的下一片、SIGTERM/Ctrl-C 优雅收尾时的全部租约（含 active，
-    见 cmd_run 的 KeyboardInterrupt 分支——那是设备管理员的主动申报动作）。
-    申报制下 open 租约永久有效，租着不还并不会过期消失，反而会占住包让别人
+    后服务端新派来的下一片，以及独立命令行 SIGTERM/Ctrl-C 收尾时的租约。
+    WebUI 普通停止保留租约；明确的停止并释放由客户端另行通知中心。
+    在线租约成功上报后 48 小时内有效，不用的包主动归还，避免占住包让别人
     领不到——所以该还的还是要主动还。
-    崩溃不走这里：interrupt 的 active 租约保留在设备名下，重启后 handshake
+    崩溃不走这里：active 租约保留在设备名下，重启后 handshake
     幂等续接（见 _run_loop / SPEC-declare §7）。
     """
     keep = keep or set()
@@ -1753,6 +1659,10 @@ def cmd_run(args) -> int:
     max_fails = max(1, int(getattr(args, "max_fails", MAX_CONSEC_FAILS) or MAX_CONSEC_FAILS))
 
     while True:
+        drain = os.environ.get("FOXLABEL_DRAIN_FILE")
+        if drain and Path(drain).exists():
+            log("当前分片已结束，交还执行权以调整配置")
+            return EXIT_OK
         leases = _claim(cfg)
         if not leases:
             log("服务端暂无派工（池子空了或配额已满）")
@@ -1773,6 +1683,9 @@ def cmd_run(args) -> int:
                                    args.idle_timeout - (time.time() - last_work)))
             log(f"{nap:.0f}s 后再看（Ctrl-C 结束）")
             while nap > 0 and not pinger.stop.is_set():
+                if drain and Path(drain).exists():
+                    pinger.stop.set()
+                    break
                 step = min(1.0, nap)
                 time.sleep(step)
                 nap -= step
@@ -1786,25 +1699,26 @@ def cmd_run(args) -> int:
         log("派工：" + "、".join(f"{l['kind']}:{l['package']}" for l in leases))
         held: list[dict] = list(leases)
         interrupted = False
+        returned = False
         try:
             rc = _run_loop(cfg, args, out_dir, leases, held, done)
+            returned = True
         except KeyboardInterrupt:
-            # SIGTERM/Ctrl-C 优雅收尾：这是设备管理员的**主动申报动作**——
-            # 手上全部租约（含正在处理的 active）当场归还，包立刻回池，
-            # 别人马上能领。与崩溃不同：崩溃时进程可能已死，租约留名下
-            # 交管理员面板处理（SPEC-declare §7）。
             interrupted = True
-            release_unused(cfg, held)
-            print("\n收到中断，已停止（未提交的产物保留在本地）")
+            if os.environ.get('FOXLABEL_KEEP_LEASES_ON_STOP') == '1':
+                print("\n收到停止请求，租约保留，48 小时内可续做（本地产物保留）")
+            else:
+                release_unused(cfg, held)
+                print("\n收到中断，已停止（未提交的产物保留在本地）")
             return EXIT_OK
         except BaseException:
             # 崩溃/异常退出：**不还租约**（申报制，SPEC-declare §7）。open
-            # 租约永久有效，留在设备名下正好——重启后 handshake 幂等续接
+            # 48 小时内重启可由 handshake 幂等续接；超过截止时间会重新分配
             # 把同一片派回来，本地已校验的分片直接复用，不重复下载。
             # 管理员随时可在面板人工释放。
             raise
         finally:
-            if not interrupted:
+            if returned and not interrupted:
                 release_unused(cfg, held)
         last_work = time.time()
 
@@ -1847,80 +1761,114 @@ def _run_loop(cfg: dict, args, out_dir: Path,
             log("手上没有 active，结束")
             break
         state = RunState()
+        state.package_index = done['n'] + 1
         held[:] = [l for l in leases if l["lease_id"] != active["lease_id"]]
         # 服务端在同一批里给的下一片（prelock）。这一片跑活时顺手把它下好，
         # 交付完直接开工，不再有"下 20G 的空窗"。没有就是 None，行为不变。
         ahead = next((l for l in leases if l["kind"] == "prelock"), None)
+        from .center_runtime.artifacts import directory
+        actual_out = directory(out_dir, active) if active.get('resume_supported') else out_dir
+        report = None
         from .center_runtime.liveness import Liveness
-        live = Liveness(cfg, leases, state, api)
-        live.start()
-        try:
-            # 存活上报供离线预锁回收使用；执行租约仍由设备或管理员显式关闭。
-            ok, detail, fail_kind, metrics = do_one(cfg, active, args, state, ahead)
-        except KeyboardInterrupt:
-            # SIGTERM/Ctrl-C 到达在 do_one 内部：把 active 也交给上层
-            # cmd_run 的优雅收尾分支归还（挂到 held 里带上）。
-            held.append(active)
-            if getattr(args, "auto_upload", False) and active.get("resume_supported"):
-                from .center_delivery import deliver
-                from .center_runtime.artifacts import directory
-                try:
-                    deliver(cfg, active, directory(out_dir, active), budget=45)
-                except Exception as exc:
-                    log(f"[warn] 中断回传未完成：{exc}；本机产物保留")
-            raise
-        finally:
-            live.finish()
-
-        # finish 申报：done/failed 都必须显式申报（租约唯一的客户端关闭路径）。
-        # done 带最终 progress（面板租约进度停在最后已知值，finish 一次性补齐）；
-        # failed 带 reason 与最终 progress。
-        final_progress = state.progress()
-        # 本片跳过/剔除的 id 与原因随 finish 一起申报。只在 ok（走 /done）时
-        # 拼：/fail 的 stats 不写 packages.note，塞进去等于白费。
-        # 服务端若还是旧版（stats 截 200 字），被切掉的只是明细段——统计部分
-        # 在前面，功能不受影响；升级服务端后明细自动全量到位。
-        note = args.note or ""
-        if ok:
-            from .center_runtime.artifacts import directory
-            actual_out = directory(out_dir, active) if active.get("resume_supported") else out_dir
-            extra, n, total = skip_note_for(actual_out, active["package"])
-            if n:
-                note = (f"{note} / " if note else "") + f"跳过明细({n}/{total}): {extra}"
-                log(f"[ok] 本片 {n}/{total} 条跳过/剔除明细随 finish 上报调度中心")
-                if n < total:
-                    log(f"[warn] 另有 {total - n} 条装不进本次申报，"
-                        f"完整清单留在本机 skipped.jsonl / excused.jsonl")
-        try:
-            if getattr(args, "auto_upload", False) and (ok or active.get("resume_supported")):
-                from .center_delivery import deliver
-
-                try:
+        with Liveness(cfg, leases, state, api) as live:
+            try:
+                # 心跳覆盖执行、上传与验收，长时间回传期间也能续期和接收租约撤销。
+                ok, detail, fail_kind, metrics = do_one(cfg, active, args, state, ahead)
+            except KeyboardInterrupt:
+                # 把 active 纳入停止收尾；WebUI 保留，独立 CLI 归还。
+                held.append(active)
+                if getattr(args, "auto_upload", False) and active.get("resume_supported") and state.source_ready:
+                    from .center_delivery import deliver
                     from .center_runtime.artifacts import directory
-                    actual_out = directory(out_dir, active) if active.get("resume_supported") else out_dir
-                    report = deliver(cfg, active, actual_out)
-                    if report and report.get('source_verification', {}).get('state') not in ('pending', 'failed') and not set(parts_to_do(active, args)).issubset(report["complete_parts"]):
-                        ok, detail, fail_kind = False, "逐图检查仍有失败、漏项或冲突", "incomplete"
-                except Exception as e:
-                    # 不关闭 active；重启后续接并补传，预锁仍由外层归还。
-                    log(f"[X] 自动回传失败：{e}；产物与当前租约保留，重新开始可补传")
-                    return EXIT_DOWNLOAD
-            res = declare_finish(cfg, active["lease_id"], ok, detail,
-                                 final_progress, note,
-                                 fail_kind=fail_kind, metrics=metrics,
-                                 parts=parts_declare(active, ok, args))
-        except AuthError as e:
-            die(EXIT_AUTH, f"认证失败：{e}")
-        except ApiError as e:
-            if e.code == 409:
-                # 租约已关闭：多半是管理员在面板释放过，或这条租约已申报过。
-                log(f"[X] {e.msg}（租约已关闭——可能被管理员释放或已申报过，"
-                    f"停手退出；未提交的产物保留在本地，重新运行即可）")
+                    try:
+                        deliver(cfg, active, directory(out_dir, active), budget=45)
+                    except Exception as exc:
+                        log(f"[warn] 中断回传未完成：{exc}；本机产物保留")
+                raise
+            except Exception as exc:
+                from .blob_client import BlobClientError
+                if not isinstance(exc, BlobClientError):
+                    raise
+                from .center_runtime.delivery_state import failed
+                permanent = failed(actual_out, active, exc)
+                log(f"[X] 分片准备失败：{exc}；本地产物保留" + ('，已停止自动重试' if permanent else '，稍后自动重试'))
+                return (EXIT_AUTH if exc.code in (401, 403) else EXIT_LEASE if exc.code == 409 else EXIT_USAGE) if permanent else EXIT_DOWNLOAD
+
+            if state.stop.is_set():
+                log('[X] 中心已撤销当前租约，停止回传与申报；本地产物保留')
                 return EXIT_LEASE
-            die(EXIT_USAGE, f"申报失败：{e}")
+
+            # finish 申报：done/failed 都必须显式申报（租约唯一的客户端关闭路径）。
+            # done 带最终 progress（面板租约进度停在最后已知值，finish 一次性补齐）；
+            # failed 带 reason 与最终 progress。
+            final_progress = state.progress()
+            # 本片跳过/剔除的 id 与原因随 finish 一起申报。只在 ok（走 /done）时
+            # 拼：/fail 的 stats 不写 packages.note，塞进去等于白费。
+            # 服务端若还是旧版（stats 截 200 字），被切掉的只是明细段——统计部分
+            # 在前面，功能不受影响；升级服务端后明细自动全量到位。
+            note = args.note or ""
+            if ok:
+                extra, n, total = skip_note_for(actual_out, active["package"])
+                if n:
+                    note = (f"{note} / " if note else "") + f"跳过明细({n}/{total}): {extra}"
+                    log(f"[ok] 本片 {n}/{total} 条跳过/剔除明细随 finish 上报调度中心")
+                    if n < total:
+                        log(f"[warn] 另有 {total - n} 条装不进本次申报，"
+                            f"完整清单留在本机 skipped.jsonl / excused.jsonl")
+            try:
+                local_report = None
+                if ok and os.environ.get('FOXLABEL_LOCAL_COMPLETE') == '1':
+                    from .center_runtime.artifacts import inspect
+                    _, digest, _, _, _, local_report = inspect(active,actual_out)
+                    local_report = {**local_report,'source_sha256':digest}
+                    if not set(parts_to_do(active,args)).issubset(local_report['complete_parts']):
+                        log('[X] 本地产物仍有失败、漏项或冲突；当前租约与产物保留，重新开始可续做')
+                        return EXIT_TASK
+                if getattr(args, "auto_upload", False) and (ok or active.get("resume_supported") and state.source_ready):
+                    from .center_delivery import deliver
+
+                    try:
+                        report = deliver(cfg, active, actual_out)
+                        if report and report.get('source_verification', {}).get('state') not in ('pending', 'failed') and not set(parts_to_do(active, args)).issubset(report["complete_parts"]):
+                            ok, detail, fail_kind = False, "逐图检查仍有失败、漏项或冲突", "incomplete"
+                    except Exception as e:
+                        # 不关闭 active；重启后续接并补传，预锁仍由外层归还。
+                        from .center_runtime.delivery_state import failed
+                        rejected = failed(actual_out, active, e)
+                        if rejected:
+                            log(f"[X] 中心验收未通过：{e}；已停止自动重试，本地产物保留")
+                            if e.report:
+                                log('[验收明细] ' + json.dumps(e.report, ensure_ascii=False))
+                            return EXIT_AUTH if e.code in (401, 403) else EXIT_LEASE if e.code == 409 else EXIT_USAGE
+                        log(f"[X] 自动回传失败：{e}；产物与当前租约保留，重新开始可补传")
+                        return EXIT_DOWNLOAD
+                res = declare_finish(cfg, active["lease_id"], ok, detail,
+                                     final_progress, note,
+                                     fail_kind=fail_kind, metrics=metrics,
+                                     parts=parts_declare(active, ok, args), local_report=local_report,
+                                     stop=state.stop)
+            except KeyboardInterrupt:
+                held.append(active)
+                raise
+            except AuthError as e:
+                die(EXIT_AUTH, f"认证失败：{e}")
+            except ApiError as e:
+                if getattr(args, 'auto_upload', False):
+                    from .blob_client import BlobClientError
+                    from .center_runtime.delivery_state import failed
+                    failed(actual_out, active, BlobClientError(e.msg, code=e.code))
+                if e.code == 409:
+                    # 租约已关闭：多半是管理员在面板释放过，或这条租约已申报过。
+                    log(f"[X] {e.msg}（租约已关闭——可能被管理员释放或已申报过，"
+                        f"停手退出；未提交的产物保留在本地，重新运行即可）")
+                    return EXIT_LEASE
+                die(EXIT_USAGE, f"申报失败：{e}")
         # declare_finish 内部已把网络故障重试到成功；到这里申报一定已落账。
 
         if not ok:
+            if getattr(args, 'auto_upload', False) and report:
+                from .center_runtime.delivery_state import save
+                save(actual_out, active, 'incomplete', error=detail, report=report)
             log(f"[X] 本次失败（已申报 fail）：{detail}")
             # 申报 fail 的响应里服务端**照样会补派下一片**（assign 无条件执行）。
             # 以前这里直接 return，那片就成了没人认领的 open 租约——申报制下不会
@@ -1928,9 +1876,14 @@ def _run_loop(cfg: dict, args, out_dir: Path,
             # 已经失败了，先把它还回去，让别的设备马上能领。
             release_unused(cfg, res.get("leases") or [])
             return EXIT_TASK
-        log(f"已交付 {active['package']}" + ('，等待中心核验' if res.get('verification_pending') else ''))
+        log(f"本地已完成 {active['package']}，等待回传；中心保留分项占用" if res.get('local_complete')
+            else f"已交付 {active['package']}" + ('，等待中心核验' if res.get('verification_pending') else ''))
+        if getattr(args, 'auto_upload', False):
+            from .center_runtime.delivery_state import save
+            save(actual_out, active, 'pending' if res.get('verification_pending') else 'completed', report=report)
         done["n"] += 1
-        if args.once:
+        drain = os.environ.get("FOXLABEL_DRAIN_FILE")
+        if args.once or (drain and Path(drain).exists()):
             release_unused(cfg, res.get("leases") or [])
             return EXIT_OK
         if args.max_packages and done["n"] >= args.max_packages:
@@ -2004,7 +1957,7 @@ def main() -> int:
 
     args = ap.parse_args()
     # POSIX 上把 SIGTERM 也走与 Ctrl-C 同一条收尾路径：否则 --wait 常驻时被
-    # systemd/容器停止会硬杀；申报制租约不会过期，必须主动归还或由中心释放。
+    # systemd/容器停止会硬杀；主动归还让空闲分片及时回池。
     def _graceful(signum, frame):
         raise KeyboardInterrupt
 

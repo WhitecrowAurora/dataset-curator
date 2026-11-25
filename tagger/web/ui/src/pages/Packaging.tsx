@@ -431,7 +431,6 @@ export function Packaging() {
         icon={<Boxes size={17} />}
         eyebrow="数据打包"
         title="分包 · 拼接 · 封包"
-        description="三条链路一次只跑一个"
         actions={
           <>
             {running ? (
@@ -499,10 +498,7 @@ export function Packaging() {
         <div className="flex min-w-0 flex-col gap-3.5">
           {mode === 'split' && (
             <SectionPanel title="分包：素材 → 分发包 + 分包表">
-              <SettingRow
-                label="素材目录"
-                help="装图的文件夹或单个大 zip；image_id 在这里一次性分配"
-              >
+              <SettingRow label="素材目录">
                 <div className="flex gap-2">
                   <input
                     className="lx-input font-mono text-xs"
@@ -523,10 +519,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow
-                label="切分方式"
-                help="按字节切分的包大小更均匀，便于传输"
-              >
+              <SettingRow label="切分方式">
                 <div className="flex items-center gap-3">
                   <ChoiceGrid
                     options={SPLIT_MODES}
@@ -568,13 +561,12 @@ export function Packaging() {
 
               <SettingRow
                 label="画师表"
-                help="parquet、分片目录，或 hf://datasets/<repo>/<路径>；留空跟配置走"
                 description={
                   artistTable.trim()
                     ? '按 post id 查画师，查不到退回目录名'
                     : cfgArtistTable
                       ? `配置：${cfgArtistTable}`
-                      : '未配置，只从目录名取画师'
+                      : '仅从目录名提取'
                 }
               >
                 <div className="flex gap-2">
@@ -582,7 +574,7 @@ export function Packaging() {
                     className="lx-input font-mono text-xs"
                     value={artistTable}
                     onChange={(e) => setArtistTable(e.target.value)}
-                    placeholder={cfgArtistTable || 'K:/anlia/_artist/danbooru_artists.parquet'}
+                    placeholder={cfgArtistTable || 'parquet / 目录 / hf://datasets/...'}
                     disabled={running}
                   />
                   <button
@@ -598,10 +590,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow
-                label="去重清单"
-                help="填了重复图就不进包、不占 image_id"
-              >
+              <SettingRow label="去重清单">
                 <div className="flex gap-2">
                   <input
                     className="lx-input font-mono text-xs"
@@ -625,7 +614,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow label="上一批分包表" help="首批留空；后续批次填上一批的表，自动衔接编号">
+              <SettingRow label="上一批分包表" help="续批时自动衔接编号">
                 <div className="flex gap-2">
                   <input className="lx-input font-mono text-xs" value={previousTable}
                     onChange={(e) => setPreviousTable(e.target.value)} disabled={running}
@@ -644,12 +633,12 @@ export function Packaging() {
               </SettingRow>
               {!previousTable.trim() && (
                 <>
-                  <SettingRow label="序号宽度" help="6 位最多 999999 张；上十亿要选 10 位，从第一批起保持一致">
+                  <SettingRow label="序号宽度" help="上十亿建议选 10 位">
                     <input type="number" className="lx-input w-28 font-mono" min={1} max={12}
                       value={splitSeqWidth} disabled={running}
                       onChange={(e) => setSplitSeqWidth(Math.min(12, Math.max(1, Math.trunc(Number(e.target.value)) || 6)))} />
                   </SettingRow>
-                  <SettingRow label="起始序号" help="新数据集从 1 开始；续批请填上面的上一批分包表">
+                  <SettingRow label="起始序号">
                     <input type="number" className="lx-input font-mono" min={1} max={999999999999}
                       value={startSeq} disabled={running}
                       onChange={(e) => setStartSeq(Math.min(999999999999, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))} />
@@ -660,7 +649,7 @@ export function Packaging() {
               <details className="px-1">
                 <summary className="cursor-pointer text-xs text-lx-muted">高级</summary>
                 <div className="mt-3 space-y-4">
-                  <SettingRow label="输出目录" help="默认为素材旁的 <名字>-dist/">
+                  <SettingRow label="输出目录">
                     <div className="flex gap-2">
                       <input
                         className="lx-input font-mono text-xs"
@@ -681,10 +670,7 @@ export function Packaging() {
                       </button>
                     </div>
                   </SettingRow>
-                  <SettingRow
-                    label="分包表"
-                    help="拼接对账的凭证；同名表会被拒"
-                  >
+                  <SettingRow label="分包表" help="拼接对账凭证，不可同名">
                     <input
                       className="lx-input font-mono text-xs"
                       value={splitTable}
@@ -694,7 +680,7 @@ export function Packaging() {
                       disabled={running}
                     />
                   </SettingRow>
-                  <SettingRow label="包内布局" help="flat 全平铺；mirror 保留原目录层级">
+                  <SettingRow label="包内布局">
                     <ChoiceGrid
                       options={LAYOUTS}
                       value={splitLayout}
@@ -710,14 +696,13 @@ export function Packaging() {
                     checked={splitRecursive}
                     onChange={setSplitRecursive}
                     label="包含子目录"
-                    hint="关掉只扫第一层"
                     disabled={running}
                   />
                   <ToggleRow
                     checked={splitVerify}
                     onChange={setSplitVerify}
                     label="写完回读校验"
-                    hint="逐包回读，核对首尾 id 与条数"
+                    hint="核对首尾 id 与条数"
                     disabled={running}
                   />
                 </div>
@@ -779,7 +764,7 @@ export function Packaging() {
             <SectionPanel title="拼接：回收目录 → 对账 → 总表">
               <SettingRow
                 label="回收目录"
-                help="装 -tag.json / -nl.json 的目录，可多个"
+                help="含 -tag.json / -nl.json，可多个"
                 icon={<FolderSearch size={14} />}
               >
                 <div className="space-y-2">
@@ -826,10 +811,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow
-                label="产物要求"
-                help="both = tag 和 NL 都有才算完整"
-              >
+              <SettingRow label="产物要求">
                 <div className="flex items-center gap-3">
                   <ChoiceGrid
                     options={REQUIRES}
@@ -854,15 +836,13 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow
-                label="抽检张数"
-                help="随机抽 N 条做人工比对；0 = 不抽"
-              >
+              <SettingRow label="抽检张数">
                 <input
                   type="number"
                   className="lx-input w-24 font-mono tabular-nums"
                   min={0}
-                  value={sampleN}
+                  value={sampleN || ''}
+                  placeholder="不抽"
                   onChange={(e) => setSampleN(Math.max(0, Number(e.target.value) || 0))}
                   disabled={running}
                 />
@@ -871,7 +851,7 @@ export function Packaging() {
               <details className="px-1">
                 <summary className="cursor-pointer text-xs text-lx-muted">高级</summary>
                 <div className="mt-3 space-y-4">
-                  <SettingRow label="分发包目录" help="dist-*.zip 所在目录；给了才能对账整包缺失">
+                  <SettingRow label="分发包目录" help="用于整包缺失对账">
                     <div className="flex gap-2">
                       <input
                         className="lx-input font-mono text-xs"
@@ -891,7 +871,7 @@ export function Packaging() {
                       </button>
                     </div>
                   </SettingRow>
-                  <SettingRow label="分包总表" help="每行一份分包表，多批一起对账">
+                  <SettingRow label="分包总表" help="每行一份">
                     <textarea
                       className="lx-input font-mono text-xs"
                       value={mergeTable}
@@ -902,7 +882,7 @@ export function Packaging() {
                       disabled={running}
                     />
                   </SettingRow>
-                  <SettingRow label="总表输出" help="默认 work/merged.jsonl">
+                  <SettingRow label="总表输出">
                     <input
                       className="lx-input font-mono text-xs"
                       value={mergeOut}
@@ -912,7 +892,7 @@ export function Packaging() {
                       disabled={running}
                     />
                   </SettingRow>
-                  <SettingRow label="抽检清单" help="默认 work/sample.md">
+                  <SettingRow label="抽检清单">
                     <input
                       className="lx-input font-mono text-xs"
                       value={sampleOut}
@@ -922,7 +902,7 @@ export function Packaging() {
                       disabled={running}
                     />
                   </SettingRow>
-                  <SettingRow label="数据集名" help="总表 image_path 的前缀；留空用配置默认">
+                  <SettingRow label="数据集名" help="image_path 前缀">
                     <input
                       className="lx-input font-mono text-xs"
                       value={dataset}
@@ -936,7 +916,6 @@ export function Packaging() {
                     checked={keepEmpty}
                     onChange={setKeepEmpty}
                     label="保留不完整记录"
-                    hint="开着会把缺字段的也写进总表"
                     disabled={running}
                   />
                 </div>
@@ -948,7 +927,6 @@ export function Packaging() {
             <SectionPanel title="封包：tags 产物 → 训练分片">
               <SettingRow
                 label="图片目录"
-                help="打标时的素材目录，封包要重读原图"
                 icon={<Package size={14} />}
               >
                 <div className="flex gap-2">
@@ -973,7 +951,7 @@ export function Packaging() {
 
               <SettingRow
                 label="产物目录"
-                help="打标输出目录，要含 tags/；成品 pack-* 落在一起"
+                help="需含 tags/ 目录"
               >
                 <div className="flex gap-2">
                   <input
@@ -996,7 +974,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow label="格式" help="可多选">
+              <SettingRow label="格式">
                 <div className="grid grid-cols-3 gap-2">
                   {FORMATS.map((f) => {
                     const active = formats.includes(f.value)
@@ -1021,10 +999,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow
-                label="重编码"
-                help="仅非 JPEG = 原图 JPEG 直通不二压"
-              >
+              <SettingRow label="重编码">
                 <ChoiceGrid
                   options={REENCODES}
                   value={reencode}
@@ -1042,14 +1017,11 @@ export function Packaging() {
                 label="JPEG 质量"
                 description={
                   reencode === 'never'
-                    ? '保留原字节，此项不生效'
+                    ? '保留原字节，不生效'
                     : quality < 92
-                      ? '低于 92 有可见块效应'
-                      : quality >= 98
-                        ? '体积最大，收益有限'
-                        : undefined
+                      ? '低于 92 可能出现块效应'
+                      : undefined
                 }
-                help="所有图按这个质量重压；90~100"
                 icon={<Palette size={14} />}
               >
                 <div className="flex items-center gap-3">
@@ -1076,16 +1048,7 @@ export function Packaging() {
 
               <SettingRow
                 label="色度采样"
-                description={
-                  reencode === 'never'
-                    ? '保留原字节，此项不生效'
-                    : subsampling === '0'
-                      ? '体积约为 4:2:0 的两倍'
-                      : subsampling === '1'
-                        ? '横向砍半，细线有色晕'
-                        : '体积最小，饱和色/细线有色晕'
-                }
-                help="4:4:4 最保真，4:2:0 体积最小"
+                description={reencode === 'never' ? '保留原字节，不生效' : undefined}
               >
                 <ChoiceGrid
                   options={SUBSAMPLING}
@@ -1102,8 +1065,7 @@ export function Packaging() {
 
               <SettingRow
                 label="编号方式"
-                description="必须与打标那次一致，否则找不到产物"
-                help="跟随目录 = 本机打的标；全局编号 = 成员打回来的"
+                description="需与打标时一致"
               >
                 <ChoiceGrid
                   options={ID_SCHEMES}
@@ -1118,7 +1080,7 @@ export function Packaging() {
               </SettingRow>
 
               {assignIds === 'global' && (
-                <SettingRow label="本批编号" help="宽度与起点要和分包表的 seq_width、start_seq 一致">
+                <SettingRow label="本批编号" help="需与分包表 seq_width / start_seq 一致">
                   <div className="flex gap-2">
                     <input type="number" className="lx-input w-24 font-mono" min={1} max={12}
                       aria-label="封包序号宽度" value={packSeqWidth} disabled={running}
@@ -1131,9 +1093,8 @@ export function Packaging() {
               )}
 
               <SettingRow
-                label="画师三件套"
-                description="要与打标时一致，否则指纹会拦住重封"
-                help="画师名写进归档名；注入写进 caption 正文"
+                label="画师"
+                description="需与打标时一致"
               >
                 <div className="flex flex-wrap items-center gap-3">
                   <ToggleRow checked={artist} onChange={setArtist} label="启用画师名" />
@@ -1159,13 +1120,12 @@ export function Packaging() {
 
               <SettingRow
                 label="画师表"
-                help="parquet、分片目录，或 hf://datasets/<repo>/<路径>；留空跟配置走"
                 description={
                   artistTable.trim()
                     ? '按 post id 查画师，查不到退回目录名'
                     : cfgArtistTable
                       ? `配置：${cfgArtistTable}`
-                      : '未配置，只从目录名取画师'
+                      : '仅从目录名提取'
                 }
               >
                 <div className="flex gap-2">
@@ -1173,7 +1133,7 @@ export function Packaging() {
                     className="lx-input font-mono text-xs"
                     value={artistTable}
                     onChange={(e) => setArtistTable(e.target.value)}
-                    placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
+                    placeholder={cfgArtistTable || 'parquet / 目录 / hf://datasets/...'}
                     disabled={running || !artist}
                   />
                   <button
@@ -1189,7 +1149,7 @@ export function Packaging() {
                 </div>
               </SettingRow>
 
-              <SettingRow label="每包条数" help="写满就封口">
+              <SettingRow label="每包条数">
                 <input
                   type="number"
                   className="lx-input font-mono tabular-nums"
@@ -1203,21 +1163,22 @@ export function Packaging() {
               <details className="px-1">
                 <summary className="cursor-pointer text-xs text-lx-muted">高级</summary>
                 <div className="mt-3 space-y-4">
-                  <SettingRow label="每包大小上限" help="0 = 不限；适合图片体积差异大的库">
+                  <SettingRow label="每包大小上限">
                     <div className="flex items-center gap-2">
                       <input
                         type="number"
                         className="lx-input font-mono tabular-nums"
                         min={0}
                         step={0.5}
-                        value={packMaxBytesGB}
+                        value={packMaxBytesGB || ''}
+                        placeholder="不限"
                         disabled={running}
                         onChange={(e) => setPackMaxBytesGB(Math.max(0, Number(e.target.value) || 0))}
                       />
                       <span className="shrink-0 text-[11px] text-lx-muted">GB</span>
                     </div>
                   </SettingRow>
-                  <SettingRow label="zip 压缩" help="仅对 zip 分片生效；deflate 通常省不到 5%" icon={<Archive size={14} />}>
+                  <SettingRow label="zip 压缩" help="仅对 zip 分片生效" icon={<Archive size={14} />}>
                     <ChoiceGrid
                       options={COMPRESS}
                       value={compress}
@@ -1229,7 +1190,7 @@ export function Packaging() {
                       ariaLabel="压缩方式"
                     />
                   </SettingRow>
-                  <SettingRow label="包内布局" help="flat 全平铺；mirror 保留原目录层级">
+                  <SettingRow label="包内布局">
                     <ChoiceGrid
                       options={LAYOUTS}
                       value={packLayout}
@@ -1245,7 +1206,7 @@ export function Packaging() {
                     checked={checkSpace}
                     onChange={setCheckSpace}
                     label="盘位预算"
-                    hint="按预计产出 + 20% 冗余判断，写不下直接拒绝"
+                    hint="按预计产出 + 20% 冗余预检"
                     disabled={running}
                   />
                 </div>

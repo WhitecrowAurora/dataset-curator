@@ -1,0 +1,196 @@
+{
+  "comparisons": [
+    {
+      "key": "2",
+      "torch_s": 20.734781799998018,
+      "fla_s": 16.97408329999962,
+      "packed_s": 21.581908600001043,
+      "torch_tokens": 243,
+      "fla_tokens": 243,
+      "packed_tokens": 243,
+      "dense_fla_equal_tokens": true,
+      "packed_fla_equal_tokens": true,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "hutao",
+      "torch_s": 25.19434960000217,
+      "fla_s": 18.62072900000203,
+      "packed_s": 24.276198900002782,
+      "torch_tokens": 314,
+      "fla_tokens": 278,
+      "packed_tokens": 278,
+      "dense_fla_equal_tokens": false,
+      "packed_fla_equal_tokens": false,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "mostima",
+      "torch_s": 22.451165300000866,
+      "fla_s": 19.487483199998678,
+      "packed_s": 24.86550360000183,
+      "torch_tokens": 288,
+      "fla_tokens": 288,
+      "packed_tokens": 288,
+      "dense_fla_equal_tokens": true,
+      "packed_fla_equal_tokens": true,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "107",
+      "torch_s": 15.282427500002086,
+      "fla_s": 12.633463400001347,
+      "packed_s": 16.456726099997468,
+      "torch_tokens": 188,
+      "fla_tokens": 188,
+      "packed_tokens": 188,
+      "dense_fla_equal_tokens": true,
+      "packed_fla_equal_tokens": true,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "106",
+      "torch_s": 17.216452199998457,
+      "fla_s": 14.718004999998811,
+      "packed_s": 19.134913099998812,
+      "torch_tokens": 216,
+      "fla_tokens": 216,
+      "packed_tokens": 216,
+      "dense_fla_equal_tokens": true,
+      "packed_fla_equal_tokens": true,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "201",
+      "torch_s": 16.29774400000315,
+      "fla_s": 13.016662099998939,
+      "packed_s": 16.767839200001617,
+      "torch_tokens": 195,
+      "fla_tokens": 195,
+      "packed_tokens": 195,
+      "dense_fla_equal_tokens": true,
+      "packed_fla_equal_tokens": true,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "mostima-head",
+      "torch_s": 22.18401580000136,
+      "fla_s": 19.589586500002042,
+      "packed_s": 24.548687999998947,
+      "torch_tokens": 288,
+      "fla_tokens": 288,
+      "packed_tokens": 288,
+      "dense_fla_equal_tokens": true,
+      "packed_fla_equal_tokens": true,
+      "equal_hair": true,
+      "stop": true
+    },
+    {
+      "key": "hutao",
+      "torch_s": 24.807181000000128,
+      "fla_s": 18.40862879999986,
+      "packed_s": 24.279769799999485,
+      "torch_tokens": 314,
+      "fla_tokens": 278,
+      "packed_tokens": 278,
+      "dense_fla_equal_tokens": false,
+      "packed_fla_equal_tokens": false,
+      "equal_hair": true,
+      "stop": true
+    }
+  ],
+  "crops": [
+    {
+      "file": "crops-dense.json",
+      "key": "mostima-head",
+      "torch_s": 14.031851499999902,
+      "fla_s": 11.191237299997738,
+      "equal_tokens": true,
+      "equal_hair": true,
+      "dimensions": [
+        410,
+        340
+      ],
+      "crop": [
+        560,
+        20,
+        970,
+        360
+      ]
+    },
+    {
+      "file": "crops-dense.json",
+      "key": "202",
+      "torch_s": 15.331036400002631,
+      "fla_s": 12.531432499999937,
+      "equal_tokens": true,
+      "equal_hair": true,
+      "dimensions": [
+        420,
+        545
+      ],
+      "crop": null
+    },
+    {
+      "file": "crops-packed.json",
+      "key": "mostima-head",
+      "torch_s": 15.876908100002765,
+      "fla_s": 13.174581600000238,
+      "equal_tokens": true,
+      "equal_hair": true,
+      "dimensions": [
+        410,
+        340
+      ],
+      "crop": [
+        560,
+        20,
+        970,
+        360
+      ]
+    },
+    {
+      "file": "crops-packed.json",
+      "key": "202",
+      "torch_s": 17.661575599999196,
+      "fla_s": 15.064436500000738,
+      "equal_tokens": true,
+      "equal_hair": true,
+      "dimensions": [
+        420,
+        545
+      ],
+      "crop": null
+    }
+  ],
+  "budgets": {
+    "quality-torch": {
+      "load_s": 21.395596499998646,
+      "allocated_gib": 9.727769374847412,
+      "peak_gib": 10.160341739654541,
+      "total_s": 164.16811720000624,
+      "tokens": 2046
+    },
+    "quality-fla": {
+      "load_s": 22.777308900000207,
+      "allocated_gib": 9.727769374847412,
+      "peak_gib": 10.160529136657715,
+      "total_s": 133.44864130000133,
+      "tokens": 1974
+    },
+    "quality-packed": {
+      "load_s": 22.92529579999973,
+      "allocated_gib": 4.360009670257568,
+      "peak_gib": 4.791684150695801,
+      "total_s": 171.91154730000198,
+      "tokens": 1974
+    }
+  },
+  "normalized_generation_time_reduction": 0.15964332750762822
+}

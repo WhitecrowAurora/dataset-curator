@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "preview": {
+    "ok": false,
+    "error": "来源不被信任",
+    "code": "origin_rejected"
+  },
+  "requires_confirmation": true,
+  "confirmation": {
+    "confirmed": 1
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"backup\": \"/tagger/.delete/artist-discovery-20261123-1500\", \"hashes\": {\"fox-label/annotation/discovery.py\": null, \"fox-label/annotation/routes.py\": \"76d9ff32c9e0602e90068585f9d014fd780221b4b9a079d6646e0d7c632a63de\", \"fox-label/source_catalog/routes.py\": \"8e602ee4cac37d82f9bffda83eaa990867f64af71d425094bb0fec92931de085\", \"fox-panel/panel.py\": \"1e93b49c188ac1efd2799b09a7ccb272053b5352e4ed3eabed72eb7018a2602c\", \"fox-panel/web/artist.js\": \"27cbc506a7d074e94ae1902336a39c35401711541c0b86f7663f3e6aee4d0cd9\", \"fox-panel/web/app.js\": \"0528db3022c604f379ef1929d63b9887ca464d0762ad59d8bdc87e8ee0148ed1\", \"fox-panel/web/workspace.js\": \"5dd379dec581402b8137532903b4619f8f59026a52d1b8e5a8e113152ec04f62\"}}\n",
+  "stderr": ""
+}

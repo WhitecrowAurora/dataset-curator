@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "actualBuiltUi": true,
+  "artistReviewVisible": true,
+  "reloadKeepsReview": true,
+  "nlOnlyNoTagBatch": true,
+  "recoveryCountdown": true,
+  "resumeButton": true,
+  "noPageErrors": true
+}

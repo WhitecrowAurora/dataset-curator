@@ -1,0 +1,20 @@
+--- server/fox-panel/web/managed-tuning.js
++++ candidate/fox-panel/web/managed-tuning.js
+@@ -10,7 +10,7 @@
+     metric(parent, "本机已交付 " + (d.completed_packages || 0) + " 个分片（包括等待中心核验的提交）");
+     if(d.execution_limit && typeof d.execution_limit.completed === 'number') metric(parent,'本轮已完成 '+d.execution_limit.completed+' 片 · 上限 '+(d.execution_limit.max_packages||'不限'));
+     (d.pending_results||[]).forEach(function(r){metric(parent,'本地已完成、待回传：'+r.pkg+' · '+r.parts.join(' / ').toUpperCase());});
+-    Object.keys(d.parallel||{}).forEach(function(key){var v=d.parallel[key];metric(parent,(key==='concurrency'?'NL 并发':'TAG 批大小')+'：'+(v.value||'自动')+' · 来源：'+v.source);});
++    Object.keys(d.parallel||{}).forEach(function(key){var v=d.parallel[key];metric(parent,(key==='concurrency'?'NL 并发':'TAG 批大小')+'：'+(v.value||'自动')+' · 来源：'+v.source);if(v.warning)metric(parent,v.warning);});
+     (d.leases || []).forEach(function (lease) {
+       metric(parent, (lease.kind === "active" ? "执行租约：" : "预取租约：") + lease.package + " · " + Math.round(lease.beat_ago_s) + " 秒前收到存活心跳"
+         + (lease.kind === "active" && lease.beat_ago_s > 120 ? " · 执行心跳已中断，需确认设备是否仍在运行；租约保留以便续做" : ""));
+@@ -51,7 +51,7 @@
+       var label = node("label"); label.className = "fp-field";
+       label.appendChild(node("span", k === "concurrency" ? "NL 并发（0 自动）" : "TAG 批大小（0 自动）"));
+       var input = node("input"); input.type = "number"; input.min = "0";
+-      input.max = k === "tag_batch" ? "128" : cfg.nl_model === "torii-gate-0.5" ? cfg.nl_engine === "native" ? "4" : "1" : "64";
++      input.max = k === "tag_batch" ? "128" : "64";
+       input.value = draft[k] === undefined ? cfg[k] : draft[k]; input.disabled = !writable;
+       input.setAttribute("aria-label", k === "concurrency" ? "NL 并发" : "TAG 批大小");
+       input.addEventListener("input", function () {draft[k] = input.value;});

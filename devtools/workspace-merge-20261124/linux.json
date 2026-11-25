@@ -1,0 +1,21 @@
+{
+  "production_snapshot": true,
+  "preserved_tables": 20,
+  "preserved_rows": 4478,
+  "member_moved": "lulu",
+  "target": "Dru768",
+  "old_plan_fingerprint": true,
+  "auto_priority": true,
+  "unique_owner": true,
+  "http": {
+    "/api/workspaces": 200,
+    "/api/offline-tasks?ws_id=Dru768": 200,
+    "/api/managed/devices": 200,
+    "/offline-workorders?ws=Dru768": 200,
+    "/ai-access": 200,
+    "/static/workspace.js": 200,
+    "old_protocol_handshake_heartbeat": 200
+  },
+  "linux_runtime": true,
+  "ok": true
+}

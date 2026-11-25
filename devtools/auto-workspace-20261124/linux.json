@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "seconds": 2.062,
+  "real_http": true,
+  "concurrent_members": 10,
+  "duplicate_parts": 0,
+  "active_leases": 10,
+  "reconnect_same_leases": true,
+  "admin_assignment_preserved": true,
+  "manual_pause_preserved": true,
+  "resume_idempotent": true,
+  "production_store_untouched": true
+}

@@ -1,0 +1,9 @@
+{
+  "checks": [
+    "new job workflow toggles and anime guidance",
+    "model picker selects explicit gguf",
+    "two role crops confirmed and merged"
+  ],
+  "errors": [],
+  "model_fixture": true
+}

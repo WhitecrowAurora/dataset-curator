@@ -1,0 +1,471 @@
+{
+  "branches": [
+    {
+      "name": "mobile agreement",
+      "status": "accepted",
+      "calls": [
+        "mobilenetv3_v0_dist"
+      ]
+    },
+    {
+      "name": "caformer agreement",
+      "status": "accepted",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0"
+      ]
+    },
+    {
+      "name": "qwen agrees pixai",
+      "status": "accepted",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "qwen agrees mobile",
+      "status": "accepted",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "qwen agrees caformer",
+      "status": "accepted",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "qwen disagreement",
+      "status": "review",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "qwen unavailable",
+      "status": "review",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "null hair",
+      "status": "review",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "ambiguous baseline",
+      "status": "review",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "light is not a final hair color",
+      "status": "review",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    },
+    {
+      "name": "concrete shallow agreement",
+      "status": "accepted",
+      "calls": [
+        "mobilenetv3_v0_dist",
+        "caformer_s36_v0",
+        "qwen"
+      ]
+    }
+  ],
+  "runtime": [
+    {
+      "id": "8a28e1daa97f4821acbb8ed8f99a8e7d",
+      "image_name": "portrait.jpg",
+      "image_sha256": "1578277d89e6fab9d9cd92454e6f00bd6e3c4b6c42d59b7b15d3087231747653",
+      "crop": null,
+      "created": 1795017938.4012713,
+      "status": "accepted",
+      "selected": [
+        "blonde"
+      ],
+      "candidates": [
+        {
+          "color": "brown",
+          "label": "棕色",
+          "probability": 0.8535879850387573,
+          "swatch": "#8b634b"
+        },
+        {
+          "color": "light",
+          "label": "浅色组",
+          "probability": 0.1277257800102234,
+          "swatch": "#e3e1d8"
+        },
+        {
+          "color": "orange",
+          "label": "橙色",
+          "probability": 0.01016884483397007,
+          "swatch": "#de934e"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "blonde",
+          "probability": 0.95703125,
+          "scores": {
+            "black": 0.0012054443359375,
+            "blonde": 0.95703125,
+            "brown": 0.00628662109375,
+            "blue": 0.0003147125244140625,
+            "pink": 0.00048828125,
+            "white": 0.00830078125,
+            "grey": 0.00225830078125,
+            "purple": 0.0003452301025390625,
+            "red": 0.00048828125,
+            "green": 7.009506225585938e-05,
+            "orange": 0.00170135498046875,
+            "aqua": 4.00543212890625e-05
+          },
+          "source": "inference",
+          "ambiguous": false
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "brown",
+          "probability": 0.9987188577651978,
+          "scores": {
+            "aqua": 4.60678984381957e-06,
+            "blue": 4.63345531898085e-06,
+            "green": 8.977228389994707e-06,
+            "brown": 0.9987188577651978,
+            "orange": 0.0007246716995723546,
+            "pink": 0.00018225620442535728,
+            "purple": 2.629316668389947e-06,
+            "red": 7.299664139281958e-05,
+            "light": 0.00027360289823263884,
+            "black": 6.837342425569659e-06
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "brown",
+          "probability": 0.8535879850387573,
+          "scores": {
+            "aqua": 0.00017516857769805938,
+            "blue": 0.0005570084904320538,
+            "green": 7.173392077675089e-05,
+            "brown": 0.8535879850387573,
+            "orange": 0.01016884483397007,
+            "pink": 0.0041796485893428326,
+            "purple": 0.0004095565527677536,
+            "red": 0.0024914622772485018,
+            "light": 0.1277257800102234,
+            "black": 0.0006327895098365843
+          }
+        },
+        {
+          "model": "qwen3vl",
+          "color": "blonde",
+          "multi_color": false,
+          "multiple_people": false,
+          "reason": "The character has uniformly light blonde hair, with no visible multi-color or multiple people.",
+          "raw": "{\n  \"color\": \"blonde\",\n  \"multi_color\": false,\n  \"multiple_people\": false,\n  \"reason\": \"The character has uniformly light blonde hair, with no visible multi-color or multiple people.\"\n}"
+        }
+      ],
+      "reason": "Qwen 与已有模型判断一致",
+      "elapsed_ms": 2540,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "qwen_model": "tagger",
+        "input": "original"
+      }
+    },
+    {
+      "id": "e788c7fdb91344b69dad5bd2793a23d7",
+      "image_name": "hutao.jpg",
+      "image_sha256": "354d76dc952c0d18f159c1a5d1ed5addf6a5004b64bc48b8afa420a3394ac2d1",
+      "crop": null,
+      "created": 1795017962.7425508,
+      "status": "accepted",
+      "selected": [
+        "brown"
+      ],
+      "candidates": [
+        {
+          "color": "brown",
+          "label": "棕色",
+          "probability": 0.9979656934738159,
+          "swatch": "#8b634b"
+        },
+        {
+          "color": "black",
+          "label": "黑色",
+          "probability": 0.0017120724078267813,
+          "swatch": "#343440"
+        },
+        {
+          "color": "purple",
+          "label": "紫色",
+          "probability": 7.29697712813504e-05,
+          "swatch": "#9b7bb6"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "brown",
+          "probability": 0.890625,
+          "scores": {
+            "black": 0.0279541015625,
+            "blonde": 0.0012054443359375,
+            "brown": 0.890625,
+            "blue": 0.00445556640625,
+            "pink": 0.00136566162109375,
+            "white": 0.0007781982421875,
+            "grey": 0.0005035400390625,
+            "purple": 0.0013275146484375,
+            "red": 0.328125,
+            "green": 0.0002613067626953125,
+            "orange": 0.00170135498046875,
+            "aqua": 0.00075531005859375
+          },
+          "source": "inference",
+          "ambiguous": false
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "brown",
+          "probability": 0.9979656934738159,
+          "scores": {
+            "aqua": 1.06538818727131e-05,
+            "blue": 1.6477892131661065e-05,
+            "green": 3.7529895053012297e-05,
+            "brown": 0.9979656934738159,
+            "orange": 5.7265235227532685e-05,
+            "pink": 5.1909039029851556e-05,
+            "purple": 7.29697712813504e-05,
+            "red": 6.977807788643986e-05,
+            "light": 5.706600404664641e-06,
+            "black": 0.0017120724078267813
+          }
+        }
+      ],
+      "reason": "MobileNet 与 PixAI 一致",
+      "elapsed_ms": 11,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "qwen_model": "tagger",
+        "input": "original"
+      }
+    },
+    {
+      "id": "a4d715c5703d4f65b781d82b9db3859b",
+      "image_name": "mostima.jpg",
+      "image_sha256": "06995984178f866f828ebeabc55d1952e8e3d3f49d36d294f4edb59e0fe13def",
+      "crop": null,
+      "created": 1795017968.6666048,
+      "status": "review",
+      "selected": [],
+      "candidates": [
+        {
+          "color": "red",
+          "label": "红色",
+          "probability": 0.9998109936714172,
+          "swatch": "#b95c62"
+        },
+        {
+          "color": "purple",
+          "label": "紫色",
+          "probability": 6.696568743791431e-05,
+          "swatch": "#9b7bb6"
+        },
+        {
+          "color": "orange",
+          "label": "橙色",
+          "probability": 4.3109113903483376e-05,
+          "swatch": "#de934e"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "black",
+          "source": "existing_result"
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "red",
+          "probability": 0.9994346499443054,
+          "scores": {
+            "aqua": 2.2425083443522453e-06,
+            "blue": 6.8808083597105e-05,
+            "green": 8.592126505391207e-06,
+            "brown": 4.7995759814511985e-05,
+            "orange": 0.0001461711508454755,
+            "pink": 6.758991366950795e-05,
+            "purple": 0.0001679569249972701,
+            "red": 0.9994346499443054,
+            "light": 1.035451077768812e-05,
+            "black": 4.562793765217066e-05
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "red",
+          "probability": 0.9998109936714172,
+          "scores": {
+            "aqua": 1.8396649466012605e-06,
+            "blue": 2.29215784202097e-05,
+            "green": 6.030878921592375e-06,
+            "brown": 1.3265877896628808e-05,
+            "orange": 4.3109113903483376e-05,
+            "pink": 1.3462929018714931e-05,
+            "purple": 6.696568743791431e-05,
+            "red": 0.9998109936714172,
+            "light": 3.544430910551455e-06,
+            "black": 1.782368417480029e-05
+          }
+        },
+        {
+          "model": "qwen3vl",
+          "color": "blonde",
+          "multi_color": true,
+          "multiple_people": true,
+          "reason": "Three characters with distinct hair colors: red, blue, and pink. The blue-haired character has blonde highlights, so blonde is the most accurate single color for that person. The others are not blonde. Since multiple people have different hair colors, multi_color is true.",
+          "raw": "{\n  \"color\": \"blonde\",\n  \"multi_color\": true,\n  \"multiple_people\": true,\n  \"reason\": \"Three characters with distinct hair colors: red, blue, and pink. The blue-haired character has blonde highlights, so blonde is the most accurate single color for that person. The others are not blonde. Since multiple people have different hair colors, multi_color is true.\"\n}"
+        }
+      ],
+      "reason": "多人、双色或发色不明确，请人工确认",
+      "elapsed_ms": 2436,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "qwen_model": "tagger",
+        "input": "original"
+      }
+    },
+    {
+      "id": "f9c1ef06228d47299d4ff887e5a57c00",
+      "image_name": "mostima.jpg",
+      "image_sha256": "06995984178f866f828ebeabc55d1952e8e3d3f49d36d294f4edb59e0fe13def",
+      "crop": [
+        560,
+        20,
+        970,
+        360
+      ],
+      "created": 1795017971.3221054,
+      "status": "review",
+      "selected": [],
+      "candidates": [
+        {
+          "color": "blue",
+          "label": "蓝色",
+          "probability": 0.9963441491127014,
+          "swatch": "#537fc7"
+        },
+        {
+          "color": "purple",
+          "label": "紫色",
+          "probability": 0.0026895017363131046,
+          "swatch": "#9b7bb6"
+        },
+        {
+          "color": "red",
+          "label": "红色",
+          "probability": 0.0007244389853440225,
+          "swatch": "#b95c62"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "black",
+          "source": "existing_result"
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "blue",
+          "probability": 0.998791515827179,
+          "scores": {
+            "aqua": 4.626411464414559e-05,
+            "blue": 0.998791515827179,
+            "green": 5.932012209086679e-05,
+            "brown": 8.035546488827094e-05,
+            "orange": 3.8690595829393715e-05,
+            "pink": 1.3227829185780138e-05,
+            "purple": 0.0006139831384643912,
+            "red": 0.00014529528561979532,
+            "light": 0.00012503897596616298,
+            "black": 8.634245750727132e-05
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "blue",
+          "probability": 0.9963441491127014,
+          "scores": {
+            "aqua": 2.2938147594686598e-05,
+            "blue": 0.9963441491127014,
+            "green": 2.7217754904995672e-05,
+            "brown": 1.935243926709518e-05,
+            "orange": 9.908746142173186e-05,
+            "pink": 5.047793365520192e-06,
+            "purple": 0.0026895017363131046,
+            "red": 0.0007244389853440225,
+            "light": 2.1964389816275798e-05,
+            "black": 4.6374218072742224e-05
+          }
+        },
+        {
+          "model": "qwen3vl",
+          "color": "blue",
+          "multi_color": true,
+          "multiple_people": true,
+          "reason": "Hair has blue and blonde highlights, and another person with red hair is partially visible.",
+          "raw": "{\n  \"color\": \"blue\",\n  \"multi_color\": true,\n  \"multiple_people\": true,\n  \"reason\": \"Hair has blue and blonde highlights, and another person with red hair is partially visible.\"\n}"
+        }
+      ],
+      "reason": "多人、双色或发色不明确，请人工确认",
+      "elapsed_ms": 1840,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "qwen_model": "tagger",
+        "input": "crop"
+      }
+    }
+  ],
+  "persistence": [
+    "decision survives store reopen",
+    "two-color decision",
+    "undo restores review",
+    "HTTP decision readback",
+    "HTTP undo",
+    "invalid light rejected",
+    "crop image dimensions"
+  ]
+}

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ...artifacts import shard_stem
 from ...storage.atomic import read_json, write_json
-from ...verification.local import paths
+from ...verification.local import paths, is_delivery
 
 ARCHIVES = ('.tar', '.tar.gz', '.tgz', '.zip')
 
@@ -44,7 +44,7 @@ def archives(roots):
         if root.is_file() and str(root).lower().endswith(ARCHIVES):
             found.add(root.resolve())
         elif root.is_dir():
-            found.update(p.resolve() for p in root.rglob('*') if p.is_file() and str(p).lower().endswith(ARCHIVES))
+            found.update(p.resolve() for p in root.rglob('*') if p.is_file() and '.delete' not in p.parts and str(p).lower().endswith(ARCHIVES))
     return found
 
 
@@ -52,6 +52,8 @@ def catalog(center, sources):
     from ...fox_worker import api
     import json
     identity = json.loads(center.worker_cfg.read_text(encoding='utf-8'))
+    from ...center_runtime.network import config as network_config
+    identity.update(network_config(center.config()))
     rows = []
     wanted = [{'stem': stem, 'size': size} for stem, size in sorted(sources)]
     for start in range(0, len(wanted), 100):
@@ -79,8 +81,9 @@ def discover(inventory):
             continue
         # 源隔离目录也可能只保留单图结果；汇总所在子目录同样自动识别。
         output_files[output] = paths(output, '', isolated=True)
+        from ...center_runtime.snapshot import superseded
         for file in output.rglob('artifacts-*'):
-            if file.is_file() and file.suffix.lower() in ('.json', '.jsonl', '.parquet'):
+            if file.is_file() and not is_delivery(file) and not superseded(file) and file.suffix.lower() in ('.json', '.jsonl', '.parquet'):
                 output_files.setdefault(file.parent, [])
                 if file not in output_files[file.parent]:
                     output_files[file.parent].append(file)

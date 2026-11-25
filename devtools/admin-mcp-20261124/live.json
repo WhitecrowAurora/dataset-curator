@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "read_only": true,
+  "hashes_match": true,
+  "http": {
+    "/": 200,
+    "/offline-workorders": 200,
+    "/ai-access": 200,
+    "/static/ai-access.js": 200,
+    "/static/ai-access.css": 200,
+    "/static/offline-jobs.js": 200,
+    "/api/workspaces": 200,
+    "/api/managed/devices": 200,
+    "/api/offline-tasks": 200,
+    "/api/ai-access": 200,
+    "/api/ai-access/bridge": 200,
+    "/mcp_without_key": 401
+  },
+  "duplicate_open_parts": 0,
+  "existing_jobs_preserved": 23,
+  "workspaces": [
+    {
+      "ws_id": "Dru768",
+      "name": "Dru768_仅nl打标"
+    },
+    {
+      "ws_id": "Fox768Test",
+      "name": "Fox768Test"
+    },
+    {
+      "ws_id": "dan",
+      "name": "dan"
+    }
+  ],
+  "production_keys_created": 0
+}

@@ -1,0 +1,9 @@
+{
+  "tagger/inference/qwen35/attention.py": "71f0dd83f5073c524f22f20be1450cb0c176872a051343794494626f1641e9a8",
+  "tagger/inference/qwen35/kernels/__init__.py": "f12729b0913dbf4fc98da98d60d4e65a6b9e26f5b48abd0b56491dde0dda61ad",
+  "tagger/inference/qwen35/kernels/convolution.py": "8131c84fadc95f80d005c9b74f38ed4e06fc26c456ccd87a175ec4d2ebf6b9a6",
+  "tagger/inference/qwen35/matrices.py": "eb06147fce5667a66da436f950d02b5721bdbda5dcc91d6e7f2fd7b1cf245272",
+  "tagger/inference/qwen35/weights.py": "cb858126d127e1d1dd0f306eeb55cc55a4cfe290c29818550fc57514a5a2737d",
+  "tagger/inference/qwen35/runtime.py": "ece137c92e94545b19a77577bf6be8201e3421fa1d9ce373c494bfc1dc55c62d",
+  "tagger/inference/qwen3vl/kernels/q6_vector.py": "06211a2db4913b6500e7b851901a57fc12d922fd95b6e6422f0d2e3839a702c6"
+}

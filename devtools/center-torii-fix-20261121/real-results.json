@@ -1,0 +1,170 @@
+[
+  {
+    "engine": "native",
+    "start_seconds": 29.75,
+    "inference_seconds": 25.64099999999962,
+    "config": {
+      "server": "",
+      "user_id": "",
+      "tag_url": "http://127.0.0.1:64697",
+      "mode": "nl",
+      "parts_pref": "",
+      "out_dir": "H:\\tagger\\work\\fox-work",
+      "interval": 120,
+      "extra_args": "",
+      "cmd_template": "",
+      "wait": true,
+      "idle_timeout": 0,
+      "max_packages": 0,
+      "download_conns": 4,
+      "cdn_probe": true,
+      "watchdog": true,
+      "hosting_mode": "active",
+      "inference_source": "local",
+      "tag_backend": "wd-eva02",
+      "tag_device": "cuda:0",
+      "tag_precision": "tf32",
+      "tag_batch": 4,
+      "nl_engine": "native",
+      "nl_model": "torii-gate-0.5",
+      "nl_device": "cuda:0",
+      "nl_precision": "q6",
+      "served_name": "tagger",
+      "concurrency": 2,
+      "gpu_mem": 0,
+      "auto_download": false,
+      "auto_quantize": false,
+      "stop_service": true,
+      "resume_on_startup": false,
+      "wanted": false,
+      "auto_upload": true,
+      "caption_format": "torii",
+      "runtime_fingerprint": {
+        "provider": "local",
+        "model_id": "tagger",
+        "engine": "native",
+        "slots": 2,
+        "model_path": "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+        "precision": "torch.float16",
+        "device": "cuda:0",
+        "max_pixels": 1000000,
+        "native_runtime": {
+          "version": "lulynx-qwen35-0.3",
+          "model_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae",
+          "metadata": "E:\\dev_model\\ToriiGate-0.5\\native-metadata",
+          "batch_size": 2,
+          "execution": {
+            "device": "cuda:0",
+            "precision": "torch.float16",
+            "linear_attention": "torch",
+            "max_pixels": 1000000,
+            "libraries": {
+              "torch": "2.13.0+cu132",
+              "transformers": "5.14.1"
+            },
+            "batch_size": 2
+          }
+        },
+        "model_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae",
+        "url": "http://127.0.0.1:64697",
+        "caption_format": "torii"
+      }
+    },
+    "rows": [
+      {
+        "image_id": "no_text",
+        "tag": "",
+        "nl": "",
+        "ts": 1795262323.4054208,
+        "excluded": {
+          "kind": "skipped",
+          "reason": "输入图过小（6602 < 10240 字节），按无内容图跳过"
+        }
+      },
+      {
+        "image_id": "dense_dialogue",
+        "tag": "",
+        "nl": "{\"image_id\": \"dense_dialogue\", \"caption\": \"A simple digital illustration features a single stylized humanoid figure standing centered against a minimalistic background split horizontally with light blue above and green below, resembling sky and grass or ground.Surrounding the character are eight evenly spaced speech bubbles containing repeated English text about meeting near an old bridge, discussing plans for the day, and reminders to bring items like notebooks and tickets.A humanoid figure with a large round head topped by short brown hair cut in a blunt bowl style.The face is minimalistic with small black dot eyes and a simple curved line smile, giving a neutral or slightly happy expression.The body wears a sleeveless red tunic reaching mid-thigh over blue pants that cover the legs fully down to flat feet (feet not visible).Arms hang straight at the sides without hands drawn.No accessories are present.Eight speech bubbles arranged evenly around the character contain English text repeatedly instructing to meet near an old bridge, mention bringing a notebook and red ticket, wait beside a station, and note that a small cafe closes at sunset.\", \"artist\": \"\", \"artist_tag\": \"\", \"artist_injected\": \"\", \"tag_count\": 0, \"nl_tokens\": 223, \"prompt_tokens\": 1279, \"chars\": 1116, \"training_text\": {\"tokenizer\": \"H:\\\\tagger\\\\models\\\\text\\\\qwen3.5-0.8b\", \"revision\": \"2fc06364715b967f1860aea9cf38778875588b17\", \"tokens\": 205, \"target\": 384, \"over_target\": false, \"limit\": 512, \"config_sha256\": \"7929e3e4a9f521b0d3b431614694b4ee691090fe3582b631fb17b84b0e4d489a\", \"tokenizer_sha256\": {\"tokenizer.json\": \"5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42\", \"tokenizer_config.json\": \"49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c\", \"chat_template.jinja\": \"273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80\"}, \"settings\": {\"tokenizer_path\": \"models/text/qwen3.5-0.8b\", \"revision\": \"2fc06364715b967f1860aea9cf38778875588b17\", \"max_length\": 512, \"template\": \"{caption}\", \"add_special_tokens\": true, \"chat_template\": false, \"system_prompt\": \"\"}}, \"score\": 4.494, \"flags\": [], \"caption_language\": \"en\", \"tags_original\": [], \"annotation_model\": \"tagger\", \"annotation_version\": \"7d6b237af26e69f6ee9b381fe7beb3340cecabae+4d5cea2c56e8\", \"source_revision\": \"\", \"ok\": true, \"attempts\": 1, \"provenance\": {\"provider\": \"local\", \"engine\": \"native\", \"runtime_sha\": \"82cbca7230f639e7\", \"model_id\": \"tagger\", \"model_path\": \"E:\\\\dev_model\\\\ToriiGate-0.5\\\\ToriiGate-0.5-Q6_K.gguf\", \"model_revision\": \"7d6b237af26e69f6ee9b381fe7beb3340cecabae\", \"precision\": \"torch.float16\", \"max_pixels\": 589824, \"caption_chars\": null, \"vllm_version\": null, \"tier\": \"\", \"device\": \"cuda:0\", \"temperature\": 0.2, \"prompt_sha\": \"4d5cea2c56e8\", \"seed\": null}, \"ts\": 1795262346.5219204}",
+        "ts": 1795262346.522432
+      }
+    ]
+  },
+  {
+    "engine": "llamacpp",
+    "start_seconds": 7.906999999999243,
+    "inference_seconds": 3.0310000000008586,
+    "config": {
+      "server": "",
+      "user_id": "",
+      "tag_url": "http://127.0.0.1:64792",
+      "mode": "nl",
+      "parts_pref": "",
+      "out_dir": "H:\\tagger\\work\\fox-work",
+      "interval": 120,
+      "extra_args": "",
+      "cmd_template": "",
+      "wait": true,
+      "idle_timeout": 0,
+      "max_packages": 0,
+      "download_conns": 4,
+      "cdn_probe": true,
+      "watchdog": true,
+      "hosting_mode": "active",
+      "inference_source": "local",
+      "tag_backend": "wd-eva02",
+      "tag_device": "cuda:0",
+      "tag_precision": "tf32",
+      "tag_batch": 4,
+      "nl_engine": "llamacpp",
+      "nl_model": "torii-gate-0.5",
+      "nl_device": "cuda:0",
+      "nl_precision": "q6",
+      "served_name": "tagger",
+      "concurrency": 1,
+      "gpu_mem": 0,
+      "auto_download": false,
+      "auto_quantize": false,
+      "stop_service": true,
+      "resume_on_startup": false,
+      "wanted": false,
+      "auto_upload": true,
+      "caption_format": "torii",
+      "runtime_fingerprint": {
+        "provider": "local",
+        "model_id": "tagger",
+        "engine": "llamacpp",
+        "slots": 1,
+        "model_path": "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+        "precision": "ToriiGate-0.5-Q6_K",
+        "device": "cuda:0",
+        "max_pixels": 1000000,
+        "native_runtime": {
+          "binary": "H:\\tagger\\runtime\\llama.cpp\\llama-server.exe",
+          "size": 9728,
+          "mtime_ns": 1794023394000000000
+        },
+        "model_revision": null,
+        "url": "http://127.0.0.1:64792",
+        "caption_format": "torii"
+      }
+    },
+    "rows": [
+      {
+        "image_id": "dense_dialogue",
+        "tag": "",
+        "nl": "{\"image_id\": \"dense_dialogue\", \"caption\": \"A minimalist digital illustration features a single character standing centered against a simple background with green grass at the bottom and pale blue sky above.The style is flat, cartoonish, and reminiscent of early internet art or webcomic aesthetics.A boy with a round head topped by short brown bowl-cut hair stands facing forward in a T-pose with arms slightly extended to his sides.He has solid black dot eyes without pupils and a small curved smile giving an innocent expression.His skin is pale peach, wearing a sleeveless red shirt that reaches mid-thigh and plain blue pants ending above the ankles.Eight white speech bubbles surround the character in two vertical columns of four on each side.Each bubble contains English text with short phrases like 'Meet me near the old bridge,' 'The blue parcel arrives at noon,' and repeated instances of 'There is still a lot to discuss.' followed by 'Let us talk about it tomorrow.' The phrasing suggests an ongoing conversation or reminder.\", \"artist\": \"\", \"artist_tag\": \"\", \"artist_injected\": \"\", \"tag_count\": 0, \"nl_tokens\": 210, \"prompt_tokens\": 1727, \"chars\": 994, \"training_text\": {\"tokenizer\": \"H:\\\\tagger\\\\models\\\\text\\\\qwen3.5-0.8b\", \"revision\": \"2fc06364715b967f1860aea9cf38778875588b17\", \"tokens\": 190, \"target\": 384, \"over_target\": false, \"limit\": 512, \"config_sha256\": \"7929e3e4a9f521b0d3b431614694b4ee691090fe3582b631fb17b84b0e4d489a\", \"tokenizer_sha256\": {\"tokenizer.json\": \"5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42\", \"tokenizer_config.json\": \"49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c\", \"chat_template.jinja\": \"273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80\"}, \"settings\": {\"tokenizer_path\": \"models/text/qwen3.5-0.8b\", \"revision\": \"2fc06364715b967f1860aea9cf38778875588b17\", \"max_length\": 512, \"template\": \"{caption}\", \"add_special_tokens\": true, \"chat_template\": false, \"system_prompt\": \"\"}}, \"score\": 4.5, \"flags\": [], \"caption_language\": \"en\", \"tags_original\": [], \"annotation_model\": \"tagger\", \"annotation_version\": \"unknown+4d5cea2c56e8\", \"source_revision\": \"\", \"ok\": true, \"attempts\": 1, \"provenance\": {\"provider\": \"local\", \"engine\": \"llamacpp\", \"runtime_sha\": \"4db54e66c905c1fc\", \"model_id\": \"tagger\", \"model_path\": \"E:\\\\dev_model\\\\ToriiGate-0.5\\\\ToriiGate-0.5-Q6_K.gguf\", \"model_revision\": null, \"precision\": \"ToriiGate-0.5-Q6_K\", \"max_pixels\": 589824, \"caption_chars\": null, \"vllm_version\": null, \"tier\": \"\", \"device\": \"cuda:0\", \"temperature\": 0.2, \"prompt_sha\": \"4d5cea2c56e8\", \"seed\": null}, \"ts\": 1795262357.7079203}",
+        "ts": 1795262357.7079203
+      },
+      {
+        "image_id": "no_text",
+        "tag": "",
+        "nl": "",
+        "ts": 1795262357.71992,
+        "excluded": {
+          "kind": "skipped",
+          "reason": "输入图过小（6602 < 10240 字节），按无内容图跳过"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,48 @@
+{
+  "files": {
+    "deepghs/anime_ch_hair_color": [
+      [
+        "caformer_s36_v0/meta.json",
+        293
+      ],
+      [
+        "caformer_s36_v0/model.onnx",
+        149640272
+      ],
+      [
+        "mobilenetv3_v0_dist/meta.json",
+        252
+      ],
+      [
+        "mobilenetv3_v0_dist/model.onnx",
+        16863428
+      ]
+    ],
+    "DraconicDragon/ToriiGate-0.5-GGUF": [
+      [
+        "ToriiGate-0.5-Q6_K.gguf",
+        3985524576
+      ],
+      [
+        "ToriiGate-0.5-fp16.mmproj.gguf",
+        672423360
+      ]
+    ]
+  },
+  "real_meta_download": {
+    "status": "done",
+    "sha256": "0a7ae7529291ed30f947c297cd7bab15eb3846ee96855361d413b4f58316a74c",
+    "labels": [
+      "aqua",
+      "blue",
+      "green",
+      "brown",
+      "orange",
+      "pink",
+      "purple",
+      "red",
+      "light",
+      "black"
+    ]
+  }
+}

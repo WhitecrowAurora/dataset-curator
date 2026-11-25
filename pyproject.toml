@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.27",
     "PyYAML>=6.0",
     "Pillow>=10.0",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
@@ -34,10 +35,32 @@ native-nl = [
     "safetensors>=0.4",
     "gguf>=0.17",
 ]
+# Torii native 的可选 CUDA 加速；不装仍可使用 PyTorch / 默认 llama.cpp。
+# 不使用 FLA 的 [cuda] extra，以免 Windows 被拉入 Linux 的 triton 包。
+torii-accel = [
+    "torch>=2.7",
+    "flash-linear-attention==0.6.0",
+    "fla-core==0.6.0",
+    "einops>=0.8",
+    "triton-windows>=3.7.1.post27,<3.8; sys_platform == 'win32'",
+    "triton>=3.3,<3.8; sys_platform == 'linux'",
+]
 # parquet 是打包的默认输出格式（Packer.formats 默认 parquet）。
 # 写/复核用 pyarrow；**读**分片（本地或 HF）走 datasets 的 streaming——
 # 两条路都在这一个 extra 里，否则会出现"能打包、打不了 NL"的半残状态。
 parquet = ["pyarrow>=15", "datasets>=2.20"]
+# 训练端精确 token 计数与人工审查偏好学习（CPU）。
+review-learning = ["transformers>=4.45", "numpy>=1.26", "pydantic>=2.7"]
+# 发色与媒体 ONNX 模型 + Torii HTTP/图像适配；native 引擎使用 native-nl。
+hair = [
+    "onnxruntime>=1.20",
+    "pydantic>=2.7",
+    "numpy>=1.26",
+    "Pillow>=10",
+    "huggingface_hub>=0.24",
+    "httpx>=0.27",
+    "psutil>=5.9",
+]
 # CPU 侧 tag 反推（分类头）。pixai 要 transformers/timm，wd-eva02 要 timm，
 # cl-tagger-v2 要 onnxruntime；不装也能跑，只是 tag 得让 VLM 出。
 tag = [
@@ -84,6 +107,7 @@ tagger = "tagger.cli:main"
 include = ["tagger*"]
 
 [tool.setuptools.package-data]
+"tagger.hair_color" = ["*.jinja"]
 "tagger.inference.qwen3vl.kernels.cuda" = ["*.cu"]
 
 [tool.pytest.ini_options]

@@ -1,0 +1,1 @@
+{"sampled_at": 1795360312.1606429, "cpu_percent": 47.22222222222222, "gpus": [{"physical_index": 0, "device": "cuda:0", "name": "NVIDIA GeForce RTX 4070 Ti SUPER", "util": 6.0, "mem_used_mb": 2088, "mem_total_mb": 16376, "mem_pct": 12.8}]}

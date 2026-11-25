@@ -1,0 +1,48 @@
+{
+  "metrics": {
+    "torii": {
+      "requests": 126,
+      "request_errors": 0,
+      "json_objects": 126,
+      "truncated": 0,
+      "request_ms_median": 2578.0,
+      "request_ms_p95": 4782.0,
+      "output_tokens_mean": 259.1587301587302,
+      "output_tokens_per_second_median": 111.48685364359429,
+      "request_after_total_gpu_used_mib_max": 6592,
+      "batch_wall_seconds": 355.2
+    },
+    "qwen": {
+      "requests": 126,
+      "request_errors": 0,
+      "json_objects": 126,
+      "truncated": 0,
+      "request_ms_median": 1297.0,
+      "request_ms_p95": 1594.0,
+      "output_tokens_mean": 45.857142857142854,
+      "output_tokens_per_second_median": 72.46363581948518,
+      "request_after_total_gpu_used_mib_max": 10329,
+      "batch_wall_seconds": 173.25
+    },
+    "torii-json": {
+      "requests": 8,
+      "request_errors": 0,
+      "json_objects": 8,
+      "truncated": 0,
+      "request_ms_median": 3562.5,
+      "request_ms_p95": 4328.0,
+      "output_tokens_mean": 345.625,
+      "output_tokens_per_second_median": 111.84308019721792,
+      "request_after_total_gpu_used_mib_max": 6421,
+      "batch_wall_seconds": 29.11
+    }
+  },
+  "comparison_inputs": 126,
+  "manually_inspected_notes": 41,
+  "accuracy_claim": false,
+  "production_changed": false,
+  "gpu_serial": true,
+  "vram_note": "整卡总占用，逐请求完成后采样的最大值；不是连续监控的模型真实峰值",
+  "latency_note": "Torii 输出完整描述；Qwen 输出短发色 JSON，输出长度和任务不同，不据此直接比较后端速度",
+  "recommendation": "可用于动漫分角色描述或辅助复核，未证明相近发色优于现有 Qwen；不直接替换自动裁决"
+}

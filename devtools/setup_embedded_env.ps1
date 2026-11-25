@@ -172,14 +172,14 @@ if (-not (Test-Path (Join-Path $sitePackages 'pip\__init__.py'))) {
 
 # ---------------------------------------------------------------- 4. 仓库路径
 # 让 env\python 里任何位置都能 import tagger，不必 pip install -e（那要 setuptools）。
-# 路径按当前仓库位置写，所以换台机器解压后要重跑本脚本一次。
+# 相对 site-packages 向上四级，覆盖升级或移动目录后无需重装环境。
 # 必须 UTF-8（无 BOM）：站点模块按 UTF-8 解 .pth，而仓库目录带中文时
 # ascii 会把路径写成问号，结果是"装了但 import 不到 tagger"。
 [System.IO.File]::WriteAllText(
     (Join-Path $sitePackages '_tagger_repo.pth'),
-    $repo + [Environment]::NewLine,
+    '..\..\..\..' + [Environment]::NewLine,
     (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "[env] 写入 _tagger_repo.pth -> $repo"
+Write-Host "[env] 写入 _tagger_repo.pth（相对仓库路径）"
 
 # ---------------------------------------------------------------- 5. 依赖
 if (Test-Path $reqFile) {
@@ -376,15 +376,15 @@ if ($SkipTag) {
     }
 
     if ($tagOk) {
-        $tagProbe = "import torch, torchvision, transformers, timm, safetensors; print('  tag runtime: torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| transformers', transformers.__version__)"
+        $tagProbe = "import torch, torchvision, transformers, timm, safetensors, onnxruntime; print('  tag runtime: torch', torch.__version__, '| cuda', torch.cuda.is_available(), '| transformers', transformers.__version__, '| hair ONNX', onnxruntime.__version__)"
         $tagCode = Invoke-Native $py @('-c', $tagProbe)
         if ($tagCode -ne 0) { $tagOk = $false }
     }
-    # 这三个不是每个后端都要：onnxruntime 只服务 cl-tagger-v2，open_clip 只
+    # ONNX Runtime 已纳入必需自检（cl-tagger-v2 / 专用发色）；open_clip 只
     # 服务图文一致度打分，datasets 只在 HF 输入源时用。缺了打标照样跑，所以
     # 只报状态、不判失败——否则一次网络抖动就会让人以为整个环境坏了。
     if ($tagOk) {
-        foreach ($opt in @(@('onnxruntime', 'cl-tagger-v2 后端'), @('open_clip', '图文一致度打分'), @('datasets', 'HF 数据集输入'))) {
+        foreach ($opt in @(@('open_clip', '图文一致度打分'), @('datasets', 'HF 数据集输入'))) {
             $optCode = Invoke-Native $py @('-c', "import $($opt[0])") -Quiet
             if ($optCode -ne 0) {
                 Write-Host "  可选缺失：$($opt[0])（$($opt[1])）—— 需要时 pip install $($opt[0])"
@@ -466,6 +466,9 @@ if ($vllmCmd -and $env:OS -ne 'Windows_NT') {
 }
 
 # ---------------------------------------------------------------- 7. 自检
+Write-Host "[env] 补齐便携 Python 开发文件（native 编译使用）"
+$devCode = Invoke-Native $py @('-c', "from tagger.runtime.python_dev import ensure; files=ensure(); print('  Python dev: OK; added', len(files), 'files')")
+if ($devCode -ne 0) { Write-Warning "  Python 开发文件补齐失败，请保留新版 env\initialization 后重跑 install.bat；native 启动需要这些文件。" }
 Write-Host "[env] 自检:"
 $probe = "import sys, httpx, yaml, PIL, pyarrow; print('  python', sys.version.split()[0]); print('  httpx', httpx.__version__); print('  pyarrow', pyarrow.__version__); print('  pillow', PIL.__version__)"
 $null = Invoke-Native $py @('-c', $probe)
@@ -515,3 +518,5 @@ if (-not $llamaOk) {
 if ($SkipTag) {
     Write-Host "  注意：本次用了 -SkipTag，打标运行时没装，跑打标前重跑 install.bat"
 }
+Write-Host "  Torii native 实验引擎：在 WebUI 的专用推理依赖组按需安装；默认使用 llama.cpp。"
+Write-Host "  Torii native CUDA 加速：依赖管理中按需安装，先装专用推理组及 PyTorch >=2.7。"

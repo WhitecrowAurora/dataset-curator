@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"packages\": [{\"package\": \"shard-000015.tar\", \"rows\": 8678, \"variants\": 8614, \"bytes\": 8530620, \"source\": {\"repo\": \"MatchaCuratio/Anime-2024Dru768-8M\", \"package\": \"shard-000015.tar\", \"size\": 1697505280, \"sha256\": \"80881d033ef89cbac86cec0ee2fca40bff6a3d9882d040b12cd1e9b39f509cbd\", \"revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"manifest\": {}, \"count\": 8678}}, {\"package\": \"shard-000017.tar\", \"rows\": 10009, \"variants\": 0, \"bytes\": 4670729, \"source\": {\"repo\": \"MatchaCuratio/Anime-2024Dru768-8M\", \"package\": \"shard-000017.tar\", \"size\": 1842882560, \"sha256\": \"32b37ad4b7d3899133fff7d5ffc411db7974a99db87e32bc95a8a79c42cf122a\", \"revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"manifest\": {}, \"count\": 10009}}], \"pending_15\": 8614, \"conflict_decisions_unchanged\": true, \"revoke\": true}\n",
+  "stderr": ""
+}

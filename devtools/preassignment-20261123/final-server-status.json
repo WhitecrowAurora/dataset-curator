@@ -1,0 +1,1 @@
+{"free_bytes": 9166413824, "production_counts": {"workspaces": 3, "packages": 874, "leases": 455, "part_assignments": 16, "repo_users": 0}, "configuration_schema_ready": true, "production_fixture_not_created": true, "temporary_databases": [], "services": {"lulynx-label.service": "active", "lulynx-panel.service": "active"}}

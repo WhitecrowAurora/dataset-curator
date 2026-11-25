@@ -1,0 +1,18 @@
+{
+  "package": "H:\\tagger\\dist\\tagger-20261121-center-torii-fix.zip",
+  "size": 76507134,
+  "sha256": "c0ebb82ebc1b5d8c08f075e2ed49ea17756ba89b98c7d271e05ff71528430cf5",
+  "verified_files": [
+    "tagger/web/torii_service.py",
+    "tagger/web/center_runtime/inference.py",
+    "tagger/web/center_runtime/config.py",
+    "tagger/web/vllm_service.py",
+    "tagger/web/center.py",
+    "tagger/cli.py",
+    "tagger/hair_color/runtime.py",
+    "tagger/inference/qwen35/runtime.py",
+    "tagger/web/ui/dist/index.html",
+    "tagger/web/ui/dist/assets/index-CWN6FFAb.js"
+  ],
+  "private_state_excluded": true
+}

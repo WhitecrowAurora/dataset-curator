@@ -1,0 +1,522 @@
+--- before/devtools/release/build_worker.py
++++ after/devtools/release/build_worker.py
+@@ -18,6 +18,7 @@
+     "center_runtime/annotation.py",
+     "center_runtime/progress.py",
+     "center_runtime/snapshot.py",
++    "center_runtime/network.py",
+     "verification/__init__.py", "verification/history.py", "verification/payload.py", "verification/source.py", "verification/local.py",
+     "naming.py",
+ )
+--- before/tagger/center_runtime/network.py
++++ after/tagger/center_runtime/network.py
+@@ -0,0 +1,107 @@
++"""调度连接的本机网络策略，供页面和独立 worker 共用。"""
++from functools import lru_cache
++import json
++import os
++from urllib.parse import urlsplit
++import urllib.request
++
++from .. import netutil
++
++DEFAULTS = {"proxy_mode": "auto", "proxy_url": ""}
++ENV_KEY = "LULYNX_CENTER_NETWORK"
++
++
++def config(values):
++    mode = values.get("proxy_mode", "auto")
++    address = str(values.get("proxy_url") or "").strip()
++    if mode not in ("auto", "direct", "custom"):
++        raise ValueError("连接方式请选择自动、直连或指定代理")
++    if mode == "custom" and address:
++        try:
++            parsed = urlsplit(address)
++            valid = (parsed.scheme in ("http", "https") and parsed.hostname
++                     and parsed.port and not parsed.username and not parsed.password
++                     and parsed.path in ("", "/") and not parsed.query and not parsed.fragment
++                     and not any(ch.isspace() for ch in address))
++        except ValueError:
++            valid = False
++        if not valid:
++            raise ValueError("代理地址请填写 HTTP / HTTPS 地址和端口，例如 http://127.0.0.1:47826")
++        address = address.rstrip("/")
++    if mode == "custom" and not address:
++        raise ValueError("指定代理时请填写代理地址")
++    return {"proxy_mode": mode, "proxy_url": address}
++
++
++def environment(server, values):
++    return {ENV_KEY: json.dumps({"server": server, **config(values)})}
++
++
++def _policy(url, values):
++    if netutil.is_loopback_url(url):
++        return "direct", ""
++    if values is None or "proxy_mode" not in values:
++        try:
++            saved = json.loads(os.environ.get(ENV_KEY, "{}"))
++            target, center = urlsplit(url), urlsplit(saved.get("server", ""))
++            values = saved if (target.scheme, target.hostname, target.port) == (center.scheme, center.hostname, center.port) else {}
++        except (ValueError, TypeError, AttributeError):
++            values = {}
++    policy = config(values)
++    return policy["proxy_mode"], policy["proxy_url"]
++
++
++def httpx_options(url, values=None):
++    mode, proxy = _policy(url, values)
++    if mode == "direct":
++        return {"trust_env": False}
++    if mode == "custom":
++        return {"trust_env": False, "proxy": proxy}
++    return netutil.httpx_options(url)
++
++
++class _ExplicitProxy(urllib.request.ProxyHandler):
++    """用户指定代理时，不让系统 NO_PROXY 把请求偷偷改成直连。"""
++    def proxy_open(self, req, proxy, type):
++        original = req.type
++        parsed = urlsplit(proxy)
++        req.set_proxy(parsed.netloc, parsed.scheme)
++        if original == parsed.scheme or original == "https":
++            return None
++        return self.parent.open(req, timeout=req.timeout)
++
++
++class _NoRedirect(urllib.request.HTTPRedirectHandler):
++    def redirect_request(self, req, fp, code, msg, hdrs, newurl):
++        return None
++
++
++@lru_cache(maxsize=16)
++def _opener(mode, proxy, redirects):
++    handlers = []
++    if mode == "direct":
++        handlers.append(urllib.request.ProxyHandler({}))
++    elif mode == "custom":
++        handlers.append(_ExplicitProxy({"http": proxy, "https": proxy}))
++    if not redirects:
++        handlers.append(_NoRedirect())
++    return urllib.request.build_opener(*handlers)
++
++
++def opener(url, values=None, *, redirects=False):
++    return _opener(*_policy(url, values), redirects)
++
++
++def curl_env(url):
++    mode, proxy = _policy(url, None)
++    env = netutil.curl_env(url)
++    if mode != "auto":
++        keys = ("http_proxy", "https_proxy", "all_proxy", "no_proxy")
++        for key in keys:
++            env.pop(key, None)
++            env.pop(key.upper(), None)
++        if mode == "direct":
++            env.update(no_proxy="*", NO_PROXY="*")
++        else:
++            env.update(http_proxy=proxy, https_proxy=proxy, no_proxy="", NO_PROXY="")
++    return env
+--- before/tagger/fox_worker.py
++++ after/tagger/fox_worker.py
+@@ -69,7 +69,7 @@
+ import urllib.request
+ import uuid
+ from pathlib import Path
+-from .netutil import curl_env
++from .center_runtime.network import curl_env, opener
+ from .center_runtime.identity import pending_path, read_for_login, saved_path, write_identity
+ from .center_runtime.download_segments import plan_path, segment_plan
+ 
+@@ -221,7 +221,7 @@
+         try:
+             req = urllib.request.Request(url, data=data, method="POST",
+                                          headers={"Content-Type": "application/json"})
+-            with urllib.request.urlopen(req, timeout=timeout) as r:
++            with opener(url, cfg).open(req, timeout=timeout) as r:
+                 return json.loads(r.read().decode() or "{}")
+         except urllib.error.HTTPError as e:
+             body_txt = e.read().decode(errors="replace")
+--- before/tagger/center_runtime/artifacts.py
++++ after/tagger/center_runtime/artifacts.py
+@@ -28,11 +28,8 @@
+     url = cfg["server"].rstrip("/") + "/api/blob/" + action
+     req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
+                                  headers={**headers(cfg, lease), 'Content-Type': 'application/json'})
+-    # 回传身份不能经重定向发送到其它主机。
+-    class NoRedirect(urllib.request.HTTPRedirectHandler):
+-        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+-            return None
+-    with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
++    from .network import opener
++    with opener(url, cfg).open(req, timeout=timeout) as response:
+         return json.load(response)
+ 
+ 
+--- before/tagger/blob_client.py
++++ after/tagger/blob_client.py
+@@ -67,10 +67,12 @@
+     headers: dict[str, str] = field(default_factory=dict, repr=False)
+     _opener: urllib.request.OpenerDirector = field(default=None, repr=False)
+     deadline: float | None = None
++    network: dict | None = field(default=None, repr=False)
+ 
+     def __post_init__(self) -> None:
+         self.base_url = self.base_url.rstrip("/")
+-        self._opener = urllib.request.build_opener()
++        from .center_runtime.network import opener
++        self._opener = opener(self.base_url, self.network, redirects=self.network is None)
+ 
+     # ---------------------------------------------------------------- HTTP
+ 
+--- before/tagger/center_delivery.py
++++ after/tagger/center_delivery.py
+@@ -13,7 +13,7 @@
+                "X-Fox-Secret": str(cfg.get("secret") or ""),
+                "X-Fox-Lease": str(lease["lease_id"])}
+     deadline = time.monotonic() + budget if budget is not None else None
+-    client = BlobClient(cfg["server"], headers=headers, timeout=300, deadline=deadline)
++    client = BlobClient(cfg["server"], headers=headers, timeout=300, deadline=deadline, network=cfg)
+     if lease.get("resume_supported"):
+         from .center_runtime.artifacts import prepare, request
+         for path in prepare(lease, out_dir, source):
+--- before/tagger/web/center.py
++++ after/tagger/web/center.py
+@@ -18,6 +18,7 @@
+ 
+ import httpx
+ from .center_runtime.config import EXECUTION_DEFAULTS, execution_config
++from ..center_runtime.network import DEFAULTS as NETWORK_DEFAULTS, config as network_config, environment as network_environment
+ from .center_runtime.secrets import Credentials
+ from .center_runtime.controller import Controller
+ from ..storage.atomic import write_bytes
+@@ -54,6 +55,7 @@
+     # 按退避重新拉起。关掉就回到"崩了就停在已停止，等人再点开始"的老行为。
+     "watchdog": True,
+     **EXECUTION_DEFAULTS,
++    **NETWORK_DEFAULTS,
+     "wanted": False,
+     "auto_upload": True,
+ }
+@@ -179,6 +181,7 @@
+                 continue
+             cfg[key] = val
+         cfg.update(execution_config(cfg))
++        cfg.update(network_config(cfg))
+         write_bytes(self.cfg_path, json.dumps(cfg, ensure_ascii=False, indent=2).encode("utf-8"))
+         return cfg
+ 
+@@ -236,6 +239,8 @@
+         if token := self.credentials.effective_token():
+             env["HF_TOKEN"] = token
+         cfg = execution if execution is not None else (self.runtime.resolved or self.config())
++        local = self.config()
++        env.update(network_environment(self.identity().get('server') or local['server'], local))
+         env["TAGGER_DL_CONNS"] = str(cfg.get("download_conns",4))
+         env["FOXLABEL_CDN_PROBE"] = "1" if cfg.get("cdn_probe",True) else "0"
+         env["LULYNX_CENTER_EXECUTION"] = json.dumps({
+@@ -250,7 +255,7 @@
+         return env
+ 
+     # ------------------------------------------------------------ 登录
+-    def login(self, server: str, user_id: str, secret: str = "") -> dict:
++    def login(self, server: str, user_id: str, secret: str = "", **network) -> dict:
+         server = (server or "").strip().rstrip("/")
+         user_id = (user_id or "").strip()
+         if not server:
+@@ -259,12 +264,19 @@
+             raise CenterError("要填姓名/ID：服务端按它记账，也是你取回工位的唯一依据")
+         if self.running or self.runtime.active or self.history.running:
+             raise CenterError("正在跑的时候不能换身份，先停止")
++        try:
++            policy = network_config({**self.config(), **{k: v for k, v in network.items() if v is not None}})
++        except ValueError as exc:
++            raise CenterError(str(exc)) from exc
++        # 登录失败也保留选定连接方式，用户修正代理后可沿用待确认的设备身份。
++        self.save_config(**policy)
+ 
+         argv = [sys.executable, "-m", "tagger.fox_worker", "login",
+                 "--server", server, "--user-id", user_id]
+         if secret.strip():
+             argv += ["--secret", secret.strip()]
+         env = self._env()
++        env.update(network_environment(server, policy))
+         env["FOXLABEL_REGISTER_ONLY"] = "1"
+         try:
+             # encoding 必须和 _env 里的 PYTHONIOENCODING 对齐：子进程按 UTF-8 写，
+@@ -652,12 +664,12 @@
+         except (OSError, ValueError):
+             body = {}
+         try:
+-            from ..netutil import httpx_options
++            from ..center_runtime.network import httpx_options
+             resp = httpx.post(f"{server.rstrip('/')}/api/v1/status",
+                               json={"user_id": body.get("user_id"),
+                                     "device_id": body.get("device_id"),
+                                     "secret": body.get("secret")},
+-                              timeout=timeout, **httpx_options(server))
++                              timeout=timeout, **httpx_options(server, self.config()))
+             data = resp.json() if resp.content else {}
+             if not isinstance(data, dict):
+                 return None
+@@ -692,8 +704,8 @@
+         if not server:
+             return None
+         try:
+-            from ..netutil import httpx_options
+-            resp = httpx.post(f"{server.rstrip('/')}/api/v1/pool", json={}, timeout=6.0, **httpx_options(server))
++            from ..center_runtime.network import httpx_options
++            resp = httpx.post(f"{server.rstrip('/')}/api/v1/pool", json={}, timeout=6.0, **httpx_options(server, self.config()))
+             if resp.status_code != 200:
+                 return None
+             got = resp.json()
+--- before/tagger/web/app.py
++++ after/tagger/web/app.py
+@@ -504,6 +504,8 @@
+     server: str
+     user_id: str
+     secret: str = ""
++    proxy_mode: Literal["auto", "direct", "custom"] | None = None
++    proxy_url: str | None = None
+ 
+ 
+ CenterExecutionPatch = create_model("CenterExecutionPatch", **{
+@@ -515,6 +517,8 @@
+ class CenterRunRequest(CenterExecutionPatch):
+     """托管 fox worker 的运行参数。全部可省略 = 沿用上次保存的配置。"""
+     tag_url: str | None = None
++    proxy_mode: Literal["auto", "direct", "custom"] | None = None
++    proxy_url: str | None = None
+     mode: str | None = None
+     # 派工倾向（2026-11-12）：只影响服务端排序，不改变本机产出什么。
+     # 空串 = 不挑，是有效值，所以这里不能用 exclude_none 之外的默认值兜。
+@@ -3227,7 +3231,8 @@
+     @app.post("/api/center/login")
+     def center_login(req: CenterLoginRequest) -> dict:
+         try:
+-            CENTER.login(req.server, req.user_id, req.secret)
++            CENTER.login(req.server, req.user_id, req.secret,
++                         proxy_mode=req.proxy_mode, proxy_url=req.proxy_url)
+         except CenterError as exc:
+             raise HTTPException(400, str(exc)) from exc
+         return CENTER.snapshot()
+--- before/tagger/web/center_runtime/managed.py
++++ after/tagger/web/center_runtime/managed.py
+@@ -9,7 +9,7 @@
+ import httpx
+ 
+ from ...storage.atomic import write_bytes
+-from ...netutil import httpx_options
++from ...center_runtime.network import httpx_options
+ from .config import REMOTE_FIELDS, REPORT_FIELDS, execution_config
+ 
+ PROTOCOL_VERSION = 1
+@@ -33,6 +33,8 @@
+         self.path = center.dir / ("history-managed-results.json" if history_only else "managed-results.json")
+         self.restored = False
+         self.identity_key = hashlib.sha256(json.dumps(self.identity, sort_keys=True).encode()).hexdigest()
++        from ...center_runtime.network import config as network_config
++        self.identity.update(network_config(center.config()))
+         try:
+             saved = json.loads(self.path.read_text(encoding='utf-8'))
+             if (saved.get('identity_key') == self.identity_key and not saved.get('closed')
+@@ -92,7 +94,7 @@
+         body["parts_pref"] = self.center.config().get("parts_pref") or "both"
+         url = str(identity["server"]).rstrip("/") + POLL_PATH
+         with httpx.Client(timeout=httpx.Timeout(20.0, connect=10.0), follow_redirects=False,
+-                          **httpx_options(url)) as client:
++                          **httpx_options(url, self.center.config())) as client:
+             response = client.post(url, json=body)
+         if self.closed and not released:
+             return []
+--- before/tagger/web/center_runtime/workspace.py
++++ after/tagger/web/center_runtime/workspace.py
+@@ -1,7 +1,7 @@
+ """本机身份代理工作区列表与指定领取。"""
+ import json
+ import httpx
+-from ...netutil import httpx_options
++from ...center_runtime.network import httpx_options
+ from fastapi import APIRouter, HTTPException
+ 
+ 
+@@ -18,7 +18,7 @@
+             body={**body,"parts":mode if mode != "both" else cfg.get("parts_pref") or "both"}
+         response=httpx.post(identity["server"].rstrip("/")+"/api/v1/"+action,
+                             json={**body,**headers},timeout=httpx.Timeout(20,connect=10),follow_redirects=False,
+-                            **httpx_options(identity['server']))
++                            **httpx_options(identity['server'], center.config()))
+         data=response.json()
+         if not isinstance(data,dict):raise ValueError("调度中心返回格式不正确")
+         if response.status_code!=200:
+--- before/tagger/web/center_runtime/history_check.py
++++ after/tagger/web/center_runtime/history_check.py
+@@ -65,7 +65,7 @@
+     headers = {"X-Fox-User": quote(session.identity["user_id"], safe=""),
+                "X-Fox-Device": session.identity["device_id"], "X-Fox-Secret": session.identity["secret"],
+                "X-Fox-History": task["check_id"], "X-Fox-Session": session.id}
+-    client = BlobClient(session.identity["server"], headers=headers, timeout=300)
++    client = BlobClient(session.identity["server"], headers=headers, timeout=300, network=history.center.config())
+     history.phase("uploading", "回传历史产物与逐图检查报告")
+     for path in (output, folder / "proof.json"):
+         if cancel.is_set():
+--- before/tagger/web/center_runtime/history.py
++++ after/tagger/web/center_runtime/history.py
+@@ -81,6 +81,8 @@
+                 import json
+                 from ...fox_worker import api
+                 identity = json.loads(self.center.worker_cfg.read_text(encoding='utf-8'))
++                from ...center_runtime.network import config as network_config
++                identity.update(network_config(self.center.config()))
+                 for start in range(0, len(ids), 500):
+                     self.update_reports(api(identity, '/api/v1/history/reports',
+                                             {'check_ids': ids[start:start + 500]}, timeout=10, retries=0)['history_reports'])
+--- before/tagger/web/center_runtime/history_discovery.py
++++ after/tagger/web/center_runtime/history_discovery.py
+@@ -52,6 +52,8 @@
+     from ...fox_worker import api
+     import json
+     identity = json.loads(center.worker_cfg.read_text(encoding='utf-8'))
++    from ...center_runtime.network import config as network_config
++    identity.update(network_config(center.config()))
+     rows = []
+     wanted = [{'stem': stem, 'size': size} for stem, size in sorted(sources)]
+     for start in range(0, len(wanted), 100):
+--- before/tagger/web/center_runtime/offline.py
++++ after/tagger/web/center_runtime/offline.py
+@@ -119,6 +119,8 @@
+             write_bytes(receipt,json.dumps(manifest,ensure_ascii=False).encode("utf-8"));receipt.chmod(0o600)
+             cfg={**self.center.config(),**manifest["config"],"hosting_mode":"active"}
+             identity={**manifest["identity"],"server":manifest["server"]}
++            from ...center_runtime.network import config as network_config
++            identity.update(network_config(self.center.config()))
+             if not upload:
+                 cfg=runtime.prepare(cfg,self.center.credentials.effective_token(),self.cancel)
+             for task in manifest["tasks"]:
+--- before/tagger/web/ui/src/lib/api.ts
++++ after/tagger/web/ui/src/lib/api.ts
+@@ -1756,6 +1756,8 @@
+ export type CenterConfig = CenterExecution & {
+   auto_upload: boolean
+   server: string
++  proxy_mode: 'auto' | 'direct' | 'custom'
++  proxy_url: string
+   user_id: string
+   tag_url: string
+   mode: string
+@@ -2732,7 +2734,7 @@
+    * 连接（换身份）。后端在跑的时候会拒：换 server 或换名字都要先停止，
+    * 否则老进程还在按旧身份续约，服务端会看见两套身份。
+    */
+-  centerLogin: (payload: { server: string; user_id: string; secret?: string }) =>
++  centerLogin: (payload: { server: string; user_id: string; secret?: string; proxy_mode?: 'auto' | 'direct' | 'custom'; proxy_url?: string }) =>
+     json<CenterState>('/api/center/login', {
+       method: 'POST',
+       body: JSON.stringify(payload),
+--- before/tagger/web/ui/src/pages/Center.tsx
++++ after/tagger/web/ui/src/pages/Center.tsx
+@@ -19,6 +19,7 @@
+ import { AdvancedSettings, FormSections } from '../components/ui/FormSections'
+ import { WorkspacePackages } from '../components/center/WorkspacePackages'
+ import { ExecutionStatus } from '../components/center/ExecutionStatus'
++import { ConnectionNetwork, type ProxyMode } from '../components/center/ConnectionNetwork'
+ import { OfflineTasks } from '../components/center/OfflineTasks'
+ import { HistoryArtifacts } from '../components/center/HistoryArtifacts'
+ import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
+@@ -96,6 +97,8 @@
+   // 下载口径：连接数同样存字符串（清空后按默认 4 处理），选优是开关
+   const [dlConns, setDlConns] = useState('4')
+   const [cdnProbe, setCdnProbe] = useState(true)
++  const [proxyMode, setProxyMode] = useState<ProxyMode>('auto')
++  const [proxyUrl, setProxyUrl] = useState('')
+   const [autoUpload, setAutoUpload] = useState(true)
+   const seeded = useRef(false)
+   const folder = useFolderPicker()
+@@ -108,6 +111,8 @@
+       if (!seeded.current) {
+         seeded.current = true
+         setServer(s.config.server)
++        setProxyMode(s.config.proxy_mode ?? 'auto')
++        setProxyUrl(s.config.proxy_url ?? '')
+         setExecution(Object.fromEntries(Object.keys(DEFAULT_EXECUTION).map((key) =>
+           [key, s.config[key as keyof CenterExecution] ?? DEFAULT_EXECUTION[key as keyof CenterExecution]])) as CenterExecution)
+         setRememberHf(s.credentials?.remember_hf ?? false)
+@@ -172,6 +177,7 @@
+   const pool = board?.ok ? board.parts : undefined
+   const serverNotice = seeded.current ? httpUrlError(server, '调度中心地址') : ''
+   const idNotice = seeded.current && !userId.trim() ? '请填写用户 ID，调度中心按这个 ID 记录产出。' : ''
++  const proxyNotice = proxyMode === 'custom' ? httpUrlError(proxyUrl, '代理地址') : ''
+   const serviceNotice = seeded.current && mode !== 'tag'
+     ? httpUrlError(tagUrl, '推理服务地址') || (execution.inference_source === 'local' ? localServiceUrlError(tagUrl) : '') : ''
+   const outNotice = seeded.current && !outDir.trim() ? '请选择产物目录，下载的分片和打标结果会保存到这里。' : ''
+@@ -179,17 +185,18 @@
+   const failureDetail = state?.runtime?.error || (runtimeFailure && state?.last_rc != null ? latestCenterFailure(state.log) : '') || runtimeFailure
+   // 打标服务与产物目录空着就不让开始：后端对空串是"保持原值"（免得把配置
+   // 清成空以后再起不来），所以输入框显示空、实际却用着旧地址，是更难查的错。
+-  const startBlocked = !ident.device_id
++  const startBlocked = proxyNotice || (!ident.device_id
+     ? '先到「连接与账号」连接调度中心'
+     : mode !== 'tag' && !tagUrl.trim()
+       ? '打标服务地址不能为空'
+       : !outDir.trim()
+         ? '产物目录不能为空'
+-        : ''
++        : '')
+   const payload = () => ({ ...execution, tag_url: tagUrl, mode, out_dir: outDir,
+     wait: waitMode, max_packages: Number(maxPkgs || 0),
+     download_conns: Math.max(1, Math.min(16, Number(dlConns) || 4)),
+     cdn_probe: cdnProbe, parts_pref: partsPref, auto_upload: autoUpload,
++    proxy_mode: proxyMode, proxy_url: proxyUrl,
+     remember_hf: rememberHf, ...(hfToken.trim() ? { hf_token: hfToken.trim() } : {}),
+   })
+ 
+@@ -454,6 +461,8 @@
+                       disabled={running}
+                     />
+                   </SettingRow>
++                  <ConnectionNetwork mode={proxyMode} address={proxyUrl} onMode={setProxyMode}
++                    onAddress={setProxyUrl} disabled={running || Boolean(busy)} notice={proxyNotice} />
+                   <SettingRow label="ID" help="服务端按它记录你的产出" required notice={idNotice}>
+                     <input
+                       className="lx-input text-xs"
+@@ -484,10 +493,11 @@
+                       <button
+                         type="button"
+                         className="lx-btn-primary shrink-0"
+-                        disabled={running || busy === 'login'}
++                        disabled={running || Boolean(busy) || Boolean(serverNotice || idNotice || proxyNotice)}
+                         onClick={() =>
+                           void act('login', async () => {
+-                            const s = await api.centerLogin({ server, user_id: userId, secret })
++                            const s = await api.centerLogin({ server, user_id: userId, secret,
++                              proxy_mode: proxyMode, proxy_url: proxyUrl })
+                             setSecret('')
+                   setSection('work')
+                             // 身份落盘了，顶栏那盏灯该立刻变绿：
+--- before/tagger/web/ui/src/components/center/ConnectionNetwork.tsx
++++ after/tagger/web/ui/src/components/center/ConnectionNetwork.tsx
+@@ -0,0 +1,23 @@
++import { ChoiceGrid } from '../ui/controls'
++import { SettingRow } from '../ui/launcher'
++
++export type ProxyMode = 'auto' | 'direct' | 'custom'
++
++export function ConnectionNetwork({ mode, address, onMode, onAddress, disabled, notice }: {
++  mode: ProxyMode; address: string; onMode: (mode: ProxyMode) => void
++  onAddress: (address: string) => void; disabled: boolean; notice: string
++}) {
++  return <>
++    <SettingRow label="连接方式" help="用于调度中心连接、接单和产物回传；本机推理保持直连。">
++      <ChoiceGrid options={['auto', 'direct', 'custom'] as const} value={mode} onChange={onMode}
++        disabled={disabled} size="sm" className="grid-cols-3" ariaLabel="调度连接方式"
++        renderLabel={(value) => ({ auto: '自动（系统代理）', direct: '直连', custom: '指定代理' })[value]} />
++    </SettingRow>
++    {mode === 'custom' && <SettingRow label="代理地址" required notice={notice}
++      help="填写代理软件的 HTTP 或 mixed 端口，例如 http://127.0.0.1:47826。代理软件需保持运行。">
++      <input className="lx-input font-mono text-xs" aria-label="调度代理地址"
++        value={address} onChange={(e) => onAddress(e.target.value)} disabled={disabled}
++        placeholder="http://127.0.0.1:47826" spellCheck={false} aria-invalid={Boolean(notice)} />
++    </SettingRow>}
++  </>
++}

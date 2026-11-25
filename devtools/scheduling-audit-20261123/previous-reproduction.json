@@ -1,0 +1,7 @@
+{
+  "previous_package": "tagger-20261122-scheduling-followup.zip",
+  "offline_cached_source_not_found": true,
+  "empty_snapshot_keeps_old_body": true,
+  "both_assignment_skips_tag_when_only_nl_exists": true,
+  "independent_worker_schema_dependency_missing": true
+}

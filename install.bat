@@ -10,6 +10,8 @@ rem  minutes the first time; it is installed by default because the default
 rem  tag backend needs it - without it the first tagging job fails with
 rem  "tag backend unavailable".
 rem
+rem  Hair MobileNet/CAFormer use the included CPU onnxruntime. Torii uses
+rem  llama.cpp below; no llama-cpp-python or extra native packages are needed.
 rem  Finally it installs llama.cpp (llama-server), ~570MB. That is the default
 rem  NL engine: without it the local service will not start at all. Same
 rem  implementation as the web button and `tagger.cli llama install`, so a

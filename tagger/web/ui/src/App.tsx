@@ -6,6 +6,7 @@ import {
   Download,
   FileJson,
   GitCompareArrows,
+  Gauge,
   History,
   Layers,
   ListChecks,
@@ -42,6 +43,8 @@ import { Deps } from './pages/Deps'
 import { Settings } from './pages/Settings'
 import { Tools } from './pages/Tools'
 import { Center } from './pages/Center'
+import { Benchmark } from './pages/Benchmark'
+import { DispatchPlanNotice } from './components/center/DispatchPlanNotice'
 import { GlobalProgress } from './components/GlobalProgress'
 import { SelfCheckDialog } from './components/SelfCheckDialog'
 import { ResumeBanner } from './components/ResumeBanner'
@@ -68,6 +71,7 @@ type Route =
   | { name: 'history' }
   | { name: 'deps' }
   | { name: 'center' }
+  | { name: 'benchmark' }
   | { name: 'settings' }
   | { name: 'tools' }
 
@@ -89,6 +93,7 @@ function parseRoute(hash: string): Route {
   if (path === '/stats') return { name: 'stats' }
   if (path === '/deps') return { name: 'deps' }
   if (path === '/center') return { name: 'center' }
+  if (path === '/benchmark') return { name: 'benchmark' }
   if (path === '/settings') return { name: 'settings' }
   if (path === '/tools') return { name: 'tools' }
   return { name: 'new' }
@@ -183,15 +188,12 @@ export default function App() {
   // 分组顺序就是干活顺序：领活 → 看进度 → 处理数据 → 折腾环境。
   // section 只写在每组第一项上（由 Sidebar 渲染成分割线 + 组标题）。
   const items: NavItem[] = [
-    // 排在最前：这是"活从哪来"的入口。从总机领分片和本机自建任务是两条并列的
-    // 起点，而前者决定了这台机器默认在干什么，所以先问它。
     {
       key: 'center',
       label: '调度中心',
       section: '任务',
       icon: <Waypoints size={15} />,
       active: route.name === 'center',
-      hint: '自动领分片打标，看派工与租约',
       onClick: () => go('/center'),
     },
     {
@@ -208,7 +210,7 @@ export default function App() {
       icon: <PlayCircle size={15} />,
       active: route.name === 'run',
       disabled: !runningId,
-      hint: runningId ? '查看正在跑的任务' : '当前没有正在跑的任务',
+      hint: runningId ? undefined : '暂无运行中任务',
       onClick: () => runningId && openJob(runningId),
     },
     {
@@ -223,7 +225,6 @@ export default function App() {
       label: '统计',
       icon: <ChartSpline size={15} />,
       active: route.name === 'stats',
-      hint: '通过率、失败率与质检分趋势',
       onClick: () => go('/stats'),
     },
     {
@@ -232,7 +233,7 @@ export default function App() {
       icon: <ListChecks size={15} />,
       active: route.name === 'results',
       disabled: !resultsId,
-      hint: resultsId ? '浏览最近一次任务的产物' : '还没有跑过任务',
+      hint: resultsId ? undefined : '暂无任务结果',
       onClick: () => resultsId && go(`/results/${resultsId}`),
     },
     {
@@ -241,7 +242,7 @@ export default function App() {
       section: '数据',
       icon: <Merge size={15} />,
       active: route.name === 'tag-manage',
-      hint: '多个 json 合成一个，tag/nl 按图配对',
+      hint: '合并 JSON / 配对',
       onClick: () => go('/tag-manage'),
     },
     {
@@ -249,7 +250,7 @@ export default function App() {
       label: '工具',
       icon: <Wrench size={15} />,
       active: route.name === 'tools',
-      hint: '清洗已打好的 JSONL 标签产物',
+      hint: '清洗 JSONL 标签',
       onClick: () => go('/tools'),
     },
     {
@@ -257,7 +258,6 @@ export default function App() {
       label: '冲突与决策',
       icon: <GitCompareArrows size={15} />,
       active: route.name === 'conflicts',
-      hint: '同一张图多份产物时逐条定留哪份',
       onClick: () => go('/conflicts'),
     },
     {
@@ -265,7 +265,6 @@ export default function App() {
       label: '去重',
       icon: <Copy size={15} />,
       active: route.name === 'dedup',
-      hint: '发分包前查重复图，产出排除清单',
       onClick: () => go('/dedup'),
     },
     {
@@ -273,7 +272,7 @@ export default function App() {
       label: '数据打包',
       icon: <Boxes size={15} />,
       active: route.name === 'packaging',
-      hint: '分包 / 拼接 / 封包，与打标分开走',
+      hint: '分包 / 拼接 / 封包',
       onClick: () => go('/packaging'),
     },
     {
@@ -281,7 +280,6 @@ export default function App() {
       label: '回传',
       icon: <UploadCloud size={15} />,
       active: route.name === 'upload',
-      hint: '把处理好的 parquet 传到汇总机',
       onClick: () => go('/upload'),
     },
     {
@@ -289,7 +287,6 @@ export default function App() {
       label: '打标清单',
       icon: <FileJson size={15} />,
       active: route.name === 'manifests',
-      hint: '汇总机上已上传的分片与合成进度',
       onClick: () => go('/manifests'),
     },
     {
@@ -298,15 +295,17 @@ export default function App() {
       section: '环境',
       icon: <Layers size={15} />,
       active: route.name === 'models',
-      hint: '管理 NL 模型与 tag 分类头',
       onClick: () => go('/models'),
+    },
+    {
+      key: 'benchmark', label: '并发测试', icon: <Gauge size={15} />,
+      active: route.name === 'benchmark', onClick: () => go('/benchmark'),
     },
     {
       key: 'downloads',
       label: '分片下载',
       icon: <Download size={15} />,
       active: route.name === 'downloads',
-      hint: '提前把仓库分片备到本地',
       onClick: () => go('/downloads'),
     },
     {
@@ -314,7 +313,6 @@ export default function App() {
       label: '依赖检测',
       icon: <Package size={15} />,
       active: route.name === 'deps',
-      hint: '查看依赖与版本，可单独装卸',
       onClick: () => go('/deps'),
     },
     {
@@ -322,7 +320,7 @@ export default function App() {
       label: '部署自检',
       icon: <ShieldCheck size={15} />,
       active: selfCheckOpen,
-      hint: '逐项验证环境、目录与服务，真跑一张图',
+      hint: '环境验证与试跑',
       onClick: () => setSelfCheckOpen(true),
     },
     {
@@ -330,7 +328,6 @@ export default function App() {
       label: '设置',
       icon: <Settings2 size={15} />,
       active: route.name === 'settings',
-      hint: '界面偏好与下载源',
       onClick: () => go('/settings'),
     },
   ]
@@ -396,6 +393,7 @@ export default function App() {
       {/* 放在所有页面之前：用户下次打开往往就是来接着昨天那个活儿的，
           不该先去某个页面里找一圈。 */}
       <ResumeBanner onOpen={openJob} />
+      <DispatchPlanNotice connected={Boolean(center?.linked)} centerPage={route.name === 'center'} onOpen={() => go('/center')} />
 
       {/* 任务收尾弹窗：长任务跑完/失败时，用户多半不在那个页面上。 */}
       <ActivityNotice interval={progressInterval} onOpen={go} />
@@ -412,6 +410,7 @@ export default function App() {
         />
       </div>
       {route.name === 'models' && <Models />}
+      {route.name === 'benchmark' && <Benchmark />}
       {route.name === 'downloads' && <Downloads />}
       {route.name === 'tag-manage' && <TagManage />}
       {route.name === 'conflicts' && <Conflicts />}

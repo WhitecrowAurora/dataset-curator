@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="3.495" timestamp="2026-11-19T07:00:04.237937+08:00" hostname="DESKTOP-310LLIR"><testcase classname="backend.smoke.media-native.checks" name="test_native_version_and_embedded_command" time="2.665"><failure message="assert ('sys.path.insert' in &quot;import sys; sys.path.insert(0, 'H:\\\\tagger'); from tagger.inference.qwen35.runtime import main; main()&quot; and 'H:\\tagger' in &quot;import sys; sys.path.insert(0, 'H:\\\\tagger'); from tagger.inference.qwen35.runtime import main; main()&quot;)&#10; +  where 'H:\\tagger' = str(WindowsPath('H:/tagger'))">tmp_path = WindowsPath('H:/tagger/backend/smoke/media-native/version-pytest/test_native_version_and_embedd0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000000004BEE030&gt;
+
+    def test_native_version_and_embedded_command(tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from tagger.inference.qwen3vl import runtime as qwen
+        from tagger.inference.qwen3vl.server import create_app
+        from tagger.inference.qwen35 import runtime as native
+        monkeypatch.setattr(qwen, "check_environment", lambda: None)
+        monkeypatch.setattr(native, "prepare_metadata", lambda directory: tmp_path)
+        command, info = native.build_command(tmp_path / "model.gguf", tmp_path / "mmproj.gguf", "torii", 8001)
+&gt;       assert "sys.path.insert" in command[4] and str(ROOT) in command[4]
+E       assert ('sys.path.insert' in "import sys; sys.path.insert(0, 'H:\\\\tagger'); from tagger.inference.qwen35.runtime import main; main()" and 'H:\\tagger' in "import sys; sys.path.insert(0, 'H:\\\\tagger'); from tagger.inference.qwen35.runtime import main; main()")
+E        +  where 'H:\\tagger' = str(WindowsPath('H:/tagger'))
+
+backend\smoke\media-native\checks.py:97: AssertionError</failure></testcase><testcase classname="backend.smoke.media-native.checks" name="test_caption_empty_lane_does_not_load" time="0.713" /></testsuite></testsuites>

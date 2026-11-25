@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>lulynx · AI 管理接口</title>
+<link rel="stylesheet" href="/static/offline-workorders.css"><link rel="stylesheet" href="/static/ai-access.css"><script src="/static/ai-access.js" defer></script></head>
+<body><main class="wo-main"><header class="wo-header"><div><h1>AI 管理接口</h1><p>给 AI 独立的调度权限，密钥可随时撤销</p></div><a href="/">返回调度中心</a></header>
+<p id="ai-message" role="status"></p>
+<section class="wo-card"><h2>连接方式</h2><p>支持 MCP Streamable HTTP。AI 客户端填写下面的地址，并在请求头配置 Authorization: Bearer 密钥。</p>
+<label>MCP 地址 <input id="ai-url" aria-label="MCP 地址" readonly size="48"></label>
+<p>可查询工作区、分片、完整调度配置、设备速度、显存、等待原因；操作权限支持预派单和撤销预派、自动派单启停、强制继续、并发调整、探测、租约释放以及离线工单生成和删除。所有操作仍受原调度规则约束。</p>
+<p>撤销预派只取消尚未领取的用户分项；执行包和预锁包请先预览再释放。撤销不会暂停自动派单，若不希望重新分派，应先暂停总派单。更新后请重新连接 AI 客户端刷新工具列表。</p>
+<p>若 AI 客户端只支持本地 stdio，可使用配套 Python 桥接脚本。<a href="/api/ai-access/bridge" download>下载桥接脚本和配置说明</a>（Python 3.10+，无需安装依赖）。</p>
+</section>
+<section class="wo-card"><h2>创建密钥</h2><div class="wo-actions">
+<label>名称 <input id="ai-name" aria-label="密钥名称" maxlength="80" placeholder="管理员 AI"></label>
+<label>权限 <select id="ai-role" aria-label="AI 权限"><option value="operate">查询和操作调度</option><option value="read">仅查询</option></select></label>
+<label>有效天数 <input id="ai-days" aria-label="密钥有效天数" type="number" value="30" min="1" max="365"></label>
+<button id="ai-create" type="button">创建密钥</button></div>
+<div id="ai-new" hidden><p>密钥只在创建时显示一次，请保存到 AI 客户端的密钥配置。</p><label>新密钥 <input id="ai-key" aria-label="新 AI 密钥" readonly size="56"></label><button id="ai-copy" type="button">复制密钥</button><button id="ai-hide" type="button">隐藏密钥</button><pre id="ai-example"></pre></div>
+</section>
+<section class="wo-card"><h2>已有密钥</h2><button id="ai-refresh" type="button">刷新</button><div class="wo-scroll"><table><thead><tr><th>名称</th><th>权限</th><th>有效期</th><th>状态</th><th>操作</th></tr></thead><tbody id="ai-keys"></tbody></table></div></section>
+<section class="wo-card"><h2>最近 AI 操作</h2><p>记录调用密钥、工具及结果，不记录密钥正文。</p><div class="wo-scroll"><table><thead><tr><th>时间</th><th>密钥</th><th>工具</th><th>结果</th></tr></thead><tbody id="ai-audit"></tbody></table></div></section>
+</main></body></html>

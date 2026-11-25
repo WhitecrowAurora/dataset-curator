@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"baseline\": {\"annotation/discovery.py\": \"ad2c8c75910e7dee07151b836545c8f6e79586e14a5f58ffe48039d4b6c3d77d\", \"annotation/artist_reinject.py\": \"0ddadc69d5c52bc4593ae1df71c6f9c7d0d226d07dcdd8ee5ae7dbf6e582a2d6\", \"history/store.py\": \"2818d60d049331d22d5021be799f6b3ef6c6da504177112e92818c25b4ef6588\"}, \"repo_artist\": [[\"MatchaCuratio/Anime-2024Dru768-8M\", \"{\\\"enabled\\\": true, \\\"directory\\\": \\\"artist\\\", \\\"revision\\\": \\\"bfb2dce5c795b9797604e376c02dd7bec1b9904c\\\", \\\"artist_inject\\\": true, \\\"artist_inject_tags\\\": false}\"]], \"free_bytes\": 9017585664, \"db_copy\": false}\n",
+  "stderr": ""
+}

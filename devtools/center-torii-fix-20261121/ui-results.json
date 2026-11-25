@@ -1,0 +1,9 @@
+{
+  "saved_model": "torii-gate-0.5",
+  "engines": [
+    "native",
+    "llamacpp"
+  ],
+  "qwen_switch": true,
+  "javascript_errors": []
+}

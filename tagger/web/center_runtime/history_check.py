@@ -30,6 +30,19 @@ def execute(history, command, session, cancel):
     expected = source_ids(source)
     local = next(r for r in history.inventory.scan() if r["id"] == row["id"])
     files = local["files"]
+    if task.get('reinject'):
+        from ...center_runtime.artist import prepare
+        from .history_artist import rewrite, ReviewRequired
+        prepare(session.identity,{**task,'session_id':session.id},row['out_dir'])
+        table = json.loads((Path(row['out_dir'])/'.center-artist.json').read_text(encoding='utf-8'))
+        history.phase('checking','依据中心画师表补注入历史产物，不启动模型')
+        history.center._push('[history] 画师表来源：'+table['source'])
+        stats = rewrite(files,expected,table,task['annotation'],force=task['reinject']=='force',cancel=cancel)
+        history.center._push('[history] 画师补注入：'+json.dumps(stats,ensure_ascii=False))
+        if stats['review_count']:
+            raise ReviewRequired(stats)
+        local=next(r for r in history.inventory.scan() if r['id']==row['id'])
+        files=local['files']
     ledgers = [str(Path(row["out_dir"]) / name) for name in ("failures.jsonl", "skipped.jsonl", "excused.jsonl")
                if (Path(row["out_dir"]) / name).is_file()]
     tracked = files + ledgers
@@ -65,7 +78,7 @@ def execute(history, command, session, cancel):
     headers = {"X-Fox-User": quote(session.identity["user_id"], safe=""),
                "X-Fox-Device": session.identity["device_id"], "X-Fox-Secret": session.identity["secret"],
                "X-Fox-History": task["check_id"], "X-Fox-Session": session.id}
-    client = BlobClient(session.identity["server"], headers=headers, timeout=300)
+    client = BlobClient(session.identity["server"], headers=headers, timeout=300, network=history.center.config())
     history.phase("uploading", "回传历史产物与逐图检查报告")
     for path in (output, folder / "proof.json"):
         if cancel.is_set():
@@ -76,7 +89,7 @@ def execute(history, command, session, cancel):
     if cancel.is_set() or session.closed:
         raise ValueError("已退出托管，取消历史产物登记")
     from ...fox_worker import api
-    result = api(session.identity, "/api/v1/history/finish", {"check_id": task["check_id"], "session_id": session.id}, timeout=60, retries=2)
+    result = api(session.identity, "/api/v1/history/finish", {"check_id": task["check_id"], "session_id": session.id}, timeout=180 if task.get('reinject') else 60, retries=2)
     final_report = result.get('report') or report
     history.report(row["id"], {**final_report, 'check_id': task['check_id'], 'session_id': session.id,
                              "registered_parts": result["registered_parts"]},

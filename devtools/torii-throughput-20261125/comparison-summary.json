@@ -1,0 +1,186 @@
+{
+  "matched": [
+    {
+      "engine": "llamacpp",
+      "slots": 1,
+      "fixed_tokens_per_second": 76.57349582204486,
+      "caption_images_per_minute": 14.741841198998262,
+      "caption_tokens_per_second": 86.33190752163358,
+      "gpu_peak_gib": 6.203125,
+      "caption_seconds": [
+        32.93897339999967,
+        32.190397099999245
+      ],
+      "caption_tokens": [
+        2811,
+        2811
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "llamacpp",
+      "slots": 4,
+      "fixed_tokens_per_second": 139.6339604809696,
+      "caption_images_per_minute": 22.533907662000765,
+      "caption_tokens_per_second": 140.4297156202503,
+      "gpu_peak_gib": 6.96875,
+      "caption_seconds": [
+        21.25989619999018,
+        21.34272929999861
+      ],
+      "caption_tokens": [
+        2902,
+        3081
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "llamacpp",
+      "slots": 8,
+      "fixed_tokens_per_second": 164.98905961637672,
+      "caption_images_per_minute": 25.494790937964392,
+      "caption_tokens_per_second": 152.8776448032835,
+      "gpu_peak_gib": 8.2900390625,
+      "caption_seconds": [
+        18.27738970000064,
+        19.411487299992586
+      ],
+      "caption_tokens": [
+        2823,
+        2937
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "native",
+      "slots": 1,
+      "fixed_tokens_per_second": 52.14991246200762,
+      "caption_images_per_minute": 10.480016789590938,
+      "caption_tokens_per_second": 59.62692885911011,
+      "gpu_peak_gib": 7.62890625,
+      "caption_seconds": [
+        46.79695810000703,
+        44.84742079999705
+      ],
+      "caption_tokens": [
+        2731,
+        2731
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "native",
+      "slots": 4,
+      "fixed_tokens_per_second": 151.9337455873274,
+      "caption_images_per_minute": 23.596858946122467,
+      "caption_tokens_per_second": 133.37141316839637,
+      "gpu_peak_gib": 9.990234375,
+      "caption_seconds": [
+        20.02614439999161,
+        20.667339600011474
+      ],
+      "caption_tokens": [
+        2713,
+        2713
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "native",
+      "slots": 8,
+      "fixed_tokens_per_second": 193.83638370266334,
+      "caption_images_per_minute": 31.160306745448572,
+      "caption_tokens_per_second": 180.27535798356394,
+      "gpu_peak_gib": 13.1484375,
+      "caption_seconds": [
+        15.638371900000493,
+        15.176962800003821
+      ],
+      "caption_tokens": [
+        2777,
+        2777
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    }
+  ],
+  "other_settings": [
+    {
+      "engine": "llamacpp-default",
+      "slots": 8,
+      "fixed_tokens_per_second": 246.60140399076374,
+      "caption_images_per_minute": 32.95822554656541,
+      "caption_tokens_per_second": 193.6476548043379,
+      "gpu_peak_gib": 8.2041015625,
+      "caption_seconds": [
+        13.958208000010927,
+        15.224522400007118
+      ],
+      "caption_tokens": [
+        2793,
+        2850
+      ],
+      "prompt_tokens": [
+        1175
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "llamacpp-production",
+      "slots": 1,
+      "fixed_tokens_per_second": 80.17652051110336,
+      "caption_images_per_minute": 17.33957722317168,
+      "caption_tokens_per_second": 100.42505141753597,
+      "gpu_peak_gib": 6.3662109375,
+      "caption_seconds": [
+        27.610038099999656,
+        27.755013200003305
+      ],
+      "caption_tokens": [
+        2780,
+        2780
+      ],
+      "prompt_tokens": [
+        1715
+      ],
+      "json_and_eos_passed": true
+    },
+    {
+      "engine": "llamacpp-production",
+      "slots": 8,
+      "fixed_tokens_per_second": 194.82440964901392,
+      "caption_images_per_minute": 28.75552681607779,
+      "caption_tokens_per_second": 173.65382651497438,
+      "gpu_peak_gib": 8.71875,
+      "caption_seconds": [
+        15.475145599993994,
+        18.11760030000005
+      ],
+      "caption_tokens": [
+        2784,
+        3033
+      ],
+      "prompt_tokens": [
+        1715
+      ],
+      "json_and_eos_passed": true
+    }
+  ]
+}

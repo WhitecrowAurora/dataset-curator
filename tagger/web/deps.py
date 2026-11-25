@@ -41,6 +41,8 @@ EXTRA_NOTES = {
     "convert": "本地量化成 GGUF（transformers 等），只在「本地量化」时用得上。",
     "serve": "vLLM 推理服务，仅 Linux / WSL2 可装。",
     "parquet": "parquet 打包与 HF 分片流式读取。",
+    "hair": "发色与动漫/真人 CPU 分类器；Torii 默认使用独立 llama.cpp，native 按需安装专用推理组。",
+    "torii-accel": "Torii native 可选 CUDA 加速，需已装专用推理组及 PyTorch ≥2.7；仅 Ampere 及更新 GPU 使用 FLA。",
 }
 
 # 日志缓冲上限。pip 装 torch 的日志能刷几千行，全留着只是浪费内存。
@@ -523,6 +525,9 @@ def _spec_version(name: str) -> str:
 # 分发名 → 导入名。清单里写的是 pip 名，而 `import` 用的是另一套名字，
 # 少了这张表，页面会把装好的 Pillow 误报成"缺失"。
 _MODULE_ALIAS = {
+    "flash-linear-attention": "fla",
+    "fla-core": "fla.ops",
+    "triton-windows": "triton",
     "pillow": "PIL",
     "pyyaml": "yaml",
     "pydantic-core": "pydantic_core",
@@ -542,6 +547,8 @@ _MODULE_ALIAS = {
 # pyproject 里的 extras 也走同一张表，否则「安装本组」在 Windows 上照样会装。
 _PLATFORM_ONLY = {
     "vllm": ("linux",),
+    "triton": ("linux",),
+    "triton-windows": ("win32",),
 }
 
 
@@ -594,7 +601,7 @@ class Item:
 # 可选依赖：不在两份清单里（清单只收"标准流程必装"的），但确实有人会用到。
 # 装不上 / 不装都不影响基本流程，所以单独一组。
 _OPTIONAL: list[Item] = [
-    Item("onnxruntime", "onnxruntime", "optional", "cl-tagger-v2 后端（不依赖 torch）"),
+    Item("onnxruntime", "onnxruntime", "optional", "cl-tagger-v2 与专用发色分类器（CPU 推理）"),
     Item("datasets", "datasets", "optional", "把 HuggingFace 数据集直接当输入源"),
     Item("vllm", "vllm", "optional", "NL 生成服务，仅 Linux / WSL2",
          platforms=("linux",)),
@@ -615,8 +622,14 @@ _GROUPS = [
 # 但它们**不进**「安装缺失」那个批量动作：serve 在 Windows 上装了也跑不起来，
 # llmcompressor 几百 MB，一次全装是误伤。所以每组只给自己的按钮。
 _EXTRA_GROUPS: list[tuple[str, str, str]] = [
+    ("hair", "发色与动漫复核",
+     "发色与动漫/真人分类器使用 CPU ONNX；Torii 默认复用 llama.cpp，"
+     "无需 llama-cpp-python。选择 native 时另装专用推理组；以下包与基础/打标环境共用。"),
     ("native-nl", "lulynx 专用推理（实验）",
-     "Qwen3-VL 专用运行时；支持 CPU 和 CUDA，复用现有打标服务。"),
+     "Qwen3-VL / Torii Qwen3.5 专用运行时；支持 CPU 和 CUDA，复用现有打标服务。"),
+    ("torii-accel", "Torii native CUDA 加速（可选）",
+     "先安装专用推理组及 PyTorch ≥2.7；FLA 用于 Ampere 或更新 GPU，"
+     "显存不足时自动保留 GGUF 量化矩阵。首图可能编译内核；默认 llama.cpp 无需这组。"),
     ("convert", "本地量化（GGUF）",
      "safetensors → F16 → Q4_K_M/Q6_K。torch / transformers / safetensors 与"
      "「打标运行时」共用同一份，卸载了打标也会停。"),
@@ -1050,6 +1063,14 @@ class DepManager:
         # import 就炸的壳，还会把钉死的 torch 换掉。要跑请去 WSL2 那边单独装。
         todo = [it for it in items
                 if it.supported and describe(it)["status"] == "missing"]
+        repaired = False
+        if extra in ('native-nl', 'torii-accel'):
+            from ..runtime.python_dev import ensure as ensure_python_dev
+            installed = ensure_python_dev()
+            if installed:
+                with self._lock:
+                    self._pending_note = f'已补齐便携 Python 开发文件（{len(installed)} 个文件）'
+                repaired = True
         if not todo:
             bad = [it for it in items if not it.supported]
             if bad:
@@ -1057,6 +1078,8 @@ class DepManager:
                 names = " / ".join(it.name for it in bad)
                 raise ValueError(
                     f"{names} 只支持 {only}，当前系统（{sys.platform}）装了也跑不起来")
+            if repaired:
+                return self._start_many(f'install-{extra}', [])
             raise ValueError(f"{extra} 声明的依赖都装着了，不用装")
         return self._start_many(f"install-{extra}", todo)
 
@@ -1099,6 +1122,10 @@ class DepManager:
         for it in load_items():
             if it.name.lower() == name.lower():
                 return it
+        for items in load_extras().values():
+            for it in items:
+                if it.name.lower() == name.lower():
+                    return it
         # 清单之外的包也允许卸：用户可能手动装过别的东西，页面上既然看得到
         # 依赖树里的异常，就该能收拾它。装的时候按裸名交给 pip 解析。
         if not re.fullmatch(r"[A-Za-z0-9_.\-]+", name):

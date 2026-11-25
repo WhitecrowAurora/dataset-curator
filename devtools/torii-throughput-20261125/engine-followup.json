@@ -1,0 +1,2372 @@
+[
+  {
+    "engine": "native",
+    "phase": "load",
+    "seconds": 27.653736200009007,
+    "runtime": {
+      "device": "cuda:0",
+      "precision": "gguf_packed_fp16",
+      "linear_attention": "fla",
+      "max_pixels": 999424,
+      "libraries": {
+        "torch": "2.13.0+cu132",
+        "transformers": "5.14.1",
+        "flash-linear-attention": "0.6.0",
+        "triton": "3.7.1"
+      },
+      "batch_size": 1,
+      "batch_window_s": 0.1,
+      "continuous_batching": true,
+      "decode_graph": true
+    }
+  },
+  {
+    "engine": "native",
+    "slots": 8,
+    "phase": "ready",
+    "seconds": 0.34195920001366176,
+    "command": null
+  },
+  {
+    "engine": "native",
+    "slots": 8,
+    "phase": "fixed",
+    "repeat": 0,
+    "seconds": 6.872254199988674,
+    "images_per_minute": 69.84607757972502,
+    "tokens": 1024,
+    "tokens_per_second": 149.00496550341336,
+    "mean_latency": 6.853203962502448,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 6.862239599999157,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A mystical white fox-like creature with glowing red eyes walks gracefully through a grassy field dotted with small white flowers. The scene is set outdoors during twilight, with a soft pastel sky blending pink and blue hues. In the background, a large, round clock tower stands prominently, showing the time around 11:05. A floating island hovers in the distance, adding a fantasy element. The foreground grass and flowers are sharply detailed, while the background is softly blurred, creating depth and focus on the creature.\", \"Creature\": \"A slender, fox-like animal with pure white fur that glows faintly with",
+        "timings": null
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 6.856615500000771,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The overall style is realistic with detailed facial features and lighting, emphasizing their age and experience.\", \"Character 1\": \"Honsa Lrkra, a middle",
+        "timings": null
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 6.860648700007005,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows destroyed buildings, rubble, neon signs, and a red emergency light, creating a tense post-apocalyptic atmosphere. The scene is rendered in a detailed, realistic anime style with sharp focus on the characters and a blurred background.\", \"Character 1\": \"A girl with long blue hair and yellow eyes wears a navy blue beret with a badge, a dark blue tactical jacket with rolled-up sleeves, a white shirt, and dark blue pants. She has black fingerless gloves, a black choker, and a utility belt",
+        "timings": null
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 6.855766900000162,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, facing forward with confident and determined expressions, ready for adventure. A small red dragon with large eyes and a curled tail stands near the front right, adding a whimsical touch.\", \"Kirito\": \"A young man with short black hair and a serious expression, wearing dark armor with silver shoulder plates and gauntlets.",
+        "timings": null
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 6.8509460000059335,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A hyper-realistic digital portrait of a young man shown from the chest up against a smooth gray gradient background. The image is framed as a fake screenshot from a video game, featuring a green health bar at the bottom and a vertical menu with icons on the left side. The lighting is soft and even, highlighting the detailed textures of skin, hair, and clothing.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has striking bright green eyes with a calm, confident gaze directed at the viewer. His skin is smooth with subtle shading that",
+        "timings": null
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 6.850835299992468,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with a softly blurred urban background. Natural daylight illuminates the scene, highlighting the warm tones of her yellow dress and the calm atmosphere. She is focused on a small brown handbag placed on the table, gently handling its clasp with both hands.\", \"Character 1\": \"A young girl with long, wavy black hair cascading over her shoulders and back. She wears a bright yellow dress with puffed short sleeves and a gathered waist, creating a soft, feminine silhouette. Her eyes are closed, and her expression is serene and contemplative.",
+        "timings": null
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 6.844994900005986,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A group of ten young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and brick walls. The court features a basketball hoop centered in the background. The girls wear various basketball uniforms and casual sportswear in colors including blue, red, pink, black, and white. Most hold basketballs, with one ball resting on the floor near the center. The man stands behind the group with hands on hips, overseeing the scene. The atmosphere is calm and focused, suggesting a team or practice setting.\", \"Character 1\": \"A girl on the far left with short blonde hair",
+        "timings": null
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 6.843584800008102,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A highly detailed monochrome graphite portrait of a young Asian girl, focusing on her face and upper shoulders. The background is plain, emphasizing the realistic textures and shading of her skin, hair, and facial features. The image captures a calm, neutral expression with soft lighting that highlights the natural contours of her face.\", \"Character 1\": \"A young Asian girl with long, straight hair parted slightly to the side, rendered with fine graphite strokes showing individual strands and volume. She has large, round eyes with subtle shading around the eyelids and lashes, a small straight nose with delicate nostrils, and full lips parted slightly",
+        "timings": null
+      }
+    ],
+    "gpu_peak_mib": 10467.0,
+    "gpu_util_mean": 72.52173913043478
+  },
+  {
+    "engine": "native",
+    "slots": 8,
+    "phase": "fixed",
+    "repeat": 1,
+    "seconds": 5.443767199991271,
+    "images_per_minute": 88.17423346111673,
+    "tokens": 1024,
+    "tokens_per_second": 188.10503138371567,
+    "mean_latency": 5.430964612500247,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 5.433206200003042,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A mystical white fox-like creature with glowing red eyes walks gracefully through a grassy field dotted with small white flowers. The scene is set outdoors during twilight, with a soft pastel sky blending pink and blue hues. In the background, a large, round clock tower stands prominently, showing the time around 11:05. A floating island hovers in the distance, adding a fantasy element. The foreground grass and flowers are sharply detailed, while the background is softly blurred, creating depth and focus on the creature.\", \"Creature\": \"A slender, fox-like animal with pure white fur that glows faintly with",
+        "timings": null
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 5.436192599998321,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The overall style is realistic with detailed facial features and lighting, emphasizing their age and experience.\", \"Character 1\": \"Honsa Lrkra, a middle",
+        "timings": null
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 5.434406499989564,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows destroyed buildings, rubble, neon signs, and a red emergency light, creating a tense post-apocalyptic atmosphere. The scene is rendered in a detailed, realistic anime style with sharp focus on the characters and a blurred background.\", \"Character 1\": \"A girl with long blue hair and yellow eyes wears a navy blue beret with a badge, a dark blue tactical jacket with rolled-up sleeves, a white shirt, and dark blue pants. She has black fingerless gloves, a black choker, and a utility belt",
+        "timings": null
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 5.4340343000076246,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, facing forward with confident and determined expressions, ready for adventure. A small red dragon with large eyes and a curled tail stands near the front right, adding a whimsical touch.\", \"Kirito\": \"A young man with short black hair and a serious expression, wearing dark armor with silver shoulder plates and gauntlets.",
+        "timings": null
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 5.429700100008631,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A hyper-realistic digital portrait of a young man shown from the chest up against a smooth gray gradient background. The image is framed as a fake screenshot from a video game, featuring a green health bar at the bottom and a vertical menu with icons on the left side. The lighting is soft and even, highlighting the detailed textures of skin, hair, and clothing.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has striking bright green eyes with a calm, confident gaze directed at the viewer. His skin is smooth with subtle shading that",
+        "timings": null
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 5.427932899998268,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with a softly blurred urban background. Natural daylight illuminates the scene, highlighting the warm tones of her yellow dress and the calm atmosphere. She is focused on a small brown handbag placed on the table, gently handling its clasp with both hands.\", \"Character 1\": \"A young girl with long, wavy black hair cascading over her shoulders and back. She wears a bright yellow dress with puffed short sleeves and a gathered waist, creating a soft, feminine silhouette. Her eyes are closed, and her expression is serene and contemplative.",
+        "timings": null
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 5.427000099996803,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A group of ten young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and brick walls. The court features a basketball hoop centered in the background. The girls wear various basketball uniforms and casual sportswear in colors including blue, red, pink, black, and white. Most hold basketballs, with one ball resting on the floor near the center. The man stands behind the group with hands on hips, overseeing the scene. The atmosphere is calm and focused, suggesting a team or practice setting.\", \"Character 1\": \"A girl on the far left with short blonde hair",
+        "timings": null
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 5.4252441999997245,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 128,
+          "total_tokens": 1303
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A highly detailed monochrome graphite portrait of a young Asian girl, focusing on her face and upper shoulders. The background is plain, emphasizing the realistic textures and shading of her skin, hair, and facial features. The image captures a calm, neutral expression with soft lighting that highlights the natural contours of her face.\", \"Character 1\": \"A young Asian girl with long, straight hair parted slightly to the side, rendered with fine graphite strokes showing individual strands and volume. She has large, round eyes with subtle shading around the eyelids and lashes, a small straight nose with delicate nostrils, and full lips parted slightly",
+        "timings": null
+      }
+    ],
+    "gpu_peak_mib": 12896.0,
+    "gpu_util_mean": 92.61111111111111
+  },
+  {
+    "engine": "native",
+    "slots": 8,
+    "phase": "caption",
+    "repeat": 0,
+    "seconds": 15.4908265999984,
+    "images_per_minute": 30.98608049747646,
+    "tokens": 2777,
+    "tokens_per_second": 179.26738654477526,
+    "mean_latency": 11.101951550001104,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 9.333367900006124,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 274,
+          "total_tokens": 1449
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A mystical white-furred creature with glowing red eyes walks gracefully across a grassy field dotted with small white flowers. The scene is set outdoors during a calm twilight, with a large clock tower showing nearly 12:00 and a floating island in the distance. The background features softly blurred hills and lampposts, creating a dreamy, serene atmosphere with soft pastel sky colors.\", \"Creature\": \"A slender, quadrupedal creature covered in thick, fluffy white fur with subtle sparkling highlights. It has large, pointed ears with pink inner fur and a long, bushy tail trailing behind. Its glowing red eyes and small black nose give it an alert, intelligent expression. The creature is mid-step, gazing forward with a calm, purposeful demeanor.\", \"Clock Tower\": \"A tall, classic clock tower with a white face showing the time just before midnight, standing prominently in the right background.\", \"Floating Island\": \"A large, distant floating island visible in the left background, adding a fantastical element to the landscape.\", \"Surroundings\": \"The grassy field is lush with scattered white flowers and small plants. The sky is a soft gradient of pastel blues and pinks, enhancing the tranquil mood. Blurred hills and lampposts are visible in the distance, contributing depth and a peaceful ambiance.\"}",
+        "timings": null
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 14.998408400002518,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 506,
+          "total_tokens": 1681
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"The image is a composite chart set on a blurred soccer stadium field featuring nine headshots of older men arranged in a 3x3 grid. Each portrait is framed with a dark blue background and numbered 1 to 9 in the top-left corner of each frame. Below each portrait is a white nameplate displaying the name and nationality of the man. The overall style is realistic with detailed facial features, wrinkles, and formal attire. Above the portraits, bold white text reads 'Top FIFA 19 Management codis,' suggesting a ranking or list of influential FIFA 19 officials.\", \"Character 1\": \"Honsa Lrkra, a middle-aged man with short brown hair and a trimmed beard, wears a dark suit with a white shirt and blue tie. His expression is neutral and serious, facing forward.\", \"Character 2\": \"Pichis Lrura, an older man with short grey hair and wrinkles, wears a dark suit, white shirt, and dark tie. He has a calm, neutral expression and looks straight ahead.\", \"Character 3\": \"Fiesen Cuna, an older man with short grey hair and a full beard, wears a dark suit with a white shirt and dark tie. His expression is stern and serious.\", \"Character 4\": \"Duna Ecina, an older man with short grey hair and wrinkles, wears a dark suit with a white shirt and purple tie. He has a calm, neutral expression.\", \"Character 5\": \"Nonano Erura, a middle-aged man with short brown hair and subtle wrinkles, wears a dark suit with a white shirt and red tie. He smiles gently.\", \"Character 6\": \"Morram Frika, an older man with short grey hair and a full beard, wears a dark suit with a white shirt and blue tie. His expression is serious.\", \"Character 7\": \"Hamin Esira, an older man with short grey hair and a trimmed beard, wears a dark suit with a white shirt and blue tie. He has a neutral, calm expression.\", \"Character 8\": \"Bisun Erura, a middle-aged man with short brown hair and subtle wrinkles, wears a dark suit with a white shirt and blue tie. He smiles gently.\", \"Character 9\": \"Cooin Frika, an older man with short grey hair and a trimmed beard, wears a dark suit with a white shirt and blue tie. His expression is neutral and calm.\"}",
+        "timings": null
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 10.455216500005918,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 321,
+          "total_tokens": 1496
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Three girls armed with assault rifles stand in a ruined urban battlefield under a gloomy, cloudy sky. The background shows destroyed buildings, rubble, neon signs, and a traffic light, creating a dystopian city warzone atmosphere. The scene is rendered in a detailed, semi-realistic anime style with sharp lines and muted colors, emphasizing the tense, combat-ready mood.\", \"Character 1\": \"Centered in the foreground, a girl with long blue hair and yellow eyes wears a navy blue beret, black fingerless gloves, a navy jacket with rolled sleeves over a white shirt, and dark tactical pants with thigh holsters. She grips a black assault rifle with a scope firmly, her expression serious and focused, standing with legs slightly apart in a ready stance.\", \"Character 2\": \"To the right, a girl with long brown hair and brown eyes wears a navy jacket with rolled sleeves, a white shirt, a short black skirt, and black boots. She holds an assault rifle with a scope, aiming forward with a calm but alert expression, her hair flowing gently behind her.\", \"Character 3\": \"On the left, a girl with brown hair tied in a high ponytail wears a similar navy jacket, white shirt, black skirt, and thigh-high stockings. She holds her assault rifle diagonally downward, looking off to the side with a focused, ready expression, standing slightly behind the others.\", \"Watermark\": \"The image includes a subtle artist signature 'shironeko_project' near the bottom corner, blending with the scene without disrupting the composition.\"}",
+        "timings": null
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 13.113820200000191,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 429,
+          "total_tokens": 1604
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A group of seven characters from the Sword Art Online universe stand on a grassy hill under a bright blue sky dotted with clouds. Behind them float several large, lush, castle-topped islands connected by visible beams, creating a fantasy world atmosphere. The characters form a semi-circle, facing forward with confident and determined expressions. A small red dragon with big eyes and a curled tail stands near the group, adding a playful touch.\", \"Kirito\": \"A young man with short black hair and dark eyes, wearing a gray and black armored outfit with shoulder plates and gauntlets. He holds a drawn sword in his right hand and wears dark pants and armored boots. His stance is firm and ready for battle.\", \"Leafa\": \"A blonde elf girl with long hair tied in a ponytail, pointed ears, and striking blue eyes. She wears a blue and white armored outfit with a short skirt, thigh-high boots, and a breastplate. Her hands rest on her hips, and she exudes confidence and strength.\", \"Yuuki\": \"A girl with long purple hair and red eyes, wearing a dark purple and white outfit with a short skirt and thigh-high boots. She has a serious expression and stands with one hand on her hip, projecting determination.\", \"Asuna\": \"A girl with long brown hair and brown eyes, dressed in a white and green outfit with a short skirt and thigh-high boots. She has a gentle smile and a relaxed but ready posture.\", \"Sinon\": \"A girl with short blue hair and blue eyes, wearing a white and blue outfit with a short skirt and thigh-high boots. She has a calm and focused expression, standing with her hands relaxed at her sides.\", \"Green-haired girl\": \"A girl with long green hair and green eyes, wearing a green and white outfit with a short skirt and thigh-high boots. She has a serene expression and stands with her hands behind her back.\", \"Red Dragon\": \"A small, cute red dragon with large black eyes, a curled tail, and small horns. It stands near the group with a friendly and playful demeanor.\"}",
+        "timings": null
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 9.271844999995665,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 272,
+          "total_tokens": 1447
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A high-resolution, realistic digital portrait of a young man shown from the chest up against a plain grey background. The image resembles a character portrait from a video game, featuring UI elements like a green health bar at the bottom and a vertical menu with icons on the left side. The lighting highlights the textures of his clothing and skin, emphasizing a serious and intense atmosphere.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has vivid green eyes staring directly at the viewer with a calm yet intense expression. His skin is smooth and light with subtle shading. He wears a black leather jacket with a raised collar, silver zippers, metal studs, and visible stitching, over a black graphic t-shirt. A distinctive black tattoo resembling a stylized circular emblem is visible on the left side of his neck. He has a small hoop earring in his left ear, adding to his edgy appearance.\", \"Texts\": \"A green health bar is visible at the bottom of the image, indicating a video game interface. On the left side, a vertical menu displays several icons, suggesting character or item selection in a game.\", \"Watermark\": \"The image includes a subtle artist signature or watermark by 'jason_kim' placed unobtrusively.\"}",
+        "timings": null
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 7.552647099990281,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 203,
+          "total_tokens": 1378
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A young woman sits indoors at a round table by a large window, softly lit by natural daylight. The background is blurred, showing an out-of-focus cityscape with balconies and windows. The setting is calm and intimate, emphasizing the subject and her interaction with a small handbag on the table.\", \"Character 1\": \"A young girl with long, wavy black hair flowing past her shoulders. She wears a yellow dress with puffed short sleeves and a cinched waist, creating gentle folds in the fabric. Her eyes are closed, and her lips are softly closed, giving her a serene, contemplative expression. She sits sideways on a wooden chair with a light cushion, leaning slightly forward. Her hands delicately hold the clasp of a small, structured black handbag resting on the table, as if adjusting or closing it. Her posture is relaxed yet engaged with the bag, and the soft lighting highlights the smooth texture of her skin and the natural shine of her hair.\"}",
+        "timings": null
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 15.473522900007083,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 526,
+          "total_tokens": 1701
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A group of eleven young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and red brick walls. The court features a black circle on the floor and a basketball hoop mounted on the wall. Most girls hold basketballs, with two balls resting on the floor in front. They wear casual basketball attire in various colors and styles, standing in a relaxed, evenly spaced line facing the camera.\", \"Character 1\": \"A girl with short blonde hair tied back with a white headband, wearing a sleeveless white basketball jersey with black trim and navy blue shorts. She holds a basketball at her right hip and wears black sneakers with white soles.\", \"Character 2\": \"An older man with short gray hair, dressed in a dark blue short-sleeve shirt and gray shorts. He stands confidently with hands on hips behind the girls.\", \"Character 3\": \"A girl with short brown hair wearing a navy blue short-sleeve shirt and light gray shorts. She holds a basketball at her left hip and wears white sneakers with black soles.\", \"Character 4\": \"A girl with long light brown hair wearing a pink sleeveless shirt with black trim and black shorts. She holds a basketball in front of her and wears black sneakers.\", \"Character 5\": \"A girl with short gray hair wearing a light blue sleeveless shirt and black shorts with yellow trim. She holds a basketball in front of her and wears black sneakers.\", \"Character 6\": \"A girl with long dark brown hair wearing a blue sleeveless shirt and black shorts. She holds a basketball at her left hip and wears white sneakers.\", \"Character 7\": \"A girl with short brown hair wearing a red sleeveless shirt and red shorts. She holds a basketball in front of her and wears black sneakers with white soles.\", \"Character 8\": \"A girl with long brown hair wearing a light teal sleeveless shirt and blue shorts. She holds a basketball at her right hip and wears black sneakers.\", \"Character 9\": \"A girl with short brown hair wearing a white short-sleeve shirt and black shorts. She holds a basketball at her left hip and wears black sneakers.\", \"Character 10\": \"A girl with short blonde hair wearing a white short-sleeve shirt and black shorts. She holds a basketball at her right hip and wears black sneakers.\", \"Character 11\": \"A girl with short brown hair wearing a white short-sleeve shirt and black shorts. She holds a basketball at her left hip and wears black sneakers.\"}",
+        "timings": null
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 8.616784400001052,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 246,
+          "total_tokens": 1421
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A highly detailed, monochrome graphite pencil portrait of a young girl, focusing on her face and upper neck against a plain, softly shaded background. The image captures realistic textures and subtle shading, emphasizing natural skin tones and hair strands with delicate cross-hatching and smooth gradients.\", \"Character 1\": \"A young girl with long, straight hair parted slightly to the left, rendered with fine pencil strokes showing volume and natural flow around her face and shoulders. Her large, round eyes have dark pupils with reflective highlights, framed by softly shaded eyelids and long eyelashes. Her nose is small and delicately shaded, with subtle nostrils visible. Her full lips are slightly parted, showing the upper teeth and a glimpse of the tongue, conveying a calm and neutral expression. The skin is smooth with gentle shading around the cheeks, nose, and jawline, highlighting natural contours and softness. She wears no visible clothing or accessories in the frame, and her head is slightly tilted forward, engaging the viewer with a direct gaze.\", \"Watermark\": \"The image includes the artist's signature 'suaa (suaa_1015)' discreetly placed, consistent with the graphite medium style.\"}",
+        "timings": null
+      }
+    ],
+    "gpu_peak_mib": 12908.0,
+    "gpu_util_mean": 90.38
+  },
+  {
+    "engine": "native",
+    "slots": 8,
+    "phase": "caption",
+    "repeat": 1,
+    "seconds": 15.45405600000231,
+    "images_per_minute": 31.059807211771993,
+    "tokens": 2777,
+    "tokens_per_second": 179.6939263064392,
+    "mean_latency": 11.058325212499767,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 9.27377329999581,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 274,
+          "total_tokens": 1449
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A mystical white-furred creature with glowing red eyes walks gracefully across a grassy field dotted with small white flowers. The scene is set outdoors during a calm twilight, with a large clock tower showing nearly 12:00 and a floating island in the distance. The background features softly blurred hills and lampposts, creating a dreamy, serene atmosphere with soft pastel sky colors.\", \"Creature\": \"A slender, quadrupedal creature covered in thick, fluffy white fur with subtle sparkling highlights. It has large, pointed ears with pink inner fur and a long, bushy tail trailing behind. Its glowing red eyes and small black nose give it an alert, intelligent expression. The creature is mid-step, gazing forward with a calm, purposeful demeanor.\", \"Clock Tower\": \"A tall, classic clock tower with a white face showing the time just before midnight, standing prominently in the right background.\", \"Floating Island\": \"A large, distant floating island visible in the left background, adding a fantastical element to the landscape.\", \"Surroundings\": \"The grassy field is lush with scattered white flowers and small plants. The sky is a soft gradient of pastel blues and pinks, enhancing the tranquil mood. Blurred hills and lampposts are visible in the distance, contributing depth and a peaceful ambiance.\"}",
+        "timings": null
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 14.96047949999047,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 506,
+          "total_tokens": 1681
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"The image is a composite chart set on a blurred soccer stadium field featuring nine headshots of older men arranged in a 3x3 grid. Each portrait is framed with a dark blue background and numbered 1 to 9 in the top-left corner of each frame. Below each portrait is a white nameplate displaying the name and nationality of the man. The overall style is realistic with detailed facial features, wrinkles, and formal attire. Above the portraits, bold white text reads 'Top FIFA 19 Management codis,' suggesting a ranking or list of influential FIFA 19 officials.\", \"Character 1\": \"Honsa Lrkra, a middle-aged man with short brown hair and a trimmed beard, wears a dark suit with a white shirt and blue tie. His expression is neutral and serious, facing forward.\", \"Character 2\": \"Pichis Lrura, an older man with short grey hair and wrinkles, wears a dark suit, white shirt, and dark tie. He has a calm, neutral expression and looks straight ahead.\", \"Character 3\": \"Fiesen Cuna, an older man with short grey hair and a full beard, wears a dark suit with a white shirt and dark tie. His expression is stern and serious.\", \"Character 4\": \"Duna Ecina, an older man with short grey hair and wrinkles, wears a dark suit with a white shirt and purple tie. He has a calm, neutral expression.\", \"Character 5\": \"Nonano Erura, a middle-aged man with short brown hair and subtle wrinkles, wears a dark suit with a white shirt and red tie. He smiles gently.\", \"Character 6\": \"Morram Frika, an older man with short grey hair and a full beard, wears a dark suit with a white shirt and blue tie. His expression is serious.\", \"Character 7\": \"Hamin Esira, an older man with short grey hair and a trimmed beard, wears a dark suit with a white shirt and blue tie. He has a neutral, calm expression.\", \"Character 8\": \"Bisun Erura, a middle-aged man with short brown hair and subtle wrinkles, wears a dark suit with a white shirt and blue tie. He smiles gently.\", \"Character 9\": \"Cooin Frika, an older man with short grey hair and a trimmed beard, wears a dark suit with a white shirt and blue tie. His expression is neutral and calm.\"}",
+        "timings": null
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 10.424815200007288,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 321,
+          "total_tokens": 1496
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Three girls armed with assault rifles stand in a ruined urban battlefield under a gloomy, cloudy sky. The background shows destroyed buildings, rubble, neon signs, and a traffic light, creating a dystopian city warzone atmosphere. The scene is rendered in a detailed, semi-realistic anime style with sharp lines and muted colors, emphasizing the tense, combat-ready mood.\", \"Character 1\": \"Centered in the foreground, a girl with long blue hair and yellow eyes wears a navy blue beret, black fingerless gloves, a navy jacket with rolled sleeves over a white shirt, and dark tactical pants with thigh holsters. She grips a black assault rifle with a scope firmly, her expression serious and focused, standing with legs slightly apart in a ready stance.\", \"Character 2\": \"To the right, a girl with long brown hair and brown eyes wears a navy jacket with rolled sleeves, a white shirt, a short black skirt, and black boots. She holds an assault rifle with a scope, aiming forward with a calm but alert expression, her hair flowing gently behind her.\", \"Character 3\": \"On the left, a girl with brown hair tied in a high ponytail wears a similar navy jacket, white shirt, black skirt, and thigh-high stockings. She holds her assault rifle diagonally downward, looking off to the side with a focused, ready expression, standing slightly behind the others.\", \"Watermark\": \"The image includes a subtle artist signature 'shironeko_project' near the bottom corner, blending with the scene without disrupting the composition.\"}",
+        "timings": null
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 13.071825400009402,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 429,
+          "total_tokens": 1604
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A group of seven characters from the Sword Art Online universe stand on a grassy hill under a bright blue sky dotted with clouds. Behind them float several large, lush, castle-topped islands connected by visible beams, creating a fantasy world atmosphere. The characters form a semi-circle, facing forward with confident and determined expressions. A small red dragon with big eyes and a curled tail stands near the group, adding a playful touch.\", \"Kirito\": \"A young man with short black hair and dark eyes, wearing a gray and black armored outfit with shoulder plates and gauntlets. He holds a drawn sword in his right hand and wears dark pants and armored boots. His stance is firm and ready for battle.\", \"Leafa\": \"A blonde elf girl with long hair tied in a ponytail, pointed ears, and striking blue eyes. She wears a blue and white armored outfit with a short skirt, thigh-high boots, and a breastplate. Her hands rest on her hips, and she exudes confidence and strength.\", \"Yuuki\": \"A girl with long purple hair and red eyes, wearing a dark purple and white outfit with a short skirt and thigh-high boots. She has a serious expression and stands with one hand on her hip, projecting determination.\", \"Asuna\": \"A girl with long brown hair and brown eyes, dressed in a white and green outfit with a short skirt and thigh-high boots. She has a gentle smile and a relaxed but ready posture.\", \"Sinon\": \"A girl with short blue hair and blue eyes, wearing a white and blue outfit with a short skirt and thigh-high boots. She has a calm and focused expression, standing with her hands relaxed at her sides.\", \"Green-haired girl\": \"A girl with long green hair and green eyes, wearing a green and white outfit with a short skirt and thigh-high boots. She has a serene expression and stands with her hands behind her back.\", \"Red Dragon\": \"A small, cute red dragon with large black eyes, a curled tail, and small horns. It stands near the group with a friendly and playful demeanor.\"}",
+        "timings": null
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 9.210364400001708,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 272,
+          "total_tokens": 1447
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A high-resolution, realistic digital portrait of a young man shown from the chest up against a plain grey background. The image resembles a character portrait from a video game, featuring UI elements like a green health bar at the bottom and a vertical menu with icons on the left side. The lighting highlights the textures of his clothing and skin, emphasizing a serious and intense atmosphere.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has vivid green eyes staring directly at the viewer with a calm yet intense expression. His skin is smooth and light with subtle shading. He wears a black leather jacket with a raised collar, silver zippers, metal studs, and visible stitching, over a black graphic t-shirt. A distinctive black tattoo resembling a stylized circular emblem is visible on the left side of his neck. He has a small hoop earring in his left ear, adding to his edgy appearance.\", \"Texts\": \"A green health bar is visible at the bottom of the image, indicating a video game interface. On the left side, a vertical menu displays several icons, suggesting character or item selection in a game.\", \"Watermark\": \"The image includes a subtle artist signature or watermark by 'jason_kim' placed unobtrusively.\"}",
+        "timings": null
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 7.5120697999955155,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 203,
+          "total_tokens": 1378
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A young woman sits indoors at a round table by a large window, softly lit by natural daylight. The background is blurred, showing an out-of-focus cityscape with balconies and windows. The setting is calm and intimate, emphasizing the subject and her interaction with a small handbag on the table.\", \"Character 1\": \"A young girl with long, wavy black hair flowing past her shoulders. She wears a yellow dress with puffed short sleeves and a cinched waist, creating gentle folds in the fabric. Her eyes are closed, and her lips are softly closed, giving her a serene, contemplative expression. She sits sideways on a wooden chair with a light cushion, leaning slightly forward. Her hands delicately hold the clasp of a small, structured black handbag resting on the table, as if adjusting or closing it. Her posture is relaxed yet engaged with the bag, and the soft lighting highlights the smooth texture of her skin and the natural shine of her hair.\"}",
+        "timings": null
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 15.43705300000147,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 526,
+          "total_tokens": 1701
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A group of eleven young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and red brick walls. The court features a black circle on the floor and a basketball hoop mounted on the wall. Most girls hold basketballs, with two balls resting on the floor in front. They wear casual basketball attire in various colors and styles, standing in a relaxed, evenly spaced line facing the camera.\", \"Character 1\": \"A girl with short blonde hair tied back with a white headband, wearing a sleeveless white basketball jersey with black trim and navy blue shorts. She holds a basketball at her right hip and wears black sneakers with white soles.\", \"Character 2\": \"An older man with short gray hair, dressed in a dark blue short-sleeve shirt and gray shorts. He stands confidently with hands on hips behind the girls.\", \"Character 3\": \"A girl with short brown hair wearing a navy blue short-sleeve shirt and light gray shorts. She holds a basketball at her left hip and wears white sneakers with black soles.\", \"Character 4\": \"A girl with long light brown hair wearing a pink sleeveless shirt with black trim and black shorts. She holds a basketball in front of her and wears black sneakers.\", \"Character 5\": \"A girl with short gray hair wearing a light blue sleeveless shirt and black shorts with yellow trim. She holds a basketball in front of her and wears black sneakers.\", \"Character 6\": \"A girl with long dark brown hair wearing a blue sleeveless shirt and black shorts. She holds a basketball at her left hip and wears white sneakers.\", \"Character 7\": \"A girl with short brown hair wearing a red sleeveless shirt and red shorts. She holds a basketball in front of her and wears black sneakers with white soles.\", \"Character 8\": \"A girl with long brown hair wearing a light teal sleeveless shirt and blue shorts. She holds a basketball at her right hip and wears black sneakers.\", \"Character 9\": \"A girl with short brown hair wearing a white short-sleeve shirt and black shorts. She holds a basketball at her left hip and wears black sneakers.\", \"Character 10\": \"A girl with short blonde hair wearing a white short-sleeve shirt and black shorts. She holds a basketball at her right hip and wears black sneakers.\", \"Character 11\": \"A girl with short brown hair wearing a white short-sleeve shirt and black shorts. She holds a basketball at her left hip and wears black sneakers.\"}",
+        "timings": null
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 8.576221099996474,
+        "usage": {
+          "prompt_tokens": 1175,
+          "completion_tokens": 246,
+          "total_tokens": 1421
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A highly detailed, monochrome graphite pencil portrait of a young girl, focusing on her face and upper neck against a plain, softly shaded background. The image captures realistic textures and subtle shading, emphasizing natural skin tones and hair strands with delicate cross-hatching and smooth gradients.\", \"Character 1\": \"A young girl with long, straight hair parted slightly to the left, rendered with fine pencil strokes showing volume and natural flow around her face and shoulders. Her large, round eyes have dark pupils with reflective highlights, framed by softly shaded eyelids and long eyelashes. Her nose is small and delicately shaded, with subtle nostrils visible. Her full lips are slightly parted, showing the upper teeth and a glimpse of the tongue, conveying a calm and neutral expression. The skin is smooth with gentle shading around the cheeks, nose, and jawline, highlighting natural contours and softness. She wears no visible clothing or accessories in the frame, and her head is slightly tilted forward, engaging the viewer with a direct gaze.\", \"Watermark\": \"The image includes the artist's signature 'suaa (suaa_1015)' discreetly placed, consistent with the graphite medium style.\"}",
+        "timings": null
+      }
+    ],
+    "gpu_peak_mib": 13033.0,
+    "gpu_util_mean": 94.22
+  },
+  {
+    "engine": "llamacpp",
+    "slots": 8,
+    "phase": "ready",
+    "seconds": 3.6760694999975385,
+    "command": [
+      "H:\\tagger\\runtime\\llama.cpp\\llama-server.exe",
+      "-m",
+      "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+      "--mmproj",
+      "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-fp16.mmproj.gguf",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "60288",
+      "--alias",
+      "torii-bench",
+      "-ngl",
+      "99",
+      "-np",
+      "8",
+      "-c",
+      "65536",
+      "--image-min-tokens",
+      "64",
+      "--image-max-tokens",
+      "976",
+      "--jinja",
+      "--chat-template-file",
+      "H:\\tagger\\tagger\\hair_color\\torii_chat_template.jinja",
+      "-fa",
+      "on",
+      "-t",
+      "8",
+      "-tb",
+      "8",
+      "--cache-ram",
+      "0",
+      "--no-cache-prompt"
+    ]
+  },
+  {
+    "engine": "llamacpp",
+    "slots": 8,
+    "phase": "fixed",
+    "repeat": 0,
+    "seconds": 6.321771400005673,
+    "images_per_minute": 75.92808559948391,
+    "tokens": 1024,
+    "tokens_per_second": 161.9799159455657,
+    "mean_latency": 6.279182462501922,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 6.284551700009615,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A mystical white fox-like creature with glowing red eyes walks gracefully through a grassy field dotted with small white flowers. The scene is set outdoors during twilight, with a soft pastel sky blending pink and blue hues. In the background, a large clock tower stands prominently on the right, showing the time around 11:05. A floating island hovers in the distance to the left, adding a fantasy element. The foreground grass and flowers are sharply detailed, while the background is softly blurred, creating depth and focus on the creature.\", \"Creature\": \"A slender, fox-like animal with pure white fur that gl",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1837.171,
+          "prompt_per_token_ms": 1.5635497872340427,
+          "prompt_per_second": 639.5702958516109,
+          "predicted_n": 128,
+          "predicted_ms": 4317.269,
+          "predicted_per_token_ms": 33.99424409448819,
+          "predicted_per_second": 29.41674470597037
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 6.24285609999788,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The overall style is realistic with sharp focus on the faces and a shallow depth of field blurring the stadium crowd and field behind them.\", \"Character 1\": \"",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1651.961,
+          "prompt_per_token_ms": 1.4059242553191489,
+          "prompt_per_second": 711.275871524812,
+          "predicted_n": 128,
+          "predicted_ms": 4519.09,
+          "predicted_per_token_ms": 35.583385826771654,
+          "predicted_per_second": 28.103003038222298
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 6.28463290000218,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows destroyed buildings, rubble, neon signs, and a red emergency light, creating a tense post-apocalyptic atmosphere. The scene is rendered in a detailed, realistic anime style with sharp focus on the characters and a blurred background.\", \"Character 1\": \"A girl with long blue hair and yellow eyes wears a navy beret with a badge, a dark blue tactical jacket with rolled-up sleeves, a white shirt, and dark blue pants. She has black fingerless gloves, a black choker, and a utility belt with",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1843.002,
+          "prompt_per_token_ms": 1.568512340425532,
+          "prompt_per_second": 637.5467850821648,
+          "predicted_n": 128,
+          "predicted_ms": 4317.909,
+          "predicted_per_token_ms": 33.99928346456693,
+          "predicted_per_second": 29.412384559285528
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 6.313245600002119,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green floating island under a bright blue sky with scattered clouds. Behind them, multiple other floating islands with castles and towers are connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, facing forward with confident and determined expressions, ready for adventure. A small red dragon stands near the front right, adding a whimsical touch.\", \"Kirito\": \"A young man with short black hair and sharp eyes, wearing dark armor with silver shoulder plates and gauntlets. He holds a long sword in his right hand",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1965.382,
+          "prompt_per_token_ms": 1.6726655319148938,
+          "prompt_per_second": 597.8481536922594,
+          "predicted_n": 128,
+          "predicted_ms": 4225.891,
+          "predicted_per_token_ms": 33.274732283464566,
+          "predicted_per_second": 30.052833828416308
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 6.237085799992201,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A hyper-realistic digital portrait of a young man with a neutral gray background. The image is framed as a fake screenshot from a video game, featuring a green health bar at the bottom and a vertical menu with icons on the left side. The lighting is soft and even, highlighting the character's facial features and clothing textures.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has striking bright green eyes and a calm, confident expression with a subtle smile. His skin is smooth and lightly tanned. He wears a black leather jacket with",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1654.798,
+          "prompt_per_token_ms": 1.4083387234042553,
+          "prompt_per_second": 710.0564540203699,
+          "predicted_n": 128,
+          "predicted_ms": 4519.323,
+          "predicted_per_token_ms": 35.585220472440945,
+          "predicted_per_second": 28.10155414870767
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 6.27348260000872,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with a softly blurred urban background. Natural daylight illuminates the scene, highlighting her yellow dress and the small brown handbag on the table. The atmosphere is calm and contemplative, with a shallow depth of field focusing on the woman and her handbag.\", \"Character 1\": \"A young Asian girl with long, wavy black hair flowing past her shoulders. She wears a bright yellow dress with puffy short sleeves and a gathered waist, the fabric softly reflecting the daylight. She sits sideways on a wooden chair with a light cushion, leaning slightly forward",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1839.912,
+          "prompt_per_token_ms": 1.5658825531914895,
+          "prompt_per_second": 638.6174990977829,
+          "predicted_n": 128,
+          "predicted_ms": 4317.82,
+          "predicted_per_token_ms": 33.99858267716535,
+          "predicted_per_second": 29.412990814809326
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 6.301813199999742,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A group of ten young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and brick walls. The court features a basketball hoop centered in the background. The girls wear various basketball uniforms and casual sportswear in colors including blue, red, pink, black, and white. Most hold basketballs, with two balls resting on the floor in front. The man stands behind the group with hands on hips, overseeing the scene. The atmosphere is calm and focused, suggesting a team or practice setting.\", \"Character 1\": \"A young girl on the far left with short blonde hair",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1962.682,
+          "prompt_per_token_ms": 1.670367659574468,
+          "prompt_per_second": 598.67059462511,
+          "predicted_n": 128,
+          "predicted_ms": 4225.02,
+          "predicted_per_token_ms": 33.267874015748035,
+          "predicted_per_second": 30.059029306370146
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 6.295791800002917,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A highly detailed monochrome graphite portrait of a young Asian girl, focusing on her face and upper shoulders. The background is plain, emphasizing the realistic textures and shading of her skin, hair, and facial features. The image captures a calm, neutral expression with soft lighting that highlights the contours of her face and the natural flow of her long hair.\", \"Character 1\": \"A young Asian girl with long, straight hair parted slightly to the side, rendered with fine graphite strokes showing individual strands and volume. Her large, round eyes have subtle shading that gives them depth and a reflective quality, looking directly at the viewer.",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1959.905,
+          "prompt_per_token_ms": 1.668004255319149,
+          "prompt_per_second": 599.5188542301795,
+          "predicted_n": 128,
+          "predicted_ms": 4224.619,
+          "predicted_per_token_ms": 33.26471653543307,
+          "predicted_per_second": 30.061882503487297
+        }
+      }
+    ],
+    "gpu_peak_mib": 13965.0,
+    "gpu_util_mean": 46.42857142857143
+  },
+  {
+    "engine": "llamacpp",
+    "slots": 8,
+    "phase": "fixed",
+    "repeat": 1,
+    "seconds": 6.338679000007687,
+    "images_per_minute": 75.72555732817798,
+    "tokens": 1024,
+    "tokens_per_second": 161.54785563344637,
+    "mean_latency": 6.288656999997329,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 6.240463299996918,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A mystical white fox-like creature with glowing red eyes walks gracefully through a grassy field dotted with small white flowers. The scene is set outdoors during twilight, with a soft pastel sky blending pink and blue hues. In the background, a large clock tower stands prominently on the right, showing the time around 11:05. A floating island hovers in the distance to the left, adding a fantasy element. The foreground grass and flowers are sharply detailed, while the background is softly blurred, creating depth and focus on the creature.\", \"Creature\": \"A slender, fox-like animal with pure white fur that gl",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1667.762,
+          "prompt_per_token_ms": 1.419371914893617,
+          "prompt_per_second": 704.5369782978627,
+          "predicted_n": 128,
+          "predicted_ms": 4488.116,
+          "predicted_per_token_ms": 35.339496062992126,
+          "predicted_per_second": 28.296951326569992
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 6.294898699998157,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The overall style is realistic with sharp focus on the faces and a shallow depth of field blurring the stadium crowd and field behind them.\", \"Character 1\": \"",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1874.822,
+          "prompt_per_token_ms": 1.5955931914893615,
+          "prompt_per_second": 626.7261638704902,
+          "predicted_n": 128,
+          "predicted_ms": 4309.853,
+          "predicted_per_token_ms": 33.93585039370079,
+          "predicted_per_second": 29.46736234391289
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 6.298323299997719,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows destroyed buildings, rubble, neon signs, and a red emergency light, creating a tense post-apocalyptic atmosphere. The scene is rendered in a detailed, realistic anime style with sharp focus on the characters and a blurred background.\", \"Character 1\": \"A girl with long blue hair and yellow eyes wears a navy blue beret with a badge, a dark blue tactical jacket with rolled-up sleeves, a white shirt, and dark blue pants. She has black fingerless gloves, a black choker, and a utility belt",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1841.619,
+          "prompt_per_token_ms": 1.567335319148936,
+          "prompt_per_second": 638.0255633765726,
+          "predicted_n": 128,
+          "predicted_ms": 4306.006,
+          "predicted_per_token_ms": 33.90555905511811,
+          "predicted_per_second": 29.49368858287703
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 6.330051299999468,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green floating island under a bright blue sky with scattered clouds. Behind them, multiple other floating islands with castles and towers are connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, facing forward with confident and determined expressions, ready for adventure. A small red dragon stands near the front right, adding a whimsical touch.\", \"Kirito\": \"A young man with short black hair and sharp eyes, wearing dark armor with silver shoulder plates and gauntlets. He holds a long sword in his right hand",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1891.307,
+          "prompt_per_token_ms": 1.6096229787234042,
+          "prompt_per_second": 621.2634966190047,
+          "predicted_n": 128,
+          "predicted_ms": 4251.993,
+          "predicted_per_token_ms": 33.480259842519686,
+          "predicted_per_second": 29.86834644365595
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 6.226468799999566,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A hyper-realistic digital portrait of a young man with a neutral gray background. The image focuses on his upper body and face, showing detailed textures of skin, hair, and clothing. The lighting is soft and even, highlighting his facial features and the leather jacket he wears. A user interface element with a green progress bar appears at the bottom, suggesting a digital or game-like context.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has striking bright green eyes with a calm, direct gaze. His skin is smooth with a warm tone",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1679.436,
+          "prompt_per_token_ms": 1.4293072340425532,
+          "prompt_per_second": 699.6396409270732,
+          "predicted_n": 128,
+          "predicted_ms": 4487.46,
+          "predicted_per_token_ms": 35.33433070866142,
+          "predicted_per_second": 28.301087920560853
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 6.287064799995278,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with a softly blurred urban background. Natural daylight illuminates the scene, highlighting her yellow dress and the small brown handbag on the table. The atmosphere is calm and contemplative, with a shallow depth of field focusing on the woman and her handbag.\", \"Character 1\": \"A young Asian girl with long, wavy black hair flowing past her shoulders. She wears a bright yellow dress with puffy short sleeves and a gathered waist, the fabric softly reflecting the daylight. She sits sideways on a wooden chair with a light cushion, leaning slightly forward",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1849.941,
+          "prompt_per_token_ms": 1.5744178723404256,
+          "prompt_per_second": 635.1553914422135,
+          "predicted_n": 128,
+          "predicted_ms": 4305.742,
+          "predicted_per_token_ms": 33.90348031496063,
+          "predicted_per_second": 29.495496943383973
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 6.318987399994512,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A group of ten young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and brick walls. The court features a basketball hoop centered in the background. The girls wear various basketball uniforms and casual sportswear in colors including blue, red, pink, black, and white. Most hold basketballs, with two balls resting on the floor in front. The man stands behind the group with hands on hips, overseeing the scene. The atmosphere is calm and focused, suggesting a team or practice setting.\", \"Character 1\": \"A young girl on the far left with short blonde hair",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1899.636,
+          "prompt_per_token_ms": 1.616711489361702,
+          "prompt_per_second": 618.5395517878161,
+          "predicted_n": 128,
+          "predicted_ms": 4251.174,
+          "predicted_per_token_ms": 33.47381102362205,
+          "predicted_per_second": 29.874100660194102
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 6.312998399997014,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A highly detailed monochrome graphite portrait of a young Asian girl, focusing on her face and upper shoulders. The background is plain, emphasizing the realistic textures and shading of her skin, hair, and facial features. The image captures a calm, neutral expression with soft lighting that highlights the contours of her face and the natural flow of her long hair.\", \"Character 1\": \"A young Asian girl with long, straight hair parted slightly to the side, rendered with fine graphite strokes showing individual strands and volume. Her large, round eyes have subtle shading that gives them depth and a reflective quality, looking directly at the viewer.",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1911.559,
+          "prompt_per_token_ms": 1.6268587234042553,
+          "prompt_per_second": 614.6815243474044,
+          "predicted_n": 128,
+          "predicted_ms": 4249.885,
+          "predicted_per_token_ms": 33.46366141732284,
+          "predicted_per_second": 29.883161544371198
+        }
+      }
+    ],
+    "gpu_peak_mib": 13884.0,
+    "gpu_util_mean": 48.23809523809524
+  },
+  {
+    "engine": "llamacpp",
+    "slots": 8,
+    "phase": "caption",
+    "repeat": 0,
+    "seconds": 22.22032159999071,
+    "images_per_minute": 21.601847562827384,
+    "tokens": 2960,
+    "tokens_per_second": 133.2113933041022,
+    "mean_latency": 16.467283724996378,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 12.421190300010494,
+        "usage": {
+          "completion_tokens": 269,
+          "prompt_tokens": 1175,
+          "total_tokens": 1444,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A mystical, serene landscape at sunrise or sunset featuring a grassy field dotted with wildflowers and scattered rocks. The sky is a gradient of soft pinks and purples with light clouds. In the background, a large, round clock tower with a white clock face and Roman numerals stands prominently on a small hill. Further away, a floating island hovers above the valley, adding a fantasy element. The depth of field is shallow, with the foreground grass and rocks blurred to focus on the central creature.\", \"Creature\": \"A small quadrupedal animal with fluffy, white fur speckled with subtle glowing sparkles, resembling a magical fox or spirit. It has large upright ears with pink inner coloring, bright glowing orange eyes, and a long bushy tail that curls slightly at the tip. The creature is captured mid-step, walking purposefully from right to left with a calm and alert expression, its fur softly illuminated by the ambient light.\", \"Objects\": \"A tall clock tower with a white clock face featuring Roman numerals stands on a small hill in the background. A floating island hovers far away above the valley, enhancing the fantastical atmosphere.\", \"Watermark\": \"The image includes a subtle artist signature 'haxiart' discreetly placed, not interfering with the main scene.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1672.118,
+          "prompt_per_token_ms": 1.4230791489361703,
+          "prompt_per_second": 702.7016035949616,
+          "predicted_n": 269,
+          "predicted_ms": 10676.008,
+          "predicted_per_token_ms": 39.835850746268655,
+          "predicted_per_second": 25.103016033708478
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 22.216288999989047,
+        "usage": {
+          "completion_tokens": 575,
+          "prompt_tokens": 1175,
+          "total_tokens": 1750,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"The image is a composite grid of nine headshots of older men in suits, arranged in three rows and three columns. Each portrait is set against a dark blue rectangular background with a white nameplate below displaying the name and country in bold black text. The top of the image features large white text reading 'Top FIFA 19 Management codis.' The background is a blurred, brightly lit FIFA World Cup soccer stadium, emphasizing a sports theme. The portraits show men in formal attire with varied expressions from serious to gentle smiles, highlighting their leadership roles.\", \"Character 1\": \"Honsa Lrkra, a middle-aged man with short brown hair and a neatly trimmed gray beard and mustache. He wears a dark gray suit jacket, white shirt, and blue tie. His expression is serious and focused, with slightly furrowed brows and a squared jawline.\", \"Character 2\": \"Pichis Lrura, an older man with short gray hair and a receding hairline. He has a full gray beard and mustache and wears a dark blue suit with a white shirt and dark tie. His expression is calm and composed.\", \"Character 3\": \"Fiesen Cuna, an elderly man with short white hair and a full white beard and mustache. He wears a dark suit with a white shirt and dark tie. His expression is serious and stern.\", \"Character 4\": \"Duna Ecina, an older man with short gray hair and a full gray beard and mustache. He wears a dark suit jacket, white shirt, and maroon tie. He smiles warmly, showing kindness.\", \"Character 5\": \"Nonano Erura, a middle-aged man with short dark brown hair and a neatly trimmed mustache. He wears a dark suit jacket, white shirt, and maroon tie. His expression is gentle and content.\", \"Character 6\": \"Morram Frika, an elderly man with short white hair and a full white beard and mustache. He wears a dark suit with a white shirt and light blue tie. His expression is serious and somber.\", \"Character 7\": \"Hamin Esira, an older man with short gray hair and a full gray beard and mustache. He wears a dark suit jacket, white shirt, and blue tie. His expression is serious and focused.\", \"Character 8\": \"Bisin Erura, a middle-aged man with short brown hair and a neat mustache. He wears a dark suit jacket, white shirt, and blue tie. He smiles gently, conveying kindness.\", \"Character 9\": \"Cooin Frika, an older man with short gray hair and a full gray beard and mustache. He wears a dark suit jacket, white shirt, and blue tie. He smiles gently, projecting warmth.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1940.8,
+          "prompt_per_token_ms": 1.6517446808510639,
+          "prompt_per_second": 605.4204451772465,
+          "predicted_n": 575,
+          "predicted_ms": 20174.266,
+          "predicted_per_token_ms": 35.146804878048776,
+          "predicted_per_second": 28.45208841798755
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 17.29109289999178,
+        "usage": {
+          "completion_tokens": 361,
+          "prompt_tokens": 1175,
+          "total_tokens": 1536,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Three armed girls stand in a ruined cityscape under a stormy, cloudy sky. The background shows crumbling skyscrapers with neon signs, rubble, and debris scattered around. The atmosphere is tense and gritty, with muted colors and soft lighting highlighting the characters and their surroundings.\", \"Character 1\": \"The central girl has long, vibrant blue hair flowing past her shoulders and intense yellow eyes. She wears a navy blue beret with a small insignia, a black choker, a navy blue tactical jacket with rolled-up sleeves, and a white shirt tucked into high-waisted navy pants. She holds a black SIG 516 assault rifle with a scope and suppressor, gripping it firmly with both hands. Her tactical belt carries multiple pouches, and she wears black fingerless gloves.\", \"Character 2\": \"To the right, a girl with long brown hair partially covering her face stands in a three-quarter profile. She wears a black open jacket over a white shirt, a short black pleated skirt, and black boots. She holds a SIG 516 rifle at the ready, fingers near the trigger. A thigh holster is strapped to her right leg, and a utility belt with pouches wraps around her waist. Her expression is serious and focused.\", \"Character 3\": \"On the left, a girl with brown hair tied in a high ponytail wears a black jacket over a white shirt and black pants. She holds a SIG 516 rifle across her body with both hands. She wears a black choker and fingerless gloves. Her stance is alert and ready for combat, though her face is partially obscured by shadows.\", \"Watermark\": \"The image includes the artist signature 'soramira' discreetly placed.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1993.596,
+          "prompt_per_token_ms": 1.6966774468085106,
+          "prompt_per_second": 589.3872178716249,
+          "predicted_n": 361,
+          "predicted_ms": 15153.42,
+          "predicted_per_token_ms": 42.09283333333333,
+          "predicted_per_second": 23.75701326829191
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 20.299857499994687,
+        "usage": {
+          "completion_tokens": 454,
+          "prompt_tokens": 1175,
+          "total_tokens": 1629,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Six characters from the game \\\"Kono Yuusha ga Ore Tueee Kuse ni Shinchou Sugiru\\\" stand confidently on a grassy floating island under a bright blue sky with scattered clouds. Behind them, several other floating islands with various buildings and towers create a fantasy world atmosphere. The scene is brightly lit with vibrant colors and detailed shading, emphasizing the characters' heroic and adventurous presence. A small red dragon named Kyuubin stands near the group, adding a whimsical touch.\", \"Character 1\": \"A young man with short dark blue hair and serious expression, wearing silver armor over a dark blue tunic, fingerless gloves, and boots. He holds a sword loosely in his right hand, standing alert and ready for action.\", \"Character 2\": \"A cheerful blonde girl with twin ponytails tied with black ribbons, bright green eyes, and a wide smile. She wears a white sleeveless top with green accents, a short green skirt, and brown boots. Her right hand rests confidently on her hip.\", \"Character 3\": \"A woman with long dark purple hair and a focused expression, wearing a dark purple short dress with white accents and thigh-high stockings. She stands with one hand on her hip, exuding a strong and determined aura.\", \"Character 4\": \"A muscular man with a thick brown beard and tousled brown hair, wearing rugged armor with metal shoulder guards, leather gloves, and boots. He has a large sword sheathed at his side and a confident, commanding pose.\", \"Character 5\": \"A blonde woman with long hair tied back in a ponytail, wearing a blue armored dress with silver trim and thigh-high boots. Her expression is calm and determined, standing with hands relaxed at her sides.\", \"Character 6\": \"A serene-looking woman with long light blue hair and elf-like ears, dressed in a white and gold sleeveless dress. She stands gracefully with hands behind her back, emanating a gentle and wise presence.\", \"Character 7\": \"A small red dragon named Kyuubin with big round eyes, a rounded snout, and small wings. It stands near the group, adding a cute and fantastical element to the scene.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1963.7,
+          "prompt_per_token_ms": 1.6712340425531915,
+          "prompt_per_second": 598.3602383256098,
+          "predicted_n": 454,
+          "predicted_ms": 18156.668,
+          "predicted_per_token_ms": 40.080944812362034,
+          "predicted_per_second": 24.949511661500885
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 13.753631999992649,
+        "usage": {
+          "completion_tokens": 291,
+          "prompt_tokens": 1175,
+          "total_tokens": 1466,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Close-up portrait of a young man with a serious expression, set against a smooth grey gradient background. The image is digitally rendered with sharp details and realistic lighting, emphasizing his facial features and upper body. The composition includes a user interface element at the bottom, resembling a progress bar or health meter, suggesting a video game or interactive context. On the left side, there is a vertical menu or tool panel with various icons, reinforcing the digital or in-game environment.\", \"Character 1\": \"A young man with short, thick black hair parted down the middle, styled with slightly tousled bangs framing his face. He has striking green eyes that look directly at the viewer with a calm yet intense gaze. His skin is smooth and fair with subtle warm undertones. He wears a black leather jacket featuring a high collar, silver studs along the shoulders and collar edges, and visible stitching. The jacket is open, revealing a black T-shirt underneath with a partially visible white graphic design. On his left ear, he sports a small hoop earring. A black tattoo resembling a stylized circular symbol with intersecting lines is visible on the left side of his neck, adding an edgy detail. His lips are closed, maintaining a neutral, serious expression.\", \"Texts\": \"The bottom of the image contains a green progress bar or health meter with a small yellow square on the left side, typical of video game UI elements.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1932.535,
+          "prompt_per_token_ms": 1.6447106382978725,
+          "prompt_per_second": 608.0096867585839,
+          "predicted_n": 291,
+          "predicted_ms": 11717.484,
+          "predicted_per_token_ms": 40.40511724137931,
+          "predicted_per_second": 24.7493403874074
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 15.64674009999726,
+        "usage": {
+          "completion_tokens": 328,
+          "prompt_tokens": 1175,
+          "total_tokens": 1503,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with bright natural light illuminating the scene. The background outside the window is softly blurred, featuring a white building and balcony, creating a calm, intimate atmosphere. The photo uses a shallow depth of field to focus sharply on the woman and a small handbag on the table, while the surroundings remain out of focus.\", \"Character 1\": \"A young Asian girl with long, wavy brown hair flowing over her shoulders and back. She wears a bright yellow dress with short, puffy sleeves and a gathered elastic waist that creates soft folds in the fabric. The dress has a modest V-neckline exposing part of her collarbone. She sits sideways on a wooden chair with a light cushioned seat, leaning slightly forward with closed eyes and a serene, contemplative expression. Her lips are gently closed, and her fair skin is softly lit by natural daylight. Both of her hands delicately hold the clasp of a small, dark gray handbag resting on the table, fingers poised as if about to secure or open it. Her posture is relaxed yet attentive, emphasizing a quiet moment of thought.\", \"Objects\": \"On the table in front of her is a small, structured dark gray handbag with a clasp that she is holding. The table is round with a smooth surface, and the wooden chair features a light cushioned seat. The large window behind her lets in abundant natural light, highlighting her form and casting soft shadows. Outside the window, a softly blurred white building and balcony railing are visible, contributing to the tranquil setting.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1916.451,
+          "prompt_per_token_ms": 1.6310221276595744,
+          "prompt_per_second": 613.1124667419099,
+          "predicted_n": 328,
+          "predicted_ms": 13606.156,
+          "predicted_per_token_ms": 41.60903975535169,
+          "predicted_per_second": 24.033239072078842
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 21.215320999996038,
+        "usage": {
+          "completion_tokens": 486,
+          "prompt_tokens": 1175,
+          "total_tokens": 1661,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Eleven young athletes and one older coach stand in a well-lit indoor basketball court with polished wooden floors and brick walls. They form a semi-circle facing forward, all holding basketballs except the coach who stands with hands on hips. The court markings, hoop, and net are visible, emphasizing the sports setting. The group wears casual athletic wear including t-shirts, shorts, tank tops, and sneakers, with hair tied back in ponytails or buns. The coach stands behind the players near the court's center, suggesting leadership or supervision.\", \"Character 1\": \"A girl on the far left with light hair tied in a ponytail, wearing a white sleeveless tank top, navy blue shorts, and black sneakers. She holds a basketball firmly in her right hand, standing relaxed but ready.\", \"Character 2\": \"A boy next to the girl with short dark hair, wearing a navy blue t-shirt, gray shorts, and white sneakers. He holds a basketball in his left hand and stands casually.\", \"Character 3\": \"A girl with blonde hair tied back, dressed in a pink sleeveless shirt with a black pattern and black shorts. She holds her basketball in her left hand, standing upright.\", \"Character 4\": \"A girl with light hair in a ponytail, wearing a light blue sleeveless tank top and black shorts. She grips her basketball with both hands and stands confidently.\", \"Character 5\": \"A boy with short dark hair wearing a blue sleeveless tank top and black shorts, holding his basketball with both hands in front of him.\", \"Character 6\": \"A girl with dark hair in a ponytail wearing a red sleeveless shirt and red shorts. She holds her basketball in her left hand with a neutral expression.\", \"Character 7\": \"A girl with light hair in a ponytail wearing a light blue tank top and blue shorts. She holds her basketball in her right hand and stands calmly.\", \"Character 8\": \"A boy with short brown hair wearing a white t-shirt and black shorts. He holds his basketball in his right hand and stands casually.\", \"Character 9\": \"An older man standing behind the players near the court's center. He has short gray hair, wears a dark blue t-shirt, gray shorts, and black sneakers. His hands rest on his hips, projecting authority as a coach or supervisor.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1973.306,
+          "prompt_per_token_ms": 1.6794093617021277,
+          "prompt_per_second": 595.4474369408495,
+          "predicted_n": 486,
+          "predicted_ms": 19083.344,
+          "predicted_per_token_ms": 39.34710103092784,
+          "predicted_per_second": 25.41483295590123
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 8.894146999999066,
+        "usage": {
+          "completion_tokens": 196,
+          "prompt_tokens": 1175,
+          "total_tokens": 1371,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A monochrome, highly detailed graphite portrait of a young Asian girl. The image focuses on her face and upper shoulders, rendered with realistic shading and fine pencil strokes that emphasize natural skin texture, hair strands, and subtle facial features. The background is plain, keeping full attention on the subject.\", \"Character 1\": \"A young Asian girl with long, straight black hair that flows naturally around her shoulders, with individual strands and volume clearly depicted. She has large, expressive eyes with detailed irises and pupils, framed by thick upper eyelashes and thin lower lashes. Her eyebrows are soft and naturally arched. The nose is realistically shaped with subtle shading showing the bridge, nostrils, and tip. Her lips are full, softly parted, and shaded to show texture and moisture. The skin texture is smooth with delicate shading around the cheeks, chin, and neck, highlighting natural contours. The portrait is from the shoulders up, with no clothing visible.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1985.321,
+          "prompt_per_token_ms": 1.6896348936170211,
+          "prompt_per_second": 591.8438378478845,
+          "predicted_n": 196,
+          "predicted_ms": 6768.523,
+          "predicted_per_token_ms": 34.71037435897436,
+          "predicted_per_second": 28.809830446021973
+        }
+      }
+    ],
+    "gpu_peak_mib": 14072.0,
+    "gpu_util_mean": 56.142857142857146
+  },
+  {
+    "engine": "llamacpp",
+    "slots": 8,
+    "phase": "caption",
+    "repeat": 1,
+    "seconds": 22.596717499996885,
+    "images_per_minute": 21.242023316000044,
+    "tokens": 2865,
+    "tokens_per_second": 126.78832666737524,
+    "mean_latency": 15.108573662499111,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 9.793802700005472,
+        "usage": {
+          "completion_tokens": 219,
+          "prompt_tokens": 1175,
+          "total_tokens": 1394,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A mystical, serene landscape at sunrise or sunset with a pastel sky blending blues, purples, and pinks. The foreground features a grassy meadow dotted with small white flowers and scattered rocks. A large, old-fashioned clock tower stands prominently on the right, slightly blurred to create depth. In the distance, a floating island with silhouetted structures hovers above the horizon, adding a fantastical element to the scene.\", \"Creature\": \"A small, quadrupedal, fox-like creature with soft, fluffy white fur speckled with subtle glowing spots. It has large, upright ears with pink inner fur and a long, bushy tail that curls slightly at the tip. The creature walks calmly from left to right, its amber eyes reflecting the warm light of dawn or dusk. Its slender legs end in small black paws with visible claws, and its expression is neutral and curious.\", \"Watermark\": \"The image includes a faint artist signature 'kai_(pixiv3090374)' placed subtly within the composition.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1771.386,
+          "prompt_per_token_ms": 1.5075625531914894,
+          "prompt_per_second": 663.3223927478257,
+          "predicted_n": 219,
+          "predicted_ms": 7858.607,
+          "predicted_per_token_ms": 36.04865596330275,
+          "predicted_per_second": 27.7402852693868
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 22.59336460000486,
+        "usage": {
+          "completion_tokens": 655,
+          "prompt_tokens": 1175,
+          "total_tokens": 1830,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"The image is a composite grid of nine realistic photographic portraits of male FIFA World Cup 19th headmasters arranged in a 3x3 layout. Each portrait is set against a dark blue background with a white nameplate below, displaying the headmasters' names and FIFA number. The portraits are taken from a slightly elevated frontal angle, showing the men from chest up. The background behind the portraits features a blurred football stadium scene with a green pitch and a crowd, emphasizing the FIFA World Cup 19 context. At the top, bold white text reads 'Top FIFA 19 Management codis,' highlighting the theme of the image.\", \"Character 1\": \"Honsa Lrkra, FIFA #1 headmaster, is an older man with short brown hair, a neatly trimmed full beard, and mustache. He wears a dark grey suit jacket over a light blue shirt and a navy blue tie. His expression is serious and focused, with slightly furrowed brows.\", \"Character 2\": \"Pichis Lrura, FIFA #2 headmaster, has short grey hair and a neatly trimmed mustache and beard. He wears a dark navy suit, light blue shirt, and navy blue tie. His expression is calm and composed.\", \"Character 3\": \"Fiesen Cuna, FIFA #3 headmaster, is an older man with short grey hair, a full beard, and mustache. He wears a dark suit jacket, light blue shirt, and navy blue tie. His expression is stern and determined.\", \"Character 4\": \"Duna Ecina, FIFA #3 headmaster, is an older man with short grey hair and a full beard and mustache. He wears a dark suit jacket, light blue shirt, and navy blue tie. His expression is calm and thoughtful.\", \"Character 5\": \"Nonano Erura, FIFA #4 headmaster, has short dark brown hair, a mustache, and a short beard. He wears a dark suit with a light blue shirt and dark red tie. His expression is friendly and approachable.\", \"Character 6\": \"Morram Frika, FIFA #5 headmaster, is an older man with short grey hair, a full beard, and mustache. He wears a dark suit jacket, light blue shirt, and light blue tie. His expression is serious and focused.\", \"Character 7\": \"Hamin Esira, FIFA #6 headmaster, is an older man with short grey hair, a full beard, and mustache. He wears a dark suit jacket, light blue shirt, and dark blue tie. His expression is calm and neutral.\", \"Character 8\": \"Bisin Erura, FIFA #9 headmaster, has short brown hair, a mustache, and short beard. He wears a dark suit jacket, light blue shirt, and dark tie. His expression is friendly with a slight smile.\", \"Character 9\": \"Cooin Frika, FIFA #6 headmaster, is an older man with short grey hair, a full beard, and mustache. He wears a dark suit jacket, light blue shirt, and dark blue tie. His expression is serious and focused.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1788.365,
+          "prompt_per_token_ms": 1.5220127659574467,
+          "prompt_per_second": 657.0247125167401,
+          "predicted_n": 655,
+          "predicted_ms": 20667.016,
+          "predicted_per_token_ms": 31.600941896024466,
+          "predicted_per_second": 31.644626394057084
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 15.011653300010948,
+        "usage": {
+          "completion_tokens": 320,
+          "prompt_tokens": 1175,
+          "total_tokens": 1495,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Three armed girls stand in a ruined cityscape under a stormy, cloudy sky. The background shows crumbling skyscrapers with neon signs, rubble, and debris scattered around. The atmosphere is tense and gritty, with muted colors and soft lighting highlighting the characters and their surroundings.\", \"Character 1\": \"The central girl has long, vibrant blue hair flowing past her shoulders and piercing yellow eyes. She wears a navy blue beret with a small badge, a black choker, a navy blue jacket with rolled-up sleeves, a white shirt tucked into matching pants, black fingerless gloves, and a tactical belt with pouches. She holds a black assault rifle with a scope firmly with both hands, standing alert and ready for combat.\", \"Character 2\": \"To the right, a girl with long brown hair and brown eyes wears a similar navy blue jacket over a white shirt, a short black skirt, black boots, and a tactical belt with a thigh strap. She holds an assault rifle with a scope in a ready position, her expression focused and determined as she scans the surroundings.\", \"Character 3\": \"On the left, another brown-haired girl with her hair tied in a high ponytail wears a dark jacket, black skirt, thigh-high stockings, and black boots. She holds her rifle at the ready, her posture tense and alert, standing slightly behind the central figure to form a protective trio.\", \"Watermark\": \"The image includes a small artist signature 'tsumugi_hiro' discreetly placed but no other visible watermarks or logos.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1857.44,
+          "prompt_per_token_ms": 1.5808,
+          "prompt_per_second": 632.591093117409,
+          "predicted_n": 320,
+          "predicted_ms": 13076.938,
+          "predicted_per_token_ms": 40.99353605015674,
+          "predicted_per_second": 24.394089809097512
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 19.324873099991237,
+        "usage": {
+          "completion_tokens": 446,
+          "prompt_tokens": 1175,
+          "total_tokens": 1621,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Six characters from the game \\\"Sennen Sensou Aigis\\\" stand confidently on a lush green field under a bright blue sky dotted with clouds. Behind them float several large, floating islands topped with castles and towers, connected by beams of light, creating a fantasy atmosphere. The group is arranged in a semi-circle, with a small red dragon in the foreground adding a playful touch. The image is sharp and colorful with clean anime-style lines.\", \"Character 1\": \"A tall, muscular man with short brown hair and a full beard stands at the center. He wears rugged brown armor with shoulder pauldrons, fingerless gloves, knee pads, and a long tunic. A sword is sheathed at his left hip. His posture is strong and protective, with clenched fists and a serious expression.\", \"Character 2\": \"To his left stands a girl with short blonde hair styled in twin tails. She wears a white sleeveless top with green accents, a green skirt, brown boots, and black arm bands. She holds a sword sheathed at her side and smiles brightly, radiating youthful energy.\", \"Character 3\": \"Next to her is a girl with long dark purple hair and a small ahoge. She wears a purple and white outfit with a short skirt, thigh-high stockings, and a cape. Her expression is calm and confident.\", \"Character 4\": \"On the right side, a tall blonde woman with long hair wears blue and white armor with a short skirt and thigh-high boots. She holds a sword in her right hand and looks determined.\", \"Character 5\": \"Next to her is a pale blue-haired girl with a long ponytail and white and blue armor with a short skirt. She stands calmly with a gentle smile.\", \"Character 6\": \"Beside her is a green-haired girl with short hair and elf-like ears. She wears a simple green outfit with a skirt and has a serene expression.\", \"Character 7\": \"In front of the group is a small red dragon with large black eyes, a yellow underbelly, and small black wings. It looks friendly and adds a whimsical element to the scene.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1955.337,
+          "prompt_per_token_ms": 1.6641165957446808,
+          "prompt_per_second": 600.9194323024625,
+          "predicted_n": 446,
+          "predicted_ms": 17161.22,
+          "predicted_per_token_ms": 38.5645393258427,
+          "predicted_per_second": 25.930557384614847
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 13.222025600000052,
+        "usage": {
+          "completion_tokens": 283,
+          "prompt_tokens": 1175,
+          "total_tokens": 1458,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Close-up portrait of a young man with a serious expression, set against a smooth grey gradient background. The image is digitally rendered with sharp details and realistic lighting, emphasizing his facial features and upper body. The framing includes parts of a user interface with tool icons and a green progress bar at the bottom, suggesting a digital art workspace.\", \"Character 1\": \"A young boy with short, jet-black hair parted slightly off-center, styled with layered strands framing his face. He has bright green eyes with a focused, intense gaze and a neutral expression with closed lips. His warm skin tone shows subtle shading on the cheeks, nose, and jawline. A distinctive black tattoo resembling a stylized eye or geometric symbol is visible on the left side of his neck. He wears a black leather jacket with visible zippers and metal studs over a black shirt printed with a faint graphic. Brown leather suspenders with silver buckles cross his shoulders. He has a small silver hoop earring in his left ear, adding a subtle punk aesthetic. The lighting highlights the contours of his face and the texture of his clothing, creating a lifelike and detailed portrait.\", \"Texts\": \"The black shirt features a faint graphic print.\", \"Watermark\": \"The image includes UI elements like tool icons along the left side and a green progress bar at the bottom, indicating a digital art program interface.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1779.81,
+          "prompt_per_token_ms": 1.514731914893617,
+          "prompt_per_second": 660.1828285041662,
+          "predicted_n": 283,
+          "predicted_ms": 11302.114,
+          "predicted_per_token_ms": 40.07841843971631,
+          "predicted_per_second": 24.951084372357244
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 10.969891699991422,
+        "usage": {
+          "completion_tokens": 240,
+          "prompt_tokens": 1175,
+          "total_tokens": 1415,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with bright natural light illuminating the scene. The background outside the window is softly blurred, featuring a white building and balcony, creating a calm, intimate atmosphere. The photo uses a shallow depth of field to focus sharply on the woman and a small handbag on the table, while the surroundings remain out of focus.\", \"Character 1\": \"A young Asian girl with long, wavy brown hair flowing over her shoulders and back. She wears a bright yellow dress with short, puffy sleeves and a gathered elastic waist that creates soft folds in the fabric. The dress has a modest V-neckline exposing part of her collarbone. She sits sideways on a wooden chair with a light cushioned seat, leaning slightly forward with closed eyes and a serene, contemplative expression. Her lips are gently closed, and her fair skin is softly lit by natural daylight. Both of her hands delicately hold the clasp of a small, dark gray handbag resting on the table, fingers poised as if about to secure or open it. Her posture is relaxed yet attentive, emphasizing a quiet moment of personal reflection.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1762.882,
+          "prompt_per_token_ms": 1.5003251063829788,
+          "prompt_per_second": 666.5222062509005,
+          "predicted_n": 240,
+          "predicted_ms": 9046.466,
+          "predicted_per_token_ms": 37.85132217573222,
+          "predicted_per_second": 26.419156386593393
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 20.780714399996214,
+        "usage": {
+          "completion_tokens": 496,
+          "prompt_tokens": 1175,
+          "total_tokens": 1671,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Eleven young athletes and one older coach stand in a well-lit indoor basketball court with polished wooden floors and brick walls. They form a semi-circle facing forward, with basketball hoops and court markings visible behind them. Most hold basketballs, some resting on the floor, emphasizing a team practice or photo session atmosphere. The lighting is bright and even, highlighting the polished floor and clear details of their sportswear and expressions.\", \"Character 1\": \"A young girl with short blonde hair, wearing a white basketball jersey with black trim and black shorts, holds a basketball against her right hip. She wears black sneakers and white socks, standing confidently with legs slightly apart.\", \"Character 2\": \"An older male coach with short gray hair, dressed in a dark blue short-sleeved shirt and gray shorts, stands behind the first girl with hands on hips, projecting authority.\", \"Character 3\": \"A young girl with short dark hair, wearing a dark blue sleeveless shirt and gray shorts, holds a basketball in front of her torso with both hands, looking forward calmly.\", \"Character 4\": \"A young girl with short blonde hair, dressed in a purple sleeveless shirt with a black graphic and black shorts, holds a basketball with both hands in front of her, standing upright.\", \"Character 5\": \"A young boy with short dark hair, wearing a light blue sleeveless jersey and black shorts, stands with one hand on his hip and the other holding a basketball at his side.\", \"Character 6\": \"A young boy with short dark hair wearing a red sleeveless jersey and red shorts, holds a basketball in front of him with both hands, standing relaxed but alert.\", \"Character 7\": \"A young girl with dark hair tied back, wearing a light blue sleeveless jersey and blue shorts, holds a basketball casually at her side.\", \"Character 8\": \"A young boy with short dark hair in a white short-sleeved shirt and black shorts, holding a basketball at his side, standing casually.\", \"Character 9\": \"A young girl with long dark hair wearing a light blue sleeveless jersey and blue shorts, holding a basketball at her side, standing with a relaxed posture.\", \"Character 10\": \"A young boy with short dark hair, dressed in a white short-sleeved shirt and black shorts, holding a basketball in front of him with both hands, standing attentively.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1963.261,
+          "prompt_per_token_ms": 1.6708604255319148,
+          "prompt_per_second": 598.494036197938,
+          "predicted_n": 496,
+          "predicted_ms": 18723.505,
+          "predicted_per_token_ms": 37.82526262626263,
+          "predicted_per_second": 26.437357748989836
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 9.172263899992686,
+        "usage": {
+          "completion_tokens": 206,
+          "prompt_tokens": 1175,
+          "total_tokens": 1381,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A monochrome, highly detailed graphite portrait of a young Asian girl in strict frontal view. The background is plain, focusing entirely on the realistic and finely textured rendering of her face and hair. The artwork emphasizes soft shading and fine lines typical of traditional pencil media, capturing a lifelike yet subtly stylized depiction.\", \"Character 1\": \"A young Asian girl with smooth, softly shaded skin showing natural contours and subtle shadows around her cheeks, nose, and lips. Her large, round eyes have reflective highlights and detailed eyelashes, conveying a calm and contemplative expression. Her lips are slightly parted with a natural, glossy texture. Her long, straight hair flows around her face with visible individual strands and soft highlights, parted naturally at the center with some loose strands framing her forehead. The realistic style blends photorealistic detail with subtle anime-inspired facial features.\", \"Watermark\": \"The image includes the artist signature 'yuuji_(and)' discreetly placed, indicating the creator's identity.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1844.23,
+          "prompt_per_token_ms": 1.5695574468085107,
+          "prompt_per_second": 637.1222678299345,
+          "predicted_n": 206,
+          "predicted_ms": 7249.122,
+          "predicted_per_token_ms": 35.36157073170732,
+          "predicted_per_second": 28.27928678811034
+        }
+      }
+    ],
+    "gpu_peak_mib": 13921.0,
+    "gpu_util_mean": 59.15492957746479
+  },
+  {
+    "engine": "llamacpp",
+    "slots": 8,
+    "phase": "ready",
+    "seconds": 4.250282699998934,
+    "command": [
+      "H:\\tagger\\runtime\\llama.cpp\\llama-server.exe",
+      "-m",
+      "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+      "--mmproj",
+      "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-fp16.mmproj.gguf",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "60414",
+      "--alias",
+      "torii-bench",
+      "-ngl",
+      "99",
+      "-np",
+      "8",
+      "-c",
+      "65536",
+      "--image-min-tokens",
+      "64",
+      "--image-max-tokens",
+      "976",
+      "--jinja",
+      "--chat-template-file",
+      "H:\\tagger\\tagger\\hair_color\\torii_chat_template.jinja",
+      "-fa",
+      "on",
+      "-t",
+      "8",
+      "-tb",
+      "8",
+      "--cache-ram",
+      "0",
+      "--no-cache-prompt"
+    ]
+  },
+  {
+    "engine": "llamacpp-default",
+    "slots": 8,
+    "phase": "fixed",
+    "repeat": 0,
+    "seconds": 4.3706551999930525,
+    "images_per_minute": 109.82335097052794,
+    "tokens": 1024,
+    "tokens_per_second": 234.28981540379294,
+    "mean_latency": 4.335967074997825,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 4.3185624000034295,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A mystical white fox-like creature with glowing red eyes walks gracefully through a grassy field dotted with small white flowers. The scene is set outdoors during twilight, with a soft pastel sky blending pink and blue hues. In the background, a large clock tower stands prominently on the right, showing the time around 11:05. A floating island hovers in the distance to the left, adding a fantasy element. The foreground grass and flowers are sharply detailed, while the background is softly blurred, creating depth and focus on the creature.\", \"Creature\": \"A slender, fox-like animal with pure white fur that gl",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1732.389,
+          "prompt_per_token_ms": 1.4743736170212765,
+          "prompt_per_second": 678.2541334538605,
+          "predicted_n": 128,
+          "predicted_ms": 2500.014,
+          "predicted_per_token_ms": 19.685149606299213,
+          "predicted_per_second": 50.79971552159307
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 4.342785899993032,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"The image is a digital composite showing nine headshots of men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The overall style is realistic with sharp focus on the faces and a shallow depth of field blurring the stadium crowd and field behind them.\", \"Character 1\": \"A",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2003.22,
+          "prompt_per_token_ms": 1.704868085106383,
+          "prompt_per_second": 586.5556454108885,
+          "predicted_n": 128,
+          "predicted_ms": 2207.249,
+          "predicted_per_token_ms": 17.37991338582677,
+          "predicted_per_second": 57.53768605173227
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 4.363480799991521,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows destroyed buildings, rubble, neon signs, and a red emergency light, creating a tense post-apocalyptic atmosphere. The scene is rendered in a detailed, realistic anime style with sharp focus on the characters and a blurred background.\", \"Character 1\": \"A girl with long blue hair and yellow eyes wears a navy blue beret with a badge, a dark blue tactical jacket with rolled-up sleeves, a white shirt, and dark blue pants. She has black fingerless gloves, a black choker, and a utility belt",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2083.778,
+          "prompt_per_token_ms": 1.7734280851063828,
+          "prompt_per_second": 563.8796455284585,
+          "predicted_n": 128,
+          "predicted_ms": 2148.506,
+          "predicted_per_token_ms": 16.917370078740156,
+          "predicted_per_second": 59.110842604116534
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 4.352311700000428,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, facing forward with confident and determined expressions, ready for adventure. A small red dragon with large eyes and a curled tail stands near the front right, adding a whimsical touch.\", \"Kirito\": \"A young man with short black hair and a serious expression, wearing dark armor with silver shoulder plates and gauntlets.",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2084.504,
+          "prompt_per_token_ms": 1.7740459574468084,
+          "prompt_per_second": 563.6832551052912,
+          "predicted_n": 128,
+          "predicted_ms": 2148.716,
+          "predicted_per_token_ms": 16.919023622047245,
+          "predicted_per_second": 59.10506553681362
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 4.322433699999237,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A hyper-realistic digital portrait of a young man with a neutral gray background. The image is framed as a fake screenshot from a video game, featuring a green health bar at the bottom and a vertical menu with icons on the left side. The lighting is soft and even, highlighting the character's facial features and clothing textures.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has striking bright green eyes and a calm, confident expression with a subtle smile. His skin is smooth and lightly tanned. He wears a black leather jacket with",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2002.198,
+          "prompt_per_token_ms": 1.7039982978723405,
+          "prompt_per_second": 586.8550463041117,
+          "predicted_n": 128,
+          "predicted_ms": 2207.365,
+          "predicted_per_token_ms": 17.380826771653542,
+          "predicted_per_second": 57.5346623689331
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 4.317308699988644,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with a softly blurred urban background. Natural daylight illuminates the scene, highlighting the warm tones of her yellow dress and the calm atmosphere. She is focused on a small brown handbag placed on the table, gently handling its clasp with both hands.\", \"Character 1\": \"A young girl with long, wavy black hair cascading over her shoulders and back. She wears a bright yellow dress with puffed short sleeves and a gathered waist, creating a soft, feminine silhouette. Her eyes are closed, and her expression is serene and contemplative.",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2001.525,
+          "prompt_per_token_ms": 1.7034255319148937,
+          "prompt_per_second": 587.0523725659185,
+          "predicted_n": 128,
+          "predicted_ms": 2207.032,
+          "predicted_per_token_ms": 17.37820472440945,
+          "predicted_per_second": 57.543343277306356
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 4.3363149000069825,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A group of ten young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and brick walls. The court features a basketball hoop centered in the background. The girls wear various basketball uniforms and casual sportswear in colors including blue, red, pink, black, and white. Most hold basketballs, with two balls resting on the floor in front. The man stands behind the group with hands on hips, overseeing the scene. The atmosphere is calm and focused, suggesting a team or practice setting.\", \"Character 1\": \"A young girl on the far left with short blonde hair",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2082.426,
+          "prompt_per_token_ms": 1.7722774468085105,
+          "prompt_per_second": 564.2457403048176,
+          "predicted_n": 128,
+          "predicted_ms": 2147.907,
+          "predicted_per_token_ms": 16.912653543307087,
+          "predicted_per_second": 59.127327207369774
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 4.334538499999326,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A highly detailed monochrome graphite portrait of a young Asian girl, focusing on her face and upper shoulders. The background is plain, emphasizing the realistic textures and shading of her skin, hair, and facial features. The image captures a calm, neutral expression with soft lighting that highlights the natural contours of her face.\", \"Character 1\": \"A young Asian girl with long, straight hair parted slightly to the side, rendered with fine graphite strokes showing individual strands and volume. She has large, round eyes with subtle shading around the eyelids and lashes, a small straight nose with delicate nostrils, and full lips parted slightly",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2083.093,
+          "prompt_per_token_ms": 1.7728451063829787,
+          "prompt_per_second": 564.0650705465383,
+          "predicted_n": 128,
+          "predicted_ms": 2148.15,
+          "predicted_per_token_ms": 16.91456692913386,
+          "predicted_per_second": 59.12063868910458
+        }
+      }
+    ],
+    "gpu_peak_mib": 13883.0,
+    "gpu_util_mean": 68.6
+  },
+  {
+    "engine": "llamacpp-default",
+    "slots": 8,
+    "phase": "fixed",
+    "repeat": 1,
+    "seconds": 4.321711600001436,
+    "images_per_minute": 111.06710591235208,
+    "tokens": 1024,
+    "tokens_per_second": 236.9431592796844,
+    "mean_latency": 4.292551787499178,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 4.274443200003589,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A mystical white fox-like creature with glowing red eyes walks gracefully through a grassy field dotted with small white flowers. The scene is set outdoors during twilight, with a soft pastel sky blending pink and blue hues. In the background, a large clock tower stands prominently on the right, showing the time around 11:05. A floating island hovers in the distance to the left, adding a fantasy element. The foreground grass and flowers are sharply detailed, while the background is softly blurred, creating depth and focus on the creature.\", \"Creature\": \"A slender, fox-like animal with pure white fur that gl",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1720.908,
+          "prompt_per_token_ms": 1.4646025531914892,
+          "prompt_per_second": 682.779091037987,
+          "predicted_n": 128,
+          "predicted_ms": 2466.779,
+          "predicted_per_token_ms": 19.423456692913387,
+          "predicted_per_second": 51.484141870836424
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 4.295129899997846,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"The image is a digital composite showing nine headshots of men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The overall style is realistic with sharp focus on the faces and a shallow depth of field blurring the stadium crowd and field behind them.\", \"Character 1\": \"A",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1944.151,
+          "prompt_per_token_ms": 1.6545965957446809,
+          "prompt_per_second": 604.3769233974109,
+          "predicted_n": 128,
+          "predicted_ms": 2193.806,
+          "predicted_per_token_ms": 17.274062992125984,
+          "predicted_per_second": 57.890260123274345
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 4.311027000003378,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows destroyed buildings, rubble, neon signs, and a red emergency light, creating a tense post-apocalyptic atmosphere. The scene is rendered in a detailed, realistic anime style with sharp focus on the characters and a blurred background.\", \"Character 1\": \"A girl with long blue hair and yellow eyes wears a navy blue beret with a badge, a dark blue tactical jacket with rolled-up sleeves, a white shirt, and dark blue pants. She has black fingerless gloves, a black choker, and a utility belt",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1988.442,
+          "prompt_per_token_ms": 1.6922910638297872,
+          "prompt_per_second": 590.914897190866,
+          "predicted_n": 128,
+          "predicted_ms": 2131.92,
+          "predicted_per_token_ms": 16.78677165354331,
+          "predicted_per_second": 59.570715599084394
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 4.3095525999960955,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, facing forward with confident and determined expressions, ready for adventure. A small red dragon with large eyes and a curled tail stands near the front right, adding a whimsical touch.\", \"Kirito\": \"A young man with short black hair and a serious expression, wearing dark armor with silver shoulder plates and gauntlets.",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1976.161,
+          "prompt_per_token_ms": 1.6818391489361704,
+          "prompt_per_second": 594.5871819148339,
+          "predicted_n": 128,
+          "predicted_ms": 2132.368,
+          "predicted_per_token_ms": 16.790299212598423,
+          "predicted_per_second": 59.55820008553871
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 4.282406700003776,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A hyper-realistic digital portrait of a young man with a neutral gray background. The image is framed as a fake screenshot from a video game, featuring a green health bar at the bottom and a vertical menu with icons on the left side. The lighting is soft and even, highlighting the character's facial features and clothing textures.\", \"Character 1\": \"A young man with short, slightly tousled black hair parted in the middle, framing his face. He has striking bright green eyes and a calm, confident expression with a subtle smile. His skin is smooth and lightly tanned. He wears a black leather jacket with",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1955.209,
+          "prompt_per_token_ms": 1.6640076595744682,
+          "prompt_per_second": 600.9587721824112,
+          "predicted_n": 128,
+          "predicted_ms": 2193.212,
+          "predicted_per_token_ms": 17.269385826771654,
+          "predicted_per_second": 57.90593886956665
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 4.2776665999990655,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with a softly blurred urban background. Natural daylight illuminates the scene, highlighting the warm tones of her yellow dress and the calm atmosphere. She is focused on a small brown handbag placed on the table, gently handling its clasp with both hands.\", \"Character 1\": \"A young girl with long, wavy black hair cascading over her shoulders and back. She wears a bright yellow dress with puffed short sleeves and a gathered waist, creating a soft, feminine silhouette. Her eyes are closed, and her expression is serene and contemplative.",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1966.792,
+          "prompt_per_token_ms": 1.6738655319148936,
+          "prompt_per_second": 597.4195542792527,
+          "predicted_n": 128,
+          "predicted_ms": 2192.68,
+          "predicted_per_token_ms": 17.2651968503937,
+          "predicted_per_second": 57.91998832478976
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 4.2955565999873215,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A group of ten young girls and one older man stand in a well-lit indoor basketball court with polished wooden floors and brick walls. The court features a basketball hoop centered in the background. The girls wear various basketball uniforms and casual sportswear in colors including blue, red, pink, black, and white. Most hold basketballs, with two balls resting on the floor in front. The man stands behind the group with hands on hips, overseeing the scene. The atmosphere is calm and focused, suggesting a team or practice setting.\", \"Character 1\": \"A young girl on the far left with short blonde hair",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2013.445,
+          "prompt_per_token_ms": 1.7135702127659573,
+          "prompt_per_second": 583.5769042611048,
+          "predicted_n": 128,
+          "predicted_ms": 2130.73,
+          "predicted_per_token_ms": 16.77740157480315,
+          "predicted_per_second": 59.60398548854148
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 4.2946317000023555,
+        "usage": {
+          "completion_tokens": 128,
+          "prompt_tokens": 1175,
+          "total_tokens": 1303,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "length",
+        "valid_json": false,
+        "text": "{\"General\": \"A highly detailed monochrome graphite portrait of a young Asian girl, focusing on her face and upper shoulders. The background is plain, emphasizing the realistic textures and shading of her skin, hair, and facial features. The image captures a calm, neutral expression with soft lighting that highlights the natural contours of her face.\", \"Character 1\": \"A young Asian girl with long, straight hair parted slightly to the side, rendered with fine graphite strokes showing individual strands and volume. She has large, round eyes with subtle shading around the eyelids and lashes, a small straight nose with delicate nostrils, and full lips parted slightly",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1999.095,
+          "prompt_per_token_ms": 1.7013574468085106,
+          "prompt_per_second": 587.7659640987547,
+          "predicted_n": 128,
+          "predicted_ms": 2131.371,
+          "predicted_per_token_ms": 16.782448818897638,
+          "predicted_per_second": 59.586059864753715
+        }
+      }
+    ],
+    "gpu_peak_mib": 13868.0,
+    "gpu_util_mean": 65.73333333333333
+  },
+  {
+    "engine": "llamacpp-default",
+    "slots": 8,
+    "phase": "caption",
+    "repeat": 0,
+    "seconds": 14.852556600002572,
+    "images_per_minute": 32.31766846119387,
+    "tokens": 2799,
+    "tokens_per_second": 188.45240421433675,
+    "mean_latency": 9.8910327875019,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 6.46619579999242,
+        "usage": {
+          "completion_tokens": 234,
+          "prompt_tokens": 1175,
+          "total_tokens": 1409,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A mystical, serene landscape at sunrise or sunset featuring a grassy field dotted with wildflowers and scattered rocks. The sky is a gradient of soft pinks and purples with wispy clouds. In the background, a large clock tower with a white clock face stands tall, showing a time just before 3 o'clock. Floating islands hover in the distance above a calm lake, adding a fantasy element. The foreground and background are softly blurred, focusing attention on the central creature and creating a dreamy atmosphere.\", \"Creature\": \"A small quadrupedal animal with a slender, elongated body covered in short, fluffy white fur. Its fur is speckled with subtle glowing points resembling bioluminescent specks or stars. It has large, pointed ears with pink inner coloring and a long, bushy tail that curls gently behind it. The creatures eyes are large and expressive, glowing with a warm amber or reddish hue, giving it an intelligent and mystical appearance. It walks gracefully across the grassy field with a calm and curious expression, appearing to explore the tranquil environment.\", \"Texts\": \"\", \"Watermark\": \"\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1646.192,
+          "prompt_per_token_ms": 1.4010144680851064,
+          "prompt_per_second": 713.768503309456,
+          "predicted_n": 234,
+          "predicted_ms": 4750.502,
+          "predicted_per_token_ms": 20.38842060085837,
+          "predicted_per_second": 49.04744803812312
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 14.58642890000192,
+        "usage": {
+          "completion_tokens": 509,
+          "prompt_tokens": 1175,
+          "total_tokens": 1684,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"The image is a digital chart showing the nine top FIFA 19 world cup managers arranged in a 3x3 grid against a blurred background of a crowded FIFA World Cup soccer stadium. Each manager's portrait is framed with a white border and numbered from 1 to 9, with their FIFA 19 association and name displayed below. The chart highlights their facial features, hairstyles, and formal suits, emphasizing their leadership roles in the tournament.\", \"Character 1\": \"Honsa Lrkra is a middle-aged man with short brown hair and a neatly trimmed full beard and mustache. He wears a dark suit with a white shirt and blue tie. His expression is serious and focused, with slightly furrowed brows.\", \"Character 2\": \"Pichis Lrura is an older man with short gray hair and wrinkles on his face. He wears a dark suit with a white shirt and dark tie. His expression is calm and composed.\", \"Character 3\": \"Fiesen Cuna is an older man with short gray hair and a full beard. He wears a dark suit with a white shirt and dark tie. His expression is stern and serious.\", \"Character 4\": \"Duna Ecina is an older man with gray hair and wrinkles. He wears a dark suit with a white shirt and purple tie. He has a gentle, slightly smiling expression.\", \"Character 5\": \"Nonano Erura is a younger man with short brown hair and clean-shaven face. He wears a dark suit with a white shirt and dark tie. He has a friendly, approachable smile.\", \"Character 6\": \"Morram Frika is an older man with short gray hair and wrinkles. He wears a dark suit with a white shirt and light blue tie. His expression is neutral and serious.\", \"Character 7\": \"Hamin Esira is an older man with short gray hair and facial stubble. He wears a dark suit with a white shirt and dark tie. His expression is stern and focused.\", \"Character 8\": \"Bisin Erura is a younger man with short brown hair and clean-shaven face. He wears a dark suit with a white shirt and dark tie. He has a warm, friendly smile.\", \"Character 9\": \"Cooin Frika is an older man with short gray hair and a trimmed mustache and beard. He wears a dark suit with a white shirt and dark tie. He has a serious and focused expression.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1877.298,
+          "prompt_per_token_ms": 1.597700425531915,
+          "prompt_per_second": 625.8995641608311,
+          "predicted_n": 509,
+          "predicted_ms": 12571.255,
+          "predicted_per_token_ms": 24.746564960629918,
+          "predicted_per_second": 40.409648837765204
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 7.858725199999753,
+        "usage": {
+          "completion_tokens": 278,
+          "prompt_tokens": 1175,
+          "total_tokens": 1453,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Three armed girls stand in a ruined cityscape under a stormy, cloudy sky. The background shows crumbling skyscrapers with neon signs, rubble, and debris scattered around. The atmosphere is tense and gritty, with muted colors and soft lighting highlighting the characters and their surroundings.\", \"Character 1\": \"The central girl has long, vibrant blue hair flowing past her shoulders and piercing yellow eyes. She wears a navy blue beret with a small badge, a black choker, a navy blue jacket with rolled-up sleeves, a white shirt tucked into matching pants, black fingerless gloves, and a tactical belt with pouches. She holds a black assault rifle with a scope firmly with both hands, standing alert and ready for combat.\", \"Character 2\": \"To the right, a girl with long brown hair and brown eyes wears a similar navy blue jacket over a white shirt, a short black skirt, black boots, and a tactical belt with a thigh strap. She holds an assault rifle with a scope, aiming it forward with a serious, focused expression, prepared for action.\", \"Character 3\": \"On the left, another girl with brown hair tied in a ponytail wears a tactical jacket, black gloves, and a skirt. She holds a rifle in a ready stance, partially obscured by the central figure, maintaining vigilance and preparedness.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1916.395,
+          "prompt_per_token_ms": 1.6309744680851064,
+          "prompt_per_second": 613.1303828281748,
+          "predicted_n": 278,
+          "predicted_ms": 5769.205,
+          "predicted_per_token_ms": 20.82745487364621,
+          "predicted_per_second": 48.01354779384681
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 14.768090400000801,
+        "usage": {
+          "completion_tokens": 515,
+          "prompt_tokens": 1175,
+          "total_tokens": 1690,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Six characters from the game \\\"Kono Yuusha ga Ore Tueee Kuse ni Shinchou Sugiru\\\" stand confidently on a grassy field under a bright blue sky filled with fluffy clouds. Behind them float multiple large, lush floating islands with castles and towers, connected by beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle, with a small red dragon positioned near two girls on the right. The scene is vibrant, detailed, and sharply rendered with a slight low-angle perspective emphasizing the characters' heroic presence.\", \"Character 1\": \"A tall, muscular man with short spiky brown hair and a full beard stands at the center front. He wears dark brown leather armor with silver shoulder pauldrons, fingerless gloves, and a utility belt holding a glowing blue vial. His confident stance has fists clenched and feet apart, radiating strength and leadership.\", \"Character 2\": \"To the man's left, a young woman with long dark purple hair wears a white blouse and a short purple skirt with a red capelet. She has thigh-high brown boots and black gloves. Her calm, serious expression and upright posture convey readiness and determination.\", \"Character 3\": \"Next to her is a cheerful blonde girl with short hair tied in twin tails. She wears a white sleeveless top, a green pleated skirt, brown fingerless gloves, and knee-high boots. Her bright smile and lively pose add youthful energy to the group.\", \"Character 4\": \"On the man's right stands a tall blonde woman with long hair and a single ahoge strand. She wears blue and silver armor with a breastplate, gauntlets, and thigh-high armored boots. Her serious expression and strong stance emphasize her warrior role.\", \"Character 5\": \"Beside her is a pale blue-haired girl with long hair and a small halo above her head, suggesting a magical or divine nature. She wears a white and blue dress with a red belt and has a calm, serene expression.\", \"Character 6\": \"Next to her is a green-haired elf girl with pointed ears and a gentle smile. She wears a sleeveless green dress with gold accents and thigh-high boots, her relaxed posture reflecting a kind and approachable personality.\", \"Character 7\": \"At the group's front right, a small, chibi-style bright red dragon with large black eyes, small wings, and a curled tail stands alert and cute, adding a playful fantasy element to the scene.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1905.963,
+          "prompt_per_token_ms": 1.6220961702127659,
+          "prompt_per_second": 616.4862591771195,
+          "predicted_n": 515,
+          "predicted_ms": 12680.007,
+          "predicted_per_token_ms": 24.669274319066147,
+          "predicted_per_second": 40.53625522446478
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 8.356717200003914,
+        "usage": {
+          "completion_tokens": 297,
+          "prompt_tokens": 1175,
+          "total_tokens": 1472,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Close-up portrait of a young man with a serious expression, set against a smooth grey gradient background. The image is digitally rendered with sharp details and realistic lighting, emphasizing his facial features and upper body. The composition includes a user interface element at the bottom, resembling a progress bar or health meter, suggesting a video game or interactive context. On the left side, there is a vertical menu or tool panel with various icons, reinforcing the digital or in-game environment.\", \"Character 1\": \"A young man with short, thick black hair parted near the middle, styled with slightly tousled bangs framing his face. He has striking green eyes that look directly at the viewer with a calm yet intense gaze. His skin is smooth and fair with subtle warm undertones. He wears a black leather jacket featuring a high collar, silver studs along the shoulders and collar edges, and visible stitching. The jacket is open, revealing a black T-shirt underneath with a partially visible white graphic design. On his left ear, he sports a small hoop earring. A black tattoo resembling a stylized circular symbol with intersecting lines is visible on the left side of his neck, adding an edgy detail. His lips are closed, maintaining a neutral, serious expression.\", \"Texts\": \"The bottom of the image contains a green progress bar or health meter with a small yellow square button next to it, indicative of a user interface element from a game or digital interface.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1889.332,
+          "prompt_per_token_ms": 1.6079421276595744,
+          "prompt_per_second": 621.9129300726394,
+          "predicted_n": 297,
+          "predicted_ms": 6351.446,
+          "predicted_per_token_ms": 21.45758783783784,
+          "predicted_per_second": 46.603560826936096
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 6.681365500000538,
+        "usage": {
+          "completion_tokens": 240,
+          "prompt_tokens": 1175,
+          "total_tokens": 1415,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with bright natural light illuminating the scene. The background outside the window is softly blurred, featuring a white building and balcony, creating a calm, intimate atmosphere. The photo uses a shallow depth of field to focus sharply on the woman and a small handbag on the table, while the surroundings remain out of focus.\", \"Character 1\": \"A young Asian girl with long, wavy brown hair flowing over her shoulders and back. She wears a bright yellow dress with short, puffy sleeves and a gathered elastic waist that creates soft folds in the fabric. The dress has a modest V-neckline exposing part of her collarbone. She sits sideways on a wooden chair with a light cushioned seat, leaning slightly forward with closed eyes and a serene, contemplative expression. Her lips are gently closed, and her fair skin is softly lit by natural daylight. Both of her hands delicately hold the clasp of a small, dark gray handbag resting on the table, fingers poised as if about to secure or open it. Her posture is relaxed yet attentive, emphasizing a quiet moment of personal reflection.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1899.854,
+          "prompt_per_token_ms": 1.6168970212765958,
+          "prompt_per_second": 618.4685770590793,
+          "predicted_n": 240,
+          "predicted_ms": 4679.783,
+          "predicted_per_token_ms": 19.580682008368203,
+          "predicted_per_second": 51.07074409219401
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 14.835579300008249,
+        "usage": {
+          "completion_tokens": 522,
+          "prompt_tokens": 1175,
+          "total_tokens": 1697,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Eleven young athletes and one older coach stand in a well-lit indoor basketball court with polished wooden floors and brick walls. They form a semi-circle facing forward, all holding basketballs except the coach who stands with hands on hips. The court markings, hoop, and net are visible, emphasizing the sports setting. The group wears casual athletic wear including t-shirts, shorts, tank tops, and sneakers, with hair tied back in ponytails or buns. The coach stands behind the players near the court's center, suggesting leadership or supervision.\", \"Character 1\": \"A girl on the far left with light hair tied in a ponytail, wearing a white sleeveless tank top, navy blue shorts, and black sneakers. She holds a basketball firmly in her right hand, standing upright with a calm expression.\", \"Character 2\": \"A boy next to the first girl with short dark hair, dressed in a dark blue t-shirt, light gray shorts, and white sneakers. He holds a basketball in his left hand, standing relaxed and facing forward.\", \"Character 3\": \"A girl with light brown hair tied back, wearing a pink tank top, black shorts, and black sneakers. She holds her basketball in her left hand, standing with a neutral expression.\", \"Character 4\": \"A girl with light brown hair tied back, wearing a light blue sleeveless shirt, black shorts, and black sneakers. She holds a basketball in her right hand, standing attentively.\", \"Character 5\": \"A boy with dark hair tied back, wearing a light blue sleeveless shirt, black shorts, and white sneakers. He holds his basketball in his right hand, standing with a relaxed but focused posture.\", \"Character 6\": \"A girl with dark hair tied back, wearing a red sleeveless shirt, red shorts, and black sneakers. She holds her basketball in her left hand, standing upright.\", \"Character 7\": \"A girl with dark hair tied back, wearing a light blue sleeveless shirt, blue shorts, and black sneakers. She holds a basketball in her right hand, standing neutrally.\", \"Character 8\": \"A boy on the far right with short dark hair, wearing a white t-shirt, black shorts, and black sneakers. He holds a basketball in his left hand, standing casually.\", \"Character 9\": \"An older male coach standing behind the players near the center. He has short gray hair, wears a dark blue t-shirt, gray shorts, and black shoes. His hands rest on his hips, projecting authority.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1941.656,
+          "prompt_per_token_ms": 1.6524731914893616,
+          "prompt_per_second": 605.1535390409011,
+          "predicted_n": 522,
+          "predicted_ms": 12758.287,
+          "predicted_per_token_ms": 24.488074856046065,
+          "predicted_per_second": 40.836203167400136
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 5.5751600000076,
+        "usage": {
+          "completion_tokens": 204,
+          "prompt_tokens": 1175,
+          "total_tokens": 1379,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A monochrome, highly detailed graphite portrait of a young Asian girl in realistic style. The image focuses on her face and upper shoulders, with soft shading and cross-hatching emphasizing natural skin texture, hair strands, and subtle facial contours. The background is plain, drawing full attention to the subjects serene expression and finely rendered features.\", \"Character 1\": \"A young Asian girl with long, straight dark hair parted slightly off-center, flowing naturally around her shoulders with visible individual strands. She has large, expressive eyes with delicate eyelashes and softly shaded irises. Her eyebrows are thin and gently arched, matching the hair color. The nose is small and softly shaded, showing realistic bridge and nostrils. Her lips are full and slightly parted, rendered with subtle highlights and shadows to convey softness and moisture. Her skin is smooth with gentle shading that suggests natural contours without harsh lines. No clothing or accessories are visible, and her calm, neutral expression faces forward, engaging the viewer directly.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1927.097,
+          "prompt_per_token_ms": 1.6400825531914893,
+          "prompt_per_second": 609.7254056230693,
+          "predicted_n": 204,
+          "predicted_ms": 3500.205,
+          "predicted_per_token_ms": 17.242389162561576,
+          "predicted_per_second": 57.99660305610672
+        }
+      }
+    ],
+    "gpu_peak_mib": 13982.0,
+    "gpu_util_mean": 74.70212765957447
+  },
+  {
+    "engine": "llamacpp-default",
+    "slots": 8,
+    "phase": "caption",
+    "repeat": 1,
+    "seconds": 16.027249399994616,
+    "images_per_minute": 29.94899424227848,
+    "tokens": 3064,
+    "tokens_per_second": 191.1744132465443,
+    "mean_latency": 10.559592275001705,
+    "results": [
+      {
+        "image": "1.jpg",
+        "seconds": 5.569754199997988,
+        "usage": {
+          "completion_tokens": 197,
+          "prompt_tokens": 1175,
+          "total_tokens": 1372,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A mystical, serene landscape at sunrise or sunset with a pastel sky blending blues, purples, and pinks. The foreground features a grassy meadow dotted with small white flowers and scattered rocks. A large, old-fashioned clock tower stands prominently on the right, slightly blurred to create depth. In the distance, a floating island hovers above the misty landscape, enhancing the fantasy atmosphere. The entire scene has a soft, dreamy focus with a shallow depth of field, emphasizing the central creature.\", \"Creature\": \"A small, four-legged quadruped with fluffy, white fur speckled with subtle sparkles resembling stars. It has large, pointed ears with pinkish inner fur and a fluffy tail that curls slightly upward. The creature's eyes glow a warm amber, giving it a magical, ethereal presence. It walks calmly from left to right across the grassy field, its posture relaxed and natural, with no clothing or accessories.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1879.07,
+          "prompt_per_token_ms": 1.5992085106382978,
+          "prompt_per_second": 625.3093285508257,
+          "predicted_n": 197,
+          "predicted_ms": 3608.498,
+          "predicted_per_token_ms": 18.41070408163265,
+          "predicted_per_second": 54.316227970751264
+        }
+      },
+      {
+        "image": "10.jpg",
+        "seconds": 16.023624400011613,
+        "usage": {
+          "completion_tokens": 670,
+          "prompt_tokens": 1175,
+          "total_tokens": 1845,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"The image is a composite grid of nine headshots of older men in suits, arranged in three rows and three columns. Each portrait is set against a dark blue rectangular background with a white nameplate below showing their name and FIFA 19 management code. The background behind the portraits is a blurred soccer stadium field with a crowd, emphasizing a sports tournament setting. Above the portraits, bold white text reads 'Top FIFA 19 Management codis'. The portraits are photorealistic with detailed facial features, wrinkles, and varied expressions ranging from neutral to slight smiles.\", \"Character 1\": \"An older man with short brown hair and a neatly trimmed gray beard and mustache. He wears a dark gray suit jacket over a white shirt and blue tie. His expression is neutral with a slight frown, and his eyes look straight ahead. His nameplate reads 'Honsa Lrkra'.\", \"Character 2\": \"An older man with short gray hair and no facial hair. He wears a dark blue suit jacket, white shirt, and blue tie. His expression is calm and neutral, eyes looking forward. His nameplate reads 'Pichis Lrura'.\", \"Character 3\": \"An older man with short gray hair and a full gray beard and mustache. He wears a dark gray suit jacket, white shirt, and blue tie. His expression is neutral and serious. His nameplate reads 'Fiesen Cuna'.\", \"Character 4\": \"An older man with short gray hair and no facial hair. He wears a dark gray suit jacket, white shirt, and dark red tie. He has a gentle smile and kind eyes. His nameplate reads 'Duna Ecina'.\", \"Character 5\": \"An older man with short brown hair and no facial hair. He wears a dark gray suit jacket, white shirt, and dark red tie. He smiles warmly with relaxed eyebrows. His nameplate reads 'Nonano Erura'.\", \"Character 6\": \"An older man with short gray hair and a full gray beard and mustache. He wears a dark gray suit jacket, white shirt, and light blue tie. His expression is neutral and serious. His nameplate reads 'Morram Frika'.\", \"Character 7\": \"An older man with short gray hair and no facial hair. He wears a dark gray suit jacket, white shirt, and dark blue tie. His expression is neutral, looking directly ahead. His nameplate reads 'Hamin Esira'.\", \"Character 8\": \"An older man with short brown hair and no facial hair. He wears a dark gray suit jacket, white shirt, and dark blue tie. He smiles gently with soft eyes. His nameplate reads 'Bisin Erura'.\", \"Character 9\": \"An older man with short gray hair and a neatly trimmed gray beard and mustache. He wears a dark gray suit jacket, white shirt, and dark blue tie. His expression is neutral with a slight smile. His nameplate reads 'Cooin Frika'.\", \"Texts\": \"Bold white text at the top reads 'Top FIFA 19 Management codis'. Each portrait has a white nameplate below showing the man's name and FIFA 19 management code.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2026.009,
+          "prompt_per_token_ms": 1.7242629787234043,
+          "prompt_per_second": 579.9579370081772,
+          "predicted_n": 670,
+          "predicted_ms": 13809.984,
+          "predicted_per_token_ms": 20.642726457399103,
+          "predicted_per_second": 48.44321325788646
+        }
+      },
+      {
+        "image": "101.jpg",
+        "seconds": 10.44035079999594,
+        "usage": {
+          "completion_tokens": 351,
+          "prompt_tokens": 1175,
+          "total_tokens": 1526,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Three armed girls stand in a ruined cityscape under a stormy, cloudy sky. The background shows crumbling skyscrapers with neon signs, rubble, and debris scattered around. The atmosphere is tense and gritty, with muted colors and soft lighting highlighting the characters and their surroundings.\", \"Character 1\": \"The central girl has long, wavy light blue hair flowing past her waist and sharp yellow eyes. She wears a dark blue beret with an emblem, a black choker, a navy blue jacket with rolled-up sleeves, a white shirt, dark blue tactical pants, and black fingerless gloves. She holds a scoped black assault rifle with both hands, ready for action. Her expression is serious and focused, and she wears a utility belt and thigh holster with tactical gear.\", \"Character 2\": \"To the right, a girl with long brown hair and brown eyes wears a navy blue jacket over a white shirt, a short black pleated skirt, thigh-high black stockings, and black boots. She holds a scoped black assault rifle in a ready stance, with a serious and alert expression, looking to the right. Her outfit is accessorized with a utility belt, thigh holster, and gloves.\", \"Character 3\": \"On the left, a girl with brown hair tied in a high ponytail wears a dark blue jacket, black skirt, and thigh-high stockings. She holds a scoped black assault rifle with both hands, positioned slightly behind the central figure. Her expression is calm and alert, focused on the environment ahead. She also wears a utility belt and gloves.\", \"Watermark\": \"The image is signed by the artist 'kuro_suto_sukii' discreetly, without disrupting the scene.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2039.264,
+          "prompt_per_token_ms": 1.7355438297872339,
+          "prompt_per_second": 576.1882718470978,
+          "predicted_n": 351,
+          "predicted_ms": 8162.102,
+          "predicted_per_token_ms": 23.320291428571426,
+          "predicted_per_second": 42.88111077269066
+        }
+      },
+      {
+        "image": "102.jpg",
+        "seconds": 14.330717900011223,
+        "usage": {
+          "completion_tokens": 491,
+          "prompt_tokens": 1175,
+          "total_tokens": 1666,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Six characters from the game \\\"Kono Yuusha ga Ore Tueee Kuse ni Shinchou Sugiru\\\" stand confidently on a grassy floating island under a bright blue sky with scattered clouds. Behind them, several other floating islands with various buildings and towers create a fantasy world atmosphere. The scene is brightly lit with vibrant colors and detailed shading, emphasizing the characters' heroic and adventurous presence. A small red dragon named Korokoro stands near the group, adding a cute, mythical touch.\", \"Character 1\": \"A young man with short dark blue hair and blue eyes, wearing silver plate armor over a dark blue undersuit. He holds a long sword in his right hand, standing upright and alert with a serious expression.\", \"Character 2\": \"A cheerful girl with short blonde hair tied in a side ponytail with a black ribbon, bright green eyes, and a wide smile. She wears a white sleeveless top with a green skirt, brown boots, and a black armband on her right arm, standing confidently with one hand on her hip.\", \"Character 3\": \"A girl with long dark purple hair and red eyes, dressed in a dark purple short dress with a white collar and black thigh-high stockings. She stands with arms crossed and a calm, focused expression.\", \"Character 4\": \"A muscular man with a thick brown beard and mustache, wearing heavy brown leather armor with metal shoulder plates and gloves. He has a confident smirk and stands with hands on hips, radiating leadership.\", \"Character 5\": \"A tall blonde woman with long hair and blue eyes, clad in blue and silver armor including a breastplate, armored skirt, and thigh-high boots. She stands proudly with one hand on her hip and a determined look.\", \"Character 6\": \"A pale blue-haired woman with long flowing hair and a serene expression, wearing a white and gold dress with detached sleeves and thigh-high stockings. She stands gracefully with her hands clasped in front of her.\", \"Character 7\": \"A green-haired elf girl with pointed ears and green eyes, dressed in a sleeveless green dress with white accents and thigh-high boots. She stands calmly with hands resting at her sides.\", \"Character 8\": \"Korokoro, a small red dragon with bright eyes and a curled tail, standing alert near the group, adding charm and fantasy element to the scene.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2023.296,
+          "prompt_per_token_ms": 1.7219540425531916,
+          "prompt_per_second": 580.735591826406,
+          "predicted_n": 491,
+          "predicted_ms": 12054.717,
+          "predicted_per_token_ms": 24.601463265306123,
+          "predicted_per_second": 40.64798866700894
+        }
+      },
+      {
+        "image": "103.jpg",
+        "seconds": 7.754220800008625,
+        "usage": {
+          "completion_tokens": 286,
+          "prompt_tokens": 1175,
+          "total_tokens": 1461,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Close-up portrait of a young man with a serious expression, set against a smooth grey gradient background. The image is digitally rendered with sharp details and realistic lighting, emphasizing his facial features and upper body. The composition includes a user interface element at the bottom, resembling a progress bar or health meter, suggesting a video game or interactive context. On the left side, there is a vertical menu or tool panel with various icons, reinforcing the digital or in-game environment.\", \"Character 1\": \"A young man with short, thick black hair parted near the middle, styled with slightly tousled bangs framing his face. He has striking green eyes that look directly at the viewer with a calm yet intense gaze. His skin is smooth and fair with subtle warm undertones. He wears a black leather jacket featuring a high collar, silver studs along the edges, and visible zippers. Underneath, he sports a dark shirt printed with a graphic design. A distinctive black tattoo of an intricate geometric design is visible on the left side of his neck. He has a small silver hoop earring in his left ear. His expression is neutral with a closed mouth, projecting a confident and composed demeanor.\", \"Texts\": \"The bottom of the image shows a horizontal progress bar or health meter with a small yellow square indicator on the left side. The left margin contains a vertical menu or tool panel with various icons.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 1862.95,
+          "prompt_per_token_ms": 1.5854893617021277,
+          "prompt_per_second": 630.7200944738183,
+          "predicted_n": 286,
+          "predicted_ms": 5805.97,
+          "predicted_per_token_ms": 20.37182456140351,
+          "predicted_per_second": 49.08740486085874
+        }
+      },
+      {
+        "image": "104.jpg",
+        "seconds": 9.63299339999503,
+        "usage": {
+          "completion_tokens": 326,
+          "prompt_tokens": 1175,
+          "total_tokens": 1501,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A young woman sits indoors at a round table near a large window with bright natural light illuminating the scene. The background outside the window is softly blurred, featuring a white building and balcony, creating a calm, intimate atmosphere. The photo uses a shallow depth of field to focus sharply on the woman and a small handbag on the table, while the surroundings remain out of focus.\", \"Character 1\": \"A young Asian girl with long, wavy black hair flowing over her shoulders and back. She wears a bright yellow dress with short, puffy sleeves and a gathered elastic waist that creates soft folds in the fabric. The dress has a modest V-neckline exposing part of her collarbone. She sits sideways on a wooden chair with a light cushioned seat, leaning slightly forward with closed eyes and a serene, contemplative expression. Her lips are gently closed, and her fair skin is softly lit by natural daylight. Both of her hands delicately hold the clasp of a small, dark gray handbag resting on the table, fingers poised as if about to secure or open it. Her posture is relaxed yet attentive, emphasizing a quiet moment of thought.\", \"Objects\": \"On the table in front of her is a small, structured dark gray handbag with a clasp that she is holding. The table is round with a smooth surface, and the wooden chair features a light cushioned seat. The large window behind her lets in abundant natural light, highlighting her form and casting soft shadows. Outside the window, a modern white building and balcony are visible but blurred by the shallow focus.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2054.862,
+          "prompt_per_token_ms": 1.7488187234042554,
+          "prompt_per_second": 571.814554943349,
+          "predicted_n": 326,
+          "predicted_ms": 7432.135,
+          "predicted_per_token_ms": 22.868107692307692,
+          "predicted_per_second": 43.72902268325319
+        }
+      },
+      {
+        "image": "105.jpg",
+        "seconds": 14.447467799996957,
+        "usage": {
+          "completion_tokens": 503,
+          "prompt_tokens": 1175,
+          "total_tokens": 1678,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"Eleven young athletes and one older coach stand in a well-lit indoor basketball court with polished wooden floors and brick walls. They form a semi-circle facing forward, all holding basketballs except the coach. The court features a hoop and backboard mounted on the wall, with white boundary lines on the floor. The group wears casual basketball attire in various colors and styles, and the lighting is bright and even, highlighting the scene's realistic photographic style.\", \"Character 1\": \"A young boy with short brown hair stands on the far left wearing a white basketball jersey with blue trim, dark blue shorts, and black sneakers. He holds a basketball at his side with a neutral expression.\", \"Character 2\": \"A young boy with short dark hair stands next to the first, dressed in a dark blue sleeveless shirt, light gray shorts, and white sneakers. He holds a basketball in his left hand and has a serious expression.\", \"Character 3\": \"A girl with short light brown hair wears a pink sleeveless top with black designs and black shorts. She holds her basketball with both hands in front of her and looks forward with a calm demeanor.\", \"Character 4\": \"A girl with long light brown hair wears a light blue sleeveless jersey and black shorts with yellow trim. She holds a basketball at her side and wears white sneakers.\", \"Character 5\": \"A girl with dark hair tied back wears a light blue sleeveless jersey and black shorts. She holds her basketball at her left hip and wears white socks and sneakers.\", \"Character 6\": \"A girl with dark hair tied back wears a red sleeveless jersey and matching shorts. She holds her basketball with both hands at waist level and wears black sneakers.\", \"Character 7\": \"A girl with dark hair tied back wears a light turquoise sleeveless jersey and blue shorts. She holds her basketball at her side and wears black sneakers.\", \"Character 8\": \"A girl with dark hair tied back wears a white sleeveless jersey and black shorts. She holds her basketball at her side and wears black sneakers.\", \"Character 9\": \"An older male coach with short gray hair stands behind the group wearing a dark blue t-shirt and black shorts. He stands with hands on hips, overseeing the players.\", \"Character 10\": \"A young boy with dark hair stands on the far right wearing a white t-shirt and black shorts. He holds a basketball at his side and wears black sneakers.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2009.127,
+          "prompt_per_token_ms": 1.709895319148936,
+          "prompt_per_second": 584.8311231694164,
+          "predicted_n": 503,
+          "predicted_ms": 12246.487,
+          "predicted_per_token_ms": 24.395392430278882,
+          "predicted_per_second": 40.99134715122795
+        }
+      },
+      {
+        "image": "106.jpg",
+        "seconds": 6.277608899996267,
+        "usage": {
+          "completion_tokens": 240,
+          "prompt_tokens": 1175,
+          "total_tokens": 1415,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish": "stop",
+        "valid_json": true,
+        "text": "{\"General\": \"A monochrome, highly detailed graphite portrait of a young Asian girl in realistic style. The image focuses on her face and upper shoulders, with soft shading and cross-hatching emphasizing natural skin texture, hair strands, and subtle facial contours. The background is plain, drawing full attention to the subjects serene expression and finely rendered features.\", \"Character 1\": \"A young Asian girl with long, straight dark hair parted slightly off-center, flowing naturally around her shoulders with visible individual strands. She has large, expressive eyes with delicate eyelashes and softly shaded irises. Her eyebrows are thin and gently arched, matching the hair color. The nose is small and softly shaded, showing realistic bridge and nostrils. Her lips are full and slightly parted, rendered with subtle highlights and shadows to convey softness and moisture. The skin shows smooth, lifelike texture with gentle shading around the cheeks and jawline, suggesting natural contours and a youthful appearance. Her ears are partially visible beneath the hair. The portrait captures a calm and contemplative mood.\", \"Watermark\": \"The image is signed by the artist 'jason_kim' in the style typical for graphite drawings.\"}",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1175,
+          "prompt_ms": 2054.386,
+          "prompt_per_token_ms": 1.7484136170212765,
+          "prompt_per_second": 571.9470440316474,
+          "predicted_n": 240,
+          "predicted_ms": 4015.016,
+          "predicted_per_token_ms": 16.799230125523014,
+          "predicted_per_second": 59.52653737868044
+        }
+      }
+    ],
+    "gpu_peak_mib": 13878.0,
+    "gpu_util_mean": 76.52
+  }
+]

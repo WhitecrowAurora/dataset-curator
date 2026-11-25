@@ -1,0 +1,21 @@
+{
+  "file": "H:\\tagger\\dist\\tagger-20261123-duty-release-fix.zip",
+  "bytes": 76760052,
+  "sha256": "0d7346e1c5029f778bde6e4ee79ea7498c86caf3d18effaf69b717b12c93bdc0",
+  "crc": "passed",
+  "exact_files": [
+    "tagger/guard.py",
+    "tagger/web/ui/src/components/center/LeasePanel.tsx",
+    "tagger/web/ui/dist/index.html",
+    "requirements-embedded.txt",
+    "tagger/web/ui/dist/assets/index-BJHdzyzL.js",
+    "tagger/web/ui/dist/assets/index-7Ebx__7j.css"
+  ],
+  "shell_sha256": "3ca049c5154b2c8ad4d3a0db6ce0d5a8dd9618f36ee4824142bd1f4bf41df853",
+  "worker_sources": 28,
+  "unchanged_shell_and_requirements": true,
+  "private_paths_excluded": true,
+  "previous_files_removed": [
+    "tagger/web/ui/dist/assets/index-BQ5hxcb1.js"
+  ]
+}

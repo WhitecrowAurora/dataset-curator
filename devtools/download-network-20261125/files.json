@@ -1,0 +1,16 @@
+{
+  "tagger/fox_worker.py": "b617aaf6e52728bf890928b1113e5386b2a283942b76aba687da32b8552d7907",
+  "tagger/center_runtime/network.py": "620e0f43228ba4e84eeb38e8166d9af992f106d7accbea147641f367eac16da4",
+  "tagger/center_runtime/download_network.py": "8e5cb5a4b954f5525044f624096e6fee221c63f06629b5d216ada64ae6c0290f",
+  "tagger/center_runtime/download_transfer.py": "4212edeb478d913136bb55488c937dee160452d25d759a967575c9f3ffd0e954",
+  "tagger/web/center.py": "14447eb7216a64c249b4bdfd31f262c022555481b3c9bacf7f034a8e37a3c89c",
+  "tagger/web/app.py": "227ea390e588c8ed5dc0a675ac50b789faeb33e38d59ded24cc8a6fb03e56e29",
+  "tagger/web/ui/src/pages/Center.tsx": "c2c2d97b888e17fed8625323e677a0e719aa63c7903aee227a636b3ba6644ed8",
+  "tagger/web/ui/src/lib/api.ts": "a73703489a7301444e669ab3e0ce136df8a540d25eef7aca2ddc539ac85c293d",
+  "tagger/web/ui/src/components/center/ConnectionNetwork.tsx": "6d3f9f0e37e4f57c3ff13a1e15c8366ec205fce3fbd8851f7ae296f3aeaaaa0f",
+  "tagger/web/ui/src/components/center/DownloadNetwork.tsx": "c30ba25487082e20529ea6490495a9e15f636f42ff38c73e33b5696386a8f14e",
+  "devtools/release/build_worker.py": "5859a6e4b39b92c7d850498dfb122db471504ecbc80f9244e569b1c42eed00d8",
+  "server/legacy-public-20261116/fox-label/worker.py": "54bed6578657fdac9c4293fae2d688415302da8ab3f293273a091c184964d447",
+  "server/legacy-public-20261116/fox-label/worker-sources.json": "e4a2afbabe22f712d759d4d9ab24f77cba9b63dd9f7363b7b56265833755fe2f",
+  "tagger/web/ui/dist/index.html": "e11a143ce96b9e65337110a7793ca6974ce05e08cb34ddbff1d7f54b926d5c9d"
+}

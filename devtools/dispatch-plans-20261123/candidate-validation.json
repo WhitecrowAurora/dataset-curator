@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"candidate_valid\": true, \"production_database_copy\": true, \"integrity\": true, \"leases_unchanged\": true, \"exports\": [{\"workspace\": \"Dru768\", \"sort\": \"user\", \"tasks\": 19, \"sizes\": {\"html\": 14469, \"json\": 20715, \"zip\": 19828}}, {\"workspace\": \"Dru768\", \"sort\": \"package\", \"tasks\": 19, \"sizes\": {\"html\": 14469, \"json\": 20717, \"zip\": 19892}}]}\n",
+  "stderr": ""
+}

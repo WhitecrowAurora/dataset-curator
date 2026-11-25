@@ -268,7 +268,6 @@ export function TagManage() {
         icon={<Merge size={17} />}
         eyebrow="打标管理"
         title="数据合并"
-        description="按 image_id 合并，字段取并集"
         actions={
           <button
             type="button"
@@ -306,10 +305,7 @@ export function TagManage() {
             </div>
           }
         >
-          <SettingRow
-            label="目录"
-            help="打标产物目录，或单个 json 文件"
-          >
+          <SettingRow label="目录">
             <div className="flex items-center gap-2">
               <input
                 className="lx-input min-w-0 flex-1 font-mono text-xs"
@@ -444,7 +440,7 @@ export function TagManage() {
               </button>
             }
           >
-            <SettingRow label="输出文件" help="相对路径按仓库根算；流式写出">
+            <SettingRow label="输出文件">
               <input
                 className="lx-input font-mono text-xs"
                 value={outPath}
@@ -454,7 +450,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="输出格式"
-              help="train 只留 image_id / image_path / caption / tag"
+              help="train 仅含 image_id / image_path / caption / tag"
             >
               <select
                 className="lx-input"
@@ -465,7 +461,7 @@ export function TagManage() {
                 <option value="train">训练四项</option>
               </select>
             </SettingRow>
-            <SettingRow label="文件形态" help="JSONL 便于逐行流式读">
+            <SettingRow label="文件形态">
               <select
                 className="lx-input"
                 value={asJsonl ? 'jsonl' : 'json'}
@@ -477,7 +473,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="图片路径前缀"
-              help="填了就改写成「前缀/图片ID+扩展名」；留空 = 保留原值"
+              help="重写为「前缀/图片ID+扩展名」"
             >
               <div className="flex items-center gap-2">
                 <input
@@ -498,7 +494,7 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="路径自检"
-              help="按前缀逐条核对本地是否存在；路径不同时填本机目录做映射"
+              help="核对图片在本地是否存在"
             >
               <div className="flex items-center gap-2">
                 <input
@@ -528,18 +524,19 @@ export function TagManage() {
             </SettingRow>
             <SettingRow
               label="分批大小"
-              help="0 = 自动（超 30 万条才分桶）；分桶后不再全局排序"
+              help="超 30 万条自动分桶（不全局排序）"
             >
               <input
                 type="number"
                 className="lx-input font-mono tabular-nums"
                 min={0}
                 step={50000}
-                value={batchSize}
+                value={batchSize || ''}
+                placeholder="自动"
                 onChange={(e) => setBatchSize(Math.max(0, Number(e.target.value) || 0))}
               />
             </SettingRow>
-            <SettingRow label="去重键" help="同键合并成一条；tag 与 nl 靠它配对">
+            <SettingRow label="去重键">
               <input
                 className="lx-input font-mono text-xs"
                 value={key}
@@ -547,7 +544,7 @@ export function TagManage() {
                 spellCheck={false}
               />
             </SettingRow>
-            <SettingRow label="字段冲突" help="同一字段两边值不同时取哪个">
+            <SettingRow label="字段冲突">
               <select
                 className="lx-input"
                 value={onConflict}
@@ -557,7 +554,7 @@ export function TagManage() {
                 <option value="last">后读到的覆盖</option>
               </select>
             </SettingRow>
-            <SettingRow label="完整性过滤" help="缺字段的整条丢掉">
+            <SettingRow label="完整性过滤">
               <select
                 className="lx-input"
                 value={require}

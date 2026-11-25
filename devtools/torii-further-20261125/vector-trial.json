@@ -1,0 +1,182 @@
+[
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 8,
+    "ms": 0.03765771680932363,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 16,
+    "ms": 0.037298055631083175,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 32,
+    "ms": 0.03852451497185277,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 8,
+    "ms": 0.021176197324920046,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 16,
+    "ms": 0.02014900560248388,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 32,
+    "ms": 0.019874452572163984,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 8,
+    "ms": 0.01996606311730568,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 16,
+    "ms": 0.022483059257669694,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 32,
+    "ms": 0.029630853466565393,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 8,
+    "ms": 0.04134331630409849,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 16,
+    "ms": 0.04159329435998616,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 32,
+    "ms": 0.04689846629531976,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 8,
+    "ms": 0.042433524284131524,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 16,
+    "ms": 0.04742691702013506,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 32,
+    "ms": 0.06091806817040148,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 8,
+    "ms": 1.1800946370187597,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 16,
+    "ms": 1.1742916091733615,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 32,
+    "ms": 1.2082514426491477,
+    "max_error": 0.0,
+    "exact": true
+  }
+]

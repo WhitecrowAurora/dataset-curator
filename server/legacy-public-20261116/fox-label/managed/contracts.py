@@ -40,7 +40,7 @@ def config(changes, base=None, capabilities=None):
     for key in ("auto_download", "auto_quantize", "stop_service"):
         if type(merged[key]) is not bool:
             raise ManagedError(f"{key} 必须为布尔值")
-    for key, limit in (("tag_batch", 128), ("concurrency", 64)):
+    for key, limit in (("tag_batch", 128), ("concurrency", 256)):
         if type(merged[key]) is not int or not 0 <= merged[key] <= limit:
             raise ManagedError(f"{key} 必须为 0～{limit} 的整数")
     mem = merged["gpu_mem"]
@@ -67,6 +67,9 @@ def config(changes, base=None, capabilities=None):
         raise ManagedError("NL 精度与引擎不匹配")
     if merged["mode"] == "tag" and merged["tag_backend"] == "none":
         raise ManagedError("只出 TAG 时请选择分类模型")
+    if merged["mode"] != "tag" and merged["inference_source"] == "local" and merged["nl_model"] == "torii-gate-0.5":
+        if merged["nl_engine"] not in ("native", "llamacpp") or merged["nl_precision"] != "q6":
+            raise ManagedError("Torii 需要 native／llama.cpp、Q6")
     if capabilities is not None:
         devices = {x["value"] for x in capabilities.get("devices", [])}
         for key in ("tag_device", "nl_device"):
@@ -121,6 +124,12 @@ def report(body):
     if not isinstance(engines, list):
         raise ManagedError("引擎能力格式不正确")
     clean["engines"] = [x for x in engines if x in ("llamacpp", "vllm", "native")]
+    clean["actions"] = [x for x in caps.get("actions", []) if x in ("configure", "probe", "force_continue")]
+    if 'remote_concurrency' in caps:
+        value=caps['remote_concurrency']
+        if not isinstance(value,dict) or set(value)-{'concurrency','tag_batch'} or any(type(v) is not bool for v in value.values()):
+            raise ManagedError('远程并发授权格式不正确')
+        clean['remote_concurrency']=value
     status = caps.get("engine_status", {})
     if not isinstance(status, dict):
         raise ManagedError("引擎状态格式不正确")
@@ -129,4 +138,4 @@ def report(body):
                               for engine, value in status.items()
                               if engine in ("llamacpp", "vllm", "native") and isinstance(value, dict)}
     return session, seq, public({k: state[k] for k in
-        ("status", "running", "message", "error", "last_rc", "progress", "history_running", "history_status", "history_message", "history_only") if k in state}), clean, results
+        ("status", "running", "preparing", "message", "error", "last_rc", "progress", "telemetry", "resolved", "probe", "pending_action", "history_running", "history_status", "history_message", "history_only", "execution_limit") if k in state}), clean, results

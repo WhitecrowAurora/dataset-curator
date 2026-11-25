@@ -1,0 +1,10 @@
+{
+  "checks": 8,
+  "old_existing_root_reproduced": true,
+  "missing_old_root_reproduced": true,
+  "current_bootstrap": true,
+  "relative_pth_after_move": true,
+  "child_module": true,
+  "real_web_health": true,
+  "html": true
+}

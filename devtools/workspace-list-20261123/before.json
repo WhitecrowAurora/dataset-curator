@@ -1,0 +1,15 @@
+{
+  "actual_http": true,
+  "production": false,
+  "names": [
+    "分派测试"
+  ],
+  "initial_count": 1,
+  "request_error_reproduced": true,
+  "recovery_count": 0,
+  "empty_recovery": false,
+  "detail_and_export": false,
+  "navigation_and_search": false,
+  "mobile": false,
+  "page_errors": []
+}

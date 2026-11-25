@@ -1,0 +1,40 @@
+{
+  "fixed128_1": {
+    "before": 1.9673499000006511,
+    "after": 1.8391503666643985,
+    "throughput_gain_percent": 6.97058466017455,
+    "all_tokens_equal": true
+  },
+  "fixed128_8": {
+    "before": 3.883193299998917,
+    "after": 3.59884623332861,
+    "throughput_gain_percent": 7.901061846905066,
+    "all_tokens_equal": true
+  },
+  "captions_8": {
+    "before": 9.823114999999234,
+    "after": 9.177561200005584,
+    "throughput_gain_percent": 7.03404516652264,
+    "all_tokens_equal": true
+  },
+  "logits": [
+    {
+      "case": "logits",
+      "batch": 1,
+      "steps": 64,
+      "max_error": 0.0,
+      "rmse": 0.0,
+      "psnr_db": "inf",
+      "argmax_equal_steps": 64
+    },
+    {
+      "case": "logits",
+      "batch": 8,
+      "steps": 64,
+      "max_error": 0.0,
+      "rmse": 0.0,
+      "psnr_db": "inf",
+      "argmax_equal_steps": 64
+    }
+  ]
+}

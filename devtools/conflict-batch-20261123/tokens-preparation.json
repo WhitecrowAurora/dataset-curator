@@ -1,0 +1,18 @@
+{
+  "rc": 0,
+  "stdout": "{\"dependency_ready\": true, \"db_bytes\": 255746048, \"before\": {\"fox-label/delivery/conflicts.py\": \"6e107154bcfc1e879ea90aa5ebb5d67f359e6b8f0a4ec696a26d54e5482336f3\", \"fox-label/delivery/details.py\": \"273099c8f0d8e805535c5bd7953bd6118be661308371d7075b783b658e5b628e\", \"fox-label/delivery/resolution_batch.py\": \"a926910061867a9d9ad5866477c95e4b90b02a2f4b030d00ce9f86462d3c8c4e\", \"fox-panel/web/source-conflicts.js\": \"506d8fbf58444d8059f3a3b4deb4fdeb6d150ad0ad197ebb008eabf86e393bbb\", \"fox-label/text_encoding/README.md\": null, \"fox-label/text_encoding/requirements.txt\": null, \"fox-label/text_encoding/tokenizer.py\": null, \"fox-label/text_encoding/__init__.py\": null, \"fox-label/text_encoding/assets/source.json\": null, \"fox-label/text_encoding/assets/tokenizer.json\": null, \"fox-label/text_encoding/assets/LICENSE\": null}}",
+  "stderr": "",
+  "after": {
+    "fox-label/delivery/conflicts.py": "165de7c8b61b1f7e55e822de02f04735c781c9556d4ab55bc03c8bb2b5cdc537",
+    "fox-label/delivery/details.py": "3cc52d4d643edf4119bc8ec281b7330ba87b3e46acebf62aa0e520807c82f4eb",
+    "fox-label/delivery/resolution_batch.py": "c15004ecb9e30580ba431659f311f324d00875d279d8e42c840272dacebf2854",
+    "fox-panel/web/source-conflicts.js": "795326daf441adb77937f8253516421600a35a6493b166d4f48197994525d59c",
+    "fox-label/text_encoding/README.md": "64188da29c288628e72514fb53ccf56f152ad4fbdaef59a35d2ff4d766093699",
+    "fox-label/text_encoding/requirements.txt": "c5080dcd99b788fe6642a72760b16c4b541f8d47b2edcfdad26da827a8beaec7",
+    "fox-label/text_encoding/tokenizer.py": "beee5e95029f48b5134cda9471282dd8e0e96c73fc5e0452317583b371466189",
+    "fox-label/text_encoding/__init__.py": "1f8ec614833806e199a1d46e5acce10ffd2ab559c13d0dfffdd5dd9f086941c3",
+    "fox-label/text_encoding/assets/source.json": "b26181610d35ad2b9aa455bc3646635715f89f8dd272054d32bbc812edd04c05",
+    "fox-label/text_encoding/assets/tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+    "fox-label/text_encoding/assets/LICENSE": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"
+  }
+}

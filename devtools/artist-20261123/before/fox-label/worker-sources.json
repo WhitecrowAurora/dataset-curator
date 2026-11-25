@@ -1,0 +1,32 @@
+{
+  "file": "worker.py",
+  "sha256": "6788f1998d4147588c0eac523e9ea3aa0d19684c8cb381d6d1d8f1186ef35c81",
+  "sources": {
+    "tagger/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tagger/artifacts.py": "63b3013b7673faf190fc6b17bcd5506546b6a71a157f713cbe82562fb2472ebb",
+    "tagger/blob_client.py": "176ce1c8c3f8fa77a1cbeabb0e2fc3e79ae8f9f067393ef44df782f3f1e71f0c",
+    "tagger/center_delivery.py": "b7f45936c555d71effdf5f44b5fc8971342a2e0d0238d0782addf9912bb2c46b",
+    "tagger/center_runtime/__init__.py": "5527c6c88beb83ec2b95b012aa765d9d2f3460ee16644cfeece3fc5c16722d91",
+    "tagger/center_runtime/annotation.py": "e9a9a12ff9fe5a1a3390135a152b76df6eb00399dd1c003557bf37862e21c17a",
+    "tagger/center_runtime/artifacts.py": "0847eb08eb057bc3d2efed587333eb2cff90c8021654fad554086dc86a38c1d9",
+    "tagger/center_runtime/download_segments.py": "740ca55c67200eae8379d6e43bf29501184275c1f888ba5578bb5a77b9023dcd",
+    "tagger/center_runtime/identity.py": "8984a3af013e5efc96aa1bfc5036494ac6ab08104f43f51ee2609e3402824d1c",
+    "tagger/center_runtime/liveness.py": "b8bc8685f81f0b9e24d9ea717153732493960d5956ea9adf7254d3dac91f6d27",
+    "tagger/center_runtime/network.py": "5a815124869918fbef306475a86a94464e544ca887a005727d889fa33360754a",
+    "tagger/center_runtime/progress.py": "b52444a321a6f8b0c025536be7f811eebd11020860a855be3be54cfb4e43b3ca",
+    "tagger/center_runtime/snapshot.py": "aa2193d8a949cbbe3cb94dccfdc2aca728a9fb92d8c9c828fe30f039daaa3306",
+    "tagger/fox_worker.py": "bbad8e99e992a5451ed805c8080ac3699c4faae3628d102848760d03dd6ef436",
+    "tagger/hardware.py": "4ef64584d9a110dcba59a1d2ce7fdd96d1e8e9e0ce3e7a52ff2efba0aab1355c",
+    "tagger/naming.py": "4f617a46388a0e17a2b20ee8cda95f5b1d3ad400d7a37d17eaf3c9d81b82bca0",
+    "tagger/netutil.py": "95bffbdd05328047a8988341c5183a751f8a4bfd80f0837eb3c3e91fe9b6ce28",
+    "tagger/nl_api.py": "3c9d9cbf4748c8deea58416abeae62113b936d278b8999e97864bacf51264bbb",
+    "tagger/schema.py": "cc8f6a59f995ce17ebd63ac97c836ec4f1cb7858dc6847447791dd8304a6e302",
+    "tagger/storage/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tagger/storage/atomic.py": "42962dcbce7511f31def0863d47779ae962246a89f6ac28b4c5a6aabba2b414b",
+    "tagger/verification/__init__.py": "01b2f9d2ff7eeeeef071bb2f6185340af00e4e9ba191735fbb049366775182a8",
+    "tagger/verification/history.py": "79fe385893cc5ed375532066372533881b0db073c8a0c88bb8aa42aee44ea280",
+    "tagger/verification/local.py": "ccefd64b82d37014161a917c17d59f0011e21877a41d862f1622f711fdbdeea8",
+    "tagger/verification/payload.py": "1d040b4cf1c2d1cb7f24a8bb1ba90ea7eddf97deb0485090e4fe04012141a45f",
+    "tagger/verification/source.py": "26e80f42f19b7fc2b0b678722ae8ed0bfd7e66a03760a990d30fd188caf8e9cb"
+  }
+}

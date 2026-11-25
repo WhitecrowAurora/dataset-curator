@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Wand2 } from 'lucide-react'
-import { springSnappy } from '../lib/motion'
+import { controlTransition } from '../lib/motion'
 import { cn } from '../lib/cn'
 
 export type NavItem = {
@@ -40,13 +40,13 @@ export function Sidebar({
   footer?: ReactNode
 }) {
   return (
-    <aside className="flex min-h-0 w-[196px] shrink-0 flex-col border-r border-lx bg-lx-sidebar-bg">
+    <aside className="lx-sidebar flex min-h-0 w-[196px] shrink-0 flex-col border-r border-lx">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-lx px-3">
         <span className="grid h-6 w-6 place-items-center rounded-lx-sm bg-lx-accent-subtle text-lx-accent">
           <Wand2 size={14} />
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[12.5px] font-semibold leading-tight text-lx">Tagger</div>
+          <div className="truncate text-[12.5px] font-semibold leading-tight text-lx">lulynx <span className="font-normal text-lx-muted">/ tagger</span></div>
           {/* 副标题只描述这个应用是什么，不写具体后端：本地 tag 后端随配置变，
               VLM 模式下根本不用它——写死 wd-eva02 会让人以为当前就是那个后端。 */}
           <div className="truncate text-[9.5px] leading-tight text-lx-muted">NL + tag 打标工作台</div>
@@ -84,8 +84,8 @@ export function Sidebar({
                 {item.active && (
                   <motion.span
                     layoutId="nav-active-bg"
-                    className="absolute inset-0 rounded-lx-sm bg-lx-accent-subtle"
-                    transition={springSnappy}
+                    className="lx-nav-selection absolute inset-0 rounded-lx-sm"
+                    transition={controlTransition}
                   />
                 )}
                 {item.active && (
@@ -95,13 +95,13 @@ export function Sidebar({
                   <motion.span
                     layoutId="nav-active-bar"
                     className="absolute inset-y-1 left-0 w-[2px] rounded-full bg-lx-accent"
-                    transition={springSnappy}
+                    transition={controlTransition}
                   />
                 )}
                 <span
                   className={cn(
                     'relative z-10 shrink-0',
-                    item.active ? 'text-lx-accent' : 'text-lx-muted group-hover:text-lx-secondary',
+                    item.active ? 'text-lx' : 'text-lx-muted group-hover:text-lx-secondary',
                   )}
                 >
                   {item.icon}

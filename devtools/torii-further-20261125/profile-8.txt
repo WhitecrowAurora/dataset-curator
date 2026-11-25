@@ -1,0 +1,41 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                          decode_tokens         0.00%       0.000us         0.00%       0.000us       0.000us     558.132ms       102.59%     558.132ms      23.255ms            24  
+                                                _linear         0.00%       0.000us         0.00%       0.000us       0.000us     129.738ms        23.85%     129.738ms      29.220us          4440  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us     105.003ms        19.30%     105.003ms      36.459us          2880  
+_Z42fmha_cutlassF_f16_aligned_32x128_gmem_sm80N22PyT...         0.00%       0.000us         0.00%       0.000us       0.000us      88.450ms        16.26%      88.450ms     460.677us           192  
+                                               _grouped         0.00%       0.000us         0.00%       0.000us       0.000us      67.694ms        12.44%      67.694ms      88.143us           768  
+                                          sample_tokens         0.00%       0.000us         0.00%       0.000us       0.000us      51.072ms         9.39%      51.072ms       2.128ms            24  
+                                    conv1D_NCHW_general         0.00%       0.000us         0.00%       0.000us       0.000us      38.222ms         7.03%      38.222ms      66.358us           576  
+            fused_recurrent_gated_delta_rule_fwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      18.688ms         3.44%      18.688ms      32.444us           576  
+_ZN2at6native27unrolled_elementwise_kernelIZZZNS0_23...         0.00%       0.000us         0.00%       0.000us       0.000us      11.421ms         2.10%      11.421ms       1.896us          6024  
+_ZN2at6native34_scatter_gather_elementwise_kernelILi...         0.00%       0.000us         0.00%       0.000us       0.000us       9.332ms         1.72%       9.332ms       3.240us          2880  
+                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us       9.094ms         1.67%       9.094ms      13.066us           696  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us       7.873ms         1.45%       7.873ms       3.124us          2520  
+_ZN2at6native18elementwise_kernelILi128ELi2EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us       7.303ms         1.34%       7.303ms       1.449us          5040  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us       4.386ms         0.81%       4.386ms       0.982us          4464  
+_ZN14at_cuda_detail3cub6detail10radix_sort29DeviceRa...         0.00%       0.000us         0.00%       0.000us       0.000us       3.776ms         0.69%       3.776ms      39.329us            96  
+_ZN2at6native40_GLOBAL__N__27eda9f4_8_Shape_cu_85d9f...         0.00%       0.000us         0.00%       0.000us       0.000us       3.115ms         0.57%       3.115ms       5.409us           576  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZNS...         0.00%       0.000us         0.00%       0.000us       0.000us       2.971ms         0.55%       2.971ms       0.945us          3144  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us       2.951ms         0.54%       2.951ms       1.171us          2520  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZNS...         0.00%       0.000us         0.00%       0.000us       0.000us       2.530ms         0.47%       2.530ms       1.004us          2520  
+_ZN2at6native43_GLOBAL__N__bcfaaeff_10_SoftMax_cu_0a...         0.00%       0.000us         0.00%       0.000us       0.000us       2.494ms         0.46%       2.494ms     103.906us            24  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us       2.193ms         0.40%       2.193ms       1.142us          1920  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us       2.125ms         0.39%       2.125ms       1.581us          1344  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us       1.798ms         0.33%       1.798ms       3.122us           576  
+_ZN2at6native40_GLOBAL__N__27eda9f4_8_Shape_cu_85d9f...         0.00%       0.000us         0.00%       0.000us       0.000us       1.494ms         0.27%       1.494ms       1.945us           768  
+_ZN2at6native27unrolled_elementwise_kernelINS0_13Bin...         0.00%       0.000us         0.00%       0.000us       0.000us       1.318ms         0.24%       1.318ms       2.288us           576  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us       1.241ms         0.23%       1.241ms       3.232us           384  
+_ZN2at6native46_GLOBAL__N__66ba73ba_13_SortStable_cu...         0.00%       0.000us         0.00%       0.000us       0.000us       1.238ms         0.23%       1.238ms      51.586us            24  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us       1.048ms         0.19%       1.048ms       5.459us           192  
+_ZN2at6native34_scatter_gather_elementwise_kernelILi...         0.00%       0.000us         0.00%       0.000us       0.000us     981.238us         0.18%     981.238us       2.555us           384  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     980.259us         0.18%     980.259us       1.276us           768  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_15g...         0.00%       0.000us         0.00%       0.000us       0.000us     936.248us         0.17%     936.248us       1.625us           576  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     807.254us         0.15%     807.254us       1.401us           576  
+                                             _silu_gate         0.00%       0.000us         0.00%       0.000us       0.000us     785.562us         0.14%     785.562us       1.023us           768  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us     705.941us         0.13%     705.941us       3.677us           192  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     658.062us         0.12%     658.062us       1.142us           576  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 631.341ms
+Self CUDA time total: 544.040ms

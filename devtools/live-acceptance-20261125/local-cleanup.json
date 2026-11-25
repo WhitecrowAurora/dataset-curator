@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "checked_at": "2026-11-25T04:09:10.1910883+08:00",
+  "test_listeners": 0,
+  "test_processes": 0,
+  "archives": [
+    {
+      "Source": "H:\\lulynx-trainer\\backend\\smoke\\tagger-live-20261125",
+      "Relative": "backend\\smoke\\tagger-live-20261125",
+      "Destination": "H:\\lulynx-trainer\\.delete\\tagger-live-20261125\\backend\\smoke\\tagger-live-20261125",
+      "FileCount": 96,
+      "Bytes": 4502880
+    },
+    {
+      "Source": "D:\\tagger-live-20261125",
+      "Relative": "drives\\D\\tagger-live-20261125",
+      "Destination": "H:\\lulynx-trainer\\.delete\\tagger-live-20261125\\drives\\D\\tagger-live-20261125",
+      "FileCount": 71,
+      "Bytes": 4193639
+    },
+    {
+      "Source": "E:\\tagger-live-20261125",
+      "Relative": "drives\\E\\tagger-live-20261125",
+      "Destination": "H:\\lulynx-trainer\\.delete\\tagger-live-20261125\\drives\\E\\tagger-live-20261125",
+      "FileCount": 19,
+      "Bytes": 1151824
+    }
+  ]
+}

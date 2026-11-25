@@ -1,0 +1,151 @@
+[
+  {
+    "path": "tagger/web/benchmark/catalog.py",
+    "sha256": "29f5ec6f796b9075574636147e740e3c1fdd2fe4468b344d7b213d4f813231b7",
+    "lines": 77
+  },
+  {
+    "path": "tagger/web/benchmark/contracts.py",
+    "sha256": "f4a994181ddcfb6b5135d71aec57f7916c55f2ffa1fbbb0afde05bda87aa121b",
+    "lines": 52
+  },
+  {
+    "path": "tagger/web/benchmark/routes.py",
+    "sha256": "8528b696c4c3e19b3f959b5b6dc520098e2ebcb4a2fc48b13d90f70f471a98c1",
+    "lines": 45
+  },
+  {
+    "path": "tagger/web/benchmark/runner.py",
+    "sha256": "37a75e3968628f80dc781333cd6bbff395c6fa1330e9fce40a042419b6a0b3b3",
+    "lines": 114
+  },
+  {
+    "path": "tagger/web/benchmark/samples.py",
+    "sha256": "54a0a8b51c74e0f2614427b683f284ebf50d38a1a2f838f8a03294da8514459f",
+    "lines": 100
+  },
+  {
+    "path": "tagger/web/benchmark/service.py",
+    "sha256": "c4c8d4c93572a6f3f99ed206f7e8891e557490a4001a68be7db4b4cfae416d80",
+    "lines": 135
+  },
+  {
+    "path": "tagger/web/benchmark/__init__.py",
+    "sha256": "7745869a15b8e02b618f34ea644528abbaa703f22139cfa0ca55f3067f6b45a0",
+    "lines": 1
+  },
+  {
+    "path": "tagger/web/ui/src/components/benchmark/benchmark.css",
+    "sha256": "e5393e8c846783c7ff149933203716353e078ff4a163c07b5a398a8eb22657f8",
+    "lines": 102
+  },
+  {
+    "path": "tagger/web/ui/src/components/benchmark/BenchmarkChart.tsx",
+    "sha256": "8e4a7a7cb5e35c1f3f39653f9e7391fec5ea107c70e17149e50634c467771453",
+    "lines": 86
+  },
+  {
+    "path": "tagger/web/ui/src/components/benchmark/BenchmarkConfigs.tsx",
+    "sha256": "59a22d3daac9753542279380bf97d3d88f036dfe7d7aeecad64590d7c70f7b35",
+    "lines": 34
+  },
+  {
+    "path": "tagger/web/ui/src/components/benchmark/BenchmarkResults.tsx",
+    "sha256": "0973401c94f7b7393695978d60f76ff348faed4c412e98045647d52e7c9e4be2",
+    "lines": 37
+  },
+  {
+    "path": "tagger/web/ui/src/pages/Benchmark.tsx",
+    "sha256": "41866c784ba1c12a9e2fd74be1c75893fc57229525d7210734624ba7b5c7599f",
+    "lines": 113
+  },
+  {
+    "path": "tagger/web/ui/src/lib/benchmark.ts",
+    "sha256": "fb23990d3f1b21c3bac3737c4df6417edd4e12d6254d838191ba367be1332b05",
+    "lines": 71
+  },
+  {
+    "path": "tagger/web/ui/dist/index.html",
+    "sha256": "1728403a5afb1ad640b1e744066094e3aec78d2e9292ae2bd39886b71cb6d7bd"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/index-BtmN91T2.css",
+    "sha256": "a6843f25de5b5f07208a37843e634cd2816cabf7d3be71a466fbf2b532c00436"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/index-cyV27MjY.js",
+    "sha256": "d92fbfb8cb495a85166408040f60d80db75149dafa4075096cc5f1bb909338e8"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-400-normal-BEIGL1Tu.woff2",
+    "sha256": "522f5827308102a9c0ea7860b5a11306043610ecf03d150ba32056a06e8c56e2"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-400-normal-ugxPyKxw.woff",
+    "sha256": "67c9cc7864b4940dbfb246c7b452c1de8e96f140f334d363fcdd87dbfeadab72"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-500-normal-DJqRU3vO.woff",
+    "sha256": "d408a664dc721f614e6346e09f3f32b2837005db28f5e4797ce8dd19da07e4ea"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-cyrillic-500-normal-DmUKJPL_.woff2",
+    "sha256": "26c9ed511def1f0fd3d1b5fe6d5c0c594d9ef8dd2435d2ff240ea265a416b6e4"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-greek-400-normal-B9oWc5Lo.woff",
+    "sha256": "09f89e8369d7745ac5fe92e62a9ea13f66f40fd95b5495fac014c54b3a1ca6cc"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-greek-400-normal-C190GLew.woff2",
+    "sha256": "365b7a8eaff022b13ed0561fde3890a04a30507d773ecd5adb3aca8e766a285c"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-greek-500-normal-D7SFKleX.woff",
+    "sha256": "89656e472646bf4d52c23d499fa2e467ad3ee73447fda24eefb96e176b1312d6"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-greek-500-normal-JpySY46c.woff2",
+    "sha256": "5b6dee4610cdaab7c4218c1692aa9a536414010eef4e5b3cfb25f45007811bcc"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-400-normal-6-qcROiO.woff",
+    "sha256": "658b9ee07b0249cf910a8d6f3d812d46c962bae81d7379a0355b1db35c61586f"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2",
+    "sha256": "14425ba9c695763c1547f48a206b7aa60350a33ae23de09f0407877f3fcd89eb"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-500-normal-BWZEU5yA.woff2",
+    "sha256": "cb182feeed4d798ff6961d3c79f7026279448fca0676438aaecb21f3fc39553a"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-500-normal-CJOVTJB7.woff",
+    "sha256": "a270dd0bf13d91053b8999b7c120ffadb59680cfd63fe1a6b388a13bf2809fe1"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-400-normal-Bc8Ftmh3.woff2",
+    "sha256": "505dfba8ecbe77e82765f36d317ed7ef4ac42719dc5f4ae68d1c483fd22d0d14"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-400-normal-fXTG6kC5.woff",
+    "sha256": "e7131bbf591e1ed9b74e44e162f6a39affa00ac21654cb683585d085733f6355"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-500-normal-ckzbgY84.woff",
+    "sha256": "8006c29f8ec53d12d281774d669a02a70b599590d110ff1a4b4a40a6fd975676"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-latin-ext-500-normal-Cut-4mMH.woff2",
+    "sha256": "879df9319f1cbf633bee1dd489e376a9e1e8c458f4abddcfe381cb83b5e6b027"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-vietnamese-400-normal-CqNFfHCs.woff",
+    "sha256": "1dfe0f740fa86409034058e49474b01126ae9ea8c1ecda905917b90d57f03b00"
+  },
+  {
+    "path": "tagger/web/ui/dist/assets/jetbrains-mono-vietnamese-500-normal-DNRqzVM1.woff",
+    "sha256": "6b14186bc983291a126aa8d6d9c3044415c968262279eecbb9bb194f1daf7800"
+  }
+]

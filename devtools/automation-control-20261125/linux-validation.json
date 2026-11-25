@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "check_count": 8,
+  "checks": [
+    "schema default paused blocks managed and handshake allocation",
+    "panel automation asset and all 13 MCP tools are available",
+    "pause preserves active and prelock; heartbeat succeeds and finish does not promote",
+    "pause survives reinitialization and resume promotes the same prelock",
+    "offline stop persists across a new session and preserves lease",
+    "MCP preview and confirmed release execute through the administrator API",
+    "offline workorder creation remains available while online dispatch is paused",
+    "invalid direct allocation cannot replace paused prelocks"
+  ],
+  "linux": true,
+  "isolated_http": true,
+  "production_member_actions": 0
+}

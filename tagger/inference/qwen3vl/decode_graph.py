@@ -37,9 +37,9 @@ class DecodeGraph:
         self.destination = logits
 
     @staticmethod
-    def supported(engine):
+    def supported(engine, length=1):
         return (engine.decode_graph and engine.device.type == "cuda"
-                and engine.decoder.norm.optimized and engine.context_capacity <= 4096
+                and engine.decoder.norm.optimized and length <= 4096
                 and engine.decoder.config.head_dim <= 256
                 and all(layer.self_attn.decode_attention == "native" for layer in engine.decoder.layers)
                 and torch.cuda.get_device_capability(engine.device) >= (8, 0))

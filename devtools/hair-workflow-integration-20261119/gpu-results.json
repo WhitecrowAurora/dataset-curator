@@ -1,0 +1,507 @@
+{
+  "pixai": {
+    "seconds": [
+      12.533635499999946,
+      0.5930603999986488
+    ],
+    "baseline": {
+      "color": "brown",
+      "probability": 0.890625,
+      "scores": {
+        "black": 0.0279541015625,
+        "blonde": 0.0012054443359375,
+        "brown": 0.890625,
+        "blue": 0.00445556640625,
+        "pink": 0.00136566162109375,
+        "white": 0.0007781982421875,
+        "grey": 0.0005035400390625,
+        "purple": 0.00128173828125,
+        "red": 0.328125,
+        "green": 0.0002613067626953125,
+        "orange": 0.00170135498046875,
+        "aqua": 0.000732421875
+      },
+      "source": "inference",
+      "person_support": true,
+      "ambiguous": false
+    },
+    "cache": {
+      "enabled": true,
+      "total_gb": 95.9,
+      "available_gb": 64.67,
+      "reserve_gb": 19.18,
+      "budget_gb": 47.49,
+      "retained_gb": 2.0,
+      "models": [
+        {
+          "name": "pixai:hair:H:\\tagger\\models",
+          "kind": "cpu_model",
+          "size_gb": 2.0,
+          "active": false
+        }
+      ]
+    }
+  },
+  "anime_counts": {
+    "accepted": 1,
+    "review": 1
+  },
+  "anime": [
+    {
+      "id": "efdb2d4751da2a81370e0b9276fa831f",
+      "image_name": "hutao.jpg",
+      "image_sha256": "354d76dc952c0d18f159c1a5d1ed5addf6a5004b64bc48b8afa420a3394ac2d1",
+      "crop": null,
+      "created": 1795030264.6398342,
+      "status": "accepted",
+      "selected": [
+        "brown"
+      ],
+      "candidates": [
+        {
+          "color": "red",
+          "label": "红色",
+          "probability": 0.983714759349823,
+          "swatch": "#b95c62"
+        },
+        {
+          "color": "brown",
+          "label": "棕色",
+          "probability": 0.014253485947847366,
+          "swatch": "#8b634b"
+        },
+        {
+          "color": "purple",
+          "label": "紫色",
+          "probability": 0.0016773405950516462,
+          "swatch": "#9b7bb6"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "",
+          "probability": 0,
+          "scores": {},
+          "source": "existing_result",
+          "person_support": false,
+          "ambiguous": false
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "brown",
+          "probability": 0.9980594515800476,
+          "scores": {
+            "aqua": 1.0584455594653264e-05,
+            "blue": 1.5901003280305304e-05,
+            "green": 3.700251181726344e-05,
+            "brown": 0.9980594515800476,
+            "orange": 5.572701047640294e-05,
+            "pink": 5.169880387256853e-05,
+            "purple": 7.588086737086996e-05,
+            "red": 6.922888132976368e-05,
+            "light": 5.672154202329693e-06,
+            "black": 0.0016187600558623672
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "red",
+          "probability": 0.983714759349823,
+          "scores": {
+            "aqua": 9.132257218880113e-06,
+            "blue": 2.408508771623019e-05,
+            "green": 2.7953021344728768e-05,
+            "brown": 0.014253485947847366,
+            "orange": 0.00010386599751655012,
+            "pink": 6.087466317694634e-05,
+            "purple": 0.0016773405950516462,
+            "red": 0.983714759349823,
+            "light": 1.0329055839974899e-05,
+            "black": 0.00011824000102933496
+          }
+        },
+        {
+          "model": "toriigate",
+          "color": "brown",
+          "candidate_colors": [
+            "brown"
+          ],
+          "multiple_people": false,
+          "multi_color": false,
+          "visible_hair": true,
+          "reason": "按角色描述提取发色",
+          "characters": [
+            {
+              "name": "Hu Tao (genshin impact)",
+              "description": "Hu Tao has long brown hair styled in twintails with a prominent ahoge on top. Her hair is decorated with red and pink plum blossom flowers, black ribbons, and small hairclips. She has vivid red eyes with flower-shaped pupils and a playful expression with her tongue sticking out. She wears a navy blue blazer with gold buttons over a white collared shirt and a red tie, paired with a brown and beige plaid pleated skirt. Her nails are painted black. She holds a small white ghost plushie with a simple laughing face close to her chest. On her back is a black backpack adorned with two enamel pinsa smiling and a surprised faceand a round charm featuring a stylized flower and symbol. Her left hand is raised near her face with fingers curled slightly, adding to her mischievous demeanor.",
+              "colors": [
+                "brown"
+              ],
+              "nonhuman": false
+            }
+          ],
+          "caption": {
+            "General": "Hu Tao from Genshin Impact stands outdoors near a wrought-iron gate and stone wall, bathed in warm sunlight with soft shadows and lens flare. She is shown from mid-thigh up in a casual school uniform style outfit, holding a small white ghost plushie. The setting suggests a garden or courtyard with greenery and a stone wall in the background.",
+            "Hu Tao (genshin impact)": "Hu Tao has long brown hair styled in twintails with a prominent ahoge on top. Her hair is decorated with red and pink plum blossom flowers, black ribbons, and small hairclips. She has vivid red eyes with flower-shaped pupils and a playful expression with her tongue sticking out. She wears a navy blue blazer with gold buttons over a white collared shirt and a red tie, paired with a brown and beige plaid pleated skirt. Her nails are painted black. She holds a small white ghost plushie with a simple laughing face close to her chest. On her back is a black backpack adorned with two enamel pinsa smiling and a surprised faceand a round charm featuring a stylized flower and symbol. Her left hand is raised near her face with fingers curled slightly, adding to her mischievous demeanor."
+          },
+          "source": "independent_image"
+        }
+      ],
+      "reason": "VLM 与已有模型判断一致",
+      "request": {
+        "image_name": "hutao.jpg",
+        "job_id": "real-anime",
+        "image_id": "hutao.jpg",
+        "media": "anime",
+        "visible_hair": "unknown",
+        "artifact_path": "H:\\tagger\\backend\\smoke\\hair-workflow\\runtime\\hutao.jpg-tag.json",
+        "pixai_scores": {
+          "black": 0.0279541015625,
+          "blonde": 0.0012054443359375,
+          "brown": 0.890625,
+          "blue": 0.00445556640625,
+          "pink": 0.00136566162109375,
+          "white": 0.0007781982421875,
+          "grey": 0.0005035400390625,
+          "purple": 0.00128173828125,
+          "red": 0.328125,
+          "green": 0.0002613067626953125,
+          "orange": 0.00170135498046875,
+          "aqua": 0.000732421875
+        }
+      },
+      "media": "anime",
+      "parent_id": "",
+      "job_id": "real-anime",
+      "extra_colors": [
+        "brown"
+      ],
+      "elapsed_ms": 12690,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "vlm": "torii",
+        "input": "original",
+        "min_confidence": 0.7
+      }
+    },
+    {
+      "id": "7ea78920f8d9b9783079fc66546ec490",
+      "image_name": "mostima.jpg",
+      "image_sha256": "06995984178f866f828ebeabc55d1952e8e3d3f49d36d294f4edb59e0fe13def",
+      "crop": null,
+      "created": 1795030264.7383318,
+      "status": "review",
+      "selected": [],
+      "candidates": [
+        {
+          "color": "red",
+          "label": "红色",
+          "probability": 0.9998109936714172,
+          "swatch": "#b95c62"
+        },
+        {
+          "color": "purple",
+          "label": "紫色",
+          "probability": 6.696594209643081e-05,
+          "swatch": "#9b7bb6"
+        },
+        {
+          "color": "orange",
+          "label": "橙色",
+          "probability": 4.310923759476282e-05,
+          "swatch": "#de934e"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "pink",
+          "probability": 0.96875,
+          "scores": {
+            "black": 0.010986328125,
+            "blonde": 0.0033721923828125,
+            "brown": 0.010009765625,
+            "blue": 0.890625,
+            "pink": 0.96875,
+            "white": 0.00124359130859375,
+            "grey": 0.005218505859375,
+            "purple": 0.0169677734375,
+            "red": 0.9375,
+            "green": 0.0002307891845703125,
+            "orange": 0.0419921875,
+            "aqua": 0.0002956390380859375
+          },
+          "source": "inference",
+          "person_support": true,
+          "ambiguous": true
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "red",
+          "probability": 0.9994346499443054,
+          "scores": {
+            "aqua": 2.2425083443522453e-06,
+            "blue": 6.8808083597105e-05,
+            "green": 8.592126505391207e-06,
+            "brown": 4.7995759814511985e-05,
+            "orange": 0.0001461711508454755,
+            "pink": 6.758991366950795e-05,
+            "purple": 0.0001679569249972701,
+            "red": 0.9994346499443054,
+            "light": 1.035451077768812e-05,
+            "black": 4.562793765217066e-05
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "red",
+          "probability": 0.9998109936714172,
+          "scores": {
+            "aqua": 1.839673700487765e-06,
+            "blue": 2.2921622075955383e-05,
+            "green": 6.030907570675481e-06,
+            "brown": 1.3265916095406283e-05,
+            "orange": 4.310923759476282e-05,
+            "pink": 1.3462980859912932e-05,
+            "purple": 6.696594209643081e-05,
+            "red": 0.9998109936714172,
+            "light": 3.544444325598306e-06,
+            "black": 1.782373510650359e-05
+          }
+        },
+        {
+          "model": "toriigate",
+          "color": "",
+          "candidate_colors": [
+            "red",
+            "blue",
+            "pink"
+          ],
+          "multiple_people": true,
+          "multi_color": true,
+          "visible_hair": true,
+          "reason": "按角色描述提取发色",
+          "characters": [
+            {
+              "name": "Character 1",
+              "description": "A girl with short, spiky red hair and sharp red eyes. She wears a white collared shirt with a red necktie, a dark jacket with rolled-up sleeves, and black fingerless gloves. Her lips are slightly parted as she sips from her coffee cup. A golden halo floats above her head. She looks directly at the viewer with a calm, focused expression.",
+              "colors": [
+                "red"
+              ],
+              "nonhuman": false
+            },
+            {
+              "name": "Character 2",
+              "description": "A girl with very long, flowing blue hair and bright blue eyes. She has animal ears with black and cream fur atop her head and wears black gloves, a gray jacket with fur trim, and a white shirt underneath. She holds her coffee cup close to her body with both hands and smiles gently at the viewer. A golden halo hovers above her head.",
+              "colors": [
+                "blue"
+              ],
+              "nonhuman": false
+            },
+            {
+              "name": "Character 3",
+              "description": "A girl with long pink hair and soft pink eyes, styled with loose strands framing her face. She wears a black jacket over a light gray shirt and holds her coffee cup with both hands near her chest. She has a calm, neutral expression and a golden halo above her head. Her hair moves slightly as if in a gentle breeze.",
+              "colors": [
+                "pink"
+              ],
+              "nonhuman": false
+            }
+          ],
+          "caption": {
+            "General": "Three girls stand close together outdoors at night beneath a dark blue starry sky, illuminated by glowing street lamps. Each holds a steaming disposable coffee cup emitting stylized pink smoke. They wear layered outfits including jackets, shirts, and gloves, with halos floating above their heads. The scene is captured from a low angle, emphasizing their presence and creating a warm, intimate atmosphere.",
+            "Character 1": "A girl with short, spiky red hair and sharp red eyes. She wears a white collared shirt with a red necktie, a dark jacket with rolled-up sleeves, and black fingerless gloves. Her lips are slightly parted as she sips from her coffee cup. A golden halo floats above her head. She looks directly at the viewer with a calm, focused expression.",
+            "Character 2": "A girl with very long, flowing blue hair and bright blue eyes. She has animal ears with black and cream fur atop her head and wears black gloves, a gray jacket with fur trim, and a white shirt underneath. She holds her coffee cup close to her body with both hands and smiles gently at the viewer. A golden halo hovers above her head.",
+            "Character 3": "A girl with long pink hair and soft pink eyes, styled with loose strands framing her face. She wears a black jacket over a light gray shirt and holds her coffee cup with both hands near her chest. She has a calm, neutral expression and a golden halo above her head. Her hair moves slightly as if in a gentle breeze."
+          },
+          "source": "independent_image"
+        }
+      ],
+      "reason": "多人、双色或发色不明确，请人工确认",
+      "request": {
+        "image_name": "mostima.jpg",
+        "job_id": "real-anime",
+        "image_id": "mostima.jpg",
+        "media": "anime",
+        "visible_hair": "unknown",
+        "artifact_path": "H:\\tagger\\backend\\smoke\\hair-workflow\\runtime\\mostima.jpg-tag.json",
+        "pixai_scores": null,
+        "baseline": {
+          "color": "pink",
+          "probability": 0.96875,
+          "scores": {
+            "black": 0.010986328125,
+            "blonde": 0.0033721923828125,
+            "brown": 0.010009765625,
+            "blue": 0.890625,
+            "pink": 0.96875,
+            "white": 0.00124359130859375,
+            "grey": 0.005218505859375,
+            "purple": 0.0169677734375,
+            "red": 0.9375,
+            "green": 0.0002307891845703125,
+            "orange": 0.0419921875,
+            "aqua": 0.0002956390380859375
+          },
+          "source": "inference",
+          "person_support": true,
+          "ambiguous": true
+        }
+      },
+      "media": "anime",
+      "parent_id": "",
+      "job_id": "real-anime",
+      "baseline_ms": 642,
+      "extra_colors": [
+        "pink",
+        "red",
+        "blue"
+      ],
+      "elapsed_ms": 4653,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "vlm": "torii",
+        "input": "original",
+        "min_confidence": 0.7
+      }
+    }
+  ],
+  "photo": {
+    "id": "492f6d2799974efab3e56c53fa7d4b44",
+    "image_name": "portrait.jpg",
+    "image_sha256": "1578277d89e6fab9d9cd92454e6f00bd6e3c4b6c42d59b7b15d3087231747653",
+    "crop": null,
+    "created": 1795030368.0697932,
+    "status": "accepted",
+    "selected": [
+      "blonde"
+    ],
+    "candidates": [
+      {
+        "color": "brown",
+        "label": "棕色",
+        "probability": 0.8535888195037842,
+        "swatch": "#8b634b"
+      },
+      {
+        "color": "light",
+        "label": "浅色组",
+        "probability": 0.12772507965564728,
+        "swatch": "#e3e1d8"
+      },
+      {
+        "color": "orange",
+        "label": "橙色",
+        "probability": 0.010168801993131638,
+        "swatch": "#de934e"
+      }
+    ],
+    "observations": [
+      {
+        "model": "pixai",
+        "color": "blonde",
+        "source": "existing_result"
+      },
+      {
+        "model": "mobilenetv3_v0_dist",
+        "color": "brown",
+        "probability": 0.9987188577651978,
+        "scores": {
+          "aqua": 4.60678984381957e-06,
+          "blue": 4.63345531898085e-06,
+          "green": 8.977228389994707e-06,
+          "brown": 0.9987188577651978,
+          "orange": 0.0007246716995723546,
+          "pink": 0.00018225620442535728,
+          "purple": 2.629316668389947e-06,
+          "red": 7.299664139281958e-05,
+          "light": 0.00027360289823263884,
+          "black": 6.837342425569659e-06
+        }
+      },
+      {
+        "model": "caformer_s36_v0",
+        "color": "brown",
+        "probability": 0.8535888195037842,
+        "scores": {
+          "aqua": 0.0001751667441567406,
+          "blue": 0.0005570034845732152,
+          "green": 7.17331058694981e-05,
+          "brown": 0.8535888195037842,
+          "orange": 0.010168801993131638,
+          "pink": 0.004179620649665594,
+          "purple": 0.000409552245400846,
+          "red": 0.002491442020982504,
+          "light": 0.12772507965564728,
+          "black": 0.0006327831652015448
+        }
+      },
+      {
+        "model": "qwen3vl",
+        "color": "blonde",
+        "multi_color": false,
+        "multiple_people": false,
+        "reason": "The character has uniformly light blonde hair, with no visible multi-color or multiple people.",
+        "raw": "{\n  \"color\": \"blonde\",\n  \"multi_color\": false,\n  \"multiple_people\": false,\n  \"reason\": \"The character has uniformly light blonde hair, with no visible multi-color or multiple people.\"\n}"
+      }
+    ],
+    "reason": "VLM 与已有模型判断一致",
+    "request": {
+      "image_name": "portrait.jpg",
+      "media": "photo",
+      "pixai_color": "blonde",
+      "visible_hair": "unknown"
+    },
+    "media": "photo",
+    "parent_id": "",
+    "job_id": "",
+    "extra_colors": [
+      "blonde"
+    ],
+    "elapsed_ms": 12436,
+    "provenance": {
+      "hair_repo": "deepghs/anime_ch_hair_color",
+      "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+      "vlm": "qwen",
+      "input": "original",
+      "min_confidence": 0.7
+    }
+  },
+  "final_cache": {
+    "enabled": true,
+    "total_gb": 95.9,
+    "available_gb": 56.93,
+    "reserve_gb": 19.18,
+    "budget_gb": 47.4,
+    "retained_gb": 9.65,
+    "models": [
+      {
+        "name": "pixai:hair:H:\\tagger\\models",
+        "kind": "cpu_model",
+        "size_gb": 2.0,
+        "active": false
+      },
+      {
+        "name": "hair:H:\\tagger\\models\\hair-color:mobilenetv3_v0_dist",
+        "kind": "cpu_session",
+        "size_gb": 0.031,
+        "active": false
+      },
+      {
+        "name": "hair:H:\\tagger\\models\\hair-color:caformer_s36_v0",
+        "kind": "cpu_session",
+        "size_gb": 0.279,
+        "active": false
+      },
+      {
+        "name": "weights:H:\\tagger\\models\\nl\\qwen3vl-8b-abliterated",
+        "kind": "mapped_weights",
+        "size_gb": 7.343,
+        "active": false
+      }
+    ]
+  },
+  "gpu_final": "1828 MiB, 10 %\n"
+}

@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "time": 1795539864.6877697,
+  "snapshot_pinned": true,
+  "backup_bytes": {
+    "db.sqlite3": 646746112,
+    "delivery.sqlite3": 73728
+  },
+  "state": {
+    "packages": 874,
+    "offline_jobs": 23,
+    "open_leases": [
+      {
+        "lease_id": "L8f67b81e6e02",
+        "pkg": "shard-000006.tar",
+        "kind": "active",
+        "device_id": "9f609acff33f",
+        "user_id": "Draco_Echo"
+      },
+      {
+        "lease_id": "L7f6a848fe173",
+        "pkg": "shard-000007.tar",
+        "kind": "prelock",
+        "device_id": "9f609acff33f",
+        "user_id": "Draco_Echo"
+      },
+      {
+        "lease_id": "L28bc14dbd33e",
+        "pkg": "shard-000010.tar",
+        "kind": "active",
+        "device_id": "0371df252e3b",
+        "user_id": "N叔"
+      },
+      {
+        "lease_id": "L6cdea3620417",
+        "pkg": "shard-000019.tar",
+        "kind": "active",
+        "device_id": "8afe1fd19aa2",
+        "user_id": "龙腾"
+      },
+      {
+        "lease_id": "Laace72f9b571",
+        "pkg": "shard-000294.tar",
+        "kind": "prelock",
+        "device_id": "0371df252e3b",
+        "user_id": "N叔"
+      }
+    ],
+    "duplicate_parts": 0
+  },
+  "files": 20,
+  "disk_free": 3202527232,
+  "services": {
+    "lulynx-label": "active",
+    "lulynx-panel": "active"
+  }
+}

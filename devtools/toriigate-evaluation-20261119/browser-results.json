@@ -1,0 +1,13 @@
+{
+  "cards": 126,
+  "images_loaded": 126,
+  "focus_filter": 41,
+  "no_hair_filter": 18,
+  "anime_filter": 8,
+  "nonhuman_filter": 8,
+  "alternate_caption_expand": true,
+  "search": true,
+  "mobile_no_horizontal_overflow": true,
+  "page_errors": [],
+  "browser": "installed Edge / Playwright fallback; in-app browser metadata error"
+}

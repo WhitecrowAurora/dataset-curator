@@ -1,0 +1,110 @@
+[
+  {
+    "batch": 1,
+    "layer": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.18573312759399413,
+    "grouped_ms": 0.17301504135131837
+  },
+  {
+    "batch": 1,
+    "layer": 15,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.17586143493652343,
+    "grouped_ms": 0.17659904479980468
+  },
+  {
+    "batch": 1,
+    "layer": 31,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.17397663116455078,
+    "grouped_ms": 0.16823263168334962
+  },
+  {
+    "batch": 2,
+    "layer": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.13241344451904297,
+    "grouped_ms": 0.1277235221862793
+  },
+  {
+    "batch": 2,
+    "layer": 15,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.13230079650878906,
+    "grouped_ms": 0.12713983535766601
+  },
+  {
+    "batch": 2,
+    "layer": 31,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.1380454444885254,
+    "grouped_ms": 0.12689408302307129
+  },
+  {
+    "batch": 4,
+    "layer": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.1466163158416748,
+    "grouped_ms": 0.3606220626831055
+  },
+  {
+    "batch": 4,
+    "layer": 15,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.3703193664550781,
+    "grouped_ms": 0.3316326522827148
+  },
+  {
+    "batch": 4,
+    "layer": 31,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.40323070526123045,
+    "grouped_ms": 0.34323455810546877
+  },
+  {
+    "batch": 8,
+    "layer": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.49032127380371093,
+    "grouped_ms": 0.473067512512207
+  },
+  {
+    "batch": 8,
+    "layer": 15,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.5222502517700195,
+    "grouped_ms": 0.49724414825439456
+  },
+  {
+    "batch": 8,
+    "layer": 31,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "equal": true,
+    "reference_ms": 0.3499827194213867,
+    "grouped_ms": 0.1328435230255127
+  }
+]

@@ -1,0 +1,23 @@
+--- server/fox-label/managed/contracts.py
++++ candidate/fox-label/managed/contracts.py
+@@ -40,7 +40,7 @@
+     for key in ("auto_download", "auto_quantize", "stop_service"):
+         if type(merged[key]) is not bool:
+             raise ManagedError(f"{key} 必须为布尔值")
+-    for key, limit in (("tag_batch", 128), ("concurrency", 64)):
++    for key, limit in (("tag_batch", 128), ("concurrency", 256)):
+         if type(merged[key]) is not int or not 0 <= merged[key] <= limit:
+             raise ManagedError(f"{key} 必须为 0～{limit} 的整数")
+     mem = merged["gpu_mem"]
+@@ -68,9 +68,8 @@
+     if merged["mode"] == "tag" and merged["tag_backend"] == "none":
+         raise ManagedError("只出 TAG 时请选择分类模型")
+     if merged["mode"] != "tag" and merged["inference_source"] == "local" and merged["nl_model"] == "torii-gate-0.5":
+-        limit = 4 if merged["nl_engine"] == "native" else 1
+-        if merged["nl_engine"] not in ("native", "llamacpp") or merged["nl_precision"] != "q6" or merged["concurrency"] > limit:
+-            raise ManagedError(f"Torii 需要 native／llama.cpp、Q6；当前引擎并发上限 {limit}")
++        if merged["nl_engine"] not in ("native", "llamacpp") or merged["nl_precision"] != "q6":
++            raise ManagedError("Torii 需要 native／llama.cpp、Q6")
+     if capabilities is not None:
+         devices = {x["value"] for x in capabilities.get("devices", [])}
+         for key in ("tag_device", "nl_device"):

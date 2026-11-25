@@ -28,6 +28,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from .runtime.disk_space import shortage
 
 
 # ------------------------------------------------------------------ 策略
@@ -194,7 +195,8 @@ class DutyCycleGovernor:
         self._clock = clock
         self._sleep = sleeper
         self.verbose = verbose
-        self._last_boundary: float | None = None
+        # 多卡分包会共用 governor；每条执行线程单独结算自身的让步。
+        self._timing = threading.local()
         self._auto_duty = 1.0
         self._integral = 0.0
         self._last_temp = 0.0
@@ -226,12 +228,12 @@ class DutyCycleGovernor:
     def on_unit_done(self) -> dict:
         """每处理完一个单元调用一次。返回本次让步的记录。"""
         now = self._clock()
-        if self._last_boundary is None:
-            self._last_boundary = now
+        last_boundary = getattr(self._timing, "last_boundary", None)
+        if last_boundary is None:
+            self._timing.last_boundary = now
             return {}
 
-        busy_s = max(now - self._last_boundary, 0.0)
-        self._last_boundary = now
+        busy_s = max(now - last_boundary, 0.0)
 
         duty = self.effective_duty
         slept = 0.0
@@ -242,14 +244,17 @@ class DutyCycleGovernor:
                 self._sleep(sleep_s)
                 slept = sleep_s
 
-        self.last_report = {
+        # 从让步结束重新计时，避免把本轮休眠算作下一轮的忙碌时间。
+        self._timing.last_boundary = self._clock()
+        report = {
             "busy_s": round(busy_s, 3),
             "slept_s": round(slept, 3),
             "duty": round(duty, 3),
             "auto_duty": round(self._auto_duty, 3),
             "temp_c": round(self._last_temp, 1),
         }
-        return self.last_report
+        self.last_report = report
+        return report
 
 
 # ------------------------------------------------------------------ 看门狗
@@ -310,11 +315,10 @@ class GuardWatchdog(threading.Thread):
             session_minutes=(time.time() - self._started_at) / 60.0,
         )
 
-        if free_gb < p.disk_min_free_gb or free_pct < p.disk_min_free_pct:
+        disk_message = shortage(p, free_gb, free_pct)
+        if disk_message:
             st.level = "stop"
-            st.reasons.append(
-                f"磁盘 {free_gb:.0f}G/{free_pct * 100:.0f}% 低于 "
-                f"{p.disk_min_free_gb:.0f}G/{p.disk_min_free_pct * 100:.0f}%")
+            st.reasons.append(disk_message)
 
         now = time.time()
         if temp >= p.temp_cutoff_c:

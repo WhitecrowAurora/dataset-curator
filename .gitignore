@@ -8,14 +8,19 @@ __pycache__/
 /work/_lt_smoke
 /tests
 /env/python/Lib/site-packages
+/env/python/Scripts/onnxruntime_test.exe
 /tagger/__pycache__
 /models/nl
+/models/hair-color
+/models/media
 *.log
 /work/_mt
 
 # 本机设置与任务历史：含素材路径、显存参数，换台机器就没意义
 /configs/ui-form.json
 /configs/setup.json
+/configs/disk.json
+/configs/disk.json.bak
 /run/history/
 
 # 运维留档：含执行机 IP、HF 账号等信息，不入库

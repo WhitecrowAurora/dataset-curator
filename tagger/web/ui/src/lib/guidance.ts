@@ -25,6 +25,10 @@ export function latestCenterFailure(logs: string[]): string {
 }
 
 export function failureAdvice(error: string, context: FailureContext): string {
+  if (/Python\.h.*not found|Failed to find Python libs|Python.*开发文件|Python.*开发库/i.test(error))
+    return '便携 Python 缺少编译头文件或开发库。请完整解压新版程序，保留 env/initialization，再启动服务；也可重跑 install.bat 补齐。'
+  if (/triton[\\/].*build\.py|tcc\.exe|cuda_utils.*(?:compile|编译)|Failed to compile/i.test(error))
+    return 'Triton 编译失败。请查看本轮模型日志中 Traceback 前的 error 行，按具体原因检查 Python 开发文件和编译依赖。'
   if (context === 'center' && /回传失败|产物发布失败/i.test(error))
     return '本机产物保留。请在调度中心服务器面板检查储存目录是否可写，或 HF Token 是否有目标仓库写权限，修正后再开始。'
   if (/no space left|disk.*full|磁盘.*(不足|满)|空间不足|空间不够/i.test(error))

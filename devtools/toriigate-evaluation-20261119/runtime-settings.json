@@ -1,0 +1,21 @@
+{
+  "runtime": "H:/tagger/runtime/llama.cpp/llama-server.exe",
+  "version": "0.9.0-dev build 12188 commit 095668452",
+  "gpu": "RTX 4070 Ti SUPER 16376 MiB",
+  "ngl": 99,
+  "np": 1,
+  "cache_prompt": false,
+  "image_min_tokens": 1024,
+  "image_max_tokens": 4096,
+  "torii": {
+    "ctx": 8192,
+    "chat_template": "official pinned template",
+    "idle_total_used_mib": 6352
+  },
+  "qwen": {
+    "ctx": 4096,
+    "model": "qwen3vl-8b-abliterated-Q6_K.gguf",
+    "mmproj": "mmproj-qwen3vl-8b-abliterated-F16.gguf"
+  },
+  "pre_load_gpu_used_mib": 1546
+}

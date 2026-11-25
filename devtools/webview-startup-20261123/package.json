@@ -1,0 +1,11 @@
+{
+  "path": "H:\\tagger\\dist\\tagger-20261123-webview-startup-fix.zip",
+  "bytes": 76762662,
+  "sha256": "80699efa5807cc6dc2358efc7c0ebff7b97074c2589ff6d9096c2101177a0c2f",
+  "crc": true,
+  "fresh_shell_matches": true,
+  "shell_sha256": "3ca049c5154b2c8ad4d3a0db6ce0d5a8dd9618f36ee4824142bd1f4bf41df853",
+  "source_matches": true,
+  "private_state_excluded": true,
+  "credentials_not_packaged": true
+}

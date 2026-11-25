@@ -1,0 +1,57 @@
+[
+  {
+    "name": "fox-label/managed/contracts.py",
+    "before": "ef5a26273f2d744b9dfd5f1e19a446fbd0479d3def85720ba4b90c89bdc979fa",
+    "after": "221bc96f39b64ebc3be5638247b2ed8eff5d3d5ce9c2b56a4045c870dc4d651d"
+  },
+  {
+    "name": "fox-label/managed/automation.py",
+    "before": "9f52b28ee24d94f0ebd8352033cc4ed94e8ebbf7176d9bcf65be9a32dd4e8893",
+    "after": "9466b47a308248be49906988025aa0fc4a4c381a54bba471d8e694b999a0dd12"
+  },
+  {
+    "name": "fox-label/managed/parallel.py",
+    "before": "b4a003bfd41435796f9135f60282caabdc8777f02da08a486544823b5c2a41ec",
+    "after": "a48de17d7e91e455f6bc04a742fe5ce02baedea66f37edc619503755efcb0d32"
+  },
+  {
+    "name": "fox-label/managed/store.py",
+    "before": "dc6138a27e8aba2b63e2d7465da186fc1aaa78530d33a01cf539fe2cb0a63c19",
+    "after": "5f69ff5b1d7bbf0886340567311db633c6dc2b7448aba9f192bcafdee5285067"
+  },
+  {
+    "name": "fox-label/assignments/preassignment.py",
+    "before": "5c49b106880f7b55f3951a1373911412dd9215776b8a2717d08b65b6484cb75a",
+    "after": "c2fb335ed71573484c3878842a4ae037d526dd28948605cd7d24a8780af2f7f2"
+  },
+  {
+    "name": "fox-label/dispatch.py",
+    "before": "6d8f1475cd7111f158b3ef2faab815a49cb623cd5ebad3c4d955ceff4bd3cf67",
+    "after": "3e9dcfe14aea6f9e8f2e3b5ced46848df90b9151e052dc09565851607b20a60b"
+  },
+  {
+    "name": "fox-panel/ai_access/tools.py",
+    "before": "8bb99eedae8dbff3351cbc27897e1170c77c4488e823f9c05dabf896e96caf9b",
+    "after": "cb9e1fea18021154ca64e37b3d3374757ead5ef5955815f5a24c683cb5e6f9c2"
+  },
+  {
+    "name": "fox-panel/ai_access/protocol.py",
+    "before": "cd0f4a6f749a08030d7fed5c0b9f2a3b33dabd8d078e795da74d9b09c4310d80",
+    "after": "e1359bcf13ba6715e2bacbc6cd07d2c74325805206f36bb637335a35024cba7a"
+  },
+  {
+    "name": "fox-panel/web/managed-tuning.js",
+    "before": "2f9fa9720177fd88c1589e933c1a8725e0e9ed16c7d01e79b9b4833283dd8119",
+    "after": "034785e5b1d11e9dfab6aebb88a47877b94c0bfcd265f19b24c0ae3dfcd9a2b3"
+  },
+  {
+    "name": "fox-label/worker.py",
+    "before": "817586a03dab584910273bf0b604cf8f11f61357b969b7b870833066b0829ed5",
+    "after": "d5e87cc53e6c680bbe7aa5a14ddb69153050afb84221eeb69b9b92a1888a206c"
+  },
+  {
+    "name": "fox-label/worker-sources.json",
+    "before": "499f3f0e33a2924736aded78da1de57927997d507ba4e05bdc8b1ac29a386e6b",
+    "after": "755ec7828ef0a89f0088dd26ca563803d70fba62c798ed4775cc0bab69408649"
+  }
+]

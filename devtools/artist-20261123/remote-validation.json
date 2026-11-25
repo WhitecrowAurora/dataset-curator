@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "画师表准备成功\n副本补注入完成 83.81061083823442\n幂等请求验证成功\n{\"result\": {\"ok\": true, \"items\": [{\"package\": \"shard-000015.tar\", \"changed_tag\": 0, \"changed_nl\": 8492, \"matched\": 8495, \"missing\": 183, \"variants\": 8434}], \"request_id\": \"real-copy-15\", \"fingerprint\": \"c0677a6bacb4b1844e4f0b10f01e0529f1e923e93ade5af66eeab3a3f857b9cb\"}, \"seconds\": 83.81061083823442, \"matched_nl\": 8492, \"max_tokens\": 436, \"backups\": 1, \"production_pending\": 8614}\n\n",
+  "stderr": ""
+}

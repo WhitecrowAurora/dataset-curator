@@ -1,0 +1,113 @@
+{
+  "time": "2026-11-25T23:42:47.965080",
+  "disk": {
+    "total": 26354073600,
+    "used": 22110011392,
+    "free": 3067850752
+  },
+  "large_backups": [
+    {
+      "path": "/tagger/.delete/workflow-audit-20261125/before/db.sqlite3",
+      "bytes": 646746112,
+      "allocated": 646750208,
+      "modified": "2026-11-25T02:02:51.040447"
+    },
+    {
+      "path": "/tagger/.delete/automation-control-20261125/before/db.sqlite3",
+      "bytes": 646746112,
+      "allocated": 646750208,
+      "modified": "2026-11-25T01:04:24.593955"
+    },
+    {
+      "path": "/tagger/.delete/delivery-startup-fix-20261124/before/db.sqlite3",
+      "bytes": 646746112,
+      "allocated": 646750208,
+      "modified": "2026-11-24T23:41:12.100666"
+    },
+    {
+      "path": "/tagger/.delete/workspace-merge-20261124/snapshot.sqlite3",
+      "bytes": 645107712,
+      "allocated": 645111808,
+      "modified": "2026-11-24T19:18:31.728773"
+    },
+    {
+      "path": "/tagger/.delete/workspace-merge-20261124/snapshot-validation.sqlite3",
+      "bytes": 645107712,
+      "allocated": 645111808,
+      "modified": "2026-11-24T19:22:07.324018"
+    },
+    {
+      "path": "/tagger/.delete/workspace-merge-20261124/snapshot-http-fixture-failed.sqlite3",
+      "bytes": 645107712,
+      "allocated": 645111808,
+      "modified": "2026-11-24T19:20:08.220403"
+    },
+    {
+      "path": "/tagger/.delete/workspace-merge-20261124/before/db.sqlite3",
+      "bytes": 645107712,
+      "allocated": 645111808,
+      "modified": "2026-11-24T19:24:21.343659"
+    },
+    {
+      "path": "/tagger/.delete/delivery-startup-fix-20261124/before/.delete/interrupted-backup/db.sqlite3",
+      "bytes": 618659840,
+      "allocated": 618659840,
+      "modified": "2026-11-24T23:41:06.720671"
+    }
+  ],
+  "large_backup_allocated": 5139357696,
+  "directory_sizes": {
+    "rc": 0,
+    "out": "390397952\t/tagger/runtime\n914067456\t/tagger/state\n643072\t/tagger/original-backup\n5592260608\t/tagger/.delete\n8192\t/tagger/backend\n131072\t/tagger/deployment\n1825857536\t/tagger/artifacts\n90112\t/tagger/config\n15323136\t/tagger/source\n557056\t/tagger/current-state\n12288\t/tagger/private-config\n8739373056\t/tagger\n57344\t/var/log/apt\n4096\t/var/log/landscape\n12288\t/var/log/unattended-upgrades\n450326528\t/var/log\n2224721920\t/var/lib/docker/overlay2\n4063232\t/var/lib/docker/image\n106496\t/var/lib/docker/buildkit\n4096\t/var/lib/docker/runtimes\n16384\t/var/lib/docker/plugins\n4096\t/var/lib/docker/swarm\n319488\t/var/lib/docker/network\n5853184\t/var/lib/docker/containers\n4096\t/var/lib/docker/tmp\n4018106368\t/var/lib/docker/volumes\n6253211648\t/var/lib/docker\n",
+    "err": ""
+  },
+  "docker_usage": {
+    "rc": 0,
+    "out": "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          5         3         2.086GB   214.3MB (10%)\nContainers      4         3         9.355MB   9.355MB (100%)\nLocal Volumes   9         9         4.016GB   0B (0%)\nBuild Cache     0         0         0B        0B\n",
+    "err": ""
+  },
+  "docker_containers": {
+    "rc": 0,
+    "out": "hbbs\tUp 8 months\nhbbr\tUp 18 months\nazuracast\tExited (137) 8 months ago\nazuracast_updater\tUp 18 months\n",
+    "err": ""
+  },
+  "state_files": [
+    {
+      "name": "hf_token.key",
+      "bytes": 44
+    },
+    {
+      "name": "hf_token.bin",
+      "bytes": 140
+    },
+    {
+      "name": "writes.jsonl",
+      "bytes": 71985
+    },
+    {
+      "name": "audit.jsonl",
+      "bytes": 269356
+    },
+    {
+      "name": "delivery.json",
+      "bytes": 130
+    },
+    {
+      "name": "delivery.sqlite3",
+      "bytes": 81920
+    },
+    {
+      "name": "admin.key",
+      "bytes": 48
+    },
+    {
+      "name": "db.sqlite3",
+      "bytes": 649142272
+    }
+  ],
+  "services": {
+    "rc": 0,
+    "out": "active\nactive\n",
+    "err": ""
+  }
+}

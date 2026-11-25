@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "file": "H:\\tagger\\dist\\tagger-20261124-auto-dispatch.zip",
+  "bytes": 77067971,
+  "sha256": "506ae9b287672e46d9354f951d0f93bb076f956b3ed8cacab532fe61dbc41721",
+  "crc": "passed",
+  "exact_files": [
+    "tagger/web/center.py",
+    "tagger/web/center_runtime/managed.py",
+    "tagger/web/center_runtime/controller.py",
+    "tagger/web/app.py",
+    "tagger/fox_worker.py",
+    "tagger/web/ui/src/pages/Center.tsx",
+    "tagger/web/ui/src/components/center/ExecutionStatus.tsx",
+    "tagger/web/center_runtime/workspace.py",
+    "tagger/artist_reinject.py",
+    "tagger/web/center_runtime/history_artist.py",
+    "tagger/web/center_runtime/history_check.py",
+    "tagger/web/ui/dist/index.html",
+    "tagger/web/center_runtime/offline_export.py",
+    "tagger/web/ui/src/components/center/HistoryArtifacts.tsx",
+    "requirements-embedded.txt",
+    "tagger/web/ui/dist/assets/index-ELdpIf8m.js",
+    "tagger/web/ui/dist/assets/index-7Ebx__7j.css"
+  ],
+  "shell_sha256": "3ca049c5154b2c8ad4d3a0db6ce0d5a8dd9618f36ee4824142bd1f4bf41df853",
+  "worker_sources": 28,
+  "unchanged_shell_and_requirements": true,
+  "private_paths_excluded": true,
+  "previous_files_preserved_except_superseded_assets": true
+}

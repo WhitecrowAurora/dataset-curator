@@ -1,0 +1,73 @@
+{
+  "ok": true,
+  "read_only": true,
+  "http": {
+    "/health": 200,
+    "/": 200,
+    "/api/workspaces": 200,
+    "/api/managed/devices": 200,
+    "/offline-workorders": 200,
+    "/ai-access": 200,
+    "/mcp without key": 401
+  },
+  "services": {
+    "lulynx-label": "active",
+    "lulynx-panel": "active"
+  },
+  "deployed_hashes_match": true,
+  "duplicate_open_parts": 0,
+  "repository_ownership_unique": true,
+  "counts": {
+    "packages": 874,
+    "completed": 2,
+    "nl_done": 6,
+    "offline_jobs": 23,
+    "deleted_offline_jobs": 23
+  },
+  "shard9": {
+    "status": "available",
+    "tag_status": "",
+    "nl_status": "",
+    "old_lease_status": "released",
+    "saved_report": {
+      "expected": 9476,
+      "ids_sha256": "7dd84b8d108480ef21be028602ec02282493439e6588d8d07c22a189ec732ae0",
+      "parts": {
+        "tag": {
+          "success": 0,
+          "excluded": 0,
+          "failed": 0,
+          "missing": 9476
+        },
+        "nl": {
+          "success": 8000,
+          "excluded": 2,
+          "failed": 5,
+          "missing": 1469
+        }
+      },
+      "complete_parts": [],
+      "accounted": false,
+      "ok": false,
+      "conflicts": [],
+      "duplicates": 6000,
+      "conflict_count": 0,
+      "source_verification": {
+        "state": "disabled"
+      }
+    }
+  },
+  "shard9_uploaded_files": 2,
+  "shard9_uploaded_bytes": 28701498,
+  "production_test_users_created": 0,
+  "workspaces": [
+    {
+      "ws_id": "Dru768",
+      "name": "Dru768_仅nl打标"
+    },
+    {
+      "ws_id": "Fox768Test",
+      "name": "Fox768Test"
+    }
+  ]
+}

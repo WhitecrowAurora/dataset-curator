@@ -1,0 +1,146 @@
+{
+  "ok": true,
+  "time": 1795540797.1250722,
+  "services": {
+    "lulynx-label": "active",
+    "lulynx-panel": "active"
+  },
+  "files": {
+    "fox-label/dispatch.py": "6d8f1475cd7111f158b3ef2faab815a49cb623cd5ebad3c4d955ceff4bd3cf67",
+    "fox-label/server.py": "b8a818beb063c774da54e8ebaf5009b3d5ff4e6f7524d7ba1b9e10a8ba389aa4",
+    "fox-label/managed/automation.py": "c6840bbb25cc57efd33205f22ab5d3f14ebfac57f20f50392641f3bd0f8530b3",
+    "fox-label/managed/store.py": "d4bb63e7f13ec786ab86b6bc3399a07ade1e10fda6f8004fa398c85ed0261b2b",
+    "fox-label/managed/stopping.py": "20f2513cc000e5b0da00c591802918a3be9656860eac00189df92444a5d590b5",
+    "fox-label/scheduling/control.py": "07a4e97921119e6c7162450b410939614325389ea5b335bd881a2a27e2e0f792",
+    "fox-label/scheduling/leases.py": "2fd5612c628daaff958176e197893fd5433b993a29fc4c369b729481228e4e57",
+    "fox-label/scheduling/onboarding.py": "c56bef668d53f6fb17984484d711d53ed6b41ea88fc35e95ec699fc9c0988bc9",
+    "fox-label/scheduling/policies.py": "44d3a5c453c12176425677a9428744d24f538be21e86f1bef11b37d5c83b82b4",
+    "fox-label/scheduling/routes.py": "8886b041b6d0f0b1330309ddd0aca1613d1eee1d25e24ec8465a0bc95ab1a6ea",
+    "fox-panel/panel.py": "dbd35fa702f2e8adae131030c54df78d3f5d519686db6e1bf0e02aa9809a1b40",
+    "fox-panel/ai_access/tools.py": "81896ba7c57460f7096026a5753fdf73410e723db153960314359b4e2f04ba3a",
+    "fox-panel/ai_access/protocol.py": "0e45247df989b793fb71144d95b1a228b0f6d5308f075c73d491221e0f697e92",
+    "fox-panel/ai_access/releases.py": "809e27f73dc77be9f3df5ca4c63cbb12a8b51e76d6dc783c5bf307a7ba28754b",
+    "fox-panel/web/app.js": "2d55be38e06df4adfa2bc790edb5ad996deafefbed048828b29336f8887b67fa",
+    "fox-panel/web/index.html": "008014cef69eb55c8e1a7cfd025c2f9d61525404e0eb8118e398b21cc7af0b39",
+    "fox-panel/web/managed.js": "8d135ff238006b0c3f12e0238ceef9551740ab4ba2f3ad8235479a41d147e191",
+    "fox-panel/web/managed-tuning.js": "254f56caab16803138dbd77a4024896fe8fd9943c6c6da3ec76c4f63aa2c398a",
+    "fox-panel/web/automation.js": "af770102a81edb5fec7732ca75f5f5c8ef234832711aa67cd6f47d248faa1b65",
+    "fox-panel/web/workspace-sections.css": "3468e2be5daabb9f624e5e46d2d52fbcdf8c0dc7bf20ca3888796aa7dbd83881",
+    "fox-panel/web/center-mcp.zip": "63cbd565fb3695d0e0121076a3cd27dd9bf0ea26b478e748195820d418612b66"
+  },
+  "before": {
+    "packages": 874,
+    "offline_jobs": 23,
+    "dispatch_plans": 1,
+    "workspaces": [
+      {
+        "ws_id": "Dru768",
+        "name": "Dru768_仅nl打标",
+        "repos": "[\"MatchaCuratio/Anime-2024Dru768-8M\"]",
+        "allocation_mode": "auto"
+      },
+      {
+        "ws_id": "Fox768Test",
+        "name": "Fox768Test",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "allocation_mode": "auto"
+      }
+    ],
+    "active": [
+      {
+        "lease_id": "L8f67b81e6e02",
+        "pkg": "shard-000006.tar",
+        "device_id": "9f609acff33f",
+        "kind": "active"
+      },
+      {
+        "lease_id": "L7f6a848fe173",
+        "pkg": "shard-000007.tar",
+        "device_id": "9f609acff33f",
+        "kind": "prelock"
+      },
+      {
+        "lease_id": "L28bc14dbd33e",
+        "pkg": "shard-000010.tar",
+        "device_id": "0371df252e3b",
+        "kind": "active"
+      },
+      {
+        "lease_id": "L6cdea3620417",
+        "pkg": "shard-000019.tar",
+        "device_id": "8afe1fd19aa2",
+        "kind": "active"
+      }
+    ],
+    "duplicate_parts": 0
+  },
+  "after": {
+    "packages": 874,
+    "offline_jobs": 23,
+    "dispatch_plans": 1,
+    "workspaces": [
+      {
+        "ws_id": "Dru768",
+        "name": "Dru768_仅nl打标",
+        "repos": "[\"MatchaCuratio/Anime-2024Dru768-8M\"]",
+        "allocation_mode": "auto"
+      },
+      {
+        "ws_id": "Fox768Test",
+        "name": "Fox768Test",
+        "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+        "allocation_mode": "auto"
+      }
+    ],
+    "active": [
+      {
+        "lease_id": "L8f67b81e6e02",
+        "pkg": "shard-000006.tar",
+        "device_id": "9f609acff33f",
+        "kind": "active"
+      },
+      {
+        "lease_id": "L7f6a848fe173",
+        "pkg": "shard-000007.tar",
+        "device_id": "9f609acff33f",
+        "kind": "prelock"
+      },
+      {
+        "lease_id": "L28bc14dbd33e",
+        "pkg": "shard-000010.tar",
+        "device_id": "0371df252e3b",
+        "kind": "active"
+      },
+      {
+        "lease_id": "L6cdea3620417",
+        "pkg": "shard-000019.tar",
+        "device_id": "8afe1fd19aa2",
+        "kind": "active"
+      }
+    ],
+    "duplicate_parts": 0
+  },
+  "dispatch": {
+    "ok": true,
+    "dispatch": {
+      "running": false,
+      "changed_at": 1795540796.4409773,
+      "changed_by": "deployment:initial-pause"
+    },
+    "active_leases": 3,
+    "prelocks": 1,
+    "offline_leases": 0,
+    "pending_starts": 0
+  },
+  "prior_leases_preserved": {
+    "L8f67b81e6e02": "open",
+    "L7f6a848fe173": "open",
+    "L28bc14dbd33e": "open",
+    "L6cdea3620417": "open"
+  },
+  "mcp_tools": 13,
+  "lease_release_actions": 0,
+  "initial_state": "paused",
+  "backup_database": "/tagger/.delete/automation-control-20261125/before/db.sqlite3",
+  "disk_free": 3194109952
+}

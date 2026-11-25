@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "independent_state": true,
+  "linux_real_panel_process": true,
+  "real_http": true,
+  "mcp_template_and_overrides": true,
+  "invalid_report_http_409": true,
+  "valid_report_retry": true,
+  "completion_idempotent": true,
+  "limit_and_pause_preserved": true,
+  "force_continue": true,
+  "offline_export_delete": true,
+  "key_revoke": true,
+  "production_test_users_created": 0
+}

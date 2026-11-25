@@ -241,7 +241,6 @@ export function Downloads() {
         icon={<HardDriveDownload size={17} />}
         eyebrow="下载"
         title="分片下载"
-        description="提前把分片备到本地，用完自动删除"
         actions={
           active ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void cancelAll()}>
@@ -275,7 +274,7 @@ export function Downloads() {
             ) : undefined
           }
         >
-          <SettingRow label="仓库" help="org/name；私有仓库需 token">
+          <SettingRow label="仓库">
             <div className="flex gap-2">
               <input
                 className="lx-input font-mono text-xs"
@@ -300,7 +299,7 @@ export function Downloads() {
             </div>
           </SettingRow>
 
-          <SettingRow label="格式" help="网络差时整片下到本地更快">
+          <SettingRow label="格式">
             <select
               className="lx-input"
               value={format}
@@ -317,7 +316,7 @@ export function Downloads() {
           </SettingRow>
 
           <div className="grid grid-cols-2 gap-2">
-            <SettingRow label="版本" help="分支 / tag / commit">
+            <SettingRow label="版本">
               <input
                 className="lx-input font-mono text-xs"
                 value={revision}
@@ -326,7 +325,7 @@ export function Downloads() {
                 spellCheck={false}
               />
             </SettingRow>
-            <SettingRow label="Token" help="私有仓库才需要">
+            <SettingRow label="Token">
               <input
                 type="password"
                 className="lx-input font-mono text-xs"
@@ -419,10 +418,7 @@ export function Downloads() {
               </StatusChip>
             }
           >
-            <SettingRow
-              label="给产物留的余量（GB）"
-              help="不够这一片 + 余量就排队等"
-            >
+            <SettingRow label="磁盘预留余量（GB）">
               <input
                 type="number"
                 className="lx-input font-mono tabular-nums"
@@ -432,10 +428,7 @@ export function Downloads() {
                 onChange={(e) => setReserveGb(Math.max(0, Number(e.target.value) || 0))}
               />
             </SettingRow>
-            <SettingRow
-              label="多线程下载"
-              help="分段并发拉取，更容易跑满线路"
-            >
+            <SettingRow label="多线程下载">
               <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
                 <input
                   type="checkbox"
@@ -443,14 +436,11 @@ export function Downloads() {
                   checked={multi}
                   onChange={(e) => setMulti(e.target.checked)}
                 />
-                启用（小文件 / 不支持 Range 时自动退回单连接）
+                启用（不支持 Range 时自动回退单连接）
               </label>
             </SettingRow>
             {multi && (
-              <SettingRow
-                label="并发线程数"
-                help="4~8 条足够；再多只是抢同一份带宽"
-              >
+              <SettingRow label="并发线程数" help="建议 4~8">
                 <input
                   type="number"
                   className="lx-input font-mono tabular-nums"
@@ -478,10 +468,7 @@ export function Downloads() {
               </StatusChip>
             }
           >
-            <SettingRow
-              label="代理地址"
-              help="全局生效；留空 = 直连"
-            >
+            <SettingRow label="代理地址">
               <input
                 className="lx-input font-mono text-xs"
                 value={proxy}

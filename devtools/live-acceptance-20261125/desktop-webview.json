@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "errors": [],
+  "pages": [
+    {
+      "route": "/",
+      "rendered": true
+    },
+    {
+      "route": "/center",
+      "rendered": true
+    },
+    {
+      "route": "/models",
+      "rendered": true
+    }
+  ]
+}

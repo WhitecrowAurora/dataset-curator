@@ -5,35 +5,41 @@ from pathlib import Path
 
 from ..artifacts import shard_stem
 from .history import read_rows
+from ..center_runtime.snapshot import NAME as SNAPSHOT_NAME, superseded
+
+
+def is_delivery(path):
+    return '.delete' in Path(path).parts or (Path(path).name.startswith('artifacts-') and Path(path).name.endswith('-delivery.jsonl'))
 
 
 def paths(output, package, isolated=False):
     output = Path(output)
     stem = shard_stem(package)
     aggregate = [p for p in output.glob('artifacts-*') if p.suffix.lower() in ('.jsonl', '.json', '.parquet')
-                 and p.name != f'artifacts-{stem}-delivery.jsonl'
+                 and not is_delivery(p) and not superseded(p)
                  and (isolated or re.fullmatch(r'artifacts-\d+', p.stem)
                       or p.stem == f'artifacts-{stem}' or p.stem.startswith(f'artifacts-{stem}-'))]
     individual = [p for pattern in ('*-tag.json', '*-nl.json', '*-tag.jsonl', '*-nl.jsonl')
-                  for p in output.rglob(pattern) if p.is_file() and not p.name.startswith('artifacts-')]
-    return sorted(aggregate + individual)
+                  for p in output.rglob(pattern) if p.is_file() and '.delete' not in p.parts and not p.name.startswith('artifacts-')]
+    snapshot = output / SNAPSHOT_NAME
+    return sorted(aggregate + individual + ([snapshot] if snapshot.is_file() else []))
 
 
-def rows(files, expected):
-    known = set(expected)
+def rows(files, expected=None):
+    known = set(expected) if expected is not None else None
     for path in files:
         part = next((p for p in ('tag', 'nl') if path.stem.endswith('-' + p)), None)
         if part and not path.name.startswith('artifacts-'):
             for value in read_rows([path]):
                 iid = value.get('image_id', path.stem[:-len('-' + part)])
-                if iid in known:
+                if known is None or iid in known:
                     # 单图文件既有裸 payload，也有标准逐图行；保持同一内容的幂等归并。
                     raw = value.get(part) if 'image_id' in value and part in value else value
                     yield {**{k: value[k] for k in ('outcomes', 'excluded') if k in value},
                            'image_id': iid, part: raw, 'ts': value.get('ts', path.stat().st_mtime)}
         else:
             for row in read_rows([path]):
-                if not re.fullmatch(r'artifacts-\d+', path.stem) or row.get('image_id') in known:
+                if known is None or not re.fullmatch(r'artifacts-\d+', path.stem) or row.get('image_id') in known:
                     yield row
 
 

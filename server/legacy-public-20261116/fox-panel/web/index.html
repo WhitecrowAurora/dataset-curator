@@ -7,19 +7,33 @@
 <title>fox-label</title>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/selection.css">
+<link rel="stylesheet" href="/static/workspace-sections.css">
 <script src="/static/selection.js" defer></script>
 <script src="/static/users.js" defer></script>
+<script src="/static/throughput.js" defer></script>
+<script src="/static/automation.js" defer></script>
 <script src="/static/app.js" defer></script>
 <script src="/static/pending-actions.js" defer></script>
 <script src="/static/delivery.js" defer></script>
 <script src="/static/skips.js" defer></script>
+<script src="/static/execution-form.js" defer></script>
+<script src="/static/dispatch-template.js" defer></script>
+<script src="/static/dispatch-assistant.js" defer></script>
+<script src="/static/workspace-sections.js" defer></script>
 <script src="/static/workspace.js" defer></script>
+<script src="/static/offline-imports.js" defer></script>
+<script src="/static/offline-jobs.js" defer></script>
 <script src="/static/allocation.js" defer></script>
 <link rel="stylesheet" href="/static/allocation.css">
 <link rel="stylesheet" href="/static/managed.css">
+<script src="/static/managed-tuning.js" defer></script>
 <script src="/static/managed.js" defer></script>
 <script src="/static/scheduling.js" defer></script>
+<script src="/static/source-conflicts.js" defer></script>
 <script src="/static/source-catalog.js" defer></script>
+<script src="/static/artist.js" defer></script>
+<script src="/static/dispatch-plans.js" defer></script>
+<script src="/static/result-exports.js" defer></script>
 </head>
 <body>
 <p id="fp-live" class="fp-sr" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -50,7 +64,17 @@
   <div class="fp-shell">
     <header class="fp-header" id="header">
       <h1 class="fp-header__title" id="page-title"></h1>
+      <div class="fp-throughput" id="total-throughput" aria-label="当前总打标速度">
+        <strong data-speed>总速度 —</strong><span data-devices>等待更新</span>
+      </div>
+      <div id="dispatch-control" class="fp-dispatch-control" aria-label="自动派单控制">
+        <strong data-state role="status">自动派单：读取中</strong>
+        <button class="fp-btn fp-btn--primary fp-btn--sm" type="button" disabled>启动派单</button>
+        <span data-message class="fp-sr" role="status"></span>
+      </div>
       <div class="fp-header__actions">
+        <a class="fp-btn fp-btn--ghost fp-btn--sm" href="/offline-workorders">离线工单</a>
+        <a class="fp-btn fp-btn--ghost fp-btn--sm" href="/ai-access">AI 接口</a>
         <span class="fp-pill fp-pill--idle" id="up-pill"></span>
         <label class="fp-check" id="auto-wrap">
           <input type="checkbox" id="auto">
@@ -251,13 +275,24 @@
           </div>
           <div class="fp-row" id="ws-detail-acts">
             <button class="fp-btn fp-btn--sm" id="ws-back" type="button"></button>
+          </div>
+          <div id="ws-overview-content">
+            <div class="fp-stats" id="ws-detail-stats" aria-busy="false"></div>
+            <h3>仓库进度</h3>
+            <div class="fp-tablewrap" id="ws-detail-repos" aria-busy="false"></div>
+            <p class="fp-card__hint">派单请切换到“派单”；结果下载、离线回收与冲突处理在“结果与核验”。</p>
+          </div>
+          <div id="ws-settings-content">
+            <h3>工作区与成员</h3>
+            <div class="fp-row">
             <button class="fp-btn fp-btn--sm" id="ws-edit" type="button"></button>
             <button class="fp-btn fp-btn--sm" id="ws-assign" type="button"></button>
             <button class="fp-btn fp-btn--danger fp-btn--sm" id="ws-remove" type="button"></button>
+            </div>
+            <details class="fp-workspace-group"><summary>已分配成员与设备</summary>
+              <div class="fp-tablewrap" id="ws-detail-people" aria-busy="false"></div>
+            </details>
           </div>
-          <div class="fp-stats" id="ws-detail-stats" aria-busy="false"></div>
-          <div class="fp-tablewrap" id="ws-detail-repos" aria-busy="false"></div>
-          <div class="fp-tablewrap" id="ws-detail-people" aria-busy="false"></div>
         </section>
       </section>
 

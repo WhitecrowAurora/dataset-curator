@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "checks": [
+    "admin package release: closed lease and part; paused across reconnect and retired session; rejected heartbeat/upload/finish; preserved done TAG",
+    "released package becomes claimable by another member",
+    "single-part release preserves another device and its package ownership",
+    "invalid release batch rolls back all leases and pause changes",
+    "administrator device release pauses all future online claims",
+    "offline lease release refreshes workorder state and frees the part",
+    "fresh registration and account rebind do not inherit the prior identity pause",
+    "real upload succeeds before artist rejection; client preserves 400 review; corrected prefix passes reconcile and done without rerunning a model",
+    "standalone worker starts without installed tagger; 29 embedded sources match manifest and CRC"
+  ],
+  "check_count": 9,
+  "isolated_database": true,
+  "production_leases_modified": 0,
+  "worker_sha256": "2d829f1d5ccbb4e45ab48f7db6ae645cf7da0d708a17edcb1a1b38c5b07d3f31"
+}

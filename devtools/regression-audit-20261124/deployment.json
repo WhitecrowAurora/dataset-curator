@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "files": 4,
+  "hashes_match": true,
+  "services": {
+    "lulynx-label.service": "active",
+    "lulynx-panel.service": "active"
+  },
+  "health": {
+    "ok": true,
+    "repos": 2,
+    "packages": 874
+  },
+  "backup": "/tagger/.delete/regression-audit-20261124/before",
+  "production_data_mutated": false
+}

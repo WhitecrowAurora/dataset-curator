@@ -1,0 +1,303 @@
+[
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 2,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.061183749511837957,
+    "staged_ms": 0.061454570317749715
+  },
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 4,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.06389298169938086,
+    "staged_ms": 0.06363938128155085
+  },
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 6,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.05955361732596512,
+    "staged_ms": 0.06716682003872072
+  },
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 8,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.07151540146724691,
+    "staged_ms": 0.07415599915055701
+  },
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 10,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.1369465266902481,
+    "staged_ms": 0.08010856521456208
+  },
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 12,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.08663975436670276,
+    "staged_ms": 0.07254939234515063
+  },
+  {
+    "names": [
+      "blk.0.attn_q.weight",
+      "blk.0.attn_k.weight",
+      "blk.0.attn_v.weight"
+    ],
+    "batch": 16,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.12874431752384047,
+    "staged_ms": 0.07152234602299701
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 2,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.2447275186323712,
+    "staged_ms": 0.21821744335200244
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 4,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.21305074888949443,
+    "staged_ms": 0.2140966409444809
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 6,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.3436825888359595,
+    "staged_ms": 0.22351525255311083
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 8,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.22279524608668552,
+    "staged_ms": 0.2122046357219659
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 10,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.3471634081259971,
+    "staged_ms": 0.23790367460285608
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 12,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.512471338931252,
+    "staged_ms": 0.22970337544629474
+  },
+  {
+    "names": [
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight"
+    ],
+    "batch": 16,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.2855722976116399,
+    "staged_ms": 0.22956976902237686
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 2,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.12980543287180432,
+    "staged_ms": 0.10379500731245919
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 4,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.11076787330450551,
+    "staged_ms": 0.10960987824304351
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 6,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.12933116505832173,
+    "staged_ms": 0.10529650320808662
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 8,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.1120528845551485,
+    "staged_ms": 0.11286700031882603
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 10,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.13724600607660456,
+    "staged_ms": 0.11603306701544645
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 12,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.13730060175140069,
+    "staged_ms": 0.11795524760388261
+  },
+  {
+    "names": [
+      "blk.0.ffn_down.weight"
+    ],
+    "batch": 16,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 0.13428880069116306,
+    "staged_ms": 0.11904761035158783
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 2,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.083617557061685,
+    "staged_ms": 1.0423552314636155
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 4,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.0154032575425191,
+    "staged_ms": 1.0187227784553705
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 6,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.078281921601435,
+    "staged_ms": 1.088515177107694
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 8,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.023640267227007,
+    "staged_ms": 1.019908487257375
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 10,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.0923154100393637,
+    "staged_ms": 1.0750631982088088
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 12,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.0917749163033306,
+    "staged_ms": 1.0523391075043882
+  },
+  {
+    "names": [
+      "output.weight"
+    ],
+    "batch": 16,
+    "exact": true,
+    "max_error": 0.0,
+    "old_ms": 1.1152314610321428,
+    "staged_ms": 1.102180383521128
+  }
+]

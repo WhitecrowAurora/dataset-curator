@@ -1,0 +1,78 @@
+{
+  "ok": true,
+  "pages": [
+    {
+      "route": "/",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/center",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/history",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/stats",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/models",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/downloads",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/packaging",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/conflicts",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/tag-manage",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/upload",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/manifests",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/deps",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/settings",
+      "rendered": true,
+      "overflow": false
+    },
+    {
+      "route": "/tools",
+      "rendered": true,
+      "overflow": false
+    }
+  ],
+  "errors": [],
+  "login": true,
+  "live_admin_page": true
+}

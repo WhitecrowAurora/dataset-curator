@@ -1,0 +1,110 @@
+[
+  {
+    "gated": false,
+    "width": 128,
+    "batch": 1,
+    "max_error": 0.0009765625,
+    "different": 1,
+    "before_ms": 0.016605093973515228,
+    "after_ms": 0.0014610117956522296
+  },
+  {
+    "gated": false,
+    "width": 128,
+    "batch": 8,
+    "max_error": 0.001953125,
+    "different": 2,
+    "before_ms": 0.015378166809482525,
+    "after_ms": 0.0015809698617450434
+  },
+  {
+    "gated": false,
+    "width": 128,
+    "batch": 32,
+    "max_error": 0.0009765625,
+    "different": 2,
+    "before_ms": 0.01683802998755589,
+    "after_ms": 0.0023023543917218567
+  },
+  {
+    "gated": false,
+    "width": 256,
+    "batch": 1,
+    "max_error": 0.0,
+    "different": 0,
+    "before_ms": 0.013842640769097112,
+    "after_ms": 0.0012505102206382388
+  },
+  {
+    "gated": false,
+    "width": 256,
+    "batch": 8,
+    "max_error": 0.001953125,
+    "different": 1,
+    "before_ms": 0.014357131611217152,
+    "after_ms": 0.00145168854682154
+  },
+  {
+    "gated": false,
+    "width": 256,
+    "batch": 32,
+    "max_error": 0.00390625,
+    "different": 7,
+    "before_ms": 0.017849836967609545,
+    "after_ms": 0.0021408046987775424
+  },
+  {
+    "gated": false,
+    "width": 2560,
+    "batch": 1,
+    "max_error": 0.0009765625,
+    "different": 4,
+    "before_ms": 0.01805115243045627,
+    "after_ms": 0.0017120025937187894
+  },
+  {
+    "gated": false,
+    "width": 2560,
+    "batch": 8,
+    "max_error": 0.00390625,
+    "different": 11,
+    "before_ms": 0.027474851887595204,
+    "after_ms": 0.0026543582105939038
+  },
+  {
+    "gated": false,
+    "width": 2560,
+    "batch": 32,
+    "max_error": 0.00390625,
+    "different": 63,
+    "before_ms": 0.06341892132038472,
+    "after_ms": 0.006317991023129403
+  },
+  {
+    "gated": true,
+    "width": 128,
+    "batch": 1,
+    "max_error": 0.0,
+    "different": 0,
+    "before_ms": 0.01857868927059971,
+    "after_ms": 0.001330438170310522
+  },
+  {
+    "gated": true,
+    "width": 128,
+    "batch": 8,
+    "max_error": 0.000244140625,
+    "different": 1,
+    "before_ms": 0.018466300511882253,
+    "after_ms": 0.0017998450672687678
+  },
+  {
+    "gated": true,
+    "width": 128,
+    "batch": 32,
+    "max_error": 0.000244140625,
+    "different": 2,
+    "before_ms": 0.020605644126611252,
+    "after_ms": 0.0023791819646067918
+  }
+]

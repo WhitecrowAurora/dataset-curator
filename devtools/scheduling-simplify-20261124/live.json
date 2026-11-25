@@ -1,0 +1,52 @@
+{
+  "ok": true,
+  "read_only": true,
+  "hashes_match": true,
+  "http": {
+    "/": 200,
+    "/offline-workorders": 200,
+    "/static/managed.js": 200,
+    "/api/workspaces": 200,
+    "/api/managed/devices": 200
+  },
+  "duplicate_open_parts": 0,
+  "workspaces": [
+    {
+      "ws_id": "Dru768",
+      "name": "Dru768_仅nl打标",
+      "repos": [
+        "MatchaCuratio/Anime-2024Dru768-8M"
+      ]
+    },
+    {
+      "ws_id": "Fox768Test",
+      "name": "Fox768Test",
+      "repos": [
+        "MatchaCuratio/Anime-Fox768-400k"
+      ]
+    },
+    {
+      "ws_id": "dan",
+      "name": "dan",
+      "repos": [
+        "MatchaCuratio/Anime-2024Dru768-8M"
+      ]
+    }
+  ],
+  "lease_status_counts": {
+    "done": 6,
+    "failed": 72,
+    "open": 623,
+    "released": 540
+  },
+  "mengzhai": {
+    "desired": "paused",
+    "pause_reason": "manual",
+    "changed_at": 0.0,
+    "changed_by": "",
+    "device_id": "714115626688",
+    "last_seq": 0,
+    "last_seen": 1795512406.873636
+  },
+  "pending_local_results": 0
+}

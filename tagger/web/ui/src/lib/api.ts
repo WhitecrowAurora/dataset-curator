@@ -17,6 +17,9 @@ export type JobSpec = {
   cache_max_gb?: number
   // 引擎。local = 本地 tag 后端；vlm = vLLM 出 NL（tag 可由本地后端并行出）
   engine: 'local' | 'vlm'
+  hair_review?: boolean
+  nl_by_media?: boolean
+  hair_media?: 'anime' | 'photo' | 'unknown'
   // 打标
   backend: string
   model_dir: string
@@ -153,7 +156,7 @@ export type JobSpec = {
 }
 
 export type JobStatus = 'pending' | 'running' | 'paused' | 'done' | 'stopped' | 'failed'
-export type JobPhase = '' | 'tag' | 'pack'
+export type JobPhase = '' | 'tag' | 'nl' | 'hair' | 'pack'
 
 export type PlanSample = {
   rel: string
@@ -1275,10 +1278,27 @@ export type TagModelEntry = {
   source: 'config' | 'managed'
 } & LocalFiles
 
+export type ReviewModelEntry = {
+  key: string
+  title: string
+  note: string
+  download_repo: string
+  revision: string
+  local_dir: string
+  local_abs: string
+  missing_files: string[]
+  ready: boolean
+  download: DownloadState | null
+  configured_path?: string
+  use_path?: string
+  in_use?: boolean
+}
+
 export type ModelCatalog = {
   /** 当前生效的清单（配置 + 覆盖） */
   vlm: VlmModelEntry[]
   tag: TagModelEntry[]
+  review?: ReviewModelEntry[]
   /** 配置侧的原始条目：用来显示"配置里有、现在被隐藏了" */
   base_vlm: VlmModelEntry[]
   base_tag: TagModelEntry[]
@@ -1655,7 +1675,10 @@ export type CenterLease = {
   repo: string
   package: string
   /** 剩多少秒到期 */
-  expires_in?: number
+  expires_in?: number | null
+  expires_at?: number | null
+  renewal_seconds?: number | null
+  last_beat_ago?: number | null
   progress?: Record<string, unknown>
 }
 
@@ -1696,6 +1719,12 @@ export type CenterOfflineState = {
   tasks: { repo: string; package: string }[]
   config?: CenterExecution & { mode: string }; out_dir?: string
 }
+export type CenterDispatchTask = { repo: string; package: string; part: 'tag' | 'nl'; user_id: string; device_id: string;
+  config: CenterExecution; annotation: Record<string, unknown> }
+export type CenterDispatchPlanState = { ok: boolean;
+  pending: null | { id: string; server: string; workspace: { ws_id: string; name: string }; recipients: string[]; selected_user: string;
+    repositories: { repo: string; artist: Record<string, unknown>; source: Record<string, unknown> }[]; tasks: CenterDispatchTask[] };
+  applied: null | { id: string; mode: 'online' | 'offline'; user_id: string; tasks: CenterDispatchTask[] } }
 
 export type SetupState = {
   completed: boolean
@@ -1705,7 +1734,10 @@ export type SetupState = {
 }
 
 export type CenterExecution = {
+  max_model_len: number
   hosting_mode: 'active' | 'passive'
+  allow_remote_tag_batch: boolean
+  allow_remote_concurrency: boolean
   inference_source: 'local' | 'existing'
   tag_backend: string
   tag_device: string
@@ -1729,12 +1761,17 @@ export type CenterOptions = {
   engines: string[]
   engine_status?: Record<string, { available: boolean; reason: string }>
   tag_models: { backend: string; ready: boolean; repo: string }[]
-  nl_models: { key: string; ready: boolean; raw_ready: boolean; gguf_quants?: Record<string, string> }[]
+  nl_models: { key: string; title?: string; configured_path?: string; ready: boolean; raw_ready: boolean; gguf_quants?: Record<string, string> }[]
 }
 
 export type CenterConfig = CenterExecution & {
+  auto_start_on_connect: boolean
   auto_upload: boolean
   server: string
+  proxy_mode: 'auto' | 'direct' | 'custom'
+  proxy_url: string
+  download_proxy_mode: 'auto' | 'direct' | 'custom' | 'center'
+  download_proxy_url: string
   user_id: string
   tag_url: string
   mode: string
@@ -1767,6 +1804,13 @@ export type CenterIdentity = {
 }
 
 export type CenterState = {
+  watchdog?: { on: boolean; wanted: boolean; restarts: number; next_in: number | null }
+  delivery?: { lease_id: string; repo: string; package: string; status: string; error: string;
+    report?: { artist_reinject?: { source: string; review_count: number;
+      review_samples: { image_id: string; part: string; artists: string[]; existing_prefix: string; reason: string }[] } } } | null
+  heartbeat?: { sampled_at: number; leases: Record<string, { last_success_ago: number | null; next_in: number | null; running: boolean; in_flight: boolean; error: string }> }
+  release?: { running: boolean; message: string; error: string; lease_id: string } | null
+  log_path?: string
   history?: { running: boolean; status: string; message: string }
   credentials: { hf_token_set: boolean; remember_hf: boolean }
   runtime: {
@@ -1778,9 +1822,16 @@ export type CenterState = {
     hosting_mode: string
     resolved: Partial<CenterConfig>
     managed: null | { status: string; error: string; session_id: string; last_seq: number;
+      start_pending?: boolean; start_intent?: string;
+      waiting_reason?: string;
+      automation?: { desired?: string; pause_reason?: string; dispatch?: {running: boolean; changed_at: number; changed_by: string}; parallel?: Record<string,{value: number; source: string; warning?: string}>; pending_results?: {pkg: string; repo: string; parts: string[]}[]; limit?: {completed: number; max_packages: number}; workspace?: { ws_id: string; name: string } | null };
       results: { id: string; seq: number; status: string; error: string }[] }
+    telemetry?: { sampled_at?: number; cpu_percent?: number; gpus?: { device: string; name: string; util: number; mem_used_mb: number; mem_total_mb: number }[] }
+    pending_action?: string
+    probe?: { error?: string; sample_count?: number; recommended?: { concurrency?: number; tag_batch?: number }; rows?: { field: string; actual?: number; rate_per_s?: number; error?: string }[] }
   }
-  progress: { done?: number; total?: number; phase?: string }
+  progress: { done?: number; total?: number; total_known?: boolean; phase?: string; package?: string; repo?: string;
+    successful?: number; failed?: number; skipped?: number; rate_per_s?: number; updated_ago_s?: number; image_id?: string; package_index?: number }
   running: boolean
   /** 上一轮进程的退出码；null = 还没跑过 */
   last_rc: number | null
@@ -1794,9 +1845,11 @@ export type CenterState = {
 }
 
 export type CenterHistory = {
-  running: boolean; status: string; message: string
+  running: boolean; status: string; message: string; blocked_reason?: string
   items: { id: string; repo: string; package: string; source: string; out_dir: string;
     files: string[]; status: string; local_status: string; automatic?: boolean; report?: { expected?: number; error?: string; registered_parts?: string[];
+      artist_reinject?: { source: string; origin?: 'center'; review_count: number; changed_tag: number; changed_nl: number;
+        review_samples: { image_id: string; part: string; artists: string[]; existing_prefix: string; reason: string }[] };
       complete_parts: string[]; conflicts: string[];
       parts: Record<string, { success: number; excluded: number; failed: number; missing: number }> } }[]
   unlinked: { name: string; path: string; reason?: string }[]
@@ -1829,6 +1882,7 @@ export class ApiError extends Error {
 
 // ---- 冲突与决策：同一个 image_id 两份不同内容（换模型 / 换 prompt / 新旧版本）
 export type ConflictCandidate = {
+  preference?: number
   value: string
   source: string
   ts: number
@@ -2348,6 +2402,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url }),
     }),
+  diskSettings: () =>
+    json<{ disk_min_free_gb: number; disk_min_free_pct: number }>('/api/settings/disk'),
+  saveDiskSettings: (settings: { disk_min_free_gb: number; disk_min_free_pct: number }) =>
+    json<{ disk_min_free_gb: number; disk_min_free_pct: number }>('/api/settings/disk', {
+      method: 'PUT', body: JSON.stringify(settings),
+    }),
   /** 下载源（镜像站）。空串 = 跟随 HF_ENDPOINT / 官方。 */
   saveEndpoint: (url: string) =>
     json<{ endpoint: string; effective: string; catalog: ModelCatalog }>(
@@ -2683,7 +2743,7 @@ export const api = {
   centerHistory: () => json<CenterHistory>('/api/center/history'),
   centerHistoryDiscover: () => json<CenterHistory>('/api/center/history/discover', { method: 'POST' }),
   centerHistoryDirectory: (path: string) => json<CenterHistory>('/api/center/history/directories', { method: 'POST', body: JSON.stringify({ path }) }),
-  centerHistoryCheck: () => json<CenterHistory>('/api/center/history/check', { method: 'POST' }),
+  centerHistoryCheck: (options: { reinject?: 'missing' | 'force'; candidate_id?: string } = {}) => json<CenterHistory>('/api/center/history/check', { method: 'POST', body: JSON.stringify(options) }),
   centerHistoryBind: (body: { repo: string; package: string; source: string; out_dir: string }) =>
     json<CenterHistory>('/api/center/history/bindings', { method: 'POST', body: JSON.stringify(body) }),
   centerHistoryRemove: (id: string) => json<CenterHistory>(`/api/center/history/bindings/${id}`, { method: 'DELETE' }),
@@ -2691,9 +2751,16 @@ export const api = {
   centerWorkspace: (offset = 0) => json<CenterWorkspacePage>(`/api/center/workspace?offset=${offset}`),
   centerReserve: (items: { repo: string; id: string }[]) => json<{ ok: boolean }>('/api/center/reserve', { method: 'POST', body: JSON.stringify({ items }) }),
   centerOffline: () => json<CenterOfflineState>('/api/center/offline'),
+  centerDispatchPlans: () => json<CenterDispatchPlanState>('/api/center/dispatch-plans'),
+  centerDispatchPlanCheck: () => json<CenterDispatchPlanState>('/api/center/dispatch-plans/check', { method: 'POST' }),
+  centerDispatchPlanImport: (path: string) => json<CenterDispatchPlanState>('/api/center/dispatch-plans/import', { method: 'POST', body: JSON.stringify({ path }) }),
+  centerDispatchPlanApply: (mode: 'online' | 'offline', user_id: string) => json<CenterDispatchPlanState>('/api/center/dispatch-plans/apply', { method: 'POST', body: JSON.stringify({ mode, user_id }) }),
+  centerDispatchPlanDismiss: () => json<CenterDispatchPlanState>('/api/center/dispatch-plans/dismiss', { method: 'POST' }),
+  centerDispatchPlanClear: () => json<CenterDispatchPlanState>('/api/center/dispatch-plans/clear', { method: 'POST' }),
   centerOfflineImport: (path: string) => json<CenterOfflineState>('/api/center/offline/import', { method: 'POST', body: JSON.stringify({ path }) }),
   centerOfflineStart: (shard_dir: string, out_dir: string, upload = false) => json<CenterOfflineState>('/api/center/offline/start', { method: 'POST', body: JSON.stringify({ shard_dir, out_dir, upload }) }),
   centerOfflineStop: () => json<CenterOfflineState>('/api/center/offline/stop', { method: 'POST' }),
+  centerOfflineExport: (shard_dir: string, out_dir: string, packageName = '') => json<{ ok: boolean; path: string; tasks: number }>('/api/center/offline/export', { method: 'POST', body: JSON.stringify({ shard_dir, out_dir, package: packageName }) }),
   centerQueue: (queue_only: boolean, clear = false) => json<{ ok: boolean }>('/api/center/queue', { method: 'POST', body: JSON.stringify({ queue_only, clear }) }),
   centerOfflineConfigure: (config: CenterExecution & { hf_token?: string; remember_hf?: boolean }) => json<CenterOfflineState>('/api/center/offline/config', { method: 'PUT', body: JSON.stringify(config) }),
   centerConfigure: (payload: Partial<CenterConfig> & { hf_token?: string; remember_hf?: boolean }) =>
@@ -2704,15 +2771,17 @@ export const api = {
    * 连接（换身份）。后端在跑的时候会拒：换 server 或换名字都要先停止，
    * 否则老进程还在按旧身份续约，服务端会看见两套身份。
    */
-  centerLogin: (payload: { server: string; user_id: string; secret?: string }) =>
+  centerLogin: (payload: { server: string; user_id: string; secret?: string; proxy_mode?: 'auto' | 'direct' | 'custom'; proxy_url?: string }) =>
     json<CenterState>('/api/center/login', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
   centerStart: (payload: Partial<CenterExecution> & {
+    force_continue?: boolean
     hf_token?: string
     remember_hf?: boolean
     auto_upload?: boolean
+    auto_start_on_connect?: boolean
     tag_url?: string
     mode?: string
     /** 派工倾向：'' 不挑 / tag / nl 只接这侧 / pref-tag / pref-nl 优先这侧 */
@@ -2728,6 +2797,10 @@ export const api = {
     cdn_probe?: boolean
   }) => json<CenterState>('/api/center/start', { method: 'POST', body: JSON.stringify(payload) }),
   centerStop: () => json<CenterState>('/api/center/stop', { method: 'POST' }),
+  centerRelease: (lease_id: string, kind: string) => json<CenterState>('/api/center/release', { method: 'POST', body: JSON.stringify({ lease_id, kind }) }),
+  centerProbe: () => json<CenterState>('/api/center/probe', { method: 'POST' }),
   /** 断开：忘掉本机设备身份（地址和姓名留着，重连不用重填） */
   centerLogout: () => json<CenterState>('/api/center/logout', { method: 'POST' }),
+  centerLogs: (kind: string) => json<{ directory: string; path: string; tail: string[] }>(`/api/center/logs?kind=${encodeURIComponent(kind)}`),
+  centerRevealLogs: (kind: string) => json<RevealResult>(`/api/center/logs/reveal?kind=${encodeURIComponent(kind)}`, { method: 'POST' }),
 }

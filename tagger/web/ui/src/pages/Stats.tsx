@@ -202,7 +202,6 @@ export function Stats() {
         icon={<ChartSpline size={17} />}
         eyebrow="质检趋势"
         title="统计"
-        description="通过率、失败率与质检分走势"
         badges={stats && <StatusChip tone={status.tone}>{status.label}</StatusChip>}
         actions={
           <div className="flex items-center gap-2">

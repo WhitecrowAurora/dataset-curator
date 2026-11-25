@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"candidate_ast\": true, \"real_table_rows\": 9382, \"real_with_artists\": 9113, \"fixed_revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"discovery\": {\"ok\": true, \"repo\": \"MatchaCuratio/Anime-2024Dru768-8M\", \"revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"total_packages\": 844, \"candidates\": [{\"directory\": \"artist\", \"files\": 844, \"matched\": 844, \"missing\": 0, \"missing_samples\": [], \"ambiguous\": 0, \"sample_package\": \"shard-000004.tar\", \"sample_path\": \"artist/shard-000004.artist.parquet\", \"validated\": true, \"error\": \"\", \"sample_rows\": 9382, \"sample_with_artist\": 9113}], \"root_files\": 0, \"message\": \"按分片文件名匹配；每个目录校验一份样本，其余分表在领取时校验\"}, \"synthetic_command_frozen\": true, \"synthetic_leases\": 0, \"real_artist_cases\": 40, \"no_production_write\": true, \"validation_db_cleanup\": true}\n",
+  "stderr": ""
+}

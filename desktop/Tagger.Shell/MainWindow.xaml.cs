@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private bool _webViewReady;
     private bool _booting;
     private bool _reallyClose;
+    private readonly WebViewSession _browser;
+    private readonly CancellationTokenSource _lifetime = new();
 
     private CancellationTokenSource? _installCts;
     private bool _installing;
@@ -31,6 +33,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _browser = new WebViewSession(WebHost);
         Loaded += OnLoaded;
         Closing += OnClosing;
         PreviewKeyDown += OnPreviewKeyDown;
@@ -55,18 +58,22 @@ public partial class MainWindow : Window
 
         try
         {
-            _server = PythonServer.Locate();
-            AppLog.Write($"root={_server.Root} python={_server.PythonPath}");
-            StatusDetail.Text = $"Python：{Path.GetFileName(_server.PythonPath)}";
-
-            _server.Output += OnServerOutput;
-            await _server.StartAsync();
+            if (_server?.IsRunning != true)
+            {
+                await ShutdownServerAsync();
+                _server = PythonServer.Locate();
+                AppLog.Write($"root={_server.Root} python={_server.PythonPath}");
+                StatusDetail.Text = $"Python：{Path.GetFileName(_server.PythonPath)}";
+                _server.Output += OnServerOutput;
+                await _server.StartAsync(_lifetime.Token);
+            }
             AppLog.Write($"服务已就绪 {_server.Url}");
 
             ShowLoading("正在载入界面…", _server.Url, "");
             await EnsureWebViewAsync();
 
-            Web.Source = new Uri(_server.Url);
+            _lifetime.Token.ThrowIfCancellationRequested();
+            _browser.View!.Source = new Uri(_server.Url);
         }
         catch (WebView2RuntimeNotFoundException ex)
         {
@@ -92,13 +99,19 @@ public partial class MainWindow : Window
             AppLog.Write(ex, "环境未初始化");
             ShowError(ex.Message, "", canInstall: true);
         }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
             AppLog.Write(ex, "启动失败");
             var log = _server?.LogTail ?? "";
             // 环境装到一半、或有人把 env\python 删了：服务能起来但 cli 报
             // 缺依赖。这种也能用安装按钮修。
-            ShowError(ex.Message, log, canInstall: log.Contains("缺 web 依赖"));
+            ShowError(ex.Message, $"Shell 日志：{AppLog.LogPath}\n\n{log}", canInstall: log.Contains("缺 web 依赖"));
+            if (_server?.IsRunning == true && !_webViewReady)
+            {
+                try { OpenExternal(_server.Url); }
+                catch (Exception openEx) { AppLog.Write(openEx, "打开浏览器失败"); }
+            }
         }
         finally
         {
@@ -110,15 +123,7 @@ public partial class MainWindow : Window
     {
         if (_webViewReady) return;
 
-        var userData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Tagger", "WebView2");
-        Directory.CreateDirectory(userData);
-
-        var env = await CoreWebView2Environment.CreateAsync(null, userData);
-        await Web.EnsureCoreWebView2Async(env);
-
-        var core = Web.CoreWebView2;
+        var core = await _browser.InitializeAsync(_server!.Root, _lifetime.Token);
 
         // 页面里没有外链，干脆禁掉新窗口；真点了就在自己这里开。
         core.Settings.AreDefaultContextMenusEnabled = true;
@@ -136,7 +141,7 @@ public partial class MainWindow : Window
         {
             if (e.IsSuccess)
             {
-                Web.Visibility = Visibility.Visible;
+                _browser.View!.Visibility = Visibility.Visible;
                 Overlay.Visibility = Visibility.Collapsed;
             }
             else
@@ -152,6 +157,7 @@ public partial class MainWindow : Window
             if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited ||
                 e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
             {
+                _webViewReady = false;
                 ShowError("界面进程崩了。可以点重试重新载入。", e.ProcessFailedKind.ToString());
             }
         };
@@ -303,9 +309,15 @@ public partial class MainWindow : Window
 
     private async void OnRetryClick(object sender, RoutedEventArgs e)
     {
-        await ShutdownServerAsync();
-        Web.Visibility = Visibility.Collapsed;
-        await BootAsync();
+        if (_booting) return;
+        RetryButton.IsEnabled = false;
+        try
+        {
+            _webViewReady = false;
+            await _browser.CloseAsync();
+            await BootAsync();
+        }
+        finally { RetryButton.IsEnabled = true; }
     }
 
     private void OnCopyClick(object sender, RoutedEventArgs e)
@@ -357,13 +369,13 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.F5)
         {
-            Web.CoreWebView2.Reload();
+            _browser.View!.CoreWebView2.Reload();
             e.Handled = true;
         }
         else if (e.Key == Key.F12 ||
                  (e.Key == Key.I && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)))
         {
-            Web.CoreWebView2.OpenDevToolsWindow();
+            _browser.View!.CoreWebView2.OpenDevToolsWindow();
             e.Handled = true;
         }
     }
@@ -398,6 +410,7 @@ public partial class MainWindow : Window
         }
 
         _reallyClose = true;
+        _lifetime.Cancel();
 
         // 安装跑到一半关窗 = 用户主动放弃。取消后子进程树会被收掉，
         // 不留下的半成品 env\python 会由下次 install 的幂等逻辑补齐。
@@ -415,6 +428,8 @@ public partial class MainWindow : Window
             Title = "Tagger · 正在停止服务…";
         }
 
+        _webViewReady = false;
+        await _browser.CloseAsync();
         await ShutdownServerAsync();
         Application.Current.Shutdown();
     }

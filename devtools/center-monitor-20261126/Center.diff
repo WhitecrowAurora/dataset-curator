@@ -1,0 +1,125 @@
+--- tagger/web/ui/src/pages/Center.tsx (before)
++++ tagger/web/ui/src/pages/Center.tsx
+@@ -9,15 +9,15 @@
+   KeyRound,
+   Loader2,
+   Play,
+-  PlugZap,
+   RefreshCw,
+   Square,
+-  Terminal,
+ } from 'lucide-react'
+ import { api, ApiError, type CenterState, type CenterExecution } from '../lib/api'
+ import { DEFAULT_EXECUTION, ExecutionSettings, ExecutionCredentials, ExecutionDownloads, ExecutionLifecycle } from '../components/center/ExecutionSettings'
+ import { AdvancedSettings, FormSections } from '../components/ui/FormSections'
+ import { ExecutionStatus } from '../components/center/ExecutionStatus'
++import { ExecutionMonitor } from '../components/center/ExecutionMonitor'
++import { CenterOverview } from '../components/center/CenterOverview'
+ import { LeasePanel } from '../components/center/LeasePanel'
+ import { ConnectionNetwork, type ProxyMode } from '../components/center/ConnectionNetwork'
+ import { DownloadNetwork } from '../components/center/DownloadNetwork'
+@@ -28,7 +28,6 @@
+ import { failureAdvice, httpUrlError, localServiceUrlError, latestCenterFailure } from '../lib/guidance'
+ import { useFolderPicker } from '../components/FolderPicker'
+ import {
+-  MiniMetricCard,
+   PageHeader,
+   SectionPanel,
+   SettingRow,
+@@ -178,10 +177,6 @@
+   const running = Boolean(state?.runtime?.active || state?.runtime?.preparing || state?.running || state?.history?.running)
+   const releasing = Boolean(state?.release?.running)
+   const ident = state?.identity ?? {}
+-  const board = state?.board
+-  const leases = board?.leases ?? []
+-  // 只有连上看板、且服务端真的给了这项统计才显示（老服务端 → undefined）
+-  const pool = board?.ok ? board.parts : undefined
+   const serverNotice = seeded.current ? httpUrlError(server, '调度中心地址') : ''
+   const idNotice = seeded.current && !userId.trim() ? '请填写用户 ID，调度中心按这个 ID 记录产出。' : ''
+   const proxyNotice = proxyMode === 'custom' ? httpUrlError(proxyUrl, '代理地址') : ''
+@@ -236,6 +231,8 @@
+         }
+       />
+ 
++      <ExecutionMonitor state={state} unavailable={Boolean(pollError)} />
++
+       {(actionError || pollError) && <ErrorBox error={actionError || pollError}
+         nextStep={failureAdvice(actionError || pollError, 'center')} />}
+       {runtimeFailure && <ErrorBox error={failureDetail} title="调度运行失败"
+@@ -245,75 +242,7 @@
+             setSection('records')
+             requestAnimationFrame(() => document.getElementById('center-logs')?.scrollIntoView({ block: 'start' }))
+           }}>查看调度日志</button>} />}
+-      {state?.runtime?.message && <p className="text-xs text-lx-muted">{state.runtime.message}</p>}
+-      {state?.runtime?.managed && <div className="rounded-lx-sm border border-lx p-3 text-xs text-lx-muted">
+-        托管连接：{({ online: '已连接', connecting: '连接中', unsupported: '等待服务端升级',
+-          offline: '连接中断，自动重连', released: '已退出托管' } as Record<string, string>)[state.runtime.managed.status]
+-          ?? state.runtime.managed.status}
+-        {state.runtime.managed.error && <p className="mt-1 text-lx-warning">{state.runtime.managed.error}</p>}
+-        {state.runtime.managed.results.slice(-3).map((r) => <p key={r.id} className="mt-1">
+-          指令 {r.seq}：{({ accepted: '准备执行', applied: '已执行', failed: '失败', canceled: '已取消' } as Record<string, string>)[r.status] ?? r.status}
+-          {r.error && ` · ${r.error}`}
+-        </p>)}
+-      </div>}
+-
+-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+-        <MiniMetricCard
+-          icon={<PlugZap size={14} />}
+-          label="连接"
+-          value={board?.ok ? '已连接' : ident.server ? '暂未连通' : '未连接'}
+-          detail={board?.ok ? ident.server : board?.reason || ident.server || '填地址与 ID'}
+-          tone={board?.ok ? 'success' : ident.server ? 'warning' : 'neutral'}
+-        />
+-        <MiniMetricCard
+-          icon={<Terminal size={14} />}
+-          label="持有租约"
+-          value={String(leases.length)}
+-          detail={board?.reason || (board?.ok ? `执行 ${leases.filter(l => l.kind === 'active').length} · 预取 ${leases.filter(l => l.kind === 'prelock').length}` : '—')}
+-          tone={leases.length > 0 ? 'accent' : 'neutral'}
+-        />
+-        {/* 全池余量：谁想补哪一侧，看这两个数决定要不要开工。
+-            老服务端没有这项统计——此时整组都不显示，免得把"没统计"读成"一片不缺"。 */}
+-        {pool && ['remaining', 'total', 'done', 'missing_nl', 'missing_tag'].every(key =>
+-          typeof pool[key as keyof typeof pool] === 'number') && (
+-          <>
+-            <MiniMetricCard
+-              icon={<CircleDot size={14} />}
+-              label="全池剩余"
+-              value={String(pool.remaining)}
+-              detail={`共 ${pool.total} 片 · 已完成 ${pool.done}`}
+-              tone={pool.remaining > 0 ? 'accent' : 'success'}
+-            />
+-            <MiniMetricCard
+-              icon={<CircleDot size={14} />}
+-              label="缺 NL"
+-              value={String(pool.missing_nl)}
+-              detail="只等描述的那一侧"
+-              tone={pool.missing_nl > 0 ? 'warning' : 'success'}
+-            />
+-            <MiniMetricCard
+-              icon={<CircleDot size={14} />}
+-              label="缺 TAG"
+-              value={String(pool.missing_tag)}
+-              detail="只等标签的那一侧"
+-              tone={pool.missing_tag > 0 ? 'warning' : 'success'}
+-            />
+-          </>
+-        )}
+-        <MiniMetricCard
+-          icon={<Loader2 size={14} />}
+-          label="上次退出码"
+-          value={state?.last_rc === null || state?.last_rc === undefined ? '—' : String(state.last_rc)}
+-          detail={running ? '正在跑' : state?.last_rc === 0 ? '正常结束' : ''}
+-          tone={
+-            state?.last_rc === null || state?.last_rc === undefined
+-              ? 'neutral'
+-              : state.last_rc === 0
+-                ? 'success'
+-                : 'warning'
+-          }
+-        />
+-      </div>
++      <CenterOverview state={state} />
+ 
+       <ExecutionStatus state={state} busy={Boolean(busy) || releasing}
+         onResume={() => void act('resume', () => api.centerStart({}))}

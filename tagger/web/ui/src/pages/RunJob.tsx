@@ -39,7 +39,7 @@ const STATUS: Record<string, { label: string; tone: StatusTone }> = {
 function phaseLabel(status: string | undefined, phase: string, enabled: boolean): string {
   if (status === 'running') {
     if (phase === 'pack') return '封包中'
-    const base = '打标中'
+    const base = phase === 'hair' ? '发色复核中' : phase === 'nl' ? '生成描述中' : '打标中'
     return enabled ? `${base} · 之后封包` : base
   }
   return STATUS[status ?? 'pending']?.label ?? '—'
@@ -85,10 +85,11 @@ export function RunJob({
   const status = STATUS[snap?.status ?? 'pending'] ?? STATUS.pending
   const pack = snap?.pack
   const packing = snap?.phase === 'pack'
+  const reviewing = snap?.phase === 'hair' && !finished
   const sealed = pack?.packs ?? []
 
   const pct = (snap?.progress ?? 0) * 100
-  const rate = (packing ? pack?.rate_per_s : snap?.rate_per_s) ?? 0
+  const rate = reviewing ? 0 : (packing ? pack?.rate_per_s : snap?.rate_per_s) ?? 0
   const speed = rate > 0 ? `${rate.toFixed(2)} 张/s${packing ? '（封包）' : ''}` : '—'
   const perImage = rate > 0 ? `${(1 / rate).toFixed(2)}` : '—'
   const total = (packing ? pack?.total : snap?.counts.total) ?? 0
@@ -124,7 +125,9 @@ export function RunJob({
             ? '任务已结束'
             : packing
               ? '正在读产物封包'
-              : '正在逐张推理'
+              : reviewing
+                ? '正在自动复核发色'
+                : snap?.phase === 'nl' ? '正在生成描述' : '正在逐张推理'
         }
         title={title}
         description={
@@ -273,7 +276,16 @@ export function RunJob({
         <div className="px-[18px] py-5 md:px-7">
           <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
             <div className="min-w-0">
-              {streaming ? (
+              {reviewing ? (
+                <>
+                  <div className="flex items-center gap-2 text-xl font-semibold text-lx">
+                    <Loader2 size={20} className="animate-spin" /> 发色复核中
+                  </div>
+                  <div className="mt-2 text-xs text-lx-muted">
+                    复核自动完成；有分歧的结果会进入「冲突与决策」供人工确认
+                  </div>
+                </>
+              ) : streaming ? (
                 <>
                   <div className="font-display text-[38px] font-semibold leading-none tabular-nums tracking-tight text-lx">
                     {fmtCount(settled)}
@@ -314,13 +326,13 @@ export function RunJob({
                 <Gauge size={12} />{' '}
                 {speed}
               </span>
-              {snap?.eta_s != null && !finished && !packing && (
+              {snap?.eta_s != null && !finished && !packing && !reviewing && (
                 <span className="tabular-nums">约剩 {fmtSeconds(snap.eta_s)}</span>
               )}
             </div>
           </div>
 
-          {!streaming && (
+          {!streaming && !reviewing && (
             <ProgressBar
               percent={pct}
               tone={snap?.status === 'failed' ? 'danger' : snap?.status === 'done' ? 'success' : 'accent'}

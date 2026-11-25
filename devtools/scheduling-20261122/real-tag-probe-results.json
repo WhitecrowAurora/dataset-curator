@@ -1,0 +1,50 @@
+{
+  "sample_count": 4,
+  "rows": [
+    {
+      "field": "tag_batch",
+      "requested": 1,
+      "actual": 1,
+      "rate_per_s": 0.448,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 33.2
+    },
+    {
+      "field": "tag_batch",
+      "requested": 2,
+      "actual": 2,
+      "rate_per_s": 0.484,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 33.0
+    },
+    {
+      "field": "tag_batch",
+      "requested": 4,
+      "actual": 4,
+      "rate_per_s": 0.467,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 30.0
+    },
+    {
+      "field": "tag_batch",
+      "requested": 8,
+      "actual": 8,
+      "rate_per_s": 0.459,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 31.1
+    }
+  ],
+  "recommended": {
+    "tag_batch": 1
+  },
+  "created_at": 1795360479.7247722,
+  "note": "小样本预热与真实打标测量；建议值需确认下发，长期稳定性仍需正式任务观察"
+}

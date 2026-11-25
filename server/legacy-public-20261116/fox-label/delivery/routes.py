@@ -17,7 +17,7 @@ def _identity(handler, dispatch, c):
         if check["status"] in ("registered", "incomplete", "verifying"):
             raise ValueError("历史检查已登记，不能覆盖验收产物")
         return {"repo": check["repo"], "pkg": check["package"],
-                "lease_id": check["check_id"], "kind": "history"}, device
+                "lease_id": check["check_id"], "annotation_json":check.get('annotation_json','{}'), "kind": "history"}, device
     device = c.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
     if not device or device["user_id"] != user:
         raise dispatch.AuthError("设备与用户不匹配")
@@ -30,11 +30,20 @@ def _identity(handler, dispatch, c):
     if not status or status["status"] != "active" or device["status"] in ("archived", "blocked"):
         raise dispatch.AuthError("身份不可接收产物")
     if (not lease or lease["user_id"] != user or lease["device_id"] != device_id
-            or lease["kind"] not in ("active", "offline") or lease["status"] not in ("open", "done")):
-        raise ValueError("当前身份没有这个可回传的租约")
+            or lease["kind"] not in ("active", "offline") or lease["status"] not in ("open", "done", "local_done")):
+        raise dispatch.LeaseError("当前身份没有这个可回传的租约，请重新领取后续做，本机产物保留")
+    from scheduling.lifetime import expired
+    if expired(lease):
+        raise dispatch.LeaseError('在线租约已过期，请重新领取后续做，本机产物保留')
     if lease["kind"] == "offline":
         from assignments.offline import authenticate
         authenticate(c,dispatch,lease,handler.headers.get("X-Fox-Secret",""))
+    validate_lease(c, lease)
+    return dict(lease), device
+
+
+def validate_lease(c, lease):
+    """普通回传与管理员导入共同检查轮次和仓库接收状态。"""
     newer = c.execute("SELECT 1 FROM lease_parts old JOIN lease_parts n ON n.repo=old.repo AND n.pkg=old.pkg AND n.part=old.part"
                        " JOIN leases later ON later.lease_id=n.lease_id JOIN leases prior ON prior.lease_id=old.lease_id"
                        " WHERE old.lease_id=? AND (later.issued_at>prior.issued_at OR"
@@ -45,7 +54,6 @@ def _identity(handler, dispatch, c):
     repo = c.execute("SELECT enabled FROM repos WHERE repo=?", (lease["repo"],)).fetchone()
     if not repo or not repo["enabled"]:
         raise ValueError("仓库已停用")
-    return dict(lease), device
 
 
 def handle(handler, dispatch, method, writable):
@@ -66,7 +74,13 @@ def handle(handler, dispatch, method, writable):
         finally:
             c.close()
         q = parse_qs(urlparse(handler.path).query)
-        if path in ('/api/blob/resume', '/api/blob/reconcile') and lease['kind'] != 'history':
+        if method == 'GET' and path == '/api/blob/artist':
+            from annotation.tables import for_task
+            try:
+                out = for_task(handler.store, lease)
+            except Exception as exc:
+                raise ValueError('画师表准备失败，请管理员检查表目录、固定版本或 HF 权限：'+str(exc)) from exc
+        elif path in ('/api/blob/resume', '/api/blob/reconcile') and lease['kind'] != 'history':
             from .reconciliation import snapshot, accept
             c = handler.store.conn()
             try:
@@ -125,8 +139,11 @@ def handle(handler, dispatch, method, writable):
         handler._json(200, out)
     except dispatch.AuthError as e:
         handler._json(401, {"error": str(e)})
+    except dispatch.LeaseError as e:
+        handler._json(409, {"error": str(e)})
     except (ValueError, BlobError) as e:
-        handler._json(400, {"error": str(e)})
+        handler._json(400, {"error": str(e),
+                           **({'report': e.report} if getattr(e, 'report', None) else {})})
     except Exception as e:
         handler._note("delivery", 503, type(e).__name__)
         handler._json(503, {"error": "产物发布失败，请检查目标目录或 HF 权限；本机产物保留"})

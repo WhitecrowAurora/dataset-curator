@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="89" time="30.722" timestamp="2026-11-19T04:46:11.539939+08:00" hostname="DESKTOP-310LLIR"><testcase classname="tests.test_client" name="test_normalize_tags_basic" time="0.010" /><testcase classname="tests.test_client" name="test_normalize_tags_drops_quality_and_identity_words" time="0.005" /><testcase classname="tests.test_client" name="test_normalize_tags_dedupes_and_drops_noise" time="0.005" /><testcase classname="tests.test_client" name="test_normalize_tags_keeps_danbooru_punctuation" time="0.003" /><testcase classname="tests.test_client" name="test_normalize_caption_strips_prefix_and_markdown" time="0.003" /><testcase classname="tests.test_client" name="test_parse_output_both_blocks" time="0.003" /><testcase classname="tests.test_client" name="test_parse_output_tolerates_missing_closing_tag" time="0.005" /><testcase classname="tests.test_client" name="test_parse_output_both_without_markers_is_empty" time="0.003" /><testcase classname="tests.test_client" name="test_parse_output_single_mode_falls_back_to_whole_text" time="0.006" /><testcase classname="tests.test_client" name="test_用满上限判为截断" time="0.005" /><testcase classname="tests.test_client" name="test_没用满就不算截断" time="0.004" /><testcase classname="tests.test_client" name="test_没有上限时不判截断" time="0.004" /><testcase classname="tests.test_client" name="test_缺闭标记本身不算截断" time="0.004" /><testcase classname="tests.test_client" name="test_parse_output_empty" time="0.004" /><testcase classname="tests.test_client" name="test_prompt_carries_tag_floor" time="0.006" /><testcase classname="tests.test_client" name="test_prompt_tag_only_has_no_caption_block" time="0.004" /><testcase classname="tests.test_client" name="test_prompt_nl_only_has_no_tag_block" time="0.007" /><testcase classname="tests.test_client" name="test_prompt_length_guidance_follows_token_budget" time="0.009" /><testcase classname="tests.test_client" name="test_zh_prompt_fits_token_gate" time="0.009" /><testcase classname="tests.test_client" name="test_zh_prompt_shorter_than_en" time="0.011" /><testcase classname="tests.test_client" name="test_sentence_range_follows_char_range" time="0.006" /><testcase classname="tests.test_client" name="test_prompt_does_not_invite_overflow" time="0.010" /><testcase classname="tests.test_client" name="test_prompt_caption_demands_colour_and_material" time="0.009" /><testcase classname="tests.test_client" name="test_prompt_caption_blocks_identity_leak" time="0.008" /><testcase classname="tests.test_client" name="test_prompt_tag_rules_forbid_padding" time="0.007" /><testcase classname="tests.test_client" name="test_prompt_both_mode_says_nothing_else" time="0.009" /><testcase classname="tests.test_client" name="test_tag_payload_records_backend_and_precision" time="0.850" /><testcase classname="tests.test_client" name="test_nl_payload_has_no_tag_fields" time="0.719" /><testcase classname="tests.test_client" name="test_vlm_tagging_marks_backend_as_vlm" time="0.751" /><testcase classname="tests.test_local_tag" name="test_scan_is_sorted_and_ids_drop_extension" time="0.030" /><testcase classname="tests.test_local_tag" name="test_scan_respects_non_recursive_and_limit" time="0.019" /><testcase classname="tests.test_local_tag" name="test_chunk_is_larger_than_batch_size" time="0.573" /><testcase classname="tests.test_local_tag" name="test_writes_payload_with_expected_fields" time="0.121" /><testcase classname="tests.test_local_tag" name="test_skip_rule_is_ok_not_empty_tag" time="0.085" /><testcase classname="tests.test_local_tag" name="test_artifact_without_fingerprint_is_skipped" time="0.097" /><testcase classname="tests.test_local_tag" name="test_fingerprint_changes_with_thresholds" time="0.163" /><testcase classname="tests.test_local_tag" name="test_force_ignores_existing_artifacts" time="0.107" /><testcase classname="tests.test_local_tag" name="test_broken_image_does_not_take_down_the_chunk" time="0.133" /><testcase classname="tests.test_local_tag" name="test_should_stop_breaks_at_chunk_boundary" time="0.599" /><testcase classname="tests.test_local_tag" name="test_timings_accumulate_and_progress_kinds_are_reported" time="0.326" /><testcase classname="tests.test_local_tag" name="test_broken_hook_does_not_abort" time="0.105" /><testcase classname="tests.test_local_tag" name="test_summary_lines_are_human_readable" time="0.005" /><testcase classname="tests.test_local_tag" name="test_scan_rejects_non_directory" time="0.009" /><testcase classname="tests.test_guard" name="test_stop_not_downgraded_by_temp_branch" time="0.004" /><testcase classname="tests.test_guard" name="test_continuous_rest_resumes" time="0.005" /><testcase classname="tests.test_guard" name="test_gpu_read_reports_gb_not_mib" time="0.005" /><testcase classname="tests.test_guard" name="test_gpu_read_returns_zero_without_touching_subprocess" time="0.004" /><testcase classname="tests.test_guard" name="test_sensor_death_stops_after_being_seen" time="0.006" /><testcase classname="tests.test_guard" name="test_never_seen_gpu_is_not_an_error" time="0.004" /><testcase classname="tests.test_guard" name="test_wait_can_run_returns_when_state_recovers" time="0.025" /><testcase classname="tests.test_guard" name="test_wait_can_run_gives_up_at_deadline" time="1.213" /><testcase classname="tests.test_web_features" name="test_filter_shards_keeps_requested_and_warns_missing" time="0.005" /><testcase classname="tests.test_web_features" name="test_tag_items_guard_stop_breaks_before_chunk" time="0.085" /><testcase classname="tests.test_web_features" name="test_tag_items_guard_pause_waits_then_runs" time="1.172" /><testcase classname="tests.test_web_features" name="test_make_guard_pushes_state_changes_into_events" time="0.071" /><testcase classname="tests.test_web_features" name="test_guard_policy_overrides_reach_the_policy" time="0.106" /><testcase classname="tests.test_web_features" name="test_guard_policy_rejects_resume_above_cutoff" time="0.039" /><testcase classname="tests.test_web_features" name="test_normalize_guard_policy_drops_unknown_and_clamps" time="0.004" /><testcase classname="tests.test_web_features" name="test_retry_failed_refuses_when_book_is_empty" time="0.055" /><testcase classname="tests.test_web_features" name="test_retry_failed_keeps_the_original_out_dir" time="0.106" /><testcase classname="tests.test_web_features" name="test_create_vlm_requires_repo_or_dir" time="0.006" /><testcase classname="tests.test_web_features" name="test_create_vlm_plan_is_none" time="0.056" /><testcase classname="tests.test_web_features" name="test_run_vlm_bridges_run_client" time="5.640"><failure message="KeyError: 'args'">tmp_path = WindowsPath('H:/tagger/backend/smoke/hair-quality/final-checks/test_run_vlm_bridges_run_clien0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000000037BBEE40&gt;
+
+    def test_run_vlm_bridges_run_client(tmp_path, monkeypatch):
+        seen: dict = {}
+    
+        # paused 是 run_client 的协作式暂停钩子（Web 的暂停按钮）。替身必须
+        # 照抄完整签名：少一个关键字参数，岗位里的 TypeError 会被当成"任务失败"，
+        # 测试报的是 `seen["args"]` KeyError，离真因隔了一层。
+        def fake_run_client(args, ops, table, on_progress=None, should_stop=None,
+                            on_log=None, guard=None, paused=None,
+                            only_failed=False, retry_budget=1):
+            seen["args"] = args
+            seen["guard"] = guard
+            seen["only_failed"] = only_failed
+            on_log("横幅一条")
+            stats = ClientStats()
+            on_progress("done", TaskRow(shard="hf://r/s#m", image_id="a-1",
+                                        file="a-1.jpg", image_path="hf://r/s#m"),
+                        Outcome("a-1", True, tag={"tags": [["red", 0.9]]}), stats)
+            on_progress("failed", TaskRow(shard="hf://r/s#m", image_id="a-2",
+                                          file="a-2.jpg"),
+                        Outcome("a-2", False, error="坏图"), stats)
+            on_progress("skipped", TaskRow(shard="hf://r/s#m", image_id="a-3",
+                                           file="a-3.jpg"), None, stats)
+            stats.done, stats.failed, stats.skipped, stats.total = 1, 1, 1, 3
+            return 0
+    
+        monkeypatch.setattr("tagger.client.run_client", fake_run_client)
+        mgr = JobManager()
+        job = mgr.create(_vlm_spec(tmp_path, hf_repo="org/team-parquet",
+                                   guard=False, vlm_model="qwen-vl-8b"))
+        mgr._run(job)
+    
+&gt;       args = seen["args"]
+               ^^^^^^^^^^^^
+E       KeyError: 'args'
+
+tests\test_web_features.py:292: KeyError</failure></testcase><testcase classname="tests.test_web_features" name="test_run_counts_split_skip_reasons_and_settle_them" time="0.132"><failure message="assert (0, 0, 0, 0, 0) == (194, 5, 2, 3, 1)&#10;  &#10;  At index 0 diff: 0 != 194&#10;  Use -v to get more diff">tmp_path = WindowsPath('H:/tagger/backend/smoke/hair-quality/final-checks/test_run_counts_split_skip_rea0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000000004BE7050&gt;
+
+    def test_run_counts_split_skip_reasons_and_settle_them(tmp_path, monkeypatch):
+        """「跳过」要按原因分开，而且几类都要算已结算。
+    
+        真实形态：一批 205 张，194 张产物已有、5 张图太小、2 张没画师、3 张重试后
+        剔除、1 张重试后依然失败。以前 counts 只有一个 skipped，其余三类压根没出门，
+        面板上只有一句说不清来由的"跳过 194"；settled 也不算它们，进度于是永远
+        停在 97.5% 不动，看着像卡死。
+        """
+    
+        def fake_run_client(args, ops, table, on_progress=None, should_stop=None,
+                            on_log=None, guard=None, paused=None,
+                            only_failed=False, retry_budget=1):
+            stats = ClientStats()
+            # 必须先回调一次：client_stats 是订阅方从 hook 里拿到的引用，
+            # 不回调的话快照还在读 local 引擎那份 TagStats，计数全是 0。
+            on_progress("skipped", TaskRow(shard="hf://r/s#m", image_id="a-1",
+                                           file="a-1.jpg"), None, stats)
+            stats.skipped, stats.blank_skipped = 194, 5
+            stats.artist_skipped, stats.excused, stats.blacklisted = 2, 3, 1
+            stats.total = 205
+            return 0
+    
+        monkeypatch.setattr("tagger.client.run_client", fake_run_client)
+        mgr = JobManager()
+        job = mgr.create(_vlm_spec(tmp_path, hf_repo="org/team-parquet", guard=False))
+        mgr._run(job)
+    
+        snap = job.snapshot()
+        c = snap["counts"]
+&gt;       assert (c["skipped"], c["blank_skipped"], c["artist_skipped"],
+                c["excused"], c["blacklisted"]) == (194, 5, 2, 3, 1)
+E       assert (0, 0, 0, 0, 0) == (194, 5, 2, 3, 1)
+E         
+E         At index 0 diff: 0 != 194
+E         Use -v to get more diff
+
+tests\test_web_features.py:349: AssertionError</failure></testcase><testcase classname="tests.test_web_features" name="test_run_vlm_mode_mapping" time="0.258" /><testcase classname="tests.test_web_features" name="test_upload_manager_success_and_rows" time="0.971" /><testcase classname="tests.test_web_features" name="test_upload_manager_failure_marks_file" time="0.017" /><testcase classname="tests.test_web_features" name="test_upload_manager_stop_between_files" time="0.075" /><testcase classname="tests.test_web_features" name="test_upload_manager_rejects_traversal" time="0.011" /><testcase classname="tests.test_web_features" name="test_run_batch_serial_stop_raises_and_stops_submitting" time="0.015" /><testcase classname="backend.smoke.hair-quality.checks" name="test_low_confidence_vlm_support" time="0.003" /><testcase classname="backend.smoke.hair-quality.checks" name="test_changed_image_and_history_preserved" time="0.626" /><testcase classname="backend.smoke.hair-quality.checks" name="test_update_scope_and_explicit_resume_location" time="0.629" /><testcase classname="backend.smoke.hair-quality.checks" name="test_missing_image_does_not_abort_batch" time="0.628" /><testcase classname="backend.smoke.hair-quality.checks" name="test_runtime_switch_and_stop" time="0.083" /><testcase classname="backend.smoke.hair-quality.checks" name="test_main_service_resume_after_failure" time="0.491" /><testcase classname="backend.smoke.hair-quality.checks" name="test_manual_and_batch_writeback_serialized" time="0.580" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_memory_budget[16-5-1]" time="1.051" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_memory_budget[32-15-3]" time="1.138" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_memory_budget[96-66-3]" time="1.241" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_pressure_lru" time="0.967" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_file_cache_pressure_does_not_hide_resident_pressure" time="0.293" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_phase_progress_and_start_coordination" time="0.003" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_caption_stages_without_hair_and_alias" time="0.403" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_batch_writes_shard_once" time="3.674" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_writeback_undo_and_shards" time="0.610" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_roles_filter_retry" time="1.557" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_torii_replay" time="0.048" /><testcase classname="backend.smoke.hair-quality.checks_previous" name="test_low_confidence_and_light" time="0.002" /></testsuite></testsuites>

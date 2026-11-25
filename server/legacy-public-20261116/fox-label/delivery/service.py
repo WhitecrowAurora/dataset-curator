@@ -7,7 +7,7 @@ import shutil
 import sqlite3
 import threading
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from .blobs import BlobStore
@@ -20,7 +20,7 @@ class Delivery:
         self.default_dir = str(Path(artifact_dir) / "received")
         self.blobs = BlobStore(Path(artifact_dir) / "transfer")
         self.lock = threading.RLock()
-        self.publish_lock = threading.Lock()
+        self.publish_lock = threading.RLock()
         self.next_cleanup = 0.0
         Path(self.default_dir).mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
@@ -29,10 +29,15 @@ class Delivery:
                       "sha256 TEXT, size INTEGER, local_path TEXT, hf_repo TEXT, hf_path TEXT,"
                       "received_at REAL DEFAULT (unixepoch()))")
 
+    @contextmanager
     def connect(self):
         c = sqlite3.connect(self.db_path, timeout=30)
         c.row_factory = sqlite3.Row
-        return c
+        try:
+            with c:
+                yield c
+        finally:
+            c.close()
 
     def config(self, private=False):
         cfg = {"mode": "local", "local_dir": self.default_dir, "hf_token": "",
@@ -113,8 +118,8 @@ class Delivery:
                             for r in fn(author=owner))
         return {"repositories": sorted(rows, key=lambda r: (r["type"], r["id"]))}
 
-    def publish(self, lease, device, body, publication=nullcontext):
-        filename = str(body.get("name") or "")
+    @staticmethod
+    def validate_filename(lease, filename):
         if Path(filename).name != filename or (not filename.endswith(".jsonl") and filename != "proof.json"):
             raise ValueError("调度回传只接收本包 JSONL 分片")
         stem = Path(lease["pkg"]).stem
@@ -122,6 +127,10 @@ class Delivery:
                        else ch for ch in stem).strip("._ ")[:60].rstrip("._ ") or "multi"
         if not (filename == "proof.json" or filename == f"artifacts-{stem}.jsonl" or filename.startswith(f"artifacts-{stem}-")):
             raise ValueError("产物文件名与当前租约分片不匹配")
+
+    def publish(self, lease, device, body, publication=nullcontext):
+        filename = str(body.get("name") or "")
+        self.validate_filename(lease, filename)
         # 用户/仓库路径用哈希隔离；文件名、租约和设备另有路径校验。
         namespace = hashlib.sha256(lease["repo"].encode()).hexdigest()[:16]
         rel = f"{namespace}/{device['device_id']}/{lease['lease_id']}/{filename}"

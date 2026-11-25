@@ -1,0 +1,33 @@
+{
+  "checks": [
+    "center catalog: PixAI / Torii / native",
+    "center tabs preserve text, numeric input, selection and expanded details",
+    "keyboard tab navigation / native details / switch with visible focus",
+    "real isolated API save and reload",
+    "light theme renders",
+    "center responsive widths 1100 / 900 / 768",
+    "new task retains input after tabs / both + media route remains populated",
+    "NL-only + media route remains populated",
+    "new task responsive widths 1100 / 900 / 768",
+    "topbar dropdown remains above main and closes with Escape",
+    "reduced motion: panel / switch / details"
+  ],
+  "page_errors": [],
+  "blocked_fixture_endpoints": [
+    "/api/activities",
+    "/api/center/history",
+    "/api/center/history/discover",
+    "/api/center/offline",
+    "/api/downloads/packs",
+    "/api/presets",
+    "/api/resume",
+    "/api/sysinfo",
+    "/api/tag-vram",
+    "/api/vllm/capability",
+    "/api/vllm/plan"
+  ],
+  "reduced_motion": {
+    "animation": "none",
+    "transition": "1e-05s"
+  }
+}

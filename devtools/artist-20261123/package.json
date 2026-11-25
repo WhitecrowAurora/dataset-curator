@@ -1,0 +1,10 @@
+{
+  "file": "H:\\tagger\\dist\\tagger-20261123-artist.zip",
+  "bytes": 76693769,
+  "sha256": "72ab6bc3ceb5c9581e19bc74f2d9bca38d6f2e52ce6e9a876060795d03da6419",
+  "crc": true,
+  "source_matches": true,
+  "excluded_private_state": true,
+  "credential_scan": true,
+  "worker_manifest": true
+}

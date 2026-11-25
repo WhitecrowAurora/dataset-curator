@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="Tagger"
         Height="860" Width="1320"
@@ -16,7 +15,7 @@
     <Grid>
         <!-- 网页本体。启动期间藏着，等 NavigationCompleted 成功才显示：
              否则 WebView2 会先糊一块白底再跳变，看着像闪屏。 -->
-        <wv2:WebView2 x:Name="Web" Visibility="Collapsed" />
+        <Grid x:Name="WebHost" />
 
         <!-- 启动遮罩：加载 -> 出错 两个面板二选一。整个盖在网页上方。 -->
         <Grid x:Name="Overlay" Background="{StaticResource BgBrush}">

@@ -1,6 +1,7 @@
 """本机身份代理工作区列表与指定领取。"""
 import json
 import httpx
+from ...center_runtime.network import httpx_options
 from fastapi import APIRouter, HTTPException
 
 
@@ -16,8 +17,14 @@ def request(center, action, body):
             mode = cfg.get("mode", "both")
             body={**body,"parts":mode if mode != "both" else cfg.get("parts_pref") or "both"}
         response=httpx.post(identity["server"].rstrip("/")+"/api/v1/"+action,
-                            json={**body,**headers},timeout=10,follow_redirects=False)
-        data=response.json()
+                            json={**body,**headers},timeout=httpx.Timeout(20,connect=10),follow_redirects=False,
+                            **httpx_options(identity['server'], center.config()))
+        try:
+            data=response.json()
+        except ValueError as exc:
+            if response.status_code >= 500:
+                raise ValueError(f"调度中心暂时不可用（HTTP {response.status_code}），请稍后重试；本地分派仍保留") from exc
+            raise ValueError(f"调度中心返回了非 JSON 内容（HTTP {response.status_code}），请检查中心地址或代理") from exc
         if not isinstance(data,dict):raise ValueError("调度中心返回格式不正确")
         if response.status_code!=200:
             raise ValueError(data.get("error") or "调度中心请求失败")
@@ -31,15 +38,27 @@ def router(center):
     from .offline import OfflineTasks
     offline=OfflineTasks(center)
     center.offline=offline
+    from .leases import LeaseControl
+    center.leases = LeaseControl(center, request)
+    from .dispatch_plans import mount as mount_plans
+    mount_plans(routes, center, request)
+    @routes.post('/release', status_code=202)
+    def release(body:dict):
+        try:
+            center.leases.start(body)
+            return center.snapshot()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     @routes.get("/workspace")
     def packages(offset:int=0):
         data = request(center,"workspace",{"offset":offset})
-        if center.runtime.active and center.config()['hosting_mode'] == 'passive':
-            data['allow_manual_claim'] = False
-            data['queue_only'] = False
+        data['allow_manual_claim'] = False
+        data['queue_only'] = False
         return data
     @routes.post("/reserve")
     def reserve(body:dict):
+        if center.leases.running:
+            raise HTTPException(400, '正在释放租约，请等待服务器确认')
         if center.runtime.active and center.config()['hosting_mode'] == 'passive':
             raise HTTPException(400,'托管中由中心分配任务')
         items=body.get("items")
@@ -50,6 +69,8 @@ def router(center):
         return data
     @routes.post("/queue")
     def queue(body:dict):
+        if center.leases.running:
+            raise HTTPException(400, '正在释放租约，请等待服务器确认')
         if center.runtime.active and center.config()['hosting_mode'] == 'passive':
             raise HTTPException(400,'托管中由中心分配任务')
         return request(center,"queue",body)
@@ -72,8 +93,14 @@ def router(center):
         except (ValueError,OSError,TypeError) as exc:raise HTTPException(400,str(exc)) from exc
     @routes.post("/offline/start")
     def offline_start(body:dict):
+        from ...config import ConfigError
         try:return offline.start(body.get("shard_dir", ""),body.get("out_dir", ""),body.get("upload") is True)
-        except (ValueError,OSError,TypeError) as exc:raise HTTPException(400,str(exc)) from exc
+        except (ValueError,OSError,TypeError,ConfigError) as exc:raise HTTPException(400,str(exc)) from exc
     @routes.post("/offline/stop")
     def offline_stop():return offline.stop()
+    @routes.post('/offline/export')
+    def offline_export(body:dict):
+        from .offline_export import export
+        try:return export(offline, body.get('shard_dir', ''), body.get('out_dir', ''), body.get('package', ''))
+        except (ValueError, OSError, TypeError) as exc:raise HTTPException(400, str(exc)) from exc
     return routes

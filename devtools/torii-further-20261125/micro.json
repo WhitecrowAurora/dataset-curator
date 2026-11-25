@@ -1,0 +1,314 @@
+[
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 8,
+    "ms": 0.04058375077993415,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 16,
+    "ms": 0.03860486707357477,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 32,
+    "ms": 0.040834255860263055,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_qkv.weight",
+    "n": 8192,
+    "k": 2560,
+    "bn": 64,
+    "ms": 0.12302524552539304,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 8,
+    "ms": 0.02155469714135589,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 16,
+    "ms": 0.02051685536674512,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 32,
+    "ms": 0.02107742192375312,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.attn_gate.weight",
+    "n": 4096,
+    "k": 2560,
+    "bn": 64,
+    "ms": 0.06841288153849188,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 8,
+    "ms": 0.022160519484886253,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 16,
+    "ms": 0.023897012257872295,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 32,
+    "ms": 0.03185291542946309,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ssm_out.weight",
+    "n": 2560,
+    "k": 4096,
+    "bn": 64,
+    "ms": 0.0878928437979215,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 8,
+    "ms": 0.04513123451885887,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 16,
+    "ms": 0.04280610568493273,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 32,
+    "ms": 0.05142448442763839,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_gate.weight",
+    "n": 9216,
+    "k": 2560,
+    "bn": 64,
+    "ms": 0.16146919031770393,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 8,
+    "ms": 0.04705244748048214,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 16,
+    "ms": 0.05137453612397803,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 32,
+    "ms": 0.06963250917112483,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "blk.0.ffn_down.weight",
+    "n": 2560,
+    "k": 9216,
+    "bn": 64,
+    "ms": 0.19276006932071396,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 8,
+    "ms": 1.2801850082090238,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 16,
+    "ms": 1.2407439273061152,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 32,
+    "ms": 1.304491108219798,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "vector",
+    "name": "output.weight",
+    "n": 248320,
+    "k": 2560,
+    "bn": 64,
+    "ms": 3.335108889066256,
+    "max_error": 0.0,
+    "exact": true
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 2048,
+    "mode": "sdpa",
+    "ms": 0.1616042169717875,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 2048,
+    "mode": "qwen_decode",
+    "ms": 0.021680808645695687,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4562156138708815e-05
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 4096,
+    "mode": "sdpa",
+    "ms": 0.3595071325638988,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 4096,
+    "mode": "qwen_decode",
+    "ms": 0.04149904597889293,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4275040484790225e-05
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 2048,
+    "mode": "sdpa",
+    "ms": 1.0014587177121772,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 2048,
+    "mode": "qwen_decode",
+    "ms": 0.1634646724691493,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4402457964024507e-05
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 4096,
+    "mode": "sdpa",
+    "ms": 1.9711505086798418,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 4096,
+    "mode": "qwen_decode",
+    "ms": 0.3258194500841516,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4394336176337674e-05
+  }
+]

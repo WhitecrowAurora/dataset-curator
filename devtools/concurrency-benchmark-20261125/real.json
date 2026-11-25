@@ -1,0 +1,75 @@
+{
+  "id": "d8f4c11ee055",
+  "running": false,
+  "status": "completed",
+  "phase": "measuring",
+  "message": "测试完成",
+  "error": "",
+  "rows": [
+    {
+      "requested": 1,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 37.06,
+      "actual": 1,
+      "warmup_s": 23.8,
+      "peak_vram_mb": 8162,
+      "elapsed_s": 19.6,
+      "process_s": 21.31,
+      "log_path": "D:\\tagger-validation\\concurrency-benchmark-20261125\\concurrency-tests\\d8f4c11ee055\\concurrency-1\\execution.log",
+      "rate_per_s": 0.2041
+    },
+    {
+      "requested": 2,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 6.08,
+      "actual": 2,
+      "warmup_s": 16.95,
+      "peak_vram_mb": 8143,
+      "elapsed_s": 14.2,
+      "process_s": 15.75,
+      "log_path": "D:\\tagger-validation\\concurrency-benchmark-20261125\\concurrency-tests\\d8f4c11ee055\\concurrency-2\\execution.log",
+      "rate_per_s": 0.2817
+    },
+    {
+      "requested": 4,
+      "status": "completed",
+      "successful": 4,
+      "failed": 0,
+      "prepare_s": 6.11,
+      "actual": 4,
+      "warmup_s": 14.83,
+      "peak_vram_mb": 8685,
+      "elapsed_s": 11.7,
+      "process_s": 13.3,
+      "log_path": "D:\\tagger-validation\\concurrency-benchmark-20261125\\concurrency-tests\\d8f4c11ee055\\concurrency-4\\execution.log",
+      "rate_per_s": 0.3419
+    }
+  ],
+  "request": {
+    "model": "qwen3vl-8b-abliterated",
+    "engine": "llamacpp",
+    "precision": "q4",
+    "device": "cuda:0",
+    "source": "H:\\lulynx-trainer\\backend\\smoke\\tagger-concurrency-benchmark-20261125\\real\\images",
+    "output_dir": "D:/tagger-validation/concurrency-benchmark-20261125",
+    "levels": [
+      1,
+      2,
+      4
+    ],
+    "sample_count": 4
+  },
+  "created_at": 1795618602.8585038,
+  "progress": {},
+  "report_path": "D:\\tagger-validation\\concurrency-benchmark-20261125\\concurrency-tests\\d8f4c11ee055\\report.json",
+  "sample_count": 4,
+  "rejected_images": 0,
+  "source": "H:\\lulynx-trainer\\backend\\smoke\\tagger-concurrency-benchmark-20261125\\real\\images",
+  "current": 4,
+  "recommended": 4,
+  "finished_at": 1795618759.9215002
+}

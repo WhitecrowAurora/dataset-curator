@@ -30,6 +30,32 @@ DEFAULT_CHUNK = 8 << 20
 class BlobClientError(Exception):
     """带上下文的上传失败（哪一步、哪个文件）。"""
 
+    def __init__(self, message: str, *, code: int | None = None, report: dict | None = None):
+        super().__init__(message)
+        self.code = code
+        self.report = report or {}
+
+    @property
+    def permanent(self) -> bool:
+        return self.code is not None and 400 <= self.code < 500 and self.code not in (408, 429)
+
+    @classmethod
+    def from_http(cls, exc: urllib.error.HTTPError, method: str, path: str):
+        detail, report = "", {}
+        try:
+            raw = exc.read(128 * 1024).decode("utf-8", "replace")
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                body = {}
+            if isinstance(body, dict):
+                detail = str(body.get("error") or "")
+                report = body.get("report") if isinstance(body.get("report"), dict) else {}
+            detail = detail or raw[:300]
+        except OSError:
+            pass
+        return cls(f"{method} {path} → HTTP {exc.code} {detail}", code=exc.code, report=report)
+
 
 @dataclass
 class UploadReport:
@@ -44,6 +70,8 @@ class UploadReport:
     sha256: str = ""
     seconds: float = 0.0
     error: str = ""
+    error_code: int | None = None
+    error_report: dict = field(default_factory=dict)
     # 服务端在 commit 时回的分片校验报告（{ok, rows, problems, ...}）。
     # 空 dict = 对方是老版本 / 跳过了校验。
     verify: dict = field(default_factory=dict)
@@ -52,7 +80,7 @@ class UploadReport:
         if not self.ok:
             return f"[回传] {self.name} 失败：{self.error}"
         saved = f"，秒传 {self.skipped_chunks} 块" if self.skipped_chunks else ""
-        return (f"[回传] {self.name} 完成 {self.bytes / 1048576:.1f} MB"
+        return (f"[回传] {self.name} 文件上传完成 {self.bytes / 1048576:.1f} MB"
                 f"（{self.uploaded_chunks} 块{saved}，{self.seconds:.1f}s）")
 
 
@@ -67,10 +95,12 @@ class BlobClient:
     headers: dict[str, str] = field(default_factory=dict, repr=False)
     _opener: urllib.request.OpenerDirector = field(default=None, repr=False)
     deadline: float | None = None
+    network: dict | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
-        self._opener = urllib.request.build_opener()
+        from .center_runtime.network import opener
+        self._opener = opener(self.base_url, self.network, redirects=self.network is None)
 
     # ---------------------------------------------------------------- HTTP
 
@@ -92,12 +122,7 @@ class BlobClient:
             with self._opener.open(req, timeout=timeout) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", "replace")[:300]
-            except Exception:                 # noqa: BLE001 - 读错误体本身失败了
-                pass
-            raise BlobClientError(f"{method} {path} → HTTP {exc.code} {detail}") from exc
+            raise BlobClientError.from_http(exc, method, path) from exc
         except urllib.error.URLError as exc:
             raise BlobClientError(f"{method} {path} 连不上：{exc.reason}") from exc
         if not raw:
@@ -128,14 +153,14 @@ class BlobClient:
             except BlobClientError as exc:
                 last = exc
                 # 400/401/403/413 这类是参数或权限问题，重试没意义，直接抛
-                msg = str(exc)
-                if "HTTP 4" in msg and "HTTP 408" not in msg and "HTTP 429" not in msg:
+                if exc.permanent:
                     raise
                 time.sleep(min(2 ** attempt, 10))
             except OSError as exc:
                 last = exc
                 time.sleep(min(2 ** attempt, 10))
-        raise BlobClientError(f"{what} 重试 {self.retries} 次仍失败：{last}")
+        raise BlobClientError(f"{what} 重试 {self.retries} 次仍失败：{last}",
+                              code=getattr(last, 'code', None), report=getattr(last, 'report', None))
 
     # ---------------------------------------------------------------- 分块
 
@@ -182,7 +207,8 @@ class BlobClient:
                     "GET", f"/api/blob/have?sha={','.join(batch)}"), "询问已有块")
                 have.update(got.get("have") or [])
         except BlobClientError as exc:
-            return UploadReport(name, False, error=str(exc), chunks=len(shas))
+            return UploadReport(name, False, error=str(exc), chunks=len(shas),
+                                error_code=exc.code, error_report=exc.report)
         uploaded = 0
         total = 0
         i = 0
@@ -197,6 +223,7 @@ class BlobClient:
                         headers={"Content-Type": "application/octet-stream"}), f"上传块 {sha[:12]}")
                 except BlobClientError as exc:
                     return UploadReport(name, False, error=str(exc), chunks=len(shas),
+                                        error_code=exc.code, error_report=exc.report,
                                         uploaded_chunks=uploaded,
                                         skipped_chunks=len(shas) - uploaded)
                 uploaded += 1
@@ -214,6 +241,7 @@ class BlobClient:
                 headers={"Content-Type": "application/json"}), "提交清单")
         except BlobClientError as exc:
             return UploadReport(name, False, error=str(exc), chunks=len(shas),
+                                error_code=exc.code, error_report=exc.report,
                                 uploaded_chunks=uploaded)
 
         remote_sha = str(res.get("sha256") or "")

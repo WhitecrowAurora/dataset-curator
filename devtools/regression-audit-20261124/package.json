@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "client_package": "H:\\tagger\\dist\\tagger-20261124-auto-center.zip",
+  "sha256": "7863f1e04fdee17dd62d2b0a27baa2eab0ecbd2cd3151b64829ba7ad69a7b0be",
+  "crc": "passed",
+  "exact_files": 22,
+  "worker_sources": 28,
+  "unchanged_release": true,
+  "bridge_matches": true,
+  "server_worker_matches": true
+}

@@ -32,8 +32,11 @@ class Credentials:
             pass
 
     def redact(self, text: str) -> str:
+        import re
         for token in {self.token, self.effective_token()} - {""}:
             text = text.replace(token, "***")
+        text = re.sub(r'\bhf_[A-Za-z0-9]+\b', '***', text)
+        text = re.sub(r'(?i)(--secret(?:\s+|=))(?:"[^"]*"|\S+)', r'\1***', text)
         return text
 
     def effective_token(self) -> str:

@@ -1,0 +1,9 @@
+{
+  "path": "H:\\tagger\\dist\\tagger-20261126-benchmark-http500-patch.zip",
+  "bytes": 2373,
+  "sha256": "050ba5f89db98d5104826a5e4b290ffa67931e64c2b1e24c3f93a81c49e33d14",
+  "source": "tagger/web/benchmark/catalog.py",
+  "before_sha256": "29f5ec6f796b9075574636147e740e3c1fdd2fe4468b344d7b213d4f813231b7",
+  "after_sha256": "d3f749cec385a2ec9617ac70c3108cedf4b4a2df06f6e620ee5b46245a305fd3",
+  "crc_checked": true
+}

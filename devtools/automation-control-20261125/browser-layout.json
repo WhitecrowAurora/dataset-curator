@@ -1,0 +1,247 @@
+{
+  "ok": true,
+  "page_errors": [],
+  "offline_stop": true,
+  "layouts": [
+    {
+      "width": 1440,
+      "scroll": 1440,
+      "overflow": [],
+      "headerVar": "92px",
+      "rootVar": "92px",
+      "mobile": false,
+      "control": {
+        "x": 1234,
+        "y": 8,
+        "width": 174,
+        "height": 32,
+        "top": 8,
+        "right": 1408,
+        "bottom": 40,
+        "left": 1234
+      },
+      "header": {
+        "x": 224,
+        "y": 0,
+        "width": 1216,
+        "height": 92,
+        "top": 0,
+        "right": 1440,
+        "bottom": 92,
+        "left": 224
+      }
+    },
+    {
+      "width": 1280,
+      "scroll": 1280,
+      "overflow": [],
+      "headerVar": "92px",
+      "rootVar": "92px",
+      "mobile": false,
+      "control": {
+        "x": 1074,
+        "y": 8,
+        "width": 174,
+        "height": 32,
+        "top": 8,
+        "right": 1248,
+        "bottom": 40,
+        "left": 1074
+      },
+      "header": {
+        "x": 224,
+        "y": 0,
+        "width": 1056,
+        "height": 92,
+        "top": 0,
+        "right": 1280,
+        "bottom": 92,
+        "left": 224
+      }
+    },
+    {
+      "width": 1024,
+      "scroll": 1024,
+      "overflow": [],
+      "headerVar": "92px",
+      "rootVar": "92px",
+      "mobile": false,
+      "control": {
+        "x": 830,
+        "y": 8,
+        "width": 174,
+        "height": 32,
+        "top": 8,
+        "right": 1004,
+        "bottom": 40,
+        "left": 830
+      },
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 92,
+        "top": 0,
+        "right": 1024,
+        "bottom": 92,
+        "left": 0
+      }
+    },
+    {
+      "width": 768,
+      "scroll": 768,
+      "overflow": [],
+      "headerVar": "92px",
+      "rootVar": "92px",
+      "mobile": false,
+      "control": {
+        "x": 574,
+        "y": 8,
+        "width": 174,
+        "height": 32,
+        "top": 8,
+        "right": 748,
+        "bottom": 40,
+        "left": 574
+      },
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 768,
+        "height": 92,
+        "top": 0,
+        "right": 768,
+        "bottom": 92,
+        "left": 0
+      }
+    },
+    {
+      "width": 390,
+      "scroll": 390,
+      "overflow": [
+        {
+          "tag": "FORM",
+          "id": "",
+          "className": "fp-inline",
+          "text": "",
+          "rect": {
+            "x": 390.234375,
+            "y": 64,
+            "width": 44,
+            "height": 44,
+            "top": 64,
+            "right": 434.234375,
+            "bottom": 108,
+            "left": 390.234375
+          }
+        },
+        {
+          "tag": "BUTTON",
+          "id": "logout",
+          "className": "fp-btn fp-btn--ghost fp-btn--sm",
+          "text": "",
+          "rect": {
+            "x": 390.234375,
+            "y": 64,
+            "width": 44,
+            "height": 44,
+            "top": 64,
+            "right": 434.234375,
+            "bottom": 108,
+            "left": 390.234375
+          }
+        },
+        {
+          "tag": "svg",
+          "id": "",
+          "className": {},
+          "text": null,
+          "rect": {
+            "x": 404.234375,
+            "y": 78,
+            "width": 16,
+            "height": 16,
+            "top": 78,
+            "right": 420.234375,
+            "bottom": 94,
+            "left": 404.234375
+          }
+        },
+        {
+          "tag": "path",
+          "id": "",
+          "className": {},
+          "text": null,
+          "rect": {
+            "x": 414.234375,
+            "y": 80.66666412353516,
+            "width": 2.666656494140625,
+            "height": 10.666671752929688,
+            "top": 80.66666412353516,
+            "right": 416.9010314941406,
+            "bottom": 91.33333587646484,
+            "left": 414.234375
+          }
+        },
+        {
+          "tag": "path",
+          "id": "",
+          "className": {},
+          "text": null,
+          "rect": {
+            "x": 406.234375,
+            "y": 86,
+            "width": 8.666656494140625,
+            "height": 0,
+            "top": 86,
+            "right": 414.9010314941406,
+            "bottom": 86,
+            "left": 406.234375
+          }
+        },
+        {
+          "tag": "path",
+          "id": "",
+          "className": {},
+          "text": null,
+          "rect": {
+            "x": 406.234375,
+            "y": 82.66666412353516,
+            "width": 3.333343505859375,
+            "height": 6.6666717529296875,
+            "top": 82.66666412353516,
+            "right": 409.5677185058594,
+            "bottom": 89.33333587646484,
+            "left": 406.234375
+          }
+        }
+      ],
+      "headerVar": "116px",
+      "rootVar": "116px",
+      "mobile": true,
+      "control": {
+        "x": 204,
+        "y": 0,
+        "width": 174,
+        "height": 44,
+        "top": 0,
+        "right": 378,
+        "bottom": 44,
+        "left": 204
+      },
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 116,
+        "top": 0,
+        "right": 390,
+        "bottom": 116,
+        "left": 0
+      }
+    }
+  ],
+  "disabled_device_stop_disabled": true,
+  "actual_panel_http": true,
+  "dispatch_pause_start_reload": true
+}

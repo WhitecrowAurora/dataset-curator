@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "original_tokens": 1209,
+  "fitted_tokens": 512,
+  "preserves_artist": true,
+  "api": {
+    "tokenizer": "H:\\tagger\\models\\text\\qwen3.5-0.8b",
+    "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "tokens": 1209,
+    "target": 384,
+    "over_target": true,
+    "limit": 512,
+    "config_sha256": "7929e3e4a9f521b0d3b431614694b4ee691090fe3582b631fb17b84b0e4d489a",
+    "tokenizer_sha256": {
+      "tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "tokenizer_config.json": "49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c",
+      "chat_template.jinja": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80"
+    },
+    "settings": {
+      "tokenizer_path": "models/text/qwen3.5-0.8b",
+      "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+      "max_length": 512,
+      "template": "{caption}",
+      "add_special_tokens": true,
+      "chat_template": false,
+      "system_prompt": ""
+    },
+    "over_limit": true
+  }
+}

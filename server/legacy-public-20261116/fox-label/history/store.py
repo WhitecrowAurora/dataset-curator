@@ -23,6 +23,10 @@ def ensure_schema(c):
       updated_at REAL NOT NULL);
     """)
     c.execute('CREATE INDEX IF NOT EXISTS idx_history_package ON history_checks(repo,package,source_sha256,status)')
+    if 'annotation_json' not in {r[1] for r in c.execute('PRAGMA table_info(history_checks)')}:
+        c.execute("ALTER TABLE history_checks ADD COLUMN annotation_json TEXT NOT NULL DEFAULT '{}'")
+    if 'reinject_mode' not in {r[1] for r in c.execute('PRAGMA table_info(history_checks)')}:
+        c.execute("ALTER TABLE history_checks ADD COLUMN reinject_mode TEXT NOT NULL DEFAULT ''")
 
 
 def inventory(c, device_id, items, now):
@@ -47,6 +51,10 @@ def view(store):
 
 def request(store, dispatch, body, actor, *, local=False):
     did, candidate = body.get("device_id"), body.get("candidate_id")
+    reinject = body.get('reinject','')
+    if reinject not in ('','missing','force'):
+        raise ManagedError('画师补注入模式不正确')
+    annotation = {}
     with closing(store.conn()) as c:
         row = c.execute("SELECT * FROM history_candidates WHERE device_id=? AND candidate_id=?", (did, candidate)).fetchone()
         current = managed.current(c, did)
@@ -61,7 +69,7 @@ def request(store, dispatch, body, actor, *, local=False):
         if c.execute("SELECT 1 FROM leases WHERE repo=? AND pkg=? AND status='open'", (row["repo"], row["package"])).fetchone():
             raise ManagedError("源分片仍在执行或预锁中，请先释放任务", 409)
         from scheduling.leases import held
-        if held(c).get((row['repo'], row['package'])):
+        if held(c,exclude_pending_device=did).get((row['repo'], row['package'])):
             raise ManagedError('源分片仍在等待中心核验', 409)
         if c.execute("SELECT 1 FROM history_checks WHERE device_id=? AND session_id=? AND status='pending'", (did, current["session_id"])).fetchone():
             raise ManagedError("设备已有待处理的历史检查", 409)
@@ -78,9 +86,20 @@ def request(store, dispatch, body, actor, *, local=False):
         session = current["session_id"]
         user = current["user_id"]
         source_bytes = package["size"]
+        if reinject:
+            from assignments.annotation import for_package
+            from annotation.store import config as artist_config
+            original_repo_config = artist_config(c, row['repo'])
+            annotation = for_package(c,dict(package),['tag','nl'])
+    if reinject:
+        from annotation.discovery import for_history
+        original_annotation = dict(annotation)
+        annotation = for_history(store, row['repo'], row['package'], annotation)
     check_id = "H" + secrets.token_hex(12)
     task = {"check_id": check_id, "candidate_id": candidate, "repo": row["repo"],
             "package": row["package"], "size": source_bytes, "sha256": sha}
+    if reinject:
+        task.update(annotation=annotation,reinject=reinject)
     now = time.time()
     with managed.transaction(store) as c:
         active = managed.current(c, did)
@@ -90,15 +109,24 @@ def request(store, dispatch, body, actor, *, local=False):
                 raise ManagedError("中心已有待执行指令，请等当前操作结束后再核对", 409)
         if not active or active["session_id"] != session or active["released"]:
             raise ManagedError("托管会话已变化，请刷新", 409)
+        if reinject:
+            from assignments.annotation import for_package
+            original = for_package(c, dict(package), ['tag','nl'])
+            if original != original_annotation or artist_config(c, row['repo']) != original_repo_config:
+                raise ManagedError('画师注入配置已变化，请刷新重试',409)
+            source = c.execute('SELECT sha256,size FROM packages WHERE repo=? AND id=?',(row['repo'],row['package'])).fetchone()
+            if not source or source['sha256'] != sha or source['size'] != source_bytes:
+                raise ManagedError('源分片已变化，请重新核对',409)
         if c.execute("SELECT 1 FROM leases WHERE repo=? AND pkg=? AND status='open'", (row["repo"], row["package"])).fetchone():
             raise ManagedError("源分片已被派发，请等待任务结束", 409)
         from scheduling.leases import held
-        if held(c).get((row['repo'], row['package'])):
+        if held(c,exclude_pending_device=did).get((row['repo'], row['package'])):
             raise ManagedError('源分片仍在等待中心核验', 409)
         if c.execute("SELECT 1 FROM history_checks WHERE device_id=? AND session_id=? AND status='pending'", (did, session)).fetchone():
             raise ManagedError("设备已有待处理的历史检查", 409)
-        c.execute("INSERT INTO history_checks VALUES(?,?,?,?,?,?,?,?,?,'pending','{}',?,?)",
+        c.execute("INSERT INTO history_checks(check_id,device_id,user_id,session_id,candidate_id,repo,package,source_sha256,source_bytes,status,report,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'pending','{}',?,?)",
                   (check_id, did, user, session, candidate, row["repo"], row["package"], sha, source_bytes, now, now))
+        c.execute('UPDATE history_checks SET annotation_json=?,reinject_mode=? WHERE check_id=?',(json.dumps(annotation),reinject,check_id))
         if local:
             store.event(c, 'history_requested', row['repo'], row['package'], user, 'check=' + check_id)
     if local:
@@ -153,7 +181,31 @@ def finish(store, dispatch, body):
         if any(client.get(k) != report[k] for k in ("expected", "ids_sha256", "parts", "complete_parts")):
             raise ManagedError("客户端和中心逐图对账结果不一致", 409)
         from delivery.reconciliation import merge
-        report = merge(c, check["repo"], check["package"], check["source_sha256"], proof["expected_ids"], artifact_rows, check['created_at'])
+        if check.get('reinject_mode'):
+            from annotation.tables import for_task
+            from annotation.maintenance import normalize
+            from annotation.artist_reinject import rows
+            from annotation.text import fit
+            from annotation.review import require_review
+            table = for_task(store,{**check,'pkg':check['package']},cached=True)
+            if table is None:
+                raise ManagedError('画师表缓存缺失，请先重新获取画师表再上报',409)
+            annotation = json.loads(check['annotation_json'])
+            force = check['reinject_mode'] == 'force'
+            issues = []
+            tags = {r['image_id']: r['tag'] for r in artifact_rows if r.get('tag')}
+            if annotation.get('artist_inject_tags'):
+                from annotation.artist_reinject import apply, id_of
+                tags = {iid: apply(value, table['mapping'].get(id_of(iid), []), 'tag',
+                                   source=table['source'], force=force)[0] for iid, value in tags.items()}
+            artifact_rows, _ = rows(artifact_rows, table, annotation, force=force, fit=fit,
+                                    tags_by_id=tags, issues=issues)
+            require_review(table, issues)
+            normalize(c,check['repo'],check['package'],check['source_sha256'],table,
+                      annotation,force=force,review=True)
+        report = merge(c, check["repo"], check["package"], check["source_sha256"], proof["expected_ids"], artifact_rows, check['created_at'],
+                       artist_normalized=bool(check.get('reinject_mode')),
+                       annotation=json.loads(check['annotation_json']) if check.get('reinject_mode') else None)
         # 当前旧调度仍独占整片；不能覆盖正在执行或预锁中的其它任务。
         if c.execute("SELECT 1 FROM leases WHERE repo=? AND pkg=? AND status='open'", (check["repo"], check["package"])).fetchone():
             raise ManagedError("该分片仍有有效任务，请先停止并释放任务，再重试补登记", 409)
@@ -176,6 +228,8 @@ def finish(store, dispatch, body):
             c.execute("UPDATE packages SET status='completed',completed_at=? WHERE repo=? AND id=?",
                       (time.strftime("%Y-%m-%dT%H:%M:%S%z"), check["repo"], check["package"]))
         report["registered_parts"] = registered
+        from scheduling.pending_results import finalize
+        finalize(c,check['repo'],check['package'],check['source_sha256'],report,device['device_id'])
         status = "registered" if not dispatch.missing_parts(package) else "incomplete"
         c.execute("UPDATE history_checks SET status=?,report=?,updated_at=? WHERE check_id=?",
                   (status, json.dumps(report, ensure_ascii=False), time.time(), check["check_id"]))

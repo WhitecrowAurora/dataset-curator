@@ -1,0 +1,28 @@
+{
+  "checks": [
+    "原模型管理页显示三个复核模型、来源与下载位置",
+    "下载进度/取消/刷新可用，未覆盖主清单未保存编辑",
+    "打开位置失败时展示可复制目录",
+    "一键使用Torii精确权重路径并持久化，其他复核设置保留",
+    "390px无横向溢出",
+    "原依赖管理页可见发色依赖分组"
+  ],
+  "errors": [],
+  "actions": [
+    {
+      "kind": "review",
+      "key": "mobilenetv3_v0_dist",
+      "repo": "deepghs/anime_ch_hair_color",
+      "dest": "H:\\tagger\\models\\hair-color",
+      "proxy": "",
+      "allow": [
+        "mobilenetv3_v0_dist/model.onnx",
+        "mobilenetv3_v0_dist/meta.json"
+      ],
+      "revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+      "token": ""
+    }
+  ],
+  "model_downloads": "fixture; no weights modified",
+  "settings": "isolated real persistence"
+}

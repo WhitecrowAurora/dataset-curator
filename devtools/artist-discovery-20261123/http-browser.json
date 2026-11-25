@@ -1,0 +1,12 @@
+{
+  "actual_http": true,
+  "actual_admin_page": true,
+  "repo_editor": true,
+  "workspace_editor": true,
+  "detect_does_not_save": true,
+  "independent_switches": true,
+  "drafts_preserved": true,
+  "workspace_save": true,
+  "no_tables_message": true,
+  "page_errors": []
+}

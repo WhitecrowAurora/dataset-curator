@@ -1,0 +1,26 @@
+[
+  {
+    "model": "tagger",
+    "zh": false,
+    "enabled": "In the style of @Artist_甲, A person in a red shirt stands on grass.",
+    "disabled": true,
+    "missing": true,
+    "dedup": true
+  },
+  {
+    "model": "tagger",
+    "zh": true,
+    "enabled": "使用 @Artist_甲 的风格，A person in a red shirt stands on grass.",
+    "disabled": true,
+    "missing": true,
+    "dedup": true
+  },
+  {
+    "model": "ToriiGate-0.5",
+    "zh": false,
+    "enabled": "In the style of @Artist_甲, A person in a red shirt stands on grass.",
+    "disabled": true,
+    "missing": true,
+    "dedup": true
+  }
+]

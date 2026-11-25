@@ -1,0 +1,514 @@
+[
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 256,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 256,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 256,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 256,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 2560,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 2560,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 2560,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": false,
+    "width": 2560,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": true,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": true,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": true,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "gated": true,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cpu",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 256,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": false,
+    "width": 2560,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "gated": true,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 256,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 256,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 256,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 256,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 2560,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 2560,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 2560,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": false,
+    "width": 2560,
+    "batch": 256,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": true,
+    "width": 128,
+    "batch": 1,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": true,
+    "width": 128,
+    "batch": 8,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": true,
+    "width": 128,
+    "batch": 32,
+    "exact": true
+  },
+  {
+    "device": "cuda",
+    "dtype": "torch.float16",
+    "gated": true,
+    "width": 128,
+    "batch": 256,
+    "exact": true
+  }
+]

@@ -410,7 +410,6 @@ export function Deps() {
         icon={<PackageCheck size={17} />}
         eyebrow={state?.python ? `装到 ${state.python}` : '读清单中'}
         title="依赖检测"
-        description="可对单个包装卸或重装。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button

@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "unauthenticated": 401,
+  "csrf": 403,
+  "http_upload_preview": true,
+  "browser_confirmation": true,
+  "attribution": "member",
+  "javascript_errors": [],
+  "workorders_page": true,
+  "draft_reload": true
+}

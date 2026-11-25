@@ -1,0 +1,87 @@
+[
+  {
+    "path": "devtools/release/build_worker.py",
+    "before_sha256": "3b7266dd7e786668db8568f8130d11868537f6229462832c9c94e0c20e78536c",
+    "after_sha256": "04cec5f931c837ce9c195a22f5a6e2b4c91327b7200d1e81641e782d1b7cf448"
+  },
+  {
+    "path": "tagger/center_runtime/network.py",
+    "before_sha256": null,
+    "after_sha256": "5a815124869918fbef306475a86a94464e544ca887a005727d889fa33360754a"
+  },
+  {
+    "path": "tagger/fox_worker.py",
+    "before_sha256": "127a340efdadb7c07d1b0802dc843b9a763472f9f010950942f86817f3785572",
+    "after_sha256": "bbad8e99e992a5451ed805c8080ac3699c4faae3628d102848760d03dd6ef436"
+  },
+  {
+    "path": "tagger/center_runtime/artifacts.py",
+    "before_sha256": "5a8cc218a2616a69adbcaad56c4a47fceffb4708a84b7d4acd51fbafe7667992",
+    "after_sha256": "0847eb08eb057bc3d2efed587333eb2cff90c8021654fad554086dc86a38c1d9"
+  },
+  {
+    "path": "tagger/blob_client.py",
+    "before_sha256": "e015ede349b237f32a5e2aad13ec4766b2c392e26924177596959825a3ce6ebc",
+    "after_sha256": "176ce1c8c3f8fa77a1cbeabb0e2fc3e79ae8f9f067393ef44df782f3f1e71f0c"
+  },
+  {
+    "path": "tagger/center_delivery.py",
+    "before_sha256": "9d62562da73860dbc53d13df7bb7af91212d81f684bc8b9262e904bbdfe5d15b",
+    "after_sha256": "b7f45936c555d71effdf5f44b5fc8971342a2e0d0238d0782addf9912bb2c46b"
+  },
+  {
+    "path": "tagger/web/center.py",
+    "before_sha256": "9b912ea5ce89b49e285dfe56901454051392e32deb376835287fa525086389c9",
+    "after_sha256": "6e99b81f10414432f36dbafe43fa49a3d5e7b4067b4524e36eb67ec316c18163"
+  },
+  {
+    "path": "tagger/web/app.py",
+    "before_sha256": "db665214b24ae69916f8b7a682f64343e227ece7fa862e0308e48b61ee63ca47",
+    "after_sha256": "bf29b4036b10a5f3be955a25f5193f7a812f8c6433f986e6c06a3e55f6e3f797"
+  },
+  {
+    "path": "tagger/web/center_runtime/managed.py",
+    "before_sha256": "dc24981fedab81e32f8ccda030a54a749ad9b7b200814eddff161aca742595da",
+    "after_sha256": "7ade34f53271f44b6ef25a8d7dc616cb3d1e687a80c07f321d3d562f2903b9dd"
+  },
+  {
+    "path": "tagger/web/center_runtime/workspace.py",
+    "before_sha256": "c90088d892ebb0e8852d43a58e3b15a1cec40589cf96d1723624899c1582c5df",
+    "after_sha256": "a3d01354957b82024178416084e3500fb6c35b5ad6ae378cf3f7e290253d6a30"
+  },
+  {
+    "path": "tagger/web/center_runtime/history_check.py",
+    "before_sha256": "35836ebdd7f527e815344dfa0974ecec4ee8d73e6405be436f72373bbebbcb07",
+    "after_sha256": "40bda226780bd47a721cc359d15fc48efca254c03dc18b22292871647f318063"
+  },
+  {
+    "path": "tagger/web/center_runtime/history.py",
+    "before_sha256": "8eec58c00f0ecac518e70d6965e833be71cb581b836ab99b362e1a19f2ccb556",
+    "after_sha256": "ae439684158d23bbb3d3d6f2ceae65918c7f1d71dee5b3986d0d43cf8ef7fcff"
+  },
+  {
+    "path": "tagger/web/center_runtime/history_discovery.py",
+    "before_sha256": "092de99a95b99012ced3cd17709b02a8143c82bf8b228e5dd74084c5f3589e01",
+    "after_sha256": "ce63cceeb3bd1462eaa2eaf485a8bcbf7affd7e99eb31edf6386536a7ef939c8"
+  },
+  {
+    "path": "tagger/web/center_runtime/offline.py",
+    "before_sha256": "6af16387cb67a27ee1716c21a94d1ea5159aad1ef768adb20e6d6bd1cedd0f74",
+    "after_sha256": "4ceff724e3568a444705fb996c0dc442b6f40bfbb23c7c7e088231ef1296d827"
+  },
+  {
+    "path": "tagger/web/ui/src/lib/api.ts",
+    "before_sha256": "5409bcac567ba2f91c1be86635c04ef732d507807d0988afa1172aab30793af1",
+    "after_sha256": "9a7ad839258a13e143e92cc4a6774ad0a49f1423d42454f7b8ebaf87e2f70bf2"
+  },
+  {
+    "path": "tagger/web/ui/src/pages/Center.tsx",
+    "before_sha256": "ce7472dbb26f94771776c2fbf83aa63523ae49ddcacaa91fedc1461a818b2c84",
+    "after_sha256": "de535cd8f12dc160f28ff4f3b147148a0405eb6ba8161a961848cdb3c5495fce"
+  },
+  {
+    "path": "tagger/web/ui/src/components/center/ConnectionNetwork.tsx",
+    "before_sha256": null,
+    "after_sha256": "14cf09f9f5a863290f63795e4425e87af6285813c7cf7d1dc886f297d3e711dc"
+  }
+]

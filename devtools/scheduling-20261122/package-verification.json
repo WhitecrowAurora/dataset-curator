@@ -1,0 +1,21 @@
+{
+  "file": "H:\\tagger\\dist\\tagger-20261122-scheduling.zip",
+  "bytes": 76511409,
+  "sha256": "82142cb53b619a4b911d089ff8a93113a6eeac7aa84e5d56d73f7ef58ec8cb0b",
+  "required_sources_match": true,
+  "credentials_excluded": true,
+  "tests": [
+    {
+      "tests": 99,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ]
+}

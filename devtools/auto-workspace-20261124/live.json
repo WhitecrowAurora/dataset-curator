@@ -1,0 +1,161 @@
+{
+  "ok": true,
+  "time": "2026-11-24T15:53:07.975825",
+  "endpoints": {
+    "/health": {
+      "status": 200,
+      "seconds": 0.006,
+      "json": true
+    },
+    "/admin/v1/meta": {
+      "status": 200,
+      "seconds": 0.031,
+      "json": true
+    },
+    "/admin/v1/workspaces": {
+      "status": 200,
+      "seconds": 0.009,
+      "json": true
+    },
+    "/admin/v1/managed/devices?summary=throughput": {
+      "status": 200,
+      "seconds": 0.008,
+      "json": true
+    },
+    "/admin/v1/workspace-packages?ws_id=Dru768&offset=0": {
+      "status": 200,
+      "seconds": 5.856,
+      "json": true
+    }
+  },
+  "public_health": {
+    "ok": true,
+    "repos": 2,
+    "packages": 874
+  },
+  "panel_endpoints": {
+    "/api/meta": {
+      "status": 200,
+      "seconds": 0.045,
+      "json": true
+    },
+    "/api/workspaces": {
+      "status": 200,
+      "seconds": 0.013,
+      "json": true
+    },
+    "/api/managed/devices?summary=throughput": {
+      "status": 200,
+      "seconds": 0.009,
+      "json": true
+    },
+    "/api/offline-tasks?ws_id=Dru768": {
+      "status": 200,
+      "seconds": 0.006,
+      "json": true
+    }
+  },
+  "offline_page": 200,
+  "processes": {
+    "lulynx-label.service": {
+      "pid": 14553,
+      "threads": 4,
+      "fd": 4,
+      "rss": "47864 kB",
+      "swap": "0 kB"
+    },
+    "lulynx-panel.service": {
+      "pid": 14695,
+      "threads": 1,
+      "fd": 4,
+      "rss": "80336 kB",
+      "swap": "122016 kB"
+    }
+  },
+  "errors_since_deployment": {
+    "Too many open files": 0,
+    "unable to open database file": 0,
+    "database is locked": 0,
+    "Traceback": 0
+  },
+  "offline_jobs": [
+    {
+      "id": "Ocf26eec78eea49a8",
+      "status": "ready",
+      "device_id": "offline-b53fe20f167d5f47",
+      "bytes": 18136935,
+      "sha256": "178a937aaf5d4e7c5b72fd85a9e66780a5d8df37e4136ca72f1e6825668c259d",
+      "leases": 68
+    },
+    {
+      "id": "Oe9f7943a13fd96cb",
+      "status": "ready",
+      "device_id": "offline-59f96fd9054ebbec",
+      "bytes": 6143160,
+      "sha256": "a1011d259a672911d1fb0f38a1a865f013c00f93fa59673e269e67106ee8fa6a",
+      "leases": 23
+    }
+  ],
+  "lease19": {
+    "lease_id": "L6cdea3620417",
+    "status": "open",
+    "kind": "active",
+    "device_id": "8afe1fd19aa2"
+  },
+  "package19": {
+    "status": "claimed",
+    "tag_status": "",
+    "nl_status": ""
+  },
+  "plan_exists": true,
+  "completion": [
+    {
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "total": 844,
+      "tag_done": 1,
+      "nl_done": 5
+    },
+    {
+      "repo": "MatchaCuratio/Anime-Fox768-400k",
+      "total": 30,
+      "tag_done": 1,
+      "nl_done": 1
+    }
+  ],
+  "artifact19": 0,
+  "checks19": 0,
+  "free_bytes": 7930548224,
+  "source_hashes_verified": true,
+  "policies": [
+    {
+      "desired": "paused",
+      "pause_reason": "failure",
+      "n": 1
+    },
+    {
+      "desired": "paused",
+      "pause_reason": "manual",
+      "n": 7
+    }
+  ],
+  "workspaces": [
+    {
+      "ws_id": "dan",
+      "name": "dan",
+      "allocation_mode": "auto",
+      "created_at": "2026-11-21T18:49:51+0800"
+    },
+    {
+      "ws_id": "Fox768Test",
+      "name": "Fox768Test",
+      "allocation_mode": "auto",
+      "created_at": "2026-11-17T09:09:55+0800"
+    },
+    {
+      "ws_id": "Dru768",
+      "name": "Dru768_仅nl打标",
+      "allocation_mode": "auto",
+      "created_at": "2026-11-16T15:54:25+0800"
+    }
+  ]
+}

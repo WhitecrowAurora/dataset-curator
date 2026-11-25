@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"backup\": \"/tagger/.delete/native-dispatch-20261123\", \"baseline\": {\"fox-panel/panel.py\": \"063bff337135f5abd8886b500e54a1b4499d7db4e75d8987027180fbeb457c2d\", \"fox-panel/web/index.html\": \"8c41c00b5fd9f17f1f53f68066269676f01312a44a9d471f0e3f7a8250f5724f\", \"fox-panel/web/execution-form.js\": null, \"fox-panel/web/workspace.js\": \"df049784f60e6044ec54000dd235a2f90ee764c0dab66fb273c3ef8049e7bf1e\", \"fox-panel/web/dispatch-plans.js\": \"60e008d825a8bbce2e786be1744dd7a7acc614494e6fba5adb9f5abb6dd41f8f\", \"fox-panel/web/selection.css\": \"18e8be081bc6eee3e1021192b126f122642fa715899f981007a7ecd125c03e3b\"}}\n",
+  "stderr": ""
+}

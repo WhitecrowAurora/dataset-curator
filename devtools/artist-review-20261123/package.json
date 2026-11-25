@@ -1,0 +1,28 @@
+{
+  "file": "H:\\tagger\\dist\\tagger-20261123-artist-review-fix.zip",
+  "bytes": 76763114,
+  "sha256": "485addbf0161219c9fbb883f9f9e76e907001a8e31b9818c0f1a8de7026db7eb",
+  "crc": "passed",
+  "exact_files": [
+    "tagger/fox_worker.py",
+    "tagger/guard.py",
+    "tagger/web/ui/src/components/center/LeasePanel.tsx",
+    "tagger/web/ui/dist/index.html",
+    "requirements-embedded.txt",
+    "tagger/artist_reinject.py",
+    "tagger/web/center_runtime/history_artist.py",
+    "tagger/web/center_runtime/history_check.py",
+    "tagger/web/center_runtime/history_submit.py",
+    "tagger/web/center_runtime/history.py",
+    "tagger/web/ui/src/components/center/HistoryArtifacts.tsx",
+    "tagger/web/ui/dist/assets/index-DMCGw6Jl.js",
+    "tagger/web/ui/dist/assets/index-7Ebx__7j.css"
+  ],
+  "shell_sha256": "3ca049c5154b2c8ad4d3a0db6ce0d5a8dd9618f36ee4824142bd1f4bf41df853",
+  "worker_sources": 28,
+  "unchanged_shell_and_requirements": true,
+  "private_paths_excluded": true,
+  "previous_files_removed": [
+    "tagger/web/ui/dist/assets/index-BCDju5Ok.js"
+  ]
+}

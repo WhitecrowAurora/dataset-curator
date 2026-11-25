@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "sections": 4,
+  "assistant_steps": 3,
+  "real_preassignment": true,
+  "last_native_q6_config": true,
+  "completed_package_selectable": true,
+  "offline_preview_and_confirm": true,
+  "selection_survives_tabs_and_refresh": true,
+  "workspace_switch": true,
+  "nested_device_view": true,
+  "independent_offline_page": true,
+  "readonly": true,
+  "mobile": true,
+  "javascript_errors": []
+}

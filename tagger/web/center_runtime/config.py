@@ -1,4 +1,4 @@
-"""本机执行配置。进入托管后冻结，中心只下发任务和启停。"""
+"""本机执行配置；托管可顺序调整并发和批大小。"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -8,7 +8,9 @@ from typing import Literal
 class ExecutionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    hosting_mode: Literal["active", "passive"] = "active"
+    hosting_mode: Literal["active", "passive"] = "passive"
+    allow_remote_tag_batch: bool = False
+    allow_remote_concurrency: bool = False
     inference_source: Literal["local", "existing"] = "local"
     mode: Literal["both", "tag", "nl"] = "both"
     tag_backend: Literal["wd-eva02", "pixai", "cl-tagger-v2", "onnx", "none"] = "wd-eva02"
@@ -20,7 +22,8 @@ class ExecutionConfig(BaseModel):
     nl_device: str = "auto"
     nl_precision: str = "f16"
     served_name: str = "tagger"
-    concurrency: int = Field(0, ge=0, le=64)
+    concurrency: int = Field(0, ge=0, le=256)
+    max_model_len: int = Field(0, ge=0, le=262144)
     gpu_mem: float = Field(0, ge=0, le=0.98)
     auto_download: bool = True
     auto_quantize: bool = False
@@ -53,18 +56,27 @@ class ExecutionConfig(BaseModel):
             setattr(self, name, value)
         self.nl_model = self.nl_model.strip()
         self.served_name = self.served_name.strip()
+        if self.mode != "tag" and self.inference_source == "local" and self.nl_model == "torii-gate-0.5":
+            from ..torii_service import plan
+            resolved = plan(self.nl_engine, self.nl_precision, self.concurrency)
+            if not resolved["ok"]:
+                raise ValueError(resolved["error"])
+            if self.mode == "both" and self.tag_backend == "none":
+                raise ValueError("Torii 描述模式请配合 PixAI 等分类模型生成标签")
         if not self.served_name:
             raise ValueError("服务模型名不能为空")
         if self.gpu_mem and self.gpu_mem < 0.1:
             raise ValueError("显存比例应为 0（自动）或 0.1～0.98")
+        if self.max_model_len and self.max_model_len < 512:
+            raise ValueError('模型上下文应为 0（自动）或 512～262144')
         return self
 
 
 EXECUTION_DEFAULTS = ExecutionConfig().model_dump()
 # 目录、身份、凭据和命令模板始终由本机管理。
-REPORT_FIELDS = set(EXECUTION_DEFAULTS) - {"hosting_mode", "resume_on_startup"}
-# 托管后本机执行环境冻结；中心只下发任务与启停／检查指令。
-REMOTE_FIELDS: set[str] = set()
+REPORT_FIELDS = set(EXECUTION_DEFAULTS) - {"hosting_mode", "resume_on_startup", "max_model_len", "allow_remote_tag_batch", "allow_remote_concurrency"}
+# 模型、精度、目录和凭据由本机管理；服务端可调整吞吐参数。
+REMOTE_FIELDS = {"concurrency", "tag_batch"}
 
 
 def execution_config(cfg: dict) -> dict:

@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"baseline\": {\"fox-label/server.py\": \"4e2931b5b5715046b25ac5bc62af91ee99e4ae89a307fc66b53882387d9ca0e5\", \"fox-label/source_catalog/routes.py\": \"2dbce3b07807de7dc006b481d204ed741e8405dd8e1938b171ebb900b971eb28\", \"fox-panel/panel.py\": \"3536a1ec5fdbd2e8dee3fd36167980563f6e79d747a5da905677aa7c31bf3a0a\", \"fox-panel/result_downloads.py\": null, \"fox-panel/web/app.js\": \"c01515a66abd04e23e4350ff702455ac8f59d08c0ff801528dcd690643d49897\", \"fox-panel/web/index.html\": \"813b52af2ed9c69f820f37b344c73f8633685016744be1e8d270df2876650cf0\", \"fox-panel/web/workspace.js\": \"55817ea5c75a283434c32915f6bf000590aef097cf68f1b01e53c56e81ad9e43\", \"fox-panel/web/result-exports.js\": null, \"fox-label/result_exports/routes.py\": null, \"fox-label/result_exports/service.py\": null, \"fox-label/result_exports/__init__.py\": null}, \"db_bytes\": 444616704, \"pending\": 8614}\n",
+  "stderr": ""
+}

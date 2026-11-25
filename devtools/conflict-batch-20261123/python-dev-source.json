@@ -1,0 +1,7 @@
+{
+  "source": "https://api.nuget.org/v3-flatcontainer/python/3.12.9/python.3.12.9.nupkg",
+  "source_sha256": "b7240e3117d94dc2446c4b1250e31306adc817934706937d0992c78f937487ba",
+  "bundle": "python-3.12.9-dev-amd64.zip",
+  "bytes": 474528,
+  "sha256": "44012b94a23186c7637f5fb4267195e95baff9d640f0fd93a9ba92bc08b32d3b"
+}

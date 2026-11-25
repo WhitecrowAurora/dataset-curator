@@ -1,0 +1,1 @@
+{"before": "H:/lulynx-trainer/backend/smoke/tagger-conflicts-20261123/pytest-regression-2/test_triton_compiler_with_ship0/dev_probe.c:1: error: include file 'Python.h' not found\n", "after_compile": true, "embedded_python_import": 42}

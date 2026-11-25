@@ -1,0 +1,18 @@
+{
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-disk-summary-fix.zip",
+    "bytes": 77092144,
+    "sha256": "081d559232bb639aa62829c5bd56eb3ed42c2c7d04e8282e3200d6dee60809b1",
+    "crc_ok": true,
+    "current_files_matched": 515,
+    "private_settings_excluded": true
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-disk-summary-patch.zip",
+    "bytes": 63268282,
+    "sha256": "c2cf9c1afd5aeacf5c59c66da0cf7be15f96c34809808f7a3a21d6b761cfe215",
+    "crc_ok": true,
+    "current_files_matched": 515,
+    "private_settings_excluded": true
+  }
+}

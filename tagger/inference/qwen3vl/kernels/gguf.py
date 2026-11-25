@@ -178,7 +178,7 @@ def linear_group(x, matrices):
     return tuple(output.reshape(*x.shape[:-1], size) for output, size in zip(outputs[:len(matrices)], sizes))
 
 
-def linear(x, packed, rows, kind):
+def linear(x, packed, rows, kind, *, allow_dense=True):
     import torch
 
     if x.dtype != torch.float16:
@@ -188,7 +188,7 @@ def linear(x, packed, rows, kind):
     # Prefill has many input rows: unpack this matrix once, then use cuBLAS,
     # instead of decoding the same packed block in every input-row tile.
     # The temporary holds one matrix, never a full dequantized model.
-    if m >= 32:
+    if m >= 32 and allow_dense:
         dense = torch.empty(rows, k, device=x.device, dtype=x.dtype)
         with torch.cuda.device(x.device):
             _dequantize[(triton.cdiv(rows, 8), triton.cdiv(k, 256))](

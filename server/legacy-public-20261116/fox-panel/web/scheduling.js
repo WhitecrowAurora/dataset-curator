@@ -53,8 +53,8 @@
     quickBody = n('div'); host.append(quickBody);
     advanced = n('details'); advanced.className = 'fp-scheduling-advanced';
     advanced.append(n('summary','分组与优先级设置')); host.append(advanced);
-    grace = field(advanced, "离线宽限（秒）", n("input")); grace.type = "number"; grace.min = "30"; grace.max = "86400";
-    button(advanced, "保存宽限", function () { save({ action: "settings", offline_grace: Number(grace.value) }); });
+    grace = field(advanced, "在线租约有效期（秒）", n("input")); grace.type = "number"; grace.readOnly = true;
+    advanced.append(n('p', '当前包与预取包均为 48 小时；成功上报重置，连续未上报才回收。离线派单独立处理。'));
     var box = n("fieldset"); box.append(n("legend", "分组")); advanced.append(box);
     gid = field(box, "分组 ID", n("input")); name = field(box, "名称", n("input")); scope = field(box, "工作区", n("select"));
     selectPickers.push(window.FoxSelection.fromSelect(scope,'分组工作区'));

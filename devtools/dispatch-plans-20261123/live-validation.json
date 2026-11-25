@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"source_matches\": true, \"schema_ready\": true, \"integrity\": true, \"public_client_api\": true, \"invalid_identity_rejected\": true, \"admin_route_ready\": true, \"production_assignments_not_applied\": true}\n",
+  "stderr": ""
+}

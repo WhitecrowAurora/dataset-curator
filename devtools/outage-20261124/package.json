@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "file": "H:\\tagger\\dist\\tagger-20261124-center-recovery.zip",
+  "bytes": 77069275,
+  "sha256": "1667ad28f4a2a6ba8dabe2eef684e75c6af112b0bcb87078d585d60d6e971155",
+  "crc": "passed",
+  "exact_files": [
+    "tagger/web/center_runtime/workspace.py",
+    "tagger/artist_reinject.py",
+    "tagger/web/center_runtime/history_artist.py",
+    "tagger/web/center_runtime/history_check.py",
+    "tagger/web/ui/dist/index.html",
+    "tagger/web/center_runtime/offline_export.py",
+    "tagger/web/ui/src/components/center/HistoryArtifacts.tsx",
+    "requirements-embedded.txt",
+    "tagger/web/ui/dist/assets/index-CU9MgOQc.js",
+    "tagger/web/ui/dist/assets/index-7Ebx__7j.css"
+  ],
+  "shell_sha256": "3ca049c5154b2c8ad4d3a0db6ce0d5a8dd9618f36ee4824142bd1f4bf41df853",
+  "worker_sources": 28,
+  "unchanged_shell_and_requirements": true,
+  "private_paths_excluded": true,
+  "previous_files_preserved": true
+}

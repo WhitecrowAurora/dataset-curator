@@ -136,7 +136,6 @@ export function History({
         icon={<HistoryIcon size={17} />}
         eyebrow="最近 20 条 · 含重启前的记录"
         title="历史任务"
-        description="停下或失败的任务可点「继续」"
         actions={
           <>
             {note && (

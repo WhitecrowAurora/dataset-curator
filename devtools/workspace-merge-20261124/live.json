@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "read_only": true,
+  "hashes_match": true,
+  "http": {
+    "/": 200,
+    "/offline-workorders?ws=Dru768": 200,
+    "/ai-access": 200,
+    "/static/workspace.js": 200,
+    "/api/workspaces": 200,
+    "/api/offline-tasks?ws_id=Dru768": 200,
+    "/api/managed/devices": 200,
+    "/api/ai-access": 200,
+    "/mcp_without_key": 401
+  },
+  "workspaces": [
+    "Dru768",
+    "Fox768Test"
+  ],
+  "lulu_workspace": "Dru768",
+  "unique_repository_ownership": true,
+  "duplicate_open_parts": 0,
+  "packages_total": 874,
+  "offline_jobs_preserved": 23,
+  "unchanged_tables": 10,
+  "auto_priority_preserved": true,
+  "production_test_users_created": 0
+}

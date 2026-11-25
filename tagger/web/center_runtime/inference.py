@@ -21,6 +21,8 @@ def options() -> dict:
     catalog = models.catalog()
     for item in catalog["vlm"]:
         item.update(models.weight_summary(item, Path(item["local_abs"])))
+    from ..torii_service import model_entry
+    catalog["vlm"].append(model_entry())
     engine_status = {engine: dict(zip(("available", "reason"), VLLM.local_capability(engine)))
                      for engine in nl_engine.ENGINES}
     return {"tag_models": catalog["tag"], "nl_models": catalog["vlm"],
@@ -61,7 +63,11 @@ class InferenceRuntime:
         existing = downloads.DOWNLOADS.state_of(kind, key)
         owned = not existing or existing["status"] not in ("queued", "running")
         self.phase("downloading", f"下载 {key}")
-        models.start_download(kind, key, token=token or None)
+        if kind == "review":
+            from ..review_models import start_download
+            start_download(key, token=token or None)
+        else:
+            models.start_download(kind, key, token=token or None)
         self.download = (kind, key) if owned else None
         try:
             self._wait(cancel, lambda: downloads.DOWNLOADS.state_of(kind, key), "模型下载")
@@ -72,6 +78,19 @@ class InferenceRuntime:
 
     def prepare(self, cfg: dict, token: str, cancel) -> dict:
         cfg = dict(cfg)
+        from ...text_encoding.tokenizer import require_training_text
+        if cancel.is_set():
+            raise Cancelled("已停止准备")
+        from ...config import load_ops
+        from ...runtime.disk_space import require_space
+        require_space(load_ops(load_tier_table(DEFAULT_TIERS)).guard_policy(), cfg['out_dir'])
+        require_training_text(cfg['mode'])
+        from ..torii_service import KEY as TORII_KEY
+        from ...inference.torii_caption import is_torii
+        torii = cfg["nl_model"] == TORII_KEY if cfg["inference_source"] == "local" else is_torii(cfg["served_name"])
+        cfg["caption_format"] = "torii" if torii else ""
+        if torii and cfg["mode"] == "both" and cfg["tag_backend"] == "none":
+            raise ConfigError("Torii 描述模式请配合 PixAI 等分类模型生成标签")
         automatic_tag = cfg["tag_device"] == "auto"
         self.local_required = cfg["mode"] != "tag" and cfg["inference_source"] == "local"
         if cancel.is_set():
@@ -94,7 +113,9 @@ class InferenceRuntime:
             raise ConfigError(f"设备 {cfg['tag_device']} 不存在")
         if cfg["mode"] == "tag" and cfg["tag_device"] == "auto":
             cfg["tag_device"] = "cuda:0" if gpus else "cpu"
-        if cfg["mode"] != "tag" and cfg["inference_source"] == "local":
+        if self.local_required and torii:
+            self._prepare_torii(cfg, token, cancel, gpus)
+        elif self.local_required:
             if cfg["nl_engine"] in ("llamacpp", "native"):
                 if cfg["nl_engine"] == "native":
                     from ...inference.qwen3vl.runtime import resolve_device_profile
@@ -102,6 +123,7 @@ class InferenceRuntime:
                     from ..service_start import resolve_device_profile
                 profile, physical_index = resolve_device_profile(cfg["nl_device"],
                     model_override=cfg["nl_model"] or None, precision_override=cfg["nl_precision"],
+                    max_model_len_override=cfg.get('max_model_len') or None,
                     gpu_mem_override=cfg["gpu_mem"] or None)
                 idx = next((i for i, g in enumerate(gpus) if g.index == physical_index), 0)
                 gpu = gpus[idx] if gpus and profile.device_name != "CPU" else None
@@ -115,17 +137,20 @@ class InferenceRuntime:
                 profile = resolve_profile(load_tier_table(DEFAULT_TIERS), gpu,
                                       model_override=cfg["nl_model"] or None,
                                       precision_override=cfg["nl_precision"],
+                                      max_model_len_override=cfg.get('max_model_len') or None,
                                       gpu_mem_override=cfg["gpu_mem"] or None)
             cfg["nl_model"] = profile.model.key
             self._prepare_weights(cfg, profile, token, cancel)
             if cfg["nl_engine"] in ("llamacpp", "native"):
                 profile, _ = resolve_device_profile(cfg["nl_device"],
                     model_override=cfg["nl_model"], precision_override=cfg["nl_precision"],
+                    max_model_len_override=cfg.get('max_model_len') or None,
                     gpu_mem_override=cfg["gpu_mem"] or None)
             elif gpu is not None:
                 profile = resolve_profile(load_tier_table(DEFAULT_TIERS), gpu,
                                       model_override=cfg["nl_model"],
                                       precision_override=cfg["nl_precision"],
+                                      max_model_len_override=cfg.get('max_model_len') or None,
                                       gpu_mem_override=cfg["gpu_mem"] or None)
             # 同卡为分类模型预留显存；只调整并发与资源，不改变精度。
             if cfg["tag_device"] == "auto" and cfg["mode"] == "both":
@@ -149,45 +174,22 @@ class InferenceRuntime:
             cfg["gpu_mem"] = cfg["gpu_mem"] or min(profile.gpu_memory_utilization, 0.8 if same_card else 0.9)
             if cfg["nl_engine"] == "native":
                 cfg["gpu_mem"] = 0
-            self.phase("starting_service", "启动 NL 模型服务")
-            port = urlsplit(cfg["tag_url"]).port or 8000
-            with GPU_START_LOCK:
-                if cancel.is_set():
-                    raise Cancelled("已停止准备")
-                from ..multi_gpu import MULTI
-                from ..jobs import MANAGER
-                if MANAGER.running() is not None or MULTI.status in ("starting", "ready", "partial", "stopping"):
-                    raise ConfigError("已有任务或多卡服务正在运行，请先停止后开工")
-                state = VLLM.snapshot()
-                opts = {"engine": cfg["nl_engine"], "model": cfg["nl_model"],
-                        "precision": cfg["nl_precision"], "served_name": cfg["served_name"],
-                        "device_index": gpu.index if gpu is not None else None, "gpu_mem": cfg["gpu_mem"],
-                        "slots": seqs if cfg["nl_engine"] in ("llamacpp", "native") else None,
-                        "max_num_seqs": seqs if cfg["nl_engine"] == "vllm" else None}
-                if cfg["nl_engine"] in ("llamacpp", "native"):
-                    opts["device"] = cfg["nl_device"]
-                if cfg["nl_engine"] in ("vllm", "native"):
-                    path = (profile.weights_path if cfg["nl_precision"] == "w4a16"
-                            else models._entry("vlm", cfg["nl_model"])["local_abs"])
-                    local = Path(path)
-                    opts["model_path"] = str((local if local.is_absolute() else downloads.ROOT / local).resolve())
-                if state["status"] in ("starting", "ready", "stopping"):
-                    matches = state["port"] == port and all(state["overrides"].get(k) == v for k, v in opts.items())
-                    if not matches and self.owned_started == state["started"]:
-                        VLLM.stop()
-                        state = VLLM.start(port=port, **opts)
-                        self.owned_started = state["started"]
-                        matches = True
-                    if not matches:
-                        raise ConfigError("本机已有不同配置的模型服务，请先停止或选择使用已有服务")
-                else:
-                    state = VLLM.start(port=port, **opts)
-                    self.owned_started = state["started"]
-                self.service_started = state["started"]
-            ready = self._wait(cancel, VLLM.snapshot, "NL 服务启动")
+            opts = {"engine": cfg["nl_engine"], "model": cfg["nl_model"],
+                    "precision": cfg["nl_precision"], "served_name": cfg["served_name"],
+                    # 执行配置用 0 表示自动／不适用；服务启动契约用 None。
+                    "device_index": gpu.index if gpu is not None else None, "gpu_mem": cfg["gpu_mem"] or None,
+                    "slots": seqs if cfg["nl_engine"] in ("llamacpp", "native") else None,
+                    "max_num_seqs": seqs if cfg["nl_engine"] == "vllm" else None}
             if cfg["nl_engine"] in ("llamacpp", "native"):
-                cfg["concurrency"] = ready.get("fingerprint", {}).get("slots") or seqs
-            cfg["tag_url"] = f"http://127.0.0.1:{port}"
+                opts["device"] = cfg["nl_device"]
+            if cfg.get('max_model_len'):
+                opts['max_model_len'] = cfg['max_model_len']
+            if cfg["nl_engine"] in ("vllm", "native"):
+                path = (profile.weights_path if cfg["nl_precision"] == "w4a16"
+                        else models._entry("vlm", cfg["nl_model"])["local_abs"])
+                local = Path(path)
+                opts["model_path"] = str((local if local.is_absolute() else downloads.ROOT / local).resolve())
+            self._start_service(cfg, opts, cancel)
         elif cfg["mode"] != "tag":
             self.phase("checking_service", "连接已有模型服务")
             probe = VLLM.probe(cfg["tag_url"])
@@ -215,6 +217,76 @@ class InferenceRuntime:
         if cancel.is_set():
             raise Cancelled("已停止准备")
         return cfg
+
+    def _prepare_torii(self, cfg, token, cancel, gpus):
+        from .. import torii_service
+
+        plan = torii_service.plan(cfg["nl_engine"], cfg["nl_precision"], cfg["concurrency"])
+        if not plan["ok"]:
+            raise ConfigError(plan["error"])
+        item = torii_service.model_entry()
+        if not item["ready"]:
+            configured = Path(item["configured_path"])
+            configured = configured if configured.is_absolute() else downloads.ROOT / configured
+            standard = Path(item["local_abs"])
+            if configured.exists() and configured.resolve() not in (standard.resolve(), Path(item["use_path"]).resolve()):
+                raise ConfigError("所选 Torii 路径缺少 Q6_K 权重或 FP16 mmproj，请在模型管理中检查：" + str(configured))
+            self._download("review", torii_service.KEY, cfg, token, cancel)
+            item = torii_service.model_entry()
+            if not item["ready"]:
+                raise ConfigError("Torii 权重未完整下载，请在模型管理中检查")
+        device = cfg["nl_device"]
+        index = 0 if device in ("auto", "cpu") else int(device[5:])
+        if device.startswith("cuda:") and index >= len(gpus):
+            raise ConfigError(f"设备 {device} 不存在")
+        if cfg["tag_device"] == "auto" and cfg["mode"] == "both":
+            other = next((i for i in range(len(gpus)) if i != index), 0)
+            cfg["tag_device"] = f"cuda:{other}" if gpus else "cpu"
+        if cfg['concurrency'] > plan['slots']:
+            self.log(f"[warn] Torii 请求并发 {cfg['concurrency']} 超出当前引擎能力，使用 {plan['slots']}，继续执行")
+        cfg["concurrency"], cfg["gpu_mem"] = plan["slots"], 0
+        self.log(f"ToriiGate-0.5 · {cfg['nl_engine']} · 并发 {cfg['concurrency']}")
+        opts = {"engine": cfg["nl_engine"], "model": torii_service.KEY, "precision": "q6",
+                "served_name": cfg["served_name"], "device": device, "slots": cfg["concurrency"],
+                "model_path": item["model_path"], "gpu_mem": None}
+        self._start_service(cfg, opts, cancel)
+
+    def _start_service(self, cfg, opts, cancel):
+        self.phase("starting_service", "启动 NL 模型服务")
+        port = urlsplit(cfg["tag_url"]).port or 8000
+        with GPU_START_LOCK:
+            if cancel.is_set():
+                raise Cancelled("已停止准备")
+            from ..multi_gpu import MULTI
+            from ..jobs import MANAGER
+            if MANAGER.running() is not None or MULTI.status in ("starting", "ready", "partial", "stopping"):
+                raise ConfigError("已有任务或多卡服务正在运行，请先停止后开工")
+            state = VLLM.snapshot()
+            if state["status"] in ("starting", "ready", "stopping"):
+                matches = state["port"] == port and all(state["overrides"].get(k) == v for k, v in opts.items())
+                if not matches and self.owned_started == state["started"]:
+                    VLLM.stop()
+                    state = VLLM.start(port=port, **opts)
+                    self.owned_started = state["started"]
+                    matches = True
+                if not matches:
+                    raise ConfigError("本机已有不同配置的模型服务，请先停止或选择使用已有服务")
+            else:
+                state = VLLM.start(port=port, **opts)
+                self.owned_started = state["started"]
+            self.service_started = state["started"]
+        try:
+            ready = self._wait(cancel, VLLM.snapshot, "NL 服务启动")
+        except ConfigError:
+            state = VLLM.snapshot()
+            self.log(f"[NL] {state.get('engine')} · 日志：{state.get('log_path')}")
+            for line in state.get('log_tail', [])[-30:]:
+                self.log('[NL] ' + line)
+            raise
+        if cfg["nl_engine"] in ("llamacpp", "native"):
+            cfg["concurrency"] = ready.get("fingerprint", {}).get("slots") or cfg["concurrency"]
+        cfg["tag_url"] = f"http://127.0.0.1:{port}"
+        cfg["runtime_fingerprint"] = ready.get("fingerprint") or {}
 
     def _prepare_weights(self, cfg, profile, token, cancel):
         key = cfg["nl_model"]

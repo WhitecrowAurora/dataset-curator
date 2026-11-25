@@ -1,0 +1,10 @@
+{
+  "path": "H:\\tagger\\dist\\tagger-20261125-startup-encoding-patch.zip",
+  "bytes": 854,
+  "sha256": "d1abe1b8b651500f2869bda90f30947086864c016458616ceb8a50279209ea71",
+  "crc_ok": true,
+  "files": [
+    "tagger.cmd",
+    "run-web.cmd"
+  ]
+}

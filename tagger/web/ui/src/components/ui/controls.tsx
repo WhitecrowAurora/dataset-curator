@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle2, XCircle, type LucideIcon } from 'lucide-re
 import { SheetHead, StatusChip } from './launcher'
 
 /**
- * 选项格：等宽按钮组单选（设备 / 精度 / 批大小等），选中态 accent 底 + 边。
+ * 选项格：等宽按钮组单选，使用中性选中面与细强调线。
  * 键盘：方向键在选项间移动并直接切换选中，Home/End 跳首尾。
  */
 export function ChoiceGrid<T extends string>({
@@ -104,11 +104,7 @@ export function ChoiceGrid<T extends string>({
             tabIndex={active ? 0 : -1}
             disabled={disabled}
             onClick={() => (blocked ? onBlocked?.(opt) : onChange(opt))}
-            className={`${sizeClass} rounded-lx-sm font-medium transition-colors border ${mono ? 'font-mono' : ''} ${
-              active
-                ? 'bg-lx-accent-subtle border-lx-accent text-lx-selected'
-                : 'bg-lx-surface-raised border-lx text-lx-muted hover:text-lx'
-            } ${blocked ? 'opacity-45 line-through decoration-lx-dim decoration-1' : ''} ${
+            className={`${sizeClass} lx-choice font-medium ${mono ? 'font-mono' : ''} ${blocked ? 'opacity-45 line-through decoration-lx-dim decoration-1' : ''} ${
               disabled || blocked ? 'cursor-not-allowed' : 'cursor-pointer'
             }`}
           >
@@ -197,12 +193,8 @@ export function ChoiceMulti<T extends string>({
             aria-pressed={active}
             disabled={disabled}
             onClick={() => toggle(opt)}
-            className={`${sizeClass} rounded-lx-sm font-medium transition-colors border ${
+            className={`${sizeClass} lx-choice font-medium ${
               mono ? 'font-mono' : ''
-            } ${
-              active
-                ? 'bg-lx-accent-subtle border-lx-accent text-lx-selected'
-                : 'bg-lx-surface-raised border-lx text-lx-muted hover:text-lx'
             } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           >
             {label}
@@ -233,13 +225,16 @@ export function ToggleRow({
         disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
       }`}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 shrink-0 rounded accent-[var(--lx-accent)]"
-      />
+      <span className="relative mt-0.5 shrink-0">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="lx-switch-input sr-only"
+        />
+        <span aria-hidden="true" className="lx-switch-track" />
+      </span>
       <span className="min-w-0">
         <span className="block text-sm text-lx-secondary">{label}</span>
         {hint && <span className="mt-0.5 block text-xs text-lx-dim">{hint}</span>}

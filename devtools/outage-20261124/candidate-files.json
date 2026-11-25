@@ -1,0 +1,10 @@
+{
+  "fox-label/server.py": "bf9fe1411af50aee89c200b37f71fdb8619a06a100be1772d5135f13d910ab69",
+  "fox-label/delivery/service.py": "acd56901bc8a851b466ede14c2384c23f00f2c67aac1e0f50b53d25abd76d376",
+  "fox-label/delivery/routes.py": "d5d68fff7238bc9ca5d4b7f2dbb117ab8255f2944d744766239838b3a8c0723c",
+  "fox-label/annotation/tables.py": "af3d0226fa5b30a217607692fd3c4435db929f893a8d0884d6197f2189de0ddf",
+  "fox-label/annotation/artist_reinject.py": "bb65170b4110ec68301163957dba1db03cb68f5e69d19f9dbd68ba665a4d6b08",
+  "fox-label/assignments/offline.py": "d85f6bedb5a213ce9d4a8a2adf4c6c11cff173ff75fba86400d8e10a54245e62",
+  "fox-label/assignments/offline_document.py": "5ff9b21a0e8082cb9391755d2cddc437f7be5825ff6f5a7dd5c658dcf652d5b3",
+  "fox-panel/panel.py": "d144ba8ae931217877604f8ebdc1c7cdef3f784916d77d91ea91f056f3a41f6a"
+}

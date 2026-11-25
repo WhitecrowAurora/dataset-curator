@@ -324,11 +324,8 @@ _CJK_CHAR = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
 def est_caption_tokens(caption: str) -> int:
     """估算 caption 作为**单条纯文本**送进 text encoder 时的 token 数。
 
-    为什么不用真实 tokenizer：生产链路里的模型可能是云端 API，拿不到
-    tokenizer；每张图再发一次 tokenize 请求也不划算。infra 那条线是 512，
-    余量很大，比例估算足够当保险。
-
-    ★口径别混：这里不算 tag、不算 LLM 的 completion_tokens。
+    仅供旧调用方的近似展示；训练预算由本地真实 tokenizer 检查。
+    这里不算 tag，也不算 LLM 的 completion_tokens。
     """
     if not caption:
         return 0
@@ -338,39 +335,24 @@ def est_caption_tokens(caption: str) -> int:
 
 
 def fit_token_budget(caption: str, limit: int) -> str:
-    """把 caption 压到 token 上限以内：按句从尾部砍，砍到预算内。
-
-    这是给 infra 的硬保险——超出 512 会在那边被**无提示截断**，截在哪没人
-    知道。在这里砍至少是确定的、落在句边界上。
-
-    `limit<=0` 表示不启用（保持原样）。
-    """
+    """旧清洗接口的估算预算；最终训练文本由 TrainingText 精确处理。"""
     if limit <= 0 or not caption:
         return caption
-
-    # 留 15% 余量：比例是拟合的，实测最坏情况估算偏小约 6%（h5 中文估 172、
-    # 真实 183）。余量不足会让超线样本漏过去，那正是这道保险要防的事。
-    budget = int(limit * 0.85)
-    if est_caption_tokens(caption) <= budget:
+    if est_caption_tokens(caption) <= limit:
         return caption
-
-    parts = [p for p in re.split(r"(?<=[。！？；;])|(?<=[.!?])\s+", caption) if p.strip()]
-    kept: list[str] = []
-    for part in parts:
-        candidate = "".join(kept) + part
-        if kept and est_caption_tokens(candidate) > budget:
-            break
-        kept.append(part)
-    out = "".join(kept).strip()
-
-    # 第一句就超预算（极少见）时按比例硬切，保证保险真的兜住。
-    if est_caption_tokens(out) > budget:
-        ratio = budget / max(1, est_caption_tokens(out))
-        out = out[:max(20, int(len(out) * ratio))].rstrip(" ，、；,;:：")
-        if out and out[-1] not in "。.！？!?":
-            out += "。"
-
-    return out or caption
+    target = max(1, int(limit * .85))
+    for match in reversed(list(re.finditer(r"[。！？；;]|[.!?](?:\s|$)", caption))):
+        text = caption[:match.end()].rstrip()
+        if text and est_caption_tokens(text) <= target:
+            return text
+    lo, hi = 0, len(caption)
+    while lo < hi:
+        middle = (lo + hi + 1) // 2
+        if est_caption_tokens(caption[:middle]) <= target:
+            lo = middle
+        else:
+            hi = middle - 1
+    return caption[:lo].rstrip()
 
 
 def tidy_caption(caption: str, token_limit: int = 0) -> str:
@@ -380,10 +362,8 @@ def tidy_caption(caption: str, token_limit: int = 0) -> str:
     "首次出现"占掉，正文里真正该保留的那条反而被当成重复脱了引号。
     最后才删"没有文字"的交代句——它要看到砍完复述之后的最终文本。
 
-    最后一道是 infra 的 token 硬保险（`token_limit>0` 才启用）：超了会在
-    训练侧被无提示截断，宁可在这里按句砍。
-
-    四步都是纯字符串操作，不改画面描述本身，只在引文层面收敛。
+    token_limit>0 保留旧接口的估算裁剪语义。主客户端在画师和标签
+    全部确定后，按最终训练文本模板与真实 tokenizer 处理预算。
     """
     if not caption:
         return caption

@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "checks": [
+    "unknown total, exact rate, NL-only parallel controls",
+    "details and release confirmation preserved; no dispatch on page open",
+    "known total and current TAG phase override",
+    "stale progress hides live speed",
+    "paused state clears old progress; resume/force-continue request contracts",
+    "no GPU and multiple GPU display",
+    "connection, command and delivery errors stay visible without expanding details",
+    "poll failure hides cached live speed",
+    "dark/light, desktop/tablet/mobile, reduced motion"
+  ],
+  "errors": [],
+  "layouts": [
+    {
+      "theme": "dark",
+      "width": 1440,
+      "scroll": 1022,
+      "client": 1022
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "scroll": 1022,
+      "client": 1022
+    },
+    {
+      "theme": "dark",
+      "width": 900,
+      "scroll": 654,
+      "client": 654
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "scroll": 160,
+      "client": 160
+    }
+  ]
+}

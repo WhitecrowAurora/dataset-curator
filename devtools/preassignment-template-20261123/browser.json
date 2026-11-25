@@ -1,0 +1,14 @@
+{
+  "real_http": true,
+  "template_saved_without_dispatch": true,
+  "reload_persistence": true,
+  "new_member_defaults": true,
+  "individual_override": true,
+  "main_dispatch_template": true,
+  "artist_snapshot": true,
+  "old_assignments_unchanged": true,
+  "clear_template": true,
+  "dark_mobile": true,
+  "zero_new_leases": true,
+  "page_errors": []
+}

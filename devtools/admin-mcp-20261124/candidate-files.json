@@ -1,0 +1,20 @@
+{
+  "fox-label/assignments/offline.py": "16a6b251638962b43701e8f6d9b6ae6d3eafb1d05e06ff40cd970264988c626e",
+  "fox-label/assignments/offline_management.py": "be062b8cc9710f015746ca4044850b92311de7716d54caf1e40203da5be63aef",
+  "fox-label/server.py": "6009f14f4ccd242942e313921cd7b0613e170a77c40cd0c26053098b476ea5f9",
+  "fox-panel/panel.py": "c2c7ef11bcff167409d1ccb2fbd4c545d38515e1ddb182191e5b69551f053b77",
+  "fox-panel/ai_access/__init__.py": "d0d5474e9ff0e21c86200bc431727d4b79b34b794b73df0894f9d4b6001af375",
+  "fox-panel/ai_access/store.py": "681ae69d28bd440c49b1c4bd698ee0029e0a37fd533f24873b17af2809484c36",
+  "fox-panel/ai_access/tools.py": "be4f7cbd441afd76a9c19584ca8313749a8255ab04a5a5c5e4583742b4652051",
+  "fox-panel/ai_access/protocol.py": "0ccc788a3aafc0da0864123329a08e8daf670398a2a5f7f9f7d13e4c951ba950",
+  "fox-panel/ai_access/routes.py": "779e6b0aa2687272145f8bc75fd65b8d75ff740914316e15859b4faedf13a59c",
+  "fox-panel/web/offline-jobs.js": "a08c584798c16178da0df0caee748ff1bf5375dba5692dc308d379360aa89281",
+  "fox-panel/web/workspace.js": "67114afbafbb11b90983de4cfc7b7ddff95da6bf99bdda11e5f1d03e3154b55b",
+  "fox-panel/web/offline-workorders.js": "3fd4caceea65a5e0121be57dce4c424386086e14069aad40a0f2364c2d54083f",
+  "fox-panel/web/index.html": "fd8d84b84ba4bbf2873092ac47280b1824887d7113f71b75af3ef55e7c9c4389",
+  "fox-panel/web/offline-workorders.html": "96ac12049aae4877af87a9c4521b7d306deb4cb760feb62d691f7c4f6b1d1aec",
+  "fox-panel/web/ai-access.html": "c38903ac84932b215e95025fbd902738096f170d9581dbf81eb7de2719b8d59e",
+  "fox-panel/web/ai-access.js": "2def74b907ff3799fa9bcc34ca9d35db299c3c117079267eccda178a323bd69d",
+  "fox-panel/web/ai-access.css": "1ad3bb919cd4d15063da2b5ef7a0a206b019194d4f1e663c3327fcb749e5f4f9",
+  "fox-panel/web/center-mcp.zip": "3d1380b66c334eb6b763294bbc41e1a3637e2bf290ee06683bbe3e7402371ca4"
+}

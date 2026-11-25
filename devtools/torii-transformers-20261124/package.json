@@ -1,0 +1,29 @@
+{
+  "source": {
+    "path": "H:\\tagger\\dist\\tagger-20261124-auto-center.zip",
+    "bytes": 77066540,
+    "sha256": "7863f1e04fdee17dd62d2b0a27baa2eab0ecbd2cd3151b64829ba7ad69a7b0be"
+  },
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261124-torii-compat.zip",
+    "bytes": 77070961,
+    "sha256": "063d07f2e2303acc68c0cb6453c8b7922cc5ed1430a51212c8c785556a413735"
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261124-torii-patch.zip",
+    "bytes": 6704,
+    "sha256": "81410c309295ad82bc2ea5817dbb0a93ca7b2f4ecfdc9fc5b897bd612733869e"
+  },
+  "full_crc_ok": true,
+  "only_changed": [
+    "tagger/inference/qwen35/linear.py",
+    "tagger/inference/qwen35/runtime.py",
+    "tagger/inference/qwen35/weights.py"
+  ],
+  "added_existing_mcp_files": [
+    "mcp/center/README.md",
+    "mcp/center/bridge.py"
+  ],
+  "embedded_worker_sources": 28,
+  "personal_state_excluded": true
+}

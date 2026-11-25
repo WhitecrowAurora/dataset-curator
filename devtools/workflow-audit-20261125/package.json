@@ -1,0 +1,29 @@
+{
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-workflow-fix.zip",
+    "bytes": 76776089,
+    "sha256": "ee7b4b57c90c2a64a3646e400253d140f81f181197eac821159df9bff956b0af",
+    "crc_ok": true,
+    "current_source_files_matched": 589,
+    "embedded_worker_sources": 29,
+    "private_state_excluded": true
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-workflow-patch.zip",
+    "bytes": 62962801,
+    "sha256": "74bb3f7161f3dd37770a41f8510b286997cf84e5459b010095d4780855704f2e",
+    "crc_ok": true,
+    "current_source_files_matched": 428,
+    "embedded_worker_sources": 29,
+    "private_state_excluded": true
+  },
+  "self_contained_shell": {
+    "bytes": 66240434,
+    "sha256": "6f6836428b3a385e20bb904e1f1f3d32396199dd044095dd9ad9c7d8ad8471d4"
+  },
+  "ui_assets": [
+    "/assets/index-BHenGRbn.js",
+    "/assets/index-7Ebx__7j.css"
+  ],
+  "cumulative_patch": true
+}

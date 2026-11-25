@@ -1,0 +1,23 @@
+{
+  "fox-label/dispatch.py": "4a48d1e963a87f4cc85d9dd0ee29e3708e03ab326d54c9faed014eb3bc3ff9e0",
+  "fox-label/server.py": "489701f7128df0f8ecb907a254f2a22076ac78df0fb9e04f6cec36ded0b9c277",
+  "fox-label/managed/automation.py": "91519efe3f2b8a82d96e44b8a406507e5d564f30c7bd912aacd99df85abefb5e",
+  "fox-label/managed/store.py": "519924a1f5a2ffad0c91dd7bcafe605e5c9fa4ed38c4b4aa13161ad6fdf83bda",
+  "fox-label/managed/stopping.py": null,
+  "fox-label/scheduling/control.py": null,
+  "fox-label/scheduling/leases.py": "b714c7405e3757ffc2f5f5169e5408cd0eccbad98c309365d8563a80108df60c",
+  "fox-label/scheduling/onboarding.py": "f540af1d87ad6eb54b0d93718fa66416cc2d66fb72daffda96e987e7cf8751a9",
+  "fox-label/scheduling/policies.py": "779c6221b7ec056a9c22f1edcc8b7295a2c13e2e71b3d39ecbefde5ad01e4ce0",
+  "fox-label/scheduling/routes.py": "ce2bad7fc6de85f93327590fd26935c66741deeea13806eabf1d9309f24f7bac",
+  "fox-panel/panel.py": "c2c7ef11bcff167409d1ccb2fbd4c545d38515e1ddb182191e5b69551f053b77",
+  "fox-panel/ai_access/tools.py": "c631e2c05989f0218498f964f26016a51e2b34ab57c61898f963b482f45b716e",
+  "fox-panel/ai_access/protocol.py": "0ccc788a3aafc0da0864123329a08e8daf670398a2a5f7f9f7d13e4c951ba950",
+  "fox-panel/ai_access/releases.py": null,
+  "fox-panel/web/app.js": "039183373054dff933dec6d986996a5cbb50fb73ac718b1727cb2c9de5ea7e77",
+  "fox-panel/web/index.html": "fd8d84b84ba4bbf2873092ac47280b1824887d7113f71b75af3ef55e7c9c4389",
+  "fox-panel/web/managed.js": "c13da13407b77b9897c15aef7094e3f76a48af93f7deb6f5fc2b2ad672fbb8da",
+  "fox-panel/web/automation.js": null,
+  "fox-panel/web/workspace-sections.css": "fe22ab0d5e4c06feb1060c82c306a6f6c43d3b7a40ff91f35770d5e467ab0ba5",
+  "fox-panel/web/center-mcp.zip": "3d1380b66c334eb6b763294bbc41e1a3637e2bf290ee06683bbe3e7402371ca4",
+  "fox-panel/web/managed-tuning.js": "3a5ae4491bf293be70689414574c694ec33a36a509e8cfbc7744c12fef38c26b"
+}

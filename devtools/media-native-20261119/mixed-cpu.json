@@ -1,0 +1,784 @@
+{
+  "device": "cpu",
+  "quality": "默认生产质检",
+  "input_media": "两图均 unknown; 不预设分类",
+  "complete": true,
+  "wall_s": 447.75932420000026,
+  "snapshot": {
+    "id": "3aa33ed0af7b",
+    "status": "done",
+    "phase": "hair",
+    "error": "",
+    "spec": {
+      "input_dir": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\mixed.zip",
+      "input_shards": [],
+      "out_dir": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out",
+      "backend": "pixai",
+      "model_dir": "",
+      "device": "cpu",
+      "tag_devices": [],
+      "tag_mode": "batch",
+      "precision": "fp32",
+      "batch": 1,
+      "preprocess": "pil",
+      "threshold": null,
+      "limit": 0,
+      "force": false,
+      "recursive": true,
+      "artist": true,
+      "artist_depth": 0,
+      "artist_inject": true,
+      "artist_inject_tags": true,
+      "artist_table": "",
+      "layout": "flat",
+      "seq_width": 6,
+      "include_zips": true,
+      "include_loose": true,
+      "pack": false,
+      "formats": [
+        "parquet"
+      ],
+      "jpeg_quality": 95,
+      "jpeg_subsampling": 0,
+      "reencode": "always",
+      "compress": "stored",
+      "max_records": 5000,
+      "max_bytes": 0,
+      "engine": "vlm",
+      "hair_review": true,
+      "nl_by_media": true,
+      "hair_media": "unknown",
+      "vlm_provider": "local",
+      "api_base": "",
+      "api_key": "",
+      "url": "http://127.0.0.1:8000",
+      "vlm_model": "tagger",
+      "output_mode": "both",
+      "temperature": 0.2,
+      "top_p": 0.9,
+      "max_tokens": 0,
+      "timeout_s": 90,
+      "concurrency": 1,
+      "multi_gpu": false,
+      "multi_gpus": [],
+      "per_card_seqs": 0,
+      "max_pixels": 0,
+      "caption_chars": null,
+      "caption_zh_ratio": 0,
+      "prompt_id": "",
+      "prompt_parts": null,
+      "seed": null,
+      "max_failures": 3,
+      "quality_pass_score": 0.0,
+      "quality_drop_score": 0.0,
+      "quality_max_attempts": 0,
+      "quality_retry_temp_step": 0.0,
+      "quality_retry_temp_cap": 0.0,
+      "quality_retry_pixels_scale": 0.0,
+      "quality_retry_pixels_cap": 0,
+      "quality_enable_clip": false,
+      "quality_clip_min_score": 0.0,
+      "quality_clip_model": "",
+      "quality_clip_pretrained": "",
+      "quality_min_chars": null,
+      "quality_max_chars": null,
+      "quality_min_tag_coverage": null,
+      "quality_max_repeat_ratio": null,
+      "escalate_url": "",
+      "escalate_model": "",
+      "use_file_url": false,
+      "hf_repo": "",
+      "hf_token": "",
+      "hf_revision": "main",
+      "hf_files": [],
+      "hf_format": "auto",
+      "hf_prefetch": 1,
+      "hf_conns": 4,
+      "hf_proxy": "",
+      "hf_cache": "",
+      "hf_reserve_gb": 0.0,
+      "cache": false,
+      "cache_max_gb": 8.0,
+      "retry_failed": false,
+      "artifact_format": "jsonl",
+      "parquet_rows": 2000,
+      "keep_categories": [],
+      "thresholds": {},
+      "model_repo": "",
+      "guard": true,
+      "guard_policy": {},
+      "check_space": true,
+      "auto_upload_url": "",
+      "auto_upload_token": "",
+      "auto_upload_dir": ""
+    },
+    "out_dir": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out",
+    "counts": {
+      "total": 2,
+      "done": 2,
+      "skipped": 0,
+      "blank_skipped": 0,
+      "artist_skipped": 0,
+      "excused": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 2
+    },
+    "progress": 1.0,
+    "total_known": true,
+    "elapsed_s": 446.5,
+    "rate_per_s": 0.01,
+    "eta_s": 0.0,
+    "output_progress": {
+      "tag": {
+        "done": 2,
+        "skipped": 0,
+        "failed": 0,
+        "total": 2,
+        "settled": 2,
+        "progress": 1.0,
+        "rate_per_s": 0.14,
+        "eta_s": 0.0
+      },
+      "nl": {
+        "done": 2,
+        "skipped": 0,
+        "failed": 0,
+        "total": 2,
+        "settled": 2,
+        "progress": 1.0,
+        "rate_per_s": 0.01,
+        "eta_s": 0.0
+      }
+    },
+    "timings_ms": {
+      "decode": 0,
+      "forward": 0
+    },
+    "usage": {
+      "prompt_tokens": 2777,
+      "completion_tokens": 499,
+      "rate_limited": 0,
+      "cost": null
+    },
+    "by_reason": {},
+    "pack": {
+      "enabled": false,
+      "total": 0,
+      "packed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 0,
+      "bytes": 0,
+      "rate_per_s": 0.0,
+      "formats": [],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": []
+    },
+    "plan": null,
+    "current": "",
+    "seq": 78,
+    "queued_events": 78,
+    "created": 1795042918.4614367,
+    "started": 1795042919.2009375,
+    "ended": 1795043365.7011206
+  },
+  "rows": [
+    {
+      "image_id": "107",
+      "tag": "{\"image_id\": \"107\", \"tag\": \"striped_clothes, shirt, 1girl, outdoors, solo, grey_hair, blurry, blurry_background, real_life, pocket, breast_pocket, striped_shirt, day, east_asian, from_side, medium_hair, necktie, upper_body, black_eyes, field, depth_of_field, grass, collared_shirt\", \"tags\": [\"striped_clothes\", \"shirt\", \"1girl\", \"outdoors\", \"solo\", \"grey_hair\", \"blurry\", \"blurry_background\", \"real_life\", \"pocket\", \"breast_pocket\", \"striped_shirt\", \"day\", \"east_asian\", \"from_side\", \"medium_hair\", \"necktie\", \"upper_body\", \"black_eyes\", \"field\", \"depth_of_field\", \"grass\", \"collared_shirt\"], \"tag_backend\": \"pixai\", \"artist\": \"\", \"artist_tag\": \"\", \"caption_language\": \"en\", \"tags_original\": [], \"annotation_model\": \"pixai-labs/pixai-tagger-v1.0\", \"annotation_version\": \"unknown+35a58899fda1\", \"source_revision\": \"\", \"ok\": true, \"attempts\": 1, \"completion_tokens\": 0, \"provenance\": {\"provider\": \"local\", \"engine\": \"\", \"runtime_sha\": \"\", \"model_id\": \"pixai-labs/pixai-tagger-v1.0\", \"model_path\": \"unknown\", \"model_revision\": null, \"precision\": \"fp32\", \"max_pixels\": 589824, \"caption_chars\": null, \"vllm_version\": null, \"tier\": \"\", \"device\": \"cpu\", \"temperature\": 0.0, \"prompt_sha\": \"35a58899fda1\", \"seed\": null, \"tag_backend\": \"pixai\", \"tag_precision\": \"fp32\", \"tag_preprocess\": \"pil\"}, \"ts\": 1795042963.8159368, \"hair_review\": {\"id\": \"c343c741bcd233ea00218fcbbf837ace\", \"status\": \"review\", \"selected\": [], \"reason\": \"模型发色仍有分歧\", \"original_tags\": [\"striped_clothes\", \"shirt\", \"1girl\", \"outdoors\", \"solo\", \"grey_hair\", \"blurry\", \"blurry_background\", \"real_life\", \"pocket\", \"breast_pocket\", \"striped_shirt\", \"day\", \"east_asian\", \"from_side\", \"medium_hair\", \"necktie\", \"upper_body\", \"black_eyes\", \"field\", \"depth_of_field\", \"grass\", \"collared_shirt\"]}}",
+      "nl": "",
+      "ts": 1795042963.9719381
+    },
+    {
+      "image_id": "hutao",
+      "tag": "{\"image_id\": \"hutao\", \"tag\": \"hu_tao_(genshin_impact), genshin_impact, boo_tao_(genshin_impact), 1girl, tongue, tongue_out, ghost, torino_aqua, twintails, red_eyes, skirt, flower, hair_ornament, long_hair, looking_at_viewer, bag, hair_flower, solo, backpack, long_sleeves, :p, symbol-shaped_pupils, school_uniform, ahoge, alternate_costume, pleated_skirt, bracelet, jacket, jewelry, outdoors, contemporary, flower-shaped_pupils, bead_bracelet, beads, smile, cardigan, blue_jacket, brown hair\", \"tags\": [\"hu_tao_(genshin_impact)\", \"genshin_impact\", \"boo_tao_(genshin_impact)\", \"1girl\", \"tongue\", \"tongue_out\", \"ghost\", \"torino_aqua\", \"twintails\", \"red_eyes\", \"skirt\", \"flower\", \"hair_ornament\", \"long_hair\", \"looking_at_viewer\", \"bag\", \"hair_flower\", \"solo\", \"backpack\", \"long_sleeves\", \":p\", \"symbol-shaped_pupils\", \"school_uniform\", \"ahoge\", \"alternate_costume\", \"pleated_skirt\", \"bracelet\", \"jacket\", \"jewelry\", \"outdoors\", \"contemporary\", \"flower-shaped_pupils\", \"bead_bracelet\", \"beads\", \"smile\", \"cardigan\", \"blue_jacket\", \"brown hair\"], \"tag_backend\": \"pixai\", \"artist\": \"\", \"artist_tag\": \"\", \"caption_language\": \"en\", \"tags_original\": [], \"annotation_model\": \"pixai-labs/pixai-tagger-v1.0\", \"annotation_version\": \"unknown+35a58899fda1\", \"source_revision\": \"\", \"ok\": true, \"attempts\": 1, \"completion_tokens\": 0, \"provenance\": {\"provider\": \"local\", \"engine\": \"\", \"runtime_sha\": \"\", \"model_id\": \"pixai-labs/pixai-tagger-v1.0\", \"model_path\": \"unknown\", \"model_revision\": null, \"precision\": \"fp32\", \"max_pixels\": 589824, \"caption_chars\": null, \"vllm_version\": null, \"tier\": \"\", \"device\": \"cpu\", \"temperature\": 0.0, \"prompt_sha\": \"35a58899fda1\", \"seed\": null, \"tag_backend\": \"pixai\", \"tag_precision\": \"fp32\", \"tag_preprocess\": \"pil\"}, \"ts\": 1795042978.4859374, \"hair_review\": {\"id\": \"73f3688915a1b097dd038e44ec979385\", \"status\": \"accepted\", \"selected\": [\"brown\"], \"reason\": \"VLM 与已有模型判断一致\", \"original_tags\": [\"hu_tao_(genshin_impact)\", \"genshin_impact\", \"boo_tao_(genshin_impact)\", \"1girl\", \"tongue\", \"tongue_out\", \"ghost\", \"torino_aqua\", \"twintails\", \"red_eyes\", \"skirt\", \"brown_hair\", \"flower\", \"hair_ornament\", \"long_hair\", \"looking_at_viewer\", \"bag\", \"hair_flower\", \"solo\", \"backpack\", \"long_sleeves\", \":p\", \"symbol-shaped_pupils\", \"school_uniform\", \"ahoge\", \"alternate_costume\", \"pleated_skirt\", \"bracelet\", \"jacket\", \"jewelry\", \"outdoors\", \"contemporary\", \"flower-shaped_pupils\", \"bead_bracelet\", \"beads\", \"smile\", \"cardigan\", \"blue_jacket\"]}}",
+      "nl": "",
+      "ts": 1795042978.7599406
+    },
+    {
+      "image_id": "hutao",
+      "tag": "",
+      "nl": "{\"image_id\": \"hutao\", \"caption\": \"Hu Tao from Genshin Impact stands outdoors near a wrought-iron gate in a softly lit garden or courtyard setting with greenery and stone pavement visible behind her.The scene is bathed in warm, natural light that highlights the textures of her hair, clothing, and accessories.A young girl with very long brown twintails tied high on each side adorned with black ribbons and red-orange plum blossom flower ornaments featuring small buds and petals.She has large vivid red eyes with glowing flower-shaped pupils containing multiple orange-red hues that catch the light, a playful expression sticking out her tongue slightly while looking directly at the viewer.Her outfit is an alternate school uniform consisting of a navy blue blazer with gold buttons worn open over a white collared shirt partially visible beneath and a loosely tied bright red necktie.She wears a short pleated plaid skirt in muted browns, greens, and creams ending mid-thigh.On her left wrist are two bead bracelets: one black with small round beads and another larger glossy red beaded bracelet on the right hand.Her nails are painted deep red matching other red accents like the necktie and flower ornaments.Hu Tao carries a modern black backpack decorated with three emoji pins showing happy, surprised, and neutral faces plus a round charm featuring her signature Genshin Vision symbol attached by a purple ribbon.She holds gently in front of her chest a small white ghost plushie or spirit figure characterized by simple red eyebrows and an open mouth as if laughing joyfully.The overall pose is relaxed yet engaging with one hand near the ghost, emphasizing her playful personality.\", \"artist\": \"\", \"artist_tag\": \"\", \"artist_injected\": \"\", \"tag_count\": 0, \"nl_tokens\": 336, \"prompt_tokens\": 1283, \"chars\": 1657, \"score\": 4.5, \"flags\": [], \"media\": \"anime\", \"media_route\": {\"media\": \"anime\", \"source\": \"deepghs/anime_real_cls\", \"revision\": \"097a6c1e9e62866a435810c883a45a7cb2c7077d\", \"scores\": {\"anime\": 0.989385187625885, \"photo\": 0.010614775121212006}}, \"caption_language\": \"en\", \"tags_original\": [], \"annotation_model\": \"ToriiGate-0.5\", \"annotation_version\": \"unknown+0f40605aeb91\", \"source_revision\": \"\", \"ok\": true, \"attempts\": 1, \"provenance\": {\"provider\": \"local\", \"engine\": \"llamacpp\", \"runtime_sha\": \"4db54e66c905c1fc\", \"model_id\": \"ToriiGate-0.5\", \"model_path\": \"E:\\\\dev_model\\\\ToriiGate-0.5\\\\ToriiGate-0.5-Q6_K.gguf\", \"model_revision\": null, \"precision\": \"ToriiGate-0.5-Q6_K\", \"max_pixels\": 1000000, \"caption_chars\": null, \"vllm_version\": null, \"tier\": \"\", \"device\": \"cpu\", \"temperature\": 0.5, \"prompt_sha\": \"0f40605aeb91\", \"seed\": 20261119}, \"ts\": 1795043079.8809361}",
+      "ts": 1795043079.8814366
+    },
+    {
+      "image_id": "107",
+      "tag": "",
+      "nl": "{\"image_id\": \"107\", \"caption\": \"A young woman with short, silver-grey hair stands in profile against a vast field of tall green grass;her skin is smooth and matte, her lips are naturally pale pink, and she wears a loose-fitting shirt made of cloth with bold black-and-white vertical stripes that appear slightly textured.The background consists of an out-of-focus expanse of green vegetation fading into a hazy grey sky, suggesting soft, diffused daylight without harsh shadows or direct sun;the overall scene is rendered in muted tones dominated by green and grey, creating a calm atmosphere.The camera captures her from a side angle at eye level, emphasizing her contemplative expression as she gazes toward the right edge of the frame.There are no visible texts or markings on any surface within the image.\", \"artist\": \"\", \"artist_tag\": \"\", \"artist_injected\": \"\", \"tag_count\": 0, \"nl_tokens\": 163, \"prompt_tokens\": 1494, \"chars\": 777, \"score\": 4.5, \"flags\": [], \"media\": \"photo\", \"media_route\": {\"media\": \"photo\", \"source\": \"deepghs/anime_real_cls\", \"revision\": \"097a6c1e9e62866a435810c883a45a7cb2c7077d\", \"scores\": {\"anime\": 0.011443514376878738, \"photo\": 0.9885565042495728}}, \"caption_language\": \"en\", \"tags_original\": [], \"annotation_model\": \"tagger\", \"annotation_version\": \"unknown+72e37f7ad5d9\", \"source_revision\": \"\", \"ok\": true, \"attempts\": 1, \"provenance\": {\"provider\": \"local\", \"engine\": \"llamacpp\", \"runtime_sha\": \"4db54e66c905c1fc\", \"model_id\": \"tagger\", \"model_path\": \"H:\\\\tagger\\\\models\\\\nl\\\\qwen3vl-8b-abliterated\\\\qwen3vl-8b-abliterated-Q6_K.gguf\", \"model_revision\": null, \"precision\": \"qwen3vl-8b-abliterated-Q6_K\", \"max_pixels\": 589824, \"caption_chars\": null, \"vllm_version\": null, \"tier\": \"\", \"device\": \"cpu\", \"temperature\": 0.2, \"prompt_sha\": \"72e37f7ad5d9\", \"seed\": null}, \"ts\": 1795043213.8094375}",
+      "ts": 1795043213.8099382
+    }
+  ],
+  "reviews": [
+    {
+      "id": "c343c741bcd233ea00218fcbbf837ace",
+      "image_name": "107.jpg",
+      "image_sha256": "e6c726b6fb2470b3c15b6364a6dd99a31b192d5154474d27fdc42fb8a8b5a4e0",
+      "crop": null,
+      "created": 1795042963.9534369,
+      "status": "review",
+      "selected": [],
+      "candidates": [
+        {
+          "color": "light",
+          "label": "浅色组",
+          "probability": 0.9996294975280762,
+          "swatch": "#e3e1d8"
+        },
+        {
+          "color": "red",
+          "label": "红色",
+          "probability": 8.769691339693964e-05,
+          "swatch": "#b95c62"
+        },
+        {
+          "color": "green",
+          "label": "绿色",
+          "probability": 6.628857954638079e-05,
+          "swatch": "#72a66a"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "grey",
+          "probability": 0.8651748299598694,
+          "scores": {
+            "black": 0.00276225246489048,
+            "blonde": 0.001069537946023047,
+            "brown": 0.00305254478007555,
+            "blue": 0.00014416759950108826,
+            "pink": 0.00032417522743344307,
+            "white": 0.036800943315029144,
+            "grey": 0.8651748299598694,
+            "purple": 0.0004971127491444349,
+            "red": 4.752770473714918e-05,
+            "green": 0.0003053894033655524,
+            "orange": 2.1908190319663845e-05,
+            "aqua": 0.0001327845238847658
+          },
+          "source": "existing_result",
+          "person_support": true,
+          "ambiguous": false
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "light",
+          "probability": 0.9934275150299072,
+          "scores": {
+            "aqua": 8.546876051696017e-05,
+            "blue": 0.0001630177430342883,
+            "green": 7.484637171728536e-05,
+            "brown": 0.0007809606031514704,
+            "orange": 9.06693676370196e-05,
+            "pink": 0.0002542402653489262,
+            "purple": 0.0019458499737083912,
+            "red": 0.0008346360409632325,
+            "light": 0.9934275150299072,
+            "black": 0.0023427153937518597
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "light",
+          "probability": 0.9996294975280762,
+          "scores": {
+            "aqua": 3.163734800182283e-05,
+            "blue": 3.131842095172033e-05,
+            "green": 6.628857954638079e-05,
+            "brown": 2.8870128517155536e-05,
+            "orange": 2.125257014995441e-05,
+            "pink": 1.1515504411363509e-05,
+            "purple": 5.9288868214935064e-05,
+            "red": 8.769691339693964e-05,
+            "light": 0.9996294975280762,
+            "black": 3.2681866287020966e-05
+          }
+        },
+        {
+          "model": "qwen3vl",
+          "color": "silver",
+          "visible_hair": true,
+          "multi_color": false,
+          "multiple_people": false,
+          "reason": "The person has clearly visible scalp hair that is silver in color, with no other colors or multiple people present.",
+          "raw": "{\n  \"color\": \"silver\",\n  \"visible_hair\": true,\n  \"multi_color\": false,\n  \"multiple_people\": false,\n  \"reason\": \"The person has clearly visible scalp hair that is silver in color, with no other colors or multiple people present.\"\n}"
+        }
+      ],
+      "reason": "模型发色仍有分歧",
+      "request": {
+        "image_name": "107.jpg",
+        "job_id": "3aa33ed0af7b",
+        "image_id": "107",
+        "media": "photo",
+        "visible_hair": "unknown",
+        "artifact_path": "",
+        "pixai_scores": {
+          "1girl": 0.9754815697669983,
+          "black_hair": 0.00276225246489048,
+          "blonde_hair": 0.001069537946023047,
+          "brown_hair": 0.00305254478007555,
+          "1boy": 0.022067861631512642,
+          "2girls": 9.091389802051708e-05,
+          "blue_hair": 0.00014416759950108826,
+          "multicolored_hair": 0.00021637007012031972,
+          "pink_hair": 0.00032417522743344307,
+          "white_hair": 0.036800943315029144,
+          "grey_hair": 0.8651748299598694,
+          "purple_hair": 0.0004971127491444349,
+          "red_hair": 4.752770473714918e-05,
+          "green_hair": 0.0003053894033655524,
+          "2boys": 6.95991184329614e-05,
+          "orange_hair": 2.1908190319663845e-05,
+          "3girls": 0.000257996580330655,
+          "aqua_hair": 0.0001327845238847658,
+          "4girls": 8.079192411969416e-06,
+          "6+girls": 6.741779361618683e-05,
+          "3boys": 3.696961357491091e-06,
+          "5girls": 9.707736353448126e-06,
+          "4boys": 1.0238751428914838e-06,
+          "6+boys": 2.1129974356881576e-06,
+          "5boys": 4.6946197471697815e-06
+        },
+        "media_route": {
+          "media": "photo",
+          "source": "deepghs/anime_real_cls",
+          "revision": "097a6c1e9e62866a435810c883a45a7cb2c7077d",
+          "scores": {
+            "anime": 0.011443514376878738,
+            "photo": 0.9885565042495728
+          }
+        },
+        "baseline": {
+          "color": "grey",
+          "probability": 0.8651748299598694,
+          "scores": {
+            "black": 0.00276225246489048,
+            "blonde": 0.001069537946023047,
+            "brown": 0.00305254478007555,
+            "blue": 0.00014416759950108826,
+            "pink": 0.00032417522743344307,
+            "white": 0.036800943315029144,
+            "grey": 0.8651748299598694,
+            "purple": 0.0004971127491444349,
+            "red": 4.752770473714918e-05,
+            "green": 0.0003053894033655524,
+            "orange": 2.1908190319663845e-05,
+            "aqua": 0.0001327845238847658
+          },
+          "source": "existing_result",
+          "person_support": true,
+          "ambiguous": false
+        },
+        "artifact_shard": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out\\artifacts-mixed.jsonl",
+        "artifact_shards": [
+          "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out\\artifacts-mixed.jsonl"
+        ]
+      },
+      "media": "photo",
+      "parent_id": "",
+      "job_id": "3aa33ed0af7b",
+      "extra_colors": [
+        "grey",
+        "silver"
+      ],
+      "elapsed_ms": 56671,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "vlm": "qwen",
+        "input": "original",
+        "min_confidence": 0.7
+      }
+    },
+    {
+      "id": "73f3688915a1b097dd038e44ec979385",
+      "image_name": "hutao.jpg",
+      "image_sha256": "354d76dc952c0d18f159c1a5d1ed5addf6a5004b64bc48b8afa420a3394ac2d1",
+      "crop": null,
+      "created": 1795042978.5759377,
+      "status": "accepted",
+      "selected": [
+        "brown"
+      ],
+      "candidates": [
+        {
+          "color": "red",
+          "label": "红色",
+          "probability": 0.983714759349823,
+          "swatch": "#b95c62"
+        },
+        {
+          "color": "brown",
+          "label": "棕色",
+          "probability": 0.014253485947847366,
+          "swatch": "#8b634b"
+        },
+        {
+          "color": "purple",
+          "label": "紫色",
+          "probability": 0.0016773405950516462,
+          "swatch": "#9b7bb6"
+        }
+      ],
+      "observations": [
+        {
+          "model": "pixai",
+          "color": "brown",
+          "probability": 0.892512857913971,
+          "scores": {
+            "black": 0.027404606342315674,
+            "blonde": 0.0011954779038205743,
+            "brown": 0.892512857913971,
+            "blue": 0.004529820755124092,
+            "pink": 0.0013634408824145794,
+            "white": 0.0007881746860221028,
+            "grey": 0.0004940498038195074,
+            "purple": 0.0012883639428764582,
+            "red": 0.32636433839797974,
+            "green": 0.0002594979596324265,
+            "orange": 0.001714855432510376,
+            "aqua": 0.0007568589644506574
+          },
+          "source": "existing_result",
+          "person_support": true,
+          "ambiguous": false
+        },
+        {
+          "model": "mobilenetv3_v0_dist",
+          "color": "brown",
+          "probability": 0.9980594515800476,
+          "scores": {
+            "aqua": 1.0584455594653264e-05,
+            "blue": 1.5901003280305304e-05,
+            "green": 3.700251181726344e-05,
+            "brown": 0.9980594515800476,
+            "orange": 5.572701047640294e-05,
+            "pink": 5.169880387256853e-05,
+            "purple": 7.588086737086996e-05,
+            "red": 6.922888132976368e-05,
+            "light": 5.672154202329693e-06,
+            "black": 0.0016187600558623672
+          }
+        },
+        {
+          "model": "caformer_s36_v0",
+          "color": "red",
+          "probability": 0.983714759349823,
+          "scores": {
+            "aqua": 9.132257218880113e-06,
+            "blue": 2.408508771623019e-05,
+            "green": 2.7953021344728768e-05,
+            "brown": 0.014253485947847366,
+            "orange": 0.00010386599751655012,
+            "pink": 6.087466317694634e-05,
+            "purple": 0.0016773405950516462,
+            "red": 0.983714759349823,
+            "light": 1.0329055839974899e-05,
+            "black": 0.00011824000102933496
+          }
+        },
+        {
+          "model": "toriigate",
+          "color": "brown",
+          "candidate_colors": [
+            "brown"
+          ],
+          "multiple_people": false,
+          "multi_color": false,
+          "visible_hair": true,
+          "reason": "按角色描述提取发色",
+          "characters": [
+            {
+              "name": "Hu Tao (Genshin Impact)",
+              "description": "Hu Tao has long brown hair styled in twintails with a prominent ahoge, adorned with red and pink plum blossom hair ornaments and small branches. Her large red eyes feature glowing flower-shaped pupils. She wears a navy blue school uniform blazer with gold buttons over a white collared shirt and a red necktie, paired with a beige plaid pleated skirt. Her fingernails are painted black, and she wears a red bead bracelet on her right wrist. She holds a small, smiling white ghost plushie with red markings close to her chest. Her expression is playful, with flushed cheeks and her tongue sticking out slightly. A black backpack with two emoji pins and a round charm featuring an eye symbol, tassels, and red flowers hangs on her back.",
+              "colors": [
+                "brown"
+              ],
+              "nonhuman": false
+            }
+          ],
+          "caption": {
+            "General": "Hu Tao from Genshin Impact stands outdoors near a wrought-iron gate and stone wall, bathed in warm sunlight with soft shadows and lens flare. She is centered in a close-up, slightly low-angle view, holding a small white ghost plushie. The background includes greenery and a peaceful garden-like setting.",
+            "Hu Tao (Genshin Impact)": "Hu Tao has long brown hair styled in twintails with a prominent ahoge, adorned with red and pink plum blossom hair ornaments and small branches. Her large red eyes feature glowing flower-shaped pupils. She wears a navy blue school uniform blazer with gold buttons over a white collared shirt and a red necktie, paired with a beige plaid pleated skirt. Her fingernails are painted black, and she wears a red bead bracelet on her right wrist. She holds a small, smiling white ghost plushie with red markings close to her chest. Her expression is playful, with flushed cheeks and her tongue sticking out slightly. A black backpack with two emoji pins and a round charm featuring an eye symbol, tassels, and red flowers hangs on her back."
+          },
+          "source": "independent_image"
+        }
+      ],
+      "reason": "VLM 与已有模型判断一致",
+      "request": {
+        "image_name": "hutao.jpg",
+        "job_id": "3aa33ed0af7b",
+        "image_id": "hutao",
+        "media": "anime",
+        "visible_hair": "unknown",
+        "artifact_path": "",
+        "pixai_scores": {
+          "1girl": 0.9951583743095398,
+          "black_hair": 0.027404606342315674,
+          "blonde_hair": 0.0011954779038205743,
+          "brown_hair": 0.892512857913971,
+          "1boy": 0.0022780089639127254,
+          "2girls": 0.0006670114817097783,
+          "blue_hair": 0.004529820755124092,
+          "multicolored_hair": 0.25547027587890625,
+          "pink_hair": 0.0013634408824145794,
+          "white_hair": 0.0007881746860221028,
+          "grey_hair": 0.0004940498038195074,
+          "purple_hair": 0.0012883639428764582,
+          "red_hair": 0.32636433839797974,
+          "green_hair": 0.0002594979596324265,
+          "2boys": 1.6384297850891016e-05,
+          "orange_hair": 0.001714855432510376,
+          "3girls": 9.134945867117494e-05,
+          "aqua_hair": 0.0007568589644506574,
+          "4girls": 0.00019726176105905324,
+          "6+girls": 1.325311041000532e-05,
+          "3boys": 0.00015706216800026596,
+          "5girls": 2.6795862595463404e-06,
+          "4boys": 6.067188223823905e-05,
+          "6+boys": 1.1798126251960639e-05,
+          "5boys": 3.351254235894885e-06
+        },
+        "media_route": {
+          "media": "anime",
+          "source": "deepghs/anime_real_cls",
+          "revision": "097a6c1e9e62866a435810c883a45a7cb2c7077d",
+          "scores": {
+            "anime": 0.989385187625885,
+            "photo": 0.010614775121212006
+          }
+        },
+        "baseline": {
+          "color": "brown",
+          "probability": 0.892512857913971,
+          "scores": {
+            "black": 0.027404606342315674,
+            "blonde": 0.0011954779038205743,
+            "brown": 0.892512857913971,
+            "blue": 0.004529820755124092,
+            "pink": 0.0013634408824145794,
+            "white": 0.0007881746860221028,
+            "grey": 0.0004940498038195074,
+            "purple": 0.0012883639428764582,
+            "red": 0.32636433839797974,
+            "green": 0.0002594979596324265,
+            "orange": 0.001714855432510376,
+            "aqua": 0.0007568589644506574
+          },
+          "source": "existing_result",
+          "person_support": true,
+          "ambiguous": false
+        },
+        "artifact_shard": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out\\artifacts-mixed.jsonl",
+        "artifact_shards": [
+          "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out\\artifacts-mixed.jsonl"
+        ]
+      },
+      "media": "anime",
+      "parent_id": "",
+      "job_id": "3aa33ed0af7b",
+      "extra_colors": [
+        "brown"
+      ],
+      "elapsed_ms": 64472,
+      "provenance": {
+        "hair_repo": "deepghs/anime_ch_hair_color",
+        "hair_revision": "c9af6e013b1984a7c06bc4a951f53c9fed98b956",
+        "vlm": "torii",
+        "input": "original",
+        "min_confidence": 0.7
+      }
+    }
+  ],
+  "resume": {
+    "id": "99d1cf01e22b",
+    "status": "done",
+    "phase": "hair",
+    "error": "",
+    "spec": {
+      "input_dir": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\mixed.zip",
+      "input_shards": [],
+      "out_dir": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out",
+      "backend": "pixai",
+      "model_dir": "",
+      "device": "cpu",
+      "tag_devices": [],
+      "tag_mode": "batch",
+      "precision": "fp32",
+      "batch": 1,
+      "preprocess": "pil",
+      "threshold": null,
+      "limit": 0,
+      "force": false,
+      "recursive": true,
+      "artist": true,
+      "artist_depth": 0,
+      "artist_inject": true,
+      "artist_inject_tags": true,
+      "artist_table": "",
+      "layout": "flat",
+      "seq_width": 6,
+      "include_zips": true,
+      "include_loose": true,
+      "pack": false,
+      "formats": [
+        "parquet"
+      ],
+      "jpeg_quality": 95,
+      "jpeg_subsampling": 0,
+      "reencode": "always",
+      "compress": "stored",
+      "max_records": 5000,
+      "max_bytes": 0,
+      "engine": "vlm",
+      "hair_review": true,
+      "nl_by_media": true,
+      "hair_media": "unknown",
+      "vlm_provider": "local",
+      "api_base": "",
+      "api_key": "",
+      "url": "http://127.0.0.1:8000",
+      "vlm_model": "tagger",
+      "output_mode": "both",
+      "temperature": 0.2,
+      "top_p": 0.9,
+      "max_tokens": 0,
+      "timeout_s": 90,
+      "concurrency": 1,
+      "multi_gpu": false,
+      "multi_gpus": [],
+      "per_card_seqs": 0,
+      "max_pixels": 0,
+      "caption_chars": null,
+      "caption_zh_ratio": 0,
+      "prompt_id": "",
+      "prompt_parts": null,
+      "seed": null,
+      "max_failures": 3,
+      "quality_pass_score": 0.0,
+      "quality_drop_score": 0.0,
+      "quality_max_attempts": 0,
+      "quality_retry_temp_step": 0.0,
+      "quality_retry_temp_cap": 0.0,
+      "quality_retry_pixels_scale": 0.0,
+      "quality_retry_pixels_cap": 0,
+      "quality_enable_clip": false,
+      "quality_clip_min_score": 0.0,
+      "quality_clip_model": "",
+      "quality_clip_pretrained": "",
+      "quality_min_chars": null,
+      "quality_max_chars": null,
+      "quality_min_tag_coverage": null,
+      "quality_max_repeat_ratio": null,
+      "escalate_url": "",
+      "escalate_model": "",
+      "use_file_url": false,
+      "hf_repo": "",
+      "hf_token": "",
+      "hf_revision": "main",
+      "hf_files": [],
+      "hf_format": "auto",
+      "hf_prefetch": 1,
+      "hf_conns": 4,
+      "hf_proxy": "",
+      "hf_cache": "",
+      "hf_reserve_gb": 0.0,
+      "cache": false,
+      "cache_max_gb": 8.0,
+      "retry_failed": false,
+      "artifact_format": "jsonl",
+      "parquet_rows": 2000,
+      "keep_categories": [],
+      "thresholds": {},
+      "model_repo": "",
+      "guard": true,
+      "guard_policy": {},
+      "check_space": true,
+      "auto_upload_url": "",
+      "auto_upload_token": "",
+      "auto_upload_dir": ""
+    },
+    "out_dir": "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out",
+    "counts": {
+      "total": 2,
+      "done": 0,
+      "skipped": 2,
+      "blank_skipped": 0,
+      "artist_skipped": 0,
+      "excused": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "settled": 2
+    },
+    "progress": 1.0,
+    "total_known": true,
+    "elapsed_s": 17.9,
+    "rate_per_s": 0.0,
+    "eta_s": null,
+    "output_progress": {
+      "tag": {
+        "done": 0,
+        "skipped": 2,
+        "failed": 0,
+        "total": 2,
+        "settled": 2,
+        "progress": 1.0,
+        "rate_per_s": 0.0,
+        "eta_s": null
+      },
+      "nl": {
+        "done": 0,
+        "skipped": 2,
+        "failed": 0,
+        "total": 2,
+        "settled": 2,
+        "progress": 1.0,
+        "rate_per_s": 0.0,
+        "eta_s": null
+      }
+    },
+    "timings_ms": {
+      "decode": 0,
+      "forward": 0
+    },
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "rate_limited": 0,
+      "cost": null
+    },
+    "by_reason": {},
+    "pack": {
+      "enabled": false,
+      "total": 0,
+      "packed": 0,
+      "skipped": 0,
+      "missing": 0,
+      "failed": 0,
+      "settled": 0,
+      "bytes": 0,
+      "rate_per_s": 0.0,
+      "formats": [],
+      "layout": "flat",
+      "quality": 95,
+      "subsampling": 0,
+      "packs": []
+    },
+    "plan": null,
+    "current": "",
+    "seq": 72,
+    "queued_events": 72,
+    "created": 1795043366.2196207,
+    "started": 1795043366.2236211,
+    "ended": 1795043384.1005254
+  },
+  "artifact_hashes": {
+    "H:\\tagger\\backend\\smoke\\media-native\\mixed-cpu\\out\\artifacts-mixed.jsonl": "cd8a672420b4bc95ddc4d0b0d18a0251d2518a297b6491bb3805c7e9fa5764be"
+  }
+}

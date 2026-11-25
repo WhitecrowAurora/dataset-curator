@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "default_enabled": true,
+  "save_before_login": true,
+  "paused_resume": true,
+  "workspace_visible": true,
+  "desktop_and_mobile": true,
+  "page_errors": []
+}

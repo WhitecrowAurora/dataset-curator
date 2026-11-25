@@ -29,7 +29,7 @@ from ..hf_source import HFCancelled, SEG_MIN_BYTES
 ROOT = Path(__file__).resolve().parents[2]
 MODELS_ROOT = ROOT / "models"
 
-_KINDS = {"vlm", "tag"}
+_KINDS = {"vlm", "tag", "review"}
 _CHUNK = 512 * 1024
 
 
@@ -147,6 +147,7 @@ class Task:
     # 本地就转不出 GGUF。这个参数留着是给"只要清单里几份"的场合备的。
     allow: tuple[str, ...] = ()
     token: str | None = field(default=None, repr=False)
+    revision: str = "main"
     status: str = "queued"           # queued / running / done / error / canceled
     message: str = ""
     current: str = ""                # 正在下的文件名
@@ -241,6 +242,7 @@ class DownloadManager:
     def start(self, kind: str, key: str, repo: str, dest: Path,
               proxy: str = "", allow: list[str] | tuple[str, ...] | None = None,
               token: str | None = None,
+              revision: str = "main",
               ) -> dict[str, Any]:
         if kind not in _KINDS:
             raise ValueError(f"未知的模型类型：{kind}")
@@ -256,7 +258,8 @@ class DownloadManager:
             if exist and exist.status in ("queued", "running"):
                 return exist.state()
             task = Task(kind=kind, key=key, repo=repo, dest=Path(dest),
-                        proxy=normalize_proxy(proxy), allow=globs, token=token)
+                        proxy=normalize_proxy(proxy), allow=globs, token=token,
+                        revision=revision or "main")
             self._tasks[tid] = task
         th = threading.Thread(target=self._worker, args=(task,), daemon=True,
                               name=f"dl-{tid}")
@@ -348,9 +351,16 @@ class DownloadManager:
     def _worker(self, task: Task) -> None:
         try:
             task.status = "running"
-            files = _list_files(task.repo, task.proxy, **({"token": task.token} if task.token else {}))
+            options = {"token": task.token} if task.token else {}
+            if task.revision != "main":
+                options["revision"] = task.revision
+            files = _list_files(task.repo, task.proxy, **options)
             if task.allow:
                 files = _filter_files(files, task.allow, task.repo)
+            if task.kind == "review":
+                missing = set(task.allow) - {name for name, _size in files}
+                if missing:
+                    raise ValueError(f"复核模型包缺少文件：{', '.join(sorted(missing))}")
             task.files_total = len(files)
             task.bytes_total = sum(size for _, size in files)
             done = 0
@@ -362,6 +372,9 @@ class DownloadManager:
                     size = 0
                 task.current = name
                 done = _fetch(task, name, size, done)
+                if task.kind == "review" and not task.cancel and size:
+                    if (task.dest / name).stat().st_size != size:
+                        raise ValueError(f"复核模型文件不完整：{name}，请重新下载")
                 task.files_done += 1
             if task.cancel:
                 task.status = "canceled"
@@ -471,14 +484,15 @@ def _filter_files(files: list[tuple[str, int]], patterns: tuple[str, ...],
         f"仓库 {repo} 里没有匹配 {' / '.join(patterns)} 的文件。实际有：{shown}")
 
 
-def _list_files(repo: str, proxy: str = "", token: str | None = None) -> list[tuple[str, int]]:
+def _list_files(repo: str, proxy: str = "", token: str | None = None,
+                revision: str = "main") -> list[tuple[str, int]]:
     """仓库文件清单 + 字节数。
 
     走 HF 的 tree 接口而不是 `HfApi().model_info()`：后者没法单独指定代理
     （它会走自己的全局会话），而这个项目在中国大陆基本都得挂代理。顺带
     省掉一层 huggingface_hub 的元数据缓存，网络本来就通的情况下更直观。
     """
-    url = f"{_endpoint()}/api/models/{repo}/tree/main?recursive=1"
+    url = f"{_endpoint()}/api/models/{repo}/tree/{quote(revision, safe='')}?recursive=1"
     out: list[tuple[str, int]] = []
     with _client(proxy) as client:
         while url:
@@ -511,16 +525,19 @@ def _fetch(task: Task, name: str, size: int, done: int) -> int:
     dest = task.dest / name
     dest.parent.mkdir(parents=True, exist_ok=True)
     have = dest.stat().st_size if dest.is_file() else 0
+    replace_review = task.kind == "review" and size and have > size
+    if replace_review:
+        have = 0
     if size and have >= size:
         task.tick(done + have)
         return done + have
 
     # 大文件走多连接分段（见 `_fetch_segmented`）：一条 TCP 下 16G 太慢，
     # 这里才是"多线程下载"真正有意义的地方。
-    if size >= SEG_MIN_BYTES * 2 and _conns() > 1:
+    if not replace_review and size >= SEG_MIN_BYTES * 2 and _conns() > 1:
         return _fetch_segmented(task, name, size, done, dest)
 
-    url = f"{_endpoint()}/{task.repo}/resolve/main/{quote(name)}"
+    url = f"{_endpoint()}/{task.repo}/resolve/{quote(task.revision, safe='')}/{quote(name)}"
     headers = _headers(task.token)
     if have and size:
         headers["Range"] = f"bytes={have}-"
@@ -562,7 +579,7 @@ def _fetch_segmented(task: Task, name: str, size: int, done: int,
         if have < size:
             dest.unlink(missing_ok=True)
 
-    url = f"{_endpoint()}/{task.repo}/resolve/main/{quote(name)}"
+    url = f"{_endpoint()}/{task.repo}/resolve/{quote(task.revision, safe='')}/{quote(name)}"
     lock = dest.with_name(dest.name + ".download.lock")
     try:
         hf_source.download_shard(

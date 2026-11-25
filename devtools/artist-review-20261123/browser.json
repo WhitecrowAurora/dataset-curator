@@ -1,0 +1,20 @@
+{
+  "errors": [],
+  "calls": [
+    {
+      "path": "/api/center/history/check",
+      "body": {
+        "reinject": "missing",
+        "candidate_id": "fixture"
+      }
+    },
+    {
+      "path": "/api/center/history/check",
+      "body": {
+        "reinject": "force",
+        "candidate_id": "fixture"
+      }
+    }
+  ],
+  "review_and_refresh": true
+}

@@ -13,6 +13,9 @@ import { api, ApiError, type ConflictItem, type ConflictsState } from '../lib/ap
 import { PageHeader, SectionPanel, SettingRow, StatusChip, type StatusTone } from '../components/ui/launcher'
 import { ChoiceGrid, ErrorBox } from '../components/ui/controls'
 import { FolderPicker } from '../components/FolderPicker'
+import { HairReviewPanel } from '../components/conflicts/HairReviewPanel'
+import { ReviewLearningPanel } from '../components/conflicts/ReviewLearningPanel'
+import { ResultReviewPanel } from '../components/conflicts/ResultReviewPanel'
 
 // 冲突与决策：同一个 image_id 被打了两遍、内容还不一样（换模型 / 换 prompt /
 // 新旧两代产物混进同一目录）。合并遇到这种会报"内容冲突"并只取第一份，
@@ -173,6 +176,9 @@ export function Conflicts() {
         </div>
       )}
 
+      <HairReviewPanel />
+      <ReviewLearningPanel />
+
       <SectionPanel
         title="产物目录"
         description="合并时给的目录要与这里一致"
@@ -305,7 +311,7 @@ export function Conflicts() {
               )}
             </div>
             <div className="flex flex-col gap-2">
-              {item.candidates.map((cand) => {
+              {[...item.candidates].sort((a, b) => (b.preference ?? 0) - (a.preference ?? 0)).map((cand) => {
                 const chosen = item.decided === cand.digest
                 return (
                   <div
@@ -317,6 +323,7 @@ export function Conflicts() {
                     <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-lx-muted">
                       <span className="font-mono">{cand.digest}</span>
                       <span>{cand.chars} 字</span>
+                      {cand.preference !== undefined && <span title="候选集内的相对偏好，不是事实准确率">偏好 {(cand.preference * 100).toFixed(1)}%</span>}
                       <span>{fmtTime(cand.ts)}</span>
                       {cand.model && <span className="truncate">模型 {cand.model}</span>}
                       <span className="truncate font-mono opacity-70">{cand.source}</span>
@@ -340,6 +347,7 @@ export function Conflicts() {
         ))}
       </SectionPanel>
 
+      <ResultReviewPanel />
       <FolderPicker
         open={picker !== null}
         start={picker !== null ? roots[picker] : ''}

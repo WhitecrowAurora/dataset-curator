@@ -126,6 +126,7 @@ class TagPrediction:
     rating: dict[str, float] = field(default_factory=dict)
     rescore: Callable[[dict[str, float] | None], dict[str, float]] | None = field(
         default=None, repr=False, compare=False)
+    hair_scores: dict[str, float] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(slots=True)
@@ -300,6 +301,7 @@ class TagBackend(ABC):
             scores = (getattr(self, "last_probs", None)
                       or getattr(self, "last_scores", None) or ())
             out = []
+            hair = getattr(self, "_last_hair_scores", ()) or ()
             for i, raw in enumerate(raws):
                 pairs = sorted(raw.items(), key=lambda kv: -kv[1])[: self.max_tags]
                 out.append(TagPrediction(
@@ -309,6 +311,7 @@ class TagBackend(ABC):
                     rating=ratings[i] if i < len(ratings) else {},
                     rescore=(partial(self._rescore_scores, scores[i])
                              if i < len(scores) else None),
+                    hair_scores=hair[i] if i < len(hair) else None,
                 ))
             return out
 
@@ -359,7 +362,7 @@ class TagBackend(ABC):
         torch.backends.cudnn.allow_tf32 = on
 
     @staticmethod
-    def _open_rgb(image):
+    def _open_rgb(image, *, white_background: bool = False):
         """接受 路径 / 文件对象 / bytes / PIL 图，统一回到 RGB 的 PIL 图。
 
         bytes 这一条是给客户端用的：客户端手里本来就是 zip 里的原始字节，
@@ -376,6 +379,12 @@ class TagBackend(ABC):
         if not isinstance(image, Image.Image):
             image = Image.open(image)
             image.load()  # 文件句柄可能在调用方 with 块里，先读完再放
+        if white_background and (image.mode in {"RGBA", "LA", "PA"}
+                                 or "transparency" in image.info):
+            rgba = image.convert("RGBA")
+            canvas = Image.new("RGBA", rgba.size, "white")
+            canvas.alpha_composite(rgba)
+            return canvas.convert("RGB")
         if image.mode == "RGB":
             return image
         # 非 RGB 一律走 PIL 自己的 convert（与改动前逐像素一致）：
@@ -491,6 +500,8 @@ class PixAITagger(TagBackend):
                   flush=True)
         # device 已经定下来了（pipeline 建好），此时设进程级 tf32 才对得上。
         self._apply_precision_flags()
+        if getattr(self, "capture_hair_scores", False):
+            self.enable_hair_scores()
         if self.verbose:
             extra = f"，{self.precision}" if self.precision != "fp32" else ""
             if self.batch_size > 1:
@@ -728,11 +739,13 @@ class PixAITagger(TagBackend):
         payload = (self._pipe(img, threshold=thr) if thr else self._pipe(img))
         return self._flatten(payload["results"])
 
-    def _predict_one(self, image) -> dict[str, float]:
-        img = self._open_rgb(image)
-        thr = self._threshold_arg()
-        payload = (self._pipe(img, threshold=thr) if thr else self._pipe(img))
-        return self._flatten(payload["results"])
+    def enable_hair_scores(self):
+        """只截取同一次前向的发色与人数分数，保持原 pipeline 筛选行为。"""
+        self.capture_hair_scores = True
+        if self._pipe is None or getattr(self, "_hair_hook", None) is not None:
+            return
+        from .hair_color.pixai_scores import capture_scores
+        self._hair_hook = capture_scores(self)
 
     def _predict_many(self, images: Sequence) -> list[dict[str, float]]:
         """一次喂多张。pixai 是 1008² / patch 14 的 ViT，单张就是 5184 个
@@ -762,6 +775,8 @@ class PixAITagger(TagBackend):
         if thr:
             call["threshold"] = thr
         tf0 = time.perf_counter()
+        if getattr(self, "capture_hair_scores", False):
+            self._last_hair_scores = []
         try:
             out = self._pipe(imgs, **call)
         except Exception:            # noqa: BLE001 - 逐张重试，坏图不该带走整批
@@ -770,6 +785,8 @@ class PixAITagger(TagBackend):
             # 退回逐张：坏的那张自己报错，其余照常出产。
             if len(imgs) == 1:
                 raise
+            if getattr(self, "capture_hair_scores", False):
+                self._last_hair_scores = []
             self._split_ms = (decode_ms,
                               int((time.perf_counter() - tf0) * 1000))
             return [self._predict_one(im) for im in imgs]
@@ -808,9 +825,8 @@ class WDEva02Tagger(TagBackend):
         model.safetensors    权重
         selected_tags.csv    tag_id,name,category,count
 
-    预处理不手写：用 timm 的 resolve_data_config + create_transform 按
-    config.json 里的 pretrained_cfg 生成（mean/std 0.5、crop_pct 1.0、
-    center crop），手抄这些参数是最容易抄错的地方。
+    按模型参考实现先白底补方，再用 timm 根据本地 pretrained_cfg 缩放归一化，
+    最后按模型要求以 BGR 顺序输入。
     """
 
     name = "wd-eva02"
@@ -1048,6 +1064,18 @@ class WDEva02Tagger(TagBackend):
     def _prep_on_device(self, pixels):
         return self._tensor_prep.apply(pixels, self.device)
 
+    def _open_square(self, source):
+        from PIL import Image
+
+        image = self._open_rgb(source, white_background=True)
+        width, height = image.size
+        if width == height:
+            return image
+        side = max(width, height)
+        canvas = Image.new("RGB", (side, side), "white")
+        canvas.paste(image, ((side - width) // 2, (side - height) // 2))
+        return canvas
+
     def _decode_batch(self, part: Sequence) -> tuple[list, int]:
         """解码 + 预处理一小批，返回 (张量列表, 本批耗时 ms)。
 
@@ -1057,10 +1085,8 @@ class WDEva02Tagger(TagBackend):
         import time
 
         t0 = time.perf_counter()
-        if self.preprocess == "tensor":
-            tensors = [self._pixels_uint8(self._open_rgb(im)) for im in part]
-        else:
-            tensors = [self._transform(self._open_rgb(im)) for im in part]
+        prep = self._pixels_uint8 if self.preprocess == "tensor" else self._transform
+        tensors = [prep(self._open_square(im)) for im in part]
         return tensors, int((time.perf_counter() - t0) * 1000)
 
     def _forward_chunk(self, tensors: Sequence) -> tuple[list[dict[str, float]],
@@ -1076,6 +1102,7 @@ class WDEva02Tagger(TagBackend):
         x = torch.stack(list(tensors))
         if self.device and self.device != "cpu":
             x = x.to(self.device)
+        x = x.flip(1)  # RGB → BGR；WD 的三通道归一化参数相同。
         half = half_dtype(self.precision)
         if half is not None:
             x = x.to(half)

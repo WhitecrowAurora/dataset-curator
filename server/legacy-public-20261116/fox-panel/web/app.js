@@ -144,7 +144,7 @@ var T = {
     stuck: "死包（claimed 但无 active 租约）",
     orphan: "孤儿租约（包已不存在）",
     ghost: "幽灵租约（设备已不存在）",
-    overdue: "逾期未申报（领取后超 48h 未申报完成的包，逐包提示）",
+    overdue: "租约已到期（连续 48h 未成功上报，等待中心回收）",
     audit: "审计记录",
     writeLog: "写操作日志",
     settingsRepos: "仓库",
@@ -309,7 +309,7 @@ var T = {
     settingsClose: "关闭设置",
     readonly: "只读",
     overdueNote: "「死包」= claimed 包没有对应 active 租约（数据不一致）；" +
-                 "「逾期未申报」= 领取后超过 48h 还没有 finish 申报的 open 租约（健康包也可能逾期）。" +
+                 "「逾期未申报」= 在线租约连续 48h 未成功上报；正常上报的包会自动续期。" +
                  "两者相互独立，都只提示、不自动回收。",
     viewPkg: "查看包详情",
     releasePkg: "释放该包",
@@ -2180,6 +2180,9 @@ function renderRepoTable(repos) {
         }));
       }
       if (actionVisible("repo.sync")) cell.appendChild(repoSyncButton(r.repo));
+      if (window.FoxArtist) cell.appendChild(rowActionBtn('画师注入与分表', 'normal', function (event) {
+        window.FoxArtist.open([r.repo], function () { return state.write; }, event.currentTarget);
+      }));
       tr.appendChild(cell);
     }
     return tr;
@@ -2768,16 +2771,17 @@ function renderDevices(d) {
 
   var devCols = [
     { label: T.col.device, cls: "fp-col-first" },
-    { label: T.col.gpu },
-    { label: T.col.vram, cls: "fp-align-right" },
+    { label: T.col.gpu, cls: "fp-col-md" },
+    { label: T.col.vram, cls: "fp-align-right fp-col-md" },
     { label: T.col.user },
-    { label: T.col.tier },
+    { label: T.col.tier, cls: "fp-col-md" },
     { label: T.col.speed, cls: "fp-align-right" },
-    { label: T.col.firstSeen, cls: "fp-align-right" },
-    { label: T.col.pkgs, cls: "fp-align-right" },
+    { label: T.col.firstSeen, cls: "fp-align-right fp-col-md" },
+    { label: T.col.pkgs, cls: "fp-align-right fp-col-md" },
     { label: T.col.status },
+    { label: T.misc.expandRow, cls: "fp-align-right" },
     { label: T.col.lastSeen },
-    { label: T.col.ver }
+    { label: T.col.ver, cls: "fp-col-md" }
   ];
   if (canWrite) devCols.push({ label: T.col.actions, cls: "fp-align-right" });
   var devPage = clampPage(state.pages.dev, devices.length, 50);
@@ -2808,19 +2812,19 @@ function renderDevices(d) {
       devCell.appendChild(devBtn);
       tr.appendChild(devCell);
       tr.appendChild(td(T.col.gpu, r.gpu_name || null, {
-        cls: "fp-cell-wrap", title: r.gpu_name || ""
+        cls: "fp-cell-wrap fp-col-md", title: r.gpu_name || ""
       }));
-      tr.appendChild(td(T.col.vram, fmtVram(r.gpu_vram_mb), { cls: "fp-align-right is-num" }));
+      tr.appendChild(td(T.col.vram, fmtVram(r.gpu_vram_mb), { cls: "fp-align-right is-num fp-col-md" }));
       tr.appendChild(td(T.col.user, r.user_id || null));
-      tr.appendChild(td(T.col.tier, r.tier || null));
+      tr.appendChild(td(T.col.tier, r.tier || null, { cls: "fp-col-md" }));
       tr.appendChild(td(T.col.speed, fmtNum(r.speed), { cls: "fp-align-right is-num" }));
       tr.appendChild(td(T.col.firstSeen, fmtEpoch(r.first_seen) || relativeTime(r.first_seen), {
-        cls: "fp-align-right is-num", title: fmtEpoch(r.first_seen) || ""
+        cls: "fp-align-right is-num fp-col-md", title: fmtEpoch(r.first_seen) || ""
       }));
       tr.appendChild(td(T.col.pkgs, (r.local_pkgs_count === null ||
                                      r.local_pkgs_count === undefined)
                                     ? null : fmtNum(r.local_pkgs_count),
-                        { cls: "fp-align-right is-num" }));
+                        { cls: "fp-align-right is-num fp-col-md" }));
       var sc = el("td", { dataset: { label: T.col.status }, class: "fp-cell-status" });
       sc.appendChild(devStatusBadge(r.status));
       tr.appendChild(sc);
@@ -2843,7 +2847,7 @@ function renderDevices(d) {
       tr.appendChild(td(T.col.lastSeen, relativeTime(r.last_seen), {
         cls: "fp-align-right is-num", title: fmtTime(r.last_seen) || ""
       }));
-      tr.appendChild(td(T.col.ver, r.client_ver || null, { cls: "is-mono" }));
+      tr.appendChild(td(T.col.ver, r.client_ver || null, { cls: "is-mono fp-col-md" }));
       if (canWrite) {
         var cell = el("td", {
           dataset: { label: T.col.actions },
@@ -3222,6 +3226,7 @@ function renderWsList(list, detailOpen) {
     box.replaceChildren();
     s.picker=window.FoxSelection.mount(box,{title:'工作区',single:true,
       onChange:function(ids){s.detail=ids[0]||'';renderWorkspaces();}});
+    s.pickerSignature=null;
   }
   var signature=JSON.stringify(items);
   if(s.pickerSignature!==signature){s.picker.setItems(items);s.pickerSignature=signature;}
@@ -3267,7 +3272,7 @@ function renderWsDetail(ws) {
     return;
   }
   card.hidden = false;
-  $("#ws-list-card").hidden = false;
+  $("#ws-list-card").hidden = true;
   $("#ws-unbound-card").hidden = true;
   $("#ws-detail-title").textContent = ws.name || ws.ws_id;
   $("#ws-detail-hint").textContent = ws.ws_id;
@@ -3455,7 +3460,8 @@ function renderCustomFields(badText) {
     var manualRow = el("label", {class:"fp-check"});
     var manualCb = el("input", {type:"checkbox"}); manualCb.checked = !!p.allow_manual_claim;
     manualCb.addEventListener("change",function(e){p.allow_manual_claim=e.target.checked;sync();});
-    manualRow.append(manualCb,el("span",{text:"允许客户端手动领取分包"}));box.appendChild(manualRow);
+    manualRow.append(manualCb,el("span",{text:"允许旧版客户端手动领取分包"}));
+    var legacyOptions=el('details');legacyOptions.append(el('summary',{text:'高级：旧客户端兼容'}),manualRow);box.appendChild(legacyOptions);
 
     var listWrap = el("div", { class: "fp-wsform__repos" });
     listWrap.appendChild(el("p", { class: "fp-hint", text: T.ws.pickRepos }));
@@ -3484,10 +3490,17 @@ function renderCustomFields(badText) {
       orderTag.textContent = (p.repos || []).map(function (r, i) {
         return (i + 1) + ". " + r;
       }).join("  →  ") || T.ws.noRepos;
+      if (artistEditor) artistEditor.setRepos(p.repos || []);
     }
     renderOrderTag();
     listWrap.appendChild(orderTag);
     box.appendChild(listWrap);
+    var artistEditor;
+    if (window.FoxArtist) {
+      box.appendChild(el('p', {class:'fp-note',text:'画师设置按仓库保存，同仓库在其他工作区也生效；请使用下方“保存画师配置”，工作区保存只更新名称与仓库列表。'}));
+      c.artistDrafts = c.artistDrafts || new Map();
+      artistEditor = window.FoxArtist.mount(box, p.repos || [], function () { return state.write && wm.phase !== 'submitting'; }, c.artistDrafts);
+    }
   } else if (c.kind === "assign") {
     var userSel = el("select", {});
     userSel.appendChild(el("option", { value: "", text: T.ws.unassigned }));
@@ -4342,6 +4355,7 @@ function loadPackage(repo, id) {
 
 /* 只读产物回收：不把 completed 当成文件已到手，也不把 SHA 当作标注合规。 */
 function renderArtifactCollection(dl, collection, row, pkg) {
+  if(window.FoxResultExports)window.FoxResultExports.package(dl,pkg);
   dl.appendChild(el("div", { class: "fp-dl__sep" }));
   dl.appendChild(el("div", { class: "fp-dl__hd", text: "产物回收" }));
   function refreshRow() {
@@ -7006,6 +7020,8 @@ function loadMeta() {
 function init() {
   buildChrome();
   wireEvents();
+  if(window.FoxThroughput)window.FoxThroughput.mount(api);
+  if(window.FoxAutomation)window.FoxAutomation.mount({api: api, write: writeRequest, writable: writeOn});
   if (!location.hash) {
     try { history.replaceState(null, "", "#/overview"); } catch (e) { /* 忽略 */ }
   }

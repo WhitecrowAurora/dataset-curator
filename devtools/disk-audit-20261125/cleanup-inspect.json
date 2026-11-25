@@ -1,0 +1,29 @@
+{
+  "action": "inspect",
+  "time": "2026-11-25T23:46:39.089149",
+  "target": "/tagger/.delete",
+  "resolved": "/tagger/.delete",
+  "allocated": 5592260608,
+  "before": {
+    "total": 26354073600,
+    "used": 22110154752,
+    "free": 3067707392
+  },
+  "process_references": [],
+  "after": {
+    "total": 26354073600,
+    "used": 22110154752,
+    "free": 3067707392
+  },
+  "free_increase": 0,
+  "services": [
+    "active",
+    "active"
+  ],
+  "df": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/vda1        25G   21G  2.9G  88% /\n",
+  "production_db_bytes": 649142272,
+  "health": {
+    "label": 200,
+    "panel": 200
+  }
+}

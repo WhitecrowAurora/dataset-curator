@@ -1,0 +1,57 @@
+[
+  {
+    "iteration": 0,
+    "seconds": 13.313729300003615,
+    "stats": {
+      "total": 4,
+      "done": 4,
+      "skipped": 0,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "artist_skipped": 0,
+      "blank_skipped": 0,
+      "excused": 0,
+      "tokens": 1666,
+      "prompt_tokens": 4700,
+      "rate_limited": 0,
+      "cost": null,
+      "wall_ms": 43808,
+      "cached": 0,
+      "by_reason": {},
+      "input_complete": false
+    }
+  },
+  {
+    "iteration": 1,
+    "seconds": 0.0012928000069223344,
+    "stats": {
+      "total": 4,
+      "done": 0,
+      "skipped": 4,
+      "failed": 0,
+      "blacklisted": 0,
+      "busy": 0,
+      "artist_skipped": 0,
+      "blank_skipped": 0,
+      "excused": 0,
+      "tokens": 0,
+      "prompt_tokens": 0,
+      "rate_limited": 0,
+      "cost": null,
+      "wall_ms": 0,
+      "cached": 0,
+      "by_reason": {},
+      "input_complete": false
+    }
+  },
+  {
+    "files": [
+      "1-nl.json",
+      "10-nl.json",
+      "101-nl.json",
+      "102-nl.json"
+    ],
+    "threads": 8
+  }
+]

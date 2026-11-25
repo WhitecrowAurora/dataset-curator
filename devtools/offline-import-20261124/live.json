@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "workspaces": 3,
+  "first_page_packages": 100,
+  "top_link": true,
+  "import_script": true,
+  "javascript_errors": [],
+  "read_only_verification": true
+}

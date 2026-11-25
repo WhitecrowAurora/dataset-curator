@@ -12,9 +12,18 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = (
     "fox_worker.py", "netutil.py", "hardware.py", "nl_api.py",
-    "center_delivery.py", "blob_client.py", "artifacts.py", "storage/atomic.py",
+    "center_delivery.py", "blob_client.py", "artifacts.py", "schema.py", "storage/atomic.py",
     "center_runtime/__init__.py", "center_runtime/artifacts.py", "center_runtime/liveness.py",
-    "center_runtime/identity.py",
+    "center_runtime/identity.py", "center_runtime/download_segments.py",
+    "center_runtime/annotation.py",
+    "center_runtime/lease_state.py",
+    "center_runtime/artist.py",
+    "center_runtime/progress.py",
+    "center_runtime/snapshot.py",
+    "center_runtime/network.py",
+    "center_runtime/download_network.py",
+    "center_runtime/download_transfer.py",
+    "center_runtime/delivery_state.py",
     "verification/__init__.py", "verification/history.py", "verification/payload.py", "verification/source.py", "verification/local.py",
     "naming.py",
 )

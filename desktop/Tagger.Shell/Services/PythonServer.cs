@@ -29,6 +29,7 @@ public sealed class PythonServer : IAsyncDisposable
     public string Root { get; }
     public string PythonPath { get; }
     public int Port { get; private set; }
+    public bool IsRunning => _process is { HasExited: false };
     public string Url => $"http://127.0.0.1:{Port}/";
 
     /// <summary>子进程 stdout/stderr 的尾部，出错时直接显示。</summary>
@@ -205,7 +206,6 @@ public sealed class PythonServer : IAsyncDisposable
         var psi = new ProcessStartInfo
         {
             FileName = PythonPath,
-            Arguments = $"-m tagger.cli web --host 127.0.0.1 --port {Port} --no-open",
             WorkingDirectory = Root,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -214,6 +214,12 @@ public sealed class PythonServer : IAsyncDisposable
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
+        // _pth 隔离模式忽略 cwd/PYTHONPATH；先导入当前目录的源码，再由 CLI
+        // 修正便携路径，使模型、worker 等 -m 子进程也使用当前位置。
+        foreach (var arg in new[] { "-u", "-c",
+            "import os,runpy,sys;sys.path.insert(0,os.getcwd());runpy.run_module('tagger.cli',run_name='__main__')",
+            "web", "--host", "127.0.0.1", "--port", Port.ToString(), "--no-open" })
+            psi.ArgumentList.Add(arg);
         // 子进程的中文输出走 UTF-8，否则 GBK/UTF-8 会打架出乱码。
         psi.Environment["PYTHONUTF8"] = "1";
         psi.Environment["PYTHONIOENCODING"] = "utf-8";

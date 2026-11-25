@@ -1,0 +1,17 @@
+{
+  "actual_http": true,
+  "production": true,
+  "names": [
+    "Dru768_仅nl打标",
+    "Fox768Test",
+    "dan"
+  ],
+  "initial_count": 3,
+  "request_error_reproduced": true,
+  "recovery_count": 0,
+  "empty_recovery": false,
+  "detail_and_export": false,
+  "navigation_and_search": false,
+  "mobile": false,
+  "page_errors": []
+}

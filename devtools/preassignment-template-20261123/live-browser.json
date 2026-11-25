@@ -1,0 +1,28 @@
+{
+  "production": true,
+  "read_only": true,
+  "template_entry": true,
+  "template_native": true,
+  "template_mode_visibility": true,
+  "template_not_saved": true,
+  "workspace_names": [
+    "Dru768_仅nl打标",
+    "Fox768Test",
+    "dan"
+  ],
+  "assistant_four_steps": true,
+  "native_option": true,
+  "nl_concurrency": true,
+  "nl_hides_tag": true,
+  "tag_hides_nl": true,
+  "both_shows_both": true,
+  "artist_option": true,
+  "human_readable_review": true,
+  "dark_theme": true,
+  "mobile_no_overflow": true,
+  "legacy_offline_native": true,
+  "dispatch_plan_native": true,
+  "static_200": true,
+  "throughput_present": true,
+  "page_errors": []
+}

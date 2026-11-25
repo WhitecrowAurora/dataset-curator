@@ -1,0 +1,699 @@
+--- before/tagger/fox_worker.py
++++ after/tagger/fox_worker.py
+@@ -50,7 +50,6 @@
+ from __future__ import annotations
+ 
+ import argparse
+-from concurrent.futures import ThreadPoolExecutor
+ import errno
+ import hashlib
+ import json
+@@ -69,9 +68,12 @@
+ import urllib.request
+ import uuid
+ from pathlib import Path
+-from .center_runtime.network import curl_env, opener
++from .center_runtime.network import opener
++from .center_runtime.download_network import curl_env, uses_proxy
++from .center_runtime import download_transfer
++from .center_runtime.download_transfer import DownloadError, RangeUnsupported
+ from .center_runtime.identity import pending_path, read_for_login, saved_path, write_identity
+-from .center_runtime.download_segments import plan_path, segment_plan
++from .center_runtime.download_segments import plan_path
+ 
+ VERSION = "3.4.0"      # 3.4：CDN 选优 + 多连接分段下载 + 预取 prelock；3.3：本机重试 + 长驻不退；3.2：本机自持 secret
+ DEFAULT_SERVER = "http://127.0.0.1:31831"
+@@ -108,10 +110,7 @@
+ PREFETCH_JOIN_WAIT = 5.0
+ PREFETCH_STOP_WAIT = 30.0
+ 
+-# 下载：多连接 + CDN 选优（v3.4）。默认按**直连**口径拉满——国内到 HF 的
+-# 单连接常被长肥管道掐死在几百 KB/s，而 HF 的 CDN 对多连接是友好的
+-# （hf_transfer 就是 8~16 连接）。走代理时 --resolve 会被代理忽略（不是失败），
+-# 所以同一套默认值在挂梯子的机器上退化成普通下载，不会更糟。
++# 下载：默认 4 连接；直连可测速选择 CDN IP，代理出口由代理自身选择。
+ DEFAULT_CONNS = 4           # 每片并发连接数；1 = 老的单流
+ SEG_MIN_BYTES = 8 * 1024 * 1024   # 每段至少这么大，太小的片不值得切
+ CDN_PROBE_BYTES = 2 * 1024 * 1024  # 每个候选 IP 只拉 2MiB 测速
+@@ -122,7 +121,6 @@
+ 
+ DL_CONNS = DEFAULT_CONNS    # cmd_run 按 --download-conns 覆盖
+ DL_CDN_PROBE = True         # --no-cdn-probe 关闭
+-_RANGE_UNSUPPORTED = False  # 碰到不认 Range 的源就永久退回单流（本进程内）
+ 
+ 
+ def die(code: int, msg: str) -> None:
+@@ -609,25 +607,23 @@
+     dest.parent.mkdir(parents=True, exist_ok=True)
+     hdr_file = _write_hdr(lease, out_dir)
+     t0 = time.time()
+-    global _RANGE_UNSUPPORTED
+     try:
+         pick = cdn_pick(lease, out_dir, hdr_file) if DL_CDN_PROBE else None
++        def attempt(selection):
++            try:
++                return _download_once(lease, dest, hdr_file, selection, state, t0)
++            except RangeUnsupported as exc:
++                _drop_segments(dest)
++                log(f"[warn] {exc}")
++                return _download_once(lease, dest, hdr_file, selection, state, t0, ranges=False)
+         try:
+-            return _download_once(lease, dest, hdr_file, pick, state, t0)
+-        except RangeUnsupported as e:
+-            # 源不认 Range：分段这条路彻底走不通，本进程后续一律单流。
+-            _RANGE_UNSUPPORTED = True
+-            _drop_segments(dest)
+-            log(f"[warn] {e}")
+-            return _download_once(lease, dest, hdr_file, pick, state, t0)
++            return attempt(pick)
+         except DownloadError:
+-            if not pick:
++            if not pick or state.stop.is_set():
+                 raise
+-            # 钉的出口挂了 / 签名过期：清缓存退回 DNS，重来一次
+-            # （段文件保留，续传接着下，不浪费已下好的部分）。
+             _forget_cdn(out_dir)
+-            log("[warn] 钉住的 CDN 出口下载失败，清缓存回退 DNS 重试一次")
+-            return _download_once(lease, dest, hdr_file, None, state, t0)
++            log("[warn] CDN 地址下载失败，清缓存回退原地址重试一次")
++            return attempt(None)
+     finally:
+         if hdr_file:
+             hdr_file.unlink(missing_ok=True)
+@@ -650,18 +646,21 @@
+ 
+ 
+ def _download_once(lease: dict, dest: Path, hdr_file: Path | None,
+-                   pick: dict | None, state: "RunState", t0: float) -> Path:
++                   pick: dict | None, state: "RunState", t0: float, *, ranges: bool = True) -> Path:
+     url = (pick or {}).get("url") or hf_url(lease)
+     total = int(lease.get("size") or 0) or _remote_size(url, hdr_file)
+     conns = 1
+-    if total > 0 and DL_CONNS > 1 and not _RANGE_UNSUPPORTED:
++    if total > 0 and DL_CONNS > 1 and ranges:
+         conns = max(1, min(DL_CONNS, total // SEG_MIN_BYTES))
+     part = dest.with_suffix(dest.suffix + ".part")
++    if part.is_file() and part.stat().st_size > 0 and not plan_path(dest).is_file():
++        conns = 1  # 沿用单流已有进度，避免改并发后重下。
+     state.phase = "download"
+     state.done = 0
++    log("分片下载线路：" + ("代理" if uses_proxy(url) else "直连"))
+     log(f"下载 {lease['package']}（{total / 2**20:.0f} MiB，{conns} 连接"
+         + (f"，出口 {_tag(pick['ip'])}" if (pick or {}).get("ip") else "") + "）…")
+-    if conns > 1 or (total > 0 and not _RANGE_UNSUPPORTED and plan_path(dest).is_file()):
++    if conns > 1 or (total > 0 and ranges and plan_path(dest).is_file()):
+         part.unlink(missing_ok=True)       # 单流遗留的半截文件不参与拼接
+         _download_segments(url, dest, hdr_file, pick, total, conns, state,
+                            source_id=str(lease.get("sha256") or hf_url(lease)))
+@@ -689,136 +688,14 @@
+ 
+ def _download_stream(url: str, part: Path, hdr_file: Path | None,
+                      pick: dict | None, total: int, state: "RunState") -> None:
+-    """单连接（DL_CONNS=1 或片太小）：老逻辑，断点续传靠 curl -C -。"""
+-    cmd = ["curl", "-sS", "-L", "--fail", "--retry", "3", "--retry-delay", "2",
+-           "-C", "-", "-o", str(part)]
+-    cmd += _resolve_args(pick)
+-    if hdr_file:
+-        cmd += ["-H", f"@{hdr_file}"]
+-    cmd.append(url)
+-    with subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=curl_env(url)) as proc:
+-        while proc.poll() is None:
+-            if state.stop.is_set():
+-                proc.terminate()
+-                break
+-            if part.exists() and total:
+-                state.done = min(99, int(part.stat().st_size / total * 100))
+-            time.sleep(0.3)
+-        rc = proc.wait()
+-        if rc != 0 or not part.exists():
+-            err = (proc.stderr.read().decode(errors="replace") if proc.stderr else "")[-200:]
+-            raise DownloadError(f"curl 退出码 {rc} {err}")
++    download_transfer.stream(url, part, hdr_file, _resolve_args(pick), total, state, log)
+ 
+ 
+ def _download_segments(url: str, dest: Path, hdr_file: Path | None,
+                        pick: dict | None, total: int, conns: int,
+                        state: "RunState", source_id: str = "") -> None:
+-    """按持久化区间续传，用 conns 控制并发，最后按序拼回 <pkg>.part。
+-
+-    段文件绑定源文件和原始区间，不随连接数变化。每段续传靠
+-    "已有长度 + curl -r 绝对区间"，不用 -C -（-C - 自己算区间，和 -r 语义冲突）。
+-    """
+-    bounds, paths = segment_plan(dest, total, conns, source_id or url)
+-    procs: list[subprocess.Popen | None] = [None] * len(bounds)
+-    errors: list[Exception | None] = [None] * len(bounds)
+-    stop = threading.Event()
+-
+-    def worker(i: int, start: int, end: int, path: Path) -> None:
+-        if state.stop.is_set() or stop.is_set():
+-            return
+-        want_len = end - start + 1
+-        have = path.stat().st_size if path.exists() else 0
+-        if have > want_len:                 # 上次的残渣越界了，重来
+-            path.unlink(missing_ok=True)
+-            have = 0
+-        if have == want_len:                # 这段已经齐了
+-            return
+-        cmd = ["curl", "-sS", "-L", "--fail", "--retry", "3", "--retry-delay", "2",
+-               "-r", f"{start + have}-{end}"]
+-        cmd += _resolve_args(pick)
+-        if hdr_file:
+-            cmd += ["-H", f"@{hdr_file}"]
+-        cmd.append(url)
+-        try:
+-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=curl_env(url))
+-        except FileNotFoundError:
+-            errors[i] = DownloadError("找不到 curl")
+-            stop.set()
+-            return
+-        procs[i] = proc
+-        try:
+-            written = have
+-            with path.open("ab") as fh:
+-                while True:
+-                    chunk = proc.stdout.read1(1 << 20)
+-                    if not chunk:
+-                        break
+-                    written += len(chunk)
+-                    if written > want_len:
+-                        # 服务端根本没理 Range，把整个文件吐给每段了——不掐掉
+-                        # 的话 4 段就能把盘写满。立刻停，让上层退回单流。
+-                        proc.terminate()
+-                        errors[i] = RangeUnsupported(
+-                            "服务端忽略 Range（返回了整文件），退回单流下载")
+-                        stop.set()
+-                        return
+-                    fh.write(chunk)
+-                    if state.stop.is_set() or stop.is_set():
+-                        break
+-            stopped = state.stop.is_set() or stop.is_set()
+-            if stopped:
+-                # 别人先停了（停止信号/别的段出错）：这里必须先把 curl 掐掉再
+-                # wait，否则它正往没人读的管道里写，wait 会永远等不到。
+-                proc.terminate()
+-            rc = proc.wait()
+-        except Exception as e:              # noqa: BLE001 —— 任何异常都算这段失败
+-            proc.kill()
+-            errors[i] = e
+-            stop.set()
+-            return
+-        if stopped:
+-            if state.stop.is_set():
+-                errors[i] = DownloadError("下载已中断")
+-            return
+-        if rc != 0:
+-            err = (proc.stderr.read().decode(errors="replace") if proc.stderr else "")[-200:]
+-            errors[i] = DownloadError(f"curl 退出码 {rc} {err}")
+-            stop.set()
+-
+-    with ThreadPoolExecutor(max_workers=conns, thread_name_prefix="segment") as pool:
+-        tasks = [pool.submit(worker, i, start, end, paths[i])
+-                 for i, (start, end) in enumerate(bounds)]
+-        while any(not task.done() for task in tasks):
+-            if state.stop.is_set() or stop.is_set():
+-                # 也处理刚从队列启动的 curl，避免取消后仍卡在管道读取中。
+-                for proc in procs:
+-                    if proc is not None and proc.poll() is None:
+-                        proc.terminate()
+-            got = sum(path.stat().st_size for path in paths if path.exists())
+-            state.done = min(99, int(got / total * 100))
+-            time.sleep(0.3)
+-        for task in tasks:
+-            task.result()
+-
+-    if state.stop.is_set():
+-        raise DownloadError("下载已中断")
+-    errs = [e for e in errors if e is not None]
+-    # RangeUnsupported 优先抛出：它是"这条路根本走不通"的信号，别的段大概率
+-    # 只是被连带中断（"下载已中断"），拿后者当结论会让上层白白重试一遍。
+-    err = next((e for e in errs if isinstance(e, RangeUnsupported)),
+-               errs[0] if errs else None)
+-    if err is not None:
+-        raise err
+-    part = dest.with_suffix(dest.suffix + ".part")
+-    with part.open("wb") as out:
+-        for path in paths:
+-            with path.open("rb") as fh:
+-                shutil.copyfileobj(fh, out, 1 << 20)
+-    size = part.stat().st_size
+-    if size != total:
+-        part.unlink(missing_ok=True)
+-        _drop_segments(dest)
+-        raise DownloadError(f"拼接后大小不符：期望 {total}，实得 {size}")
++    download_transfer.segments(url, dest, hdr_file, _resolve_args(pick),
++                               total, conns, state, source_id, log)
+     _drop_segments(dest)
+ 
+ 
+@@ -849,10 +726,14 @@
+     而且现在 v6 常常比 v4 快）。只拉 2MiB 就能分出高下，代价几秒，换来整片
+     （十几个 G）的走线。
+ 
+-    直连口径（默认）：`--resolve` 只影响 curl 自己的 DNS；走代理时被代理忽略，
+-    所以挂梯子的机器不会因此失败，只是拿不到这部分收益。
+-    """
++    `--resolve` 只影响 curl 自己的 DNS；代理连接跳过 IP 测速。
++    """
++    if uses_proxy(hf_url(lease)):
++        log("分片下载使用代理，跳过 CDN IP 测速")
++        return None
+     final = _final_url(hf_url(lease), hdr_file)
++    if final and uses_proxy(final):
++        return None
+     parts = urllib.parse.urlsplit(final) if final else None
+     if not parts or not parts.hostname:
+         return None
+@@ -984,32 +865,28 @@
+ 
+ 
+ def _remote_size(url: str, hdr_file: Path | None) -> int:
+-    """服务端没给 size 时问一次 Content-Length（拿不到就退回单流，不猜）。"""
+-    cmd = ["curl", "-sS", "-L", "-I", "-o", os.devnull, "--max-time", "20"]
++    """取最终响应的 Content-Length；缺失或请求失败时使用单流。"""
++    cmd = ["curl", "-sS", "-L", "--fail", "-I", "-o", os.devnull,
++           "-D", "-", "--max-time", "20"]
+     if hdr_file:
+         cmd += ["-H", f"@{hdr_file}"]
+     cmd.append(url)
+     try:
+-        r = subprocess.run(cmd, capture_output=True, timeout=30)
++        r = subprocess.run(cmd, capture_output=True, timeout=30, env=curl_env(url))
+     except (OSError, subprocess.SubprocessError):
+         return 0
+     if r.returncode != 0:
+         return 0
+-    for line in reversed(r.stdout.decode(errors="replace").splitlines()):
+-        if line.lower().startswith("content-length:"):
++    total = 0
++    for line in r.stdout.decode(errors="replace").splitlines():
++        if line.startswith("HTTP/"):
++            total = 0
++        elif line.lower().startswith("content-length:"):
+             try:
+-                return int(line.split(":", 1)[1].strip())
++                total = max(0, int(line.split(":", 1)[1].strip()))
+             except ValueError:
+-                return 0
+-    return 0
+-
+-
+-class DownloadError(Exception):
+-    pass
+-
+-
+-class RangeUnsupported(DownloadError):
+-    """服务端不认 Range：分段这条路走不通，必须退回单流。"""
++                total = 0
++    return total
+ 
+ 
+ class Prefetcher(threading.Thread):
+--- before/tagger/center_runtime/network.py
++++ after/tagger/center_runtime/network.py
+@@ -92,8 +92,8 @@
+     return _opener(*_policy(url, values), redirects)
+ 
+ 
+-def curl_env(url):
+-    mode, proxy = _policy(url, None)
++def curl_env(url, values=None):
++    mode, proxy = _policy(url, values)
+     env = netutil.curl_env(url)
+     if mode != "auto":
+         keys = ("http_proxy", "https_proxy", "all_proxy", "no_proxy")
+--- before/tagger/center_runtime/download_network.py
++++ after/tagger/center_runtime/download_network.py
+@@ -0,0 +1,45 @@
++"""分片下载的独立网络策略；不影响调度通信和本机推理。"""
++import json
++import os
++from urllib.parse import urlsplit
++from urllib.request import proxy_bypass_environment
++
++from . import network
++
++DEFAULTS = {"download_proxy_mode": "auto", "download_proxy_url": ""}
++ENV_KEY = "LULYNX_DOWNLOAD_NETWORK"
++
++
++def config(values):
++    mode = values.get("download_proxy_mode", "auto")
++    address = str(values.get("download_proxy_url") or "").strip()
++    if mode == "center":
++        return {"download_proxy_mode": mode, "download_proxy_url": address}
++    policy = network.config({"proxy_mode": mode, "proxy_url": address})
++    return {"download_proxy_mode": mode, "download_proxy_url": policy["proxy_url"]}
++
++
++def environment(values):
++    saved = config(values)
++    policy = network.config(values) if saved["download_proxy_mode"] == "center" else {
++        "proxy_mode": saved["download_proxy_mode"], "proxy_url": saved["download_proxy_url"]}
++    return {ENV_KEY: json.dumps(policy)}
++
++
++def curl_env(url):
++    try:
++        policy = json.loads(os.environ.get(ENV_KEY, "{}"))
++        policy = network.config(policy)
++    except (ValueError, TypeError, AttributeError):
++        policy = network.DEFAULTS
++    return network.curl_env(url, policy)
++
++
++def uses_proxy(url):
++    env = curl_env(url)
++    target = urlsplit(url)
++    no_proxy = env.get("no_proxy", env.get("NO_PROXY", ""))
++    if proxy_bypass_environment(target.netloc, {"no": no_proxy}):
++        return False
++    key = target.scheme + "_proxy"
++    return bool(env.get(key) or env.get(key.upper()) or env.get("all_proxy") or env.get("ALL_PROXY"))
+--- before/tagger/center_runtime/download_transfer.py
++++ after/tagger/center_runtime/download_transfer.py
+@@ -0,0 +1,153 @@
++"""curl 分段传输、续传与有限重试。每次重试重新读取本地偏移。"""
++from concurrent.futures import ThreadPoolExecutor
++import re
++import shutil
++import subprocess
++import threading
++import time
++
++from .download_network import curl_env
++from .download_segments import segment_plan
++
++CONNECT_TIMEOUT = 15
++STALL_TIMEOUT = 30
++RETRY_DELAY = 2
++RETRIES = 3
++
++
++class DownloadError(Exception):
++    pass
++
++
++class RangeUnsupported(DownloadError):
++    """源忽略了 Range，需要退回单流。"""
++
++
++def _command(url, hdr_file, resolve):
++    cmd = ["curl", "-sS", "-L", "--fail", "--connect-timeout", str(CONNECT_TIMEOUT),
++           "--speed-limit", "1", "--speed-time", str(STALL_TIMEOUT), *resolve]
++    if hdr_file:
++        cmd += ["-H", f"@{hdr_file}"]
++    return cmd + [url]
++
++
++def _retryable(rc, error):
++    if rc == 22:
++        return bool(re.search(r"\b(?:408|429|500|502|503|504)\b", error))
++    return rc in (5, 6, 7, 16, 18, 28, 35, 52, 55, 56, 92)
++
++
++def _retry(attempt, rc, error, state, stopped, log):
++    if state.stop.is_set() or stopped.is_set():
++        raise DownloadError("下载已中断")
++    if attempt >= RETRIES or not _retryable(rc, error):
++        raise DownloadError(f"curl 退出码 {rc} {error[-200:]}")
++    log(f"[warn] 下载连接中断（curl {rc}），{RETRY_DELAY:g} 秒后续传（重试 {attempt + 1}/{RETRIES}）")
++    until = time.monotonic() + RETRY_DELAY
++    while time.monotonic() < until:
++        if state.stop.wait(min(0.1, max(0, until - time.monotonic()))) or stopped.is_set():
++            raise DownloadError("下载已中断")
++
++
++def stream(url, part, hdr_file, resolve, total, state, log):
++    stopped = threading.Event()
++    for attempt in range(RETRIES + 1):
++        if state.stop.is_set():
++            raise DownloadError("下载已中断")
++        if total and part.is_file() and part.stat().st_size == total:
++            return  # 数据齐全后交给上层校验，避免向 EOF 再发 Range。
++        cmd = _command(url, hdr_file, resolve) + ["-C", "-", "-o", str(part)]
++        with subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=curl_env(url)) as proc:
++            while proc.poll() is None:
++                if state.stop.wait(0.1):
++                    proc.terminate()
++                    break
++                if part.exists() and total:
++                    state.done = min(99, int(part.stat().st_size / total * 100))
++            rc = proc.wait()
++            error = proc.stderr.read().decode(errors="replace")
++        if state.stop.is_set():
++            raise DownloadError("下载已中断")
++        if rc == 0 and part.exists():
++            if total and part.stat().st_size != total:
++                raise DownloadError(f"下载大小不符：期望 {total}，实得 {part.stat().st_size}")
++            return
++        _retry(attempt, rc, error, state, stopped, log)
++
++
++def segments(url, dest, hdr_file, resolve, total, conns, state, source_id, log):
++    bounds, paths = segment_plan(dest, total, conns, source_id or url)
++    procs = [None] * len(bounds)
++    errors = [None] * len(bounds)
++    stopped = threading.Event()
++    pending = sum(not path.exists() or path.stat().st_size != end - start + 1
++                  for (start, end), path in zip(bounds, paths))
++    log(f"分段续传：{len(bounds)} 段，待下载 {pending} 段，最多 {min(conns, pending)} 连接")
++
++    def worker(i, start, end, path):
++        try:
++            want = end - start + 1
++            for attempt in range(RETRIES + 1):
++                if state.stop.is_set() or stopped.is_set():
++                    return
++                have = path.stat().st_size if path.exists() else 0
++                if have > want:
++                    path.write_bytes(b"")
++                    have = 0
++                if have == want:
++                    return
++                cmd = _command(url, hdr_file, resolve) + ["-r", f"{start + have}-{end}"]
++                with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=curl_env(url)) as proc:
++                    procs[i] = proc
++                    try:
++                        with path.open("ab") as fh:
++                            written = have
++                            while chunk := proc.stdout.read1(1 << 20):
++                                written += len(chunk)
++                                if written > want:
++                                    raise RangeUnsupported("服务端忽略 Range（返回了整文件），退回单流下载")
++                                fh.write(chunk)
++                                if state.stop.is_set() or stopped.is_set():
++                                    break
++                    except BaseException:
++                        if proc.poll() is None:
++                            proc.terminate()
++                        raise
++                    if proc.poll() is None and (state.stop.is_set() or stopped.is_set()):
++                        proc.terminate()
++                    rc = proc.wait()
++                    error = proc.stderr.read().decode(errors="replace")
++                if rc == 0 and path.stat().st_size == want:
++                    return
++                _retry(attempt, rc or 18, error, state, stopped, log)
++        except Exception as exc:
++            errors[i] = exc
++            stopped.set()
++
++    with ThreadPoolExecutor(max_workers=conns, thread_name_prefix="segment") as pool:
++        tasks = [pool.submit(worker, i, start, end, paths[i]) for i, (start, end) in enumerate(bounds)]
++        while any(not task.done() for task in tasks):
++            if state.stop.is_set() or stopped.is_set():
++                for proc in procs:
++                    if proc is not None and proc.poll() is None:
++                        proc.terminate()
++            got = sum(path.stat().st_size for path in paths if path.exists())
++            state.done = min(99, int(got / total * 100))
++            time.sleep(0.1)
++        for task in tasks:
++            task.result()
++    if state.stop.is_set():
++        raise DownloadError("下载已中断")
++    failures = [e for e in errors if e is not None]
++    if failures:
++        original = next((e for e in failures if str(e) != "下载已中断"), failures[0])
++        raise next((e for e in failures if isinstance(e, RangeUnsupported)), original)
++    part = dest.with_suffix(dest.suffix + ".part")
++    with part.open("wb") as out:
++        for path in paths:
++            with path.open("rb") as fh:
++                shutil.copyfileobj(fh, out, 1 << 20)
++    if part.stat().st_size != total:
++        raise DownloadError(f"拼接后大小不符：期望 {total}，实得 {part.stat().st_size}")
++    for path in paths:
++        path.unlink(missing_ok=True)
+--- before/tagger/web/center.py
++++ after/tagger/web/center.py
+@@ -19,6 +19,7 @@
+ import httpx
+ from .center_runtime.config import EXECUTION_DEFAULTS, execution_config
+ from ..center_runtime.network import DEFAULTS as NETWORK_DEFAULTS, config as network_config, environment as network_environment
++from ..center_runtime import download_network
+ from .center_runtime.secrets import Credentials
+ from .center_runtime.controller import Controller
+ from ..storage.atomic import write_bytes
+@@ -55,6 +56,7 @@
+     "watchdog": True,
+     **EXECUTION_DEFAULTS,
+     **NETWORK_DEFAULTS,
++    **download_network.DEFAULTS,
+     "wanted": False,
+     "auto_upload": True,
+     "auto_start_on_connect": True,
+@@ -184,6 +186,7 @@
+         cfg.update(execution_config(cfg))
+         cfg.update(hosting_mode='passive',wait=False,idle_timeout=0)
+         cfg.update(network_config(cfg))
++        cfg.update(download_network.config(cfg))
+         write_bytes(self.cfg_path, json.dumps(cfg, ensure_ascii=False, indent=2).encode("utf-8"))
+         return cfg
+ 
+@@ -244,6 +247,7 @@
+         cfg = execution if execution is not None else (self.runtime.resolved or self.config())
+         local = self.config()
+         env.update(network_environment(self.identity().get('server') or local['server'], local))
++        env.update(download_network.environment(local))
+         env["TAGGER_DL_CONNS"] = str(cfg.get("download_conns",4))
+         env["FOXLABEL_CDN_PROBE"] = "1" if cfg.get("cdn_probe",True) else "0"
+         env["LULYNX_CENTER_EXECUTION"] = json.dumps({
+--- before/tagger/web/app.py
++++ after/tagger/web/app.py
+@@ -521,6 +521,8 @@
+     auto_start_on_connect: bool | None = None
+     proxy_mode: Literal["auto", "direct", "custom"] | None = None
+     proxy_url: str | None = None
++    download_proxy_mode: Literal["auto", "direct", "custom", "center"] | None = None
++    download_proxy_url: str | None = None
+     mode: str | None = None
+     # 派工倾向（2026-11-12）：只影响服务端排序，不改变本机产出什么。
+     # 空串 = 不挑，是有效值，所以这里不能用 exclude_none 之外的默认值兜。
+--- before/tagger/web/ui/src/pages/Center.tsx
++++ after/tagger/web/ui/src/pages/Center.tsx
+@@ -20,6 +20,7 @@
+ import { ExecutionStatus } from '../components/center/ExecutionStatus'
+ import { LeasePanel } from '../components/center/LeasePanel'
+ import { ConnectionNetwork, type ProxyMode } from '../components/center/ConnectionNetwork'
++import { DownloadNetwork } from '../components/center/DownloadNetwork'
+ import { OfflineTasks } from '../components/center/OfflineTasks'
+ import { DispatchPlans } from '../components/center/DispatchPlans'
+ import { HistoryArtifacts } from '../components/center/HistoryArtifacts'
+@@ -99,6 +100,8 @@
+   const [cdnProbe, setCdnProbe] = useState(true)
+   const [proxyMode, setProxyMode] = useState<ProxyMode>('auto')
+   const [proxyUrl, setProxyUrl] = useState('')
++  const [downloadProxyMode, setDownloadProxyMode] = useState<ProxyMode | 'center'>('auto')
++  const [downloadProxyUrl, setDownloadProxyUrl] = useState('')
+   const [autoUpload, setAutoUpload] = useState(true)
+   const [autoStartOnConnect, setAutoStartOnConnect] = useState(true)
+   const seeded = useRef(false)
+@@ -114,6 +117,8 @@
+         setServer(s.config.server)
+         setProxyMode(s.config.proxy_mode ?? 'auto')
+         setProxyUrl(s.config.proxy_url ?? '')
++        setDownloadProxyMode(s.config.download_proxy_mode ?? 'auto')
++        setDownloadProxyUrl(s.config.download_proxy_url ?? '')
+         setExecution(Object.fromEntries(Object.keys(DEFAULT_EXECUTION).map((key) =>
+           [key, s.config[key as keyof CenterExecution] ?? DEFAULT_EXECUTION[key as keyof CenterExecution]])) as CenterExecution)
+         setRememberHf(s.credentials?.remember_hf ?? false)
+@@ -180,6 +185,7 @@
+   const serverNotice = seeded.current ? httpUrlError(server, '调度中心地址') : ''
+   const idNotice = seeded.current && !userId.trim() ? '请填写用户 ID，调度中心按这个 ID 记录产出。' : ''
+   const proxyNotice = proxyMode === 'custom' ? httpUrlError(proxyUrl, '代理地址') : ''
++  const downloadProxyNotice = downloadProxyMode === 'custom' ? httpUrlError(downloadProxyUrl, '下载代理地址') : ''
+   const serviceNotice = seeded.current && mode !== 'tag'
+     ? httpUrlError(tagUrl, '推理服务地址') || (execution.inference_source === 'local' ? localServiceUrlError(tagUrl) : '') : ''
+   const outNotice = seeded.current && !outDir.trim() ? '请选择产物目录，下载的分片和打标结果会保存到这里。' : ''
+@@ -187,7 +193,7 @@
+   const failureDetail = state?.runtime?.error || (runtimeFailure && state?.last_rc != null ? latestCenterFailure(state.log) : '') || runtimeFailure
+   // 打标服务与产物目录空着就不让开始：后端对空串是"保持原值"（免得把配置
+   // 清成空以后再起不来），所以输入框显示空、实际却用着旧地址，是更难查的错。
+-  const startBlocked = proxyNotice || (!ident.device_id
++  const startBlocked = proxyNotice || downloadProxyNotice || (!ident.device_id
+     ? '先到「连接与账号」连接调度中心'
+     : mode !== 'tag' && !tagUrl.trim()
+       ? '打标服务地址不能为空'
+@@ -199,6 +205,7 @@
+     download_conns: Math.max(1, Math.min(16, Number(dlConns) || 4)),
+     cdn_probe: cdnProbe, parts_pref: partsPref, auto_upload: autoUpload, auto_start_on_connect: autoStartOnConnect,
+     proxy_mode: proxyMode, proxy_url: proxyUrl,
++    download_proxy_mode: downloadProxyMode, download_proxy_url: downloadProxyUrl,
+     remember_hf: rememberHf, ...(hfToken.trim() ? { hf_token: hfToken.trim() } : {}),
+   })
+ 
+@@ -621,6 +628,8 @@
+               label="自动回传（推荐）"
+             />
+             {!autoUpload && <p className="text-xs text-lx-warning">完成后保留本地产物并登记待回传；中心继续保留该分项，管理员尚不能下载结果。恢复回传可在任务与记录中核对并上报。</p>}
++            <DownloadNetwork mode={downloadProxyMode} address={downloadProxyUrl} onMode={setDownloadProxyMode}
++              onAddress={setDownloadProxyUrl} disabled={running} notice={downloadProxyNotice} />
+             <AdvancedSettings title="高级：下载连接与 CDN 测速">
+               {/* 下载口径。两件事一起决定"这片多久能到"：单条 TCP 常被限速（多连接），
+                   以及 DNS 给的那个边缘未必最快（开工前测速选优）。 */}
+@@ -629,7 +638,7 @@
+                   checked={cdnProbe}
+                   onChange={setCdnProbe}
+                   disabled={running}
+-                  label="CDN 测速"
++                  label="CDN 测速（仅直连时选路）"
+                 />
+                 <div className="mt-3 flex flex-wrap items-end gap-3">
+                   <label className="flex flex-col gap-1">
+@@ -637,6 +646,7 @@
+                     <input
+                       className="lx-input w-24 font-mono text-xs tabular-nums"
+                       inputMode="numeric"
++                      aria-label="下载连接数"
+                       value={dlConns}
+                       onChange={(e) => setDlConns(e.target.value.replace(/[^\d]/g, ''))}
+                       placeholder="4"
+--- before/tagger/web/ui/src/lib/api.ts
++++ after/tagger/web/ui/src/lib/api.ts
+@@ -1770,6 +1770,8 @@
+   server: string
+   proxy_mode: 'auto' | 'direct' | 'custom'
+   proxy_url: string
++  download_proxy_mode: 'auto' | 'direct' | 'custom' | 'center'
++  download_proxy_url: string
+   user_id: string
+   tag_url: string
+   mode: string
+--- before/tagger/web/ui/src/components/center/ConnectionNetwork.tsx
++++ after/tagger/web/ui/src/components/center/ConnectionNetwork.tsx
+@@ -8,7 +8,7 @@
+   onAddress: (address: string) => void; disabled: boolean; notice: string
+ }) {
+   return <>
+-    <SettingRow label="连接方式" help="用于调度中心连接、接单和产物回传；本机推理保持直连。">
++    <SettingRow label="调度连接方式" help="用于连接、接单和产物回传。分片下载连接在「下载与交付」中单独选择；本机推理保持直连。">
+       <ChoiceGrid options={['auto', 'direct', 'custom'] as const} value={mode} onChange={onMode}
+         disabled={disabled} size="sm" className="grid-cols-3" ariaLabel="调度连接方式"
+         renderLabel={(value) => ({ auto: '自动（系统代理）', direct: '直连', custom: '指定代理' })[value]} />
+--- before/tagger/web/ui/src/components/center/DownloadNetwork.tsx
++++ after/tagger/web/ui/src/components/center/DownloadNetwork.tsx
+@@ -0,0 +1,23 @@
++import { ChoiceGrid } from '../ui/controls'
++import { SettingRow } from '../ui/launcher'
++import type { CenterConfig } from '../../lib/api'
++
++export function DownloadNetwork({ mode, address, onMode, onAddress, disabled, notice }: {
++  mode: CenterConfig['download_proxy_mode']; address: string
++  onMode: (mode: CenterConfig['download_proxy_mode']) => void; onAddress: (address: string) => void
++  disabled: boolean; notice: string
++}) {
++  return <>
++    <SettingRow label="分片下载连接" help="控制素材分片和预取的下载线路，与调度连接分别保存。">
++      <ChoiceGrid options={['auto', 'direct', 'custom', 'center'] as const} value={mode} onChange={onMode}
++        disabled={disabled} size="sm" className="grid-cols-2" ariaLabel="分片下载连接方式"
++        renderLabel={(value) => ({ auto: '自动（系统代理）', direct: '直连', custom: '指定代理', center: '跟随调度连接' })[value]} />
++    </SettingRow>
++    {mode === 'custom' && <SettingRow label="下载代理地址" required notice={notice}
++      help="填写代理软件的 HTTP 或 mixed 端口，代理软件需保持运行。">
++      <input className="lx-input font-mono text-xs" aria-label="下载代理地址" value={address}
++        onChange={(event) => onAddress(event.target.value)} disabled={disabled}
++        placeholder="http://127.0.0.1:47826" spellCheck={false} aria-invalid={Boolean(notice)} />
++    </SettingRow>}
++  </>
++}

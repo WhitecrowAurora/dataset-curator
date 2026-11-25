@@ -1,0 +1,12 @@
+{
+  "actual_http": true,
+  "readonly_view": true,
+  "heartbeat_renew": true,
+  "local_countdown": true,
+  "prelock_release": true,
+  "active_release": true,
+  "server_auto_paused": true,
+  "desktop": true,
+  "narrow_screen": true,
+  "page_errors": []
+}

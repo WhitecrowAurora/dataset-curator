@@ -7,6 +7,8 @@ from .config import DEFAULTS, validate
 
 
 def ensure_schema(c):
+    from annotation.store import ensure_schema as ensure_artist
+    ensure_artist(c)
     c.executescript("""
     CREATE TABLE IF NOT EXISTS source_configs (repo TEXT PRIMARY KEY,config_json TEXT NOT NULL,generation TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS source_jobs (repo TEXT PRIMARY KEY,generation TEXT NOT NULL,state TEXT NOT NULL,
@@ -97,6 +99,7 @@ def view(c):
                           " AND p.sha256=s.source_sha256 AND p.size=s.source_bytes WHERE s.repo=? AND s.generation=?",
                           (repo, cfg["generation"])).fetchone()[0]
         waiting = c.execute("SELECT COUNT(DISTINCT pkg) FROM source_submissions WHERE repo=? AND state='pending'", (repo,)).fetchone()[0]
-        items.append(dict(repo=repo, config={k: cfg[k] for k in DEFAULTS}, job=dict(job) if job else None,
+        from annotation.store import config as artist_config
+        items.append(dict(repo=repo, artist=artist_config(c, repo), config={k: cfg[k] for k in DEFAULTS}, job=dict(job) if job else None,
                           verified_packages=count, pending_submissions=waiting))
     return {"ok": True, "items": items}

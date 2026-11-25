@@ -1,0 +1,16 @@
+--- server/fox-label/managed/store.py
++++ candidate/fox-label/managed/store.py
+@@ -343,13 +343,6 @@
+         if action in ('configure', 'probe'):
+             from .tuning import validate
+             validate(action, changes, json.loads(active['config']), json.loads(active['capabilities']))
+-            if action=='configure':
+-                from .parallel import next_package, required
+-                import dispatch
+-                device=dict(c.execute('SELECT * FROM devices WHERE device_id=?',(device_id,)).fetchone())
+-                required_parallel=required(c,device,next_package(c,dispatch,device))
+-                if any(key in required_parallel and value != required_parallel[key] for key,value in changes.items()):
+-                    raise ManagedError('预派任务的并发优先，请先修改预派配置',409)
+             if pending:
+                 raise ManagedError("已有待执行指令，请等待确认后再调整", 409)
+         if action == "start":

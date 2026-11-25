@@ -1,0 +1,15 @@
+{
+  "package": "H:\\tagger\\dist\\tagger-20261123-scheduling-audit.zip",
+  "bytes": 76532780,
+  "sha256": "2d347b326c84b543c87dfefb3c606efa59b6c53934f77aac2f94a360ec234649",
+  "source_and_ui_match": true,
+  "worker_match": true,
+  "machine_data_excluded": true,
+  "credentials_excluded": true,
+  "tests": {
+    "tests": 330,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  }
+}

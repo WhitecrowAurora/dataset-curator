@@ -11,6 +11,8 @@ def ensure_schema(c):
 
 
 def clear_device(c, device_id):
+    from .plans import clear_device as clear_plan
+    clear_plan(c, device_id)
     c.execute("DELETE FROM package_queue WHERE device_id=?", (device_id,))
     c.execute("DELETE FROM part_assignments WHERE target_type='device' AND target_id=?", (device_id,))
     c.execute("UPDATE devices SET queue_only=0 WHERE device_id=?", (device_id,))

@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "deployed_files": 5,
+  "hashes": {
+    "fox-label/scheduling/repository_ownership.py": "02c52f2edfd3033f73bf51be5abb4691888bcb305a88ce5ee8e916e301a485a3",
+    "fox-label/scheduling/policies.py": "779c6221b7ec056a9c22f1edcc8b7295a2c13e2e71b3d39ecbefde5ad01e4ce0",
+    "fox-label/scheduling/onboarding.py": "f540af1d87ad6eb54b0d93718fa66416cc2d66fb72daffda96e987e7cf8751a9",
+    "fox-label/scheduling/workspace_migration.py": "75a9b34ca62956594be69616b5ffe21d9bb2170946dd54d301da915906a8dcfd",
+    "fox-panel/web/workspace.js": "570e8e4650eb0096d521fd5b4d52982d77334dbed4fffccc7e62dc26b023ab2d"
+  },
+  "target": "Dru768",
+  "archived_workspace": "dan",
+  "moved": {
+    "users": 1,
+    "devices": 0,
+    "user_groups": 0,
+    "repo_devices": 0,
+    "repo_users": 0
+  },
+  "event_seq": 1844,
+  "auto_assign_at": "2026-11-21T18:49:51+0800",
+  "preserved_tables": 20,
+  "preserved_records": 4478,
+  "packages_total": 874,
+  "offline_jobs": 23,
+  "backup": "/tagger/.delete/workspace-merge-20261124/before/db.sqlite3",
+  "free_gib": 4.93,
+  "services": {
+    "lulynx-label.service": "active",
+    "lulynx-panel.service": "active"
+  }
+}

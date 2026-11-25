@@ -1,0 +1,19 @@
+--- server/fox-panel/ai_access/protocol.py
++++ candidate/fox-panel/ai_access/protocol.py
+@@ -5,6 +5,7 @@
+ 
+ VERSIONS=('2025-06-18','2025-03-26')
+ INSTRUCTIONS=('lulynx 调度管理员接口。先查询设备、工作区和可派分项，再操作；'
++              '工作区默认模型与量化要求用center_workspace_template，先读center_workspaces；只影响后续预派。并发是吞吐建议，不应阻断接单。'
+               '完整调度配置用center_scheduling；撤销用户预派用center_cancel_preassignment，仅取消尚未领取的分项。'
+               '撤销预派不暂停自动派单，若不希望再派新包，先暂停总派单。预锁或执行租约另走释放，不与撤销预派混用。'
+               '启停请求的 request_id 要唯一，重试沿用。强制继续不会跳过租约、冲突或并发授权。'
+@@ -30,7 +31,7 @@
+     if method=='initialize':
+         version=params.get('protocolVersion')
+         result=dict(protocolVersion=version if version in VERSIONS else VERSIONS[0],
+-                    serverInfo=dict(name='lulynx-center',version='1.1.0'),
++                    serverInfo=dict(name='lulynx-center',version='1.2.0'),
+                     capabilities=dict(tools=dict(listChanged=False)),instructions=INSTRUCTIONS)
+     elif method=='ping':result={}
+     elif method=='tools/list':

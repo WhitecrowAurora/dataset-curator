@@ -1,0 +1,110 @@
+[
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 2048,
+    "mode": "sdpa",
+    "ms": 0.16303383328404208,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 2048,
+    "mode": "grouped_sdpa",
+    "ms": 0.11358282424272508,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 2048,
+    "mode": "qwen_decode",
+    "ms": 0.021839576105616786,
+    "max_error": 0.0001220703125,
+    "rmse": 1.5048241039039567e-05
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 4096,
+    "mode": "sdpa",
+    "ms": 0.3589459423451697,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 4096,
+    "mode": "grouped_sdpa",
+    "ms": 0.2197156630622016,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 1,
+    "span": 4096,
+    "mode": "qwen_decode",
+    "ms": 0.04150286862178033,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4583625670638867e-05
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 2048,
+    "mode": "sdpa",
+    "ms": 1.0123031616210938,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 2048,
+    "mode": "grouped_sdpa",
+    "ms": 0.13369874539996646,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 2048,
+    "mode": "qwen_decode",
+    "ms": 0.170440673828125,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4338082110043615e-05
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 4096,
+    "mode": "sdpa",
+    "ms": 1.9753864262728085,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 4096,
+    "mode": "grouped_sdpa",
+    "ms": 0.2523314401967376,
+    "max_error": 0.0,
+    "rmse": 0.0
+  },
+  {
+    "case": "attention",
+    "batch": 8,
+    "span": 4096,
+    "mode": "qwen_decode",
+    "ms": 0.32077708537657035,
+    "max_error": 0.0001220703125,
+    "rmse": 1.4423062566493172e-05
+  }
+]

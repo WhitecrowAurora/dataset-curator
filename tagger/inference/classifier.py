@@ -42,6 +42,9 @@ def classify(client, task, data, started, cache_key):
                                         "tokens": 0, "tag": {"tags": tags, "flags": flags,
                                                              "rescored": rescored,
                                                              "rating": prediction.rating}})
+        if getattr(client, "hair_batch", None) is not None:
+            payload["_hair_scores"] = prediction.hair_scores
+            client.hair_batch.capture(data, payload, task.image_id, task.file, media=task.media)
         return Outcome(task.image_id, True, tag=payload, attempts=1,
                        wall_ms=int((time.perf_counter() - started) * 1000))
     except Exception as exc:

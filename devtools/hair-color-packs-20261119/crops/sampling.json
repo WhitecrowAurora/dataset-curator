@@ -1,0 +1,187 @@
+{
+  "repo": "jasperai/monet",
+  "revision": "a718d526ddcd9bd13681784d1fd02a2082d4e615",
+  "seed": 20261119,
+  "method": "2 manual head crops from person samples 101 and 107",
+  "shards": [
+    {
+      "source": "z-image",
+      "path": "v1.2.0/synthetic/z-image/0-0/000000.tar",
+      "size": 5204541440,
+      "windows": [
+        {
+          "offset": 3903406080,
+          "bytes": 16777216,
+          "complete_jpgs": 32
+        },
+        {
+          "offset": 4579996160,
+          "bytes": 16777216,
+          "complete_jpgs": 27
+        },
+        {
+          "offset": 4996359680,
+          "bytes": 16777216,
+          "complete_jpgs": 30
+        }
+      ]
+    },
+    {
+      "source": "flux-schnell",
+      "path": "v1.2.0/synthetic/flux-schnell/0-0/000000.tar",
+      "size": 5296711680,
+      "windows": [
+        {
+          "offset": 3972533760,
+          "bytes": 16777216,
+          "complete_jpgs": 30
+        },
+        {
+          "offset": 4661106176,
+          "bytes": 16777216,
+          "complete_jpgs": 35
+        },
+        {
+          "offset": 5084843008,
+          "bytes": 16777216,
+          "complete_jpgs": 30
+        }
+      ]
+    },
+    {
+      "source": "flux-klein",
+      "path": "v1.2.0/synthetic/flux-klein/0-0/000000.tar",
+      "size": 5898403840,
+      "windows": [
+        {
+          "offset": 4423802880,
+          "bytes": 16777216,
+          "complete_jpgs": 28
+        },
+        {
+          "offset": 5190595072,
+          "bytes": 16777216,
+          "complete_jpgs": 30
+        },
+        {
+          "offset": 5662467584,
+          "bytes": 16777216,
+          "complete_jpgs": 28
+        }
+      ]
+    }
+  ],
+  "records": [
+    {
+      "index": 201,
+      "file": "201_crop.png",
+      "source": "z-image",
+      "shard": "v1.2.0/synthetic/z-image/0-0/000000.tar",
+      "member": "013_df736bd240db7816.jpg",
+      "data_offset": 3916117504,
+      "bytes": 131139,
+      "sha256": "c3db4231a4e379ea918088d61b3d8d9e67752a7e05c51f0b0ff1dc85769ed68f",
+      "dimensions": [
+        265,
+        340
+      ],
+      "window": 0,
+      "metadata": {
+        "aesthetic_jasperai": 5.364879,
+        "aesthetic_laion-improved": 6.575969,
+        "aspect_ratio": 1.0,
+        "caption_florence-2-large": "The image shows a group of anime girls with guns standing in the middle of a city, surrounded by buildings, lights, and scrap on the ground. The sky is filled with clouds and the image is animated, giving it a dynamic feel.",
+        "caption_gemini-2.5-flash-lite": "In a post-apocalyptic urban environment, three anime-style women stand ready for combat. The central figure, with striking blue hair and yellow eyes, wears a dark beret and a tactical uniform, her rifle held at the ready. To her right, a woman with brown hair in a ponytail sports a similar outfit and weapon, while another woman with brown hair, partially obscured behind the central figure, also aims her rifle. The background depicts a destroyed city with crumbling buildings and debris, illuminated by the eerie glow of neon signs and emergency lights, evoking a sense of danger and resilience in a devastated world.",
+        "caption_internvl-3-8b": "The image is an illustration of three anime-style characters in a futuristic, urban setting. The central character has long blue hair, yellow eyes, and is wearing a police-style uniform with a beret. She is holding a rifle. Behind her are two other characters, also in similar uniforms, holding rifles. The background shows shows a cityscape with damaged buildings, neon signs, and a cloudy sky, suggesting a post-apocalyptic or conflict scenario.",
+        "caption_original": "Here's a rephrased version of your description with a fresh tone and flow while preserving all the key details:\n\nA vivid, anime-inspired scene unfolds in a ruined cityscape, where four young women navigate a harsh, post-apocalyptic world armed with firearms. In the foreground, a girl with long, light blue hair and vivid yellow eyes dons a sleek, dark military outfit—complete with a beret, white undershirt, and a tactical jacket marked with battle patches. She grips an assault rifle equipped with both a scope and a flashlight, her posture tense and focused. To her right, another woman with long light brown hair stands in a dark jacket over a white shirt and short skirt, her profile turned slightly as she aims a submachine gun toward the right edge of the frame. A third figure, slightly to the left and partially hidden behind the others, has light brown hair in twin pigtails and wears a dark jacket and skirt; she’s also armed, her silhouette just visible in the action. In the distance, a fourth character is mostly out of view, hooded and masked, holding a weapon as the city’s skeletal towers loom behind them. The setting is dominated by crumbling skyscrapers and scattered wreckage, bathed in the cold, flickering light of broken neon and emergency lamps—evoking a world torn apart by war and decay. The artwork is richly detailed and immersive, using a subdued, earthy color scheme to amplify the mood of loss, tension, and survival.",
+        "caption_sharegpt4v-7b": "The image portrays a scene of three female characters in a post-apocalyptic setting. They are all equipped with guns, ready for action. The character in the foreground is distinguished by her blue hair and a black hat, holding a gun in her right hand. Behind her, two more characters are visible. One has brown hair and is also armed with a gun, while the other has blonde hair and is holding a sword. The backdrop of the image is a cityscape, with buildings and rubble scattered around, adding to the overall post-apocalyptic atmosphere. The characters'",
+        "classifier_clip-vit-base-patch32": "[{\"name\": \"police officer\", \"prob\": 0.29215776920318604}, {\"name\": \"anime\", \"prob\": 0.2739522159099579}, {\"name\": \"anime style\", \"prob\": 0.2719871699810028}, {\"name\": \"security guard\", \"prob\": 0.2716560959815979}, {\"name\": \"lieutenant\", \"prob\": 0.2663116455078125}]",
+        "classifier_yolo": "[{\"name\": \"assault_rifle\", \"prob\": \"0.93068486\"}, {\"name\": \"rifle\", \"prob\": \"0.032443255\"}, {\"name\": \"military_uniform\", \"prob\": \"0.028132834\"}, {\"name\": \"projectile\", \"prob\": \"0.0019622836\"}, {\"name\": \"stage\", \"prob\": \"0.0018635595\"}]",
+        "detection-face_mediapipe": "[{\"bbox\": {\"xmin\": 0.6694240570068359, \"ymin\": 0.2930431067943573, \"xmax\": 0.7508310079574585, \"ymax\": 0.374449759721756}, \"keypoints\": [[0.6937327980995178, 0.32347509264945984], [0.7261221408843994, 0.3212043046951294], [0.7152340412139893, 0.34395942091941833], [0.7123211622238159, 0.356815904378891], [0.664919376373291, 0.323062926530838], [0.7362502813339233, 0.317793607711792]]}]",
+        "detection_yolo": "[{\"bbox\": [235, 226, 631, 1023], \"name\": \"person\"}, {\"bbox\": [78, 307, 328, 939], \"name\": \"person\"}, {\"bbox\": [546, 240, 928, 987], \"name\": \"person\"}, {\"bbox\": [1, 853, 246, 1023], \"name\": \"boat\"}]",
+        "hash_md5": "a62d3d18a7f28ffabe63cd95a78c7220",
+        "hash_perceptual": "918f12372c7e4db1",
+        "hash_sha256": "c97a9f7650ae2d37bcb499571e7901700a130cadb4dd6d0b3b4a7c8de74cf1a9",
+        "height": 1024.0,
+        "id": "013_df736bd240db7816",
+        "least_dimension": 1024.0,
+        "license": "apache-2.0",
+        "nsfw_bumble": 0.05355720594525337,
+        "nsfw_falcon": 0.0,
+        "nsfw_jasperai": 0.26623299717903137,
+        "resolution": 1048576.0,
+        "source": "synthetic-z-image",
+        "sscd_cluster_id": "918f12372c7e4db1",
+        "sscd_nn": 0.4127255082130432,
+        "white_pixels": 0.0010490417480468,
+        "width": 1024.0,
+        "wk_jasperai": 0.2178574651479721,
+        "wk_laion": 0.26520201563835144
+      },
+      "caption_selected_as_anime": true,
+      "crop": [
+        300,
+        210,
+        565,
+        550
+      ],
+      "parent_index": 101
+    },
+    {
+      "index": 202,
+      "file": "202_crop.png",
+      "source": "z-image",
+      "shard": "v1.2.0/synthetic/z-image/0-0/000000.tar",
+      "member": "015_5286976755118034.jpg",
+      "data_offset": 4589576192,
+      "bytes": 276761,
+      "sha256": "b6c9ae5f2b03a927ca03b36229a93118dbef3c2d3c2d4074bd4b8d15c5fe57d4",
+      "dimensions": [
+        420,
+        545
+      ],
+      "window": 1,
+      "metadata": {
+        "aesthetic_jasperai": 5.335558,
+        "aesthetic_laion-improved": 6.1344657,
+        "aspect_ratio": 1.0,
+        "caption_florence-2-large": "The image shows a woman standing in a field of tall grass, wearing a black and white striped shirt. The background is slightly blurred, giving the image a dreamy feel.",
+        "caption_gemini-2.5-flash-lite": "A young woman with silver-grey hair stands in a lush green field, her profile visible as she looks off to the left. She is wearing a black and white striped button-down shirt with full sleeves. The field is dense with tall green grass that fills the foreground and extends into the background, creating a natural and serene setting. The sky above is overcast and hazy, contributing to a soft, diffused light that illuminates the scene. The style of the photograph is naturalistic and portrait-oriented, with a shallow depth of field that blurs the background, drawing the viewer's attention to the woman.",
+        "caption_internvl-3-8b": "The image shows a person with short, light-colored hair standing in a field of tall green grass. They are wearing a black and white striped shirt and are looking off into the distance. The background is slightly blurred, emphasizing the person in the foreground. The overall atmosphere is calm and serene.",
+        "caption_original": "A young woman with silvery hair stands in a field of lush green grass, gazing into the horizon with a thoughtful, quiet expression. She is dressed in a black-and-white striped shirt.",
+        "caption_sharegpt4v-7b": "In the image, a young woman with long, gray hair is the central figure. She is standing in a field of tall, green grass. The woman is dressed in a black and white striped shirt, adding a contrast to the vibrant green of the field. Her gaze is directed off to the side, suggesting she might be lost in thought or observing something out of frame. The field extends into the distance, eventually meeting a line of trees and buildings, indicating that the field is not isolated but part of a larger landscape. The sky overhead is overcast, casting a soft, diffused light over the scene",
+        "classifier_clip-vit-base-patch32": "[{\"name\": \"farmer\", \"prob\": 0.26841896772384644}, {\"name\": \"korean\", \"prob\": 0.26442793011665344}, {\"name\": \"zebras\", \"prob\": 0.2610895335674286}, {\"name\": \"hairstylist\", \"prob\": 0.2582749128341675}, {\"name\": \"stripes\", \"prob\": 0.25790902972221375}]",
+        "classifier_yolo": "[{\"name\": \"soccer_ball\", \"prob\": \"0.098070726\"}, {\"name\": \"cellular_telephone\", \"prob\": \"0.0879684\"}, {\"name\": \"croquet_ball\", \"prob\": \"0.07847917\"}, {\"name\": \"zebra\", \"prob\": \"0.07822131\"}, {\"name\": \"rapeseed\", \"prob\": \"0.07626212\"}]",
+        "detection-face_mediapipe": "[{\"bbox\": {\"xmin\": 0.4540616571903229, \"ymin\": 0.2592928111553192, \"xmax\": 0.6210421919822693, \"ymax\": 0.42625948786735535}, \"keypoints\": [[0.5220200419425964, 0.29802969098091125], [0.5473774671554565, 0.30794626474380493], [0.48173171281814575, 0.335801362991333], [0.4933426082134247, 0.37422701716423035], [0.5660973787307739, 0.31614920496940613], [0.6523210406303406, 0.3522334098815918]]}]",
+        "detection_yolo": "[{\"bbox\": [429, 145, 827, 1021], \"name\": \"person\"}]",
+        "hash_md5": "88c6794a44e7556f377fbb7bf24e009f",
+        "hash_perceptual": "99e190b2e6e989d6",
+        "hash_sha256": "009306a954c0f96acf8c1c3151630d4ee239aba827cbf0250f6293dafbab2d5c",
+        "height": 1024.0,
+        "id": "015_5286976755118034",
+        "least_dimension": 1024.0,
+        "license": "apache-2.0",
+        "nsfw_bumble": 0.05900360271334648,
+        "nsfw_falcon": 0.0,
+        "nsfw_jasperai": 0.1845656782388687,
+        "resolution": 1048576.0,
+        "source": "synthetic-z-image",
+        "sscd_cluster_id": "99e190b2e6e989d6",
+        "sscd_nn": 0.4911693334579468,
+        "white_pixels": 0.0042915344238281,
+        "width": 1024.0,
+        "wk_jasperai": 0.1630839705467224,
+        "wk_laion": 0.7344595193862915
+      },
+      "caption_selected_as_anime": false,
+      "crop": [
+        470,
+        110,
+        890,
+        655
+      ],
+      "parent_index": 107
+    }
+  ],
+  "download_seconds": 117.56
+}

@@ -1,0 +1,96 @@
+{
+  "ok": true,
+  "time": 1795541581.5636485,
+  "services": {
+    "lulynx-label": "active",
+    "lulynx-panel": "active"
+  },
+  "dispatch": {
+    "ok": true,
+    "dispatch": {
+      "running": false,
+      "changed_at": 1795540796.4409773,
+      "changed_by": "deployment:initial-pause"
+    },
+    "active_leases": 3,
+    "prelocks": 1,
+    "offline_leases": 0,
+    "pending_starts": 0
+  },
+  "counts": {
+    "packages": 874,
+    "completed_packages": 2,
+    "offline_jobs": 23,
+    "dispatch_plans": 1,
+    "duplicate_parts": 0
+  },
+  "open_leases": [
+    {
+      "lease_id": "L6cdea3620417",
+      "device_id": "8afe1fd19aa2",
+      "pkg": "shard-000019.tar",
+      "kind": "active",
+      "issued_at": 1795412448.5498655
+    },
+    {
+      "lease_id": "L8f67b81e6e02",
+      "device_id": "9f609acff33f",
+      "pkg": "shard-000006.tar",
+      "kind": "active",
+      "issued_at": 1795533676.08765
+    },
+    {
+      "lease_id": "L7f6a848fe173",
+      "device_id": "9f609acff33f",
+      "pkg": "shard-000007.tar",
+      "kind": "prelock",
+      "issued_at": 1795533676.5086877
+    },
+    {
+      "lease_id": "L28bc14dbd33e",
+      "device_id": "0371df252e3b",
+      "pkg": "shard-000010.tar",
+      "kind": "active",
+      "issued_at": 1795536142.536405
+    }
+  ],
+  "workspace_ids": [
+    "Dru768",
+    "Fox768Test"
+  ],
+  "nginx_assets": {
+    "/static/automation.js": "af770102a81edb5fec7732ca75f5f5c8ef234832711aa67cd6f47d248faa1b65",
+    "/static/managed.js": "f452aec2d58f55036146e2b50ee395607cc3beede8306bb7c8be7293c8a4c364",
+    "/static/managed-tuning.js": "254f56caab16803138dbd77a4024896fe8fd9943c6c6da3ec76c4f63aa2c398a",
+    "/static/workspace-sections.css": "3468e2be5daabb9f624e5e46d2d52fbcdf8c0dc7bf20ca3888796aa7dbd83881"
+  },
+  "mcp_read_tools": [
+    "center_overview",
+    "center_workspaces",
+    "center_devices",
+    "center_packages",
+    "center_offline_jobs",
+    "center_dispatch_state"
+  ],
+  "mcp_operate_tools": [
+    "center_overview",
+    "center_workspaces",
+    "center_devices",
+    "center_packages",
+    "center_offline_jobs",
+    "center_dispatch_state",
+    "center_dispatch_control",
+    "center_preassign",
+    "center_device_command",
+    "center_offline_export",
+    "center_offline_delete",
+    "center_release_preview",
+    "center_release"
+  ],
+  "mcp_deployed_tool_count": 13,
+  "mcp_dispatch_matches": true,
+  "temporary_keys_revoked": true,
+  "member_operations": 0,
+  "online_leases_issued_since_last_dispatch_change": 0,
+  "disk_free": 3178913792
+}

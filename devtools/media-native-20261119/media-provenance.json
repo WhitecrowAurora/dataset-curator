@@ -1,0 +1,1279 @@
+{
+  "_id": "657cb73b3e3b5bea66dfadee",
+  "id": "deepghs/anime_real_cls",
+  "private": false,
+  "pipeline_tag": "image-classification",
+  "tags": [
+    "tensorboard",
+    "onnx",
+    "art",
+    "image-classification",
+    "dataset:deepghs/anime_real_cls",
+    "license:openrail",
+    "region:us"
+  ],
+  "downloads": 0,
+  "likes": 11,
+  "modelId": "deepghs/anime_real_cls",
+  "author": "deepghs",
+  "sha": "097a6c1e9e62866a435810c883a45a7cb2c7077d",
+  "lastModified": "2024-10-31T10:10:30.000Z",
+  "gated": false,
+  "disabled": false,
+  "model-index": null,
+  "config": {},
+  "cardData": {
+    "license": "openrail",
+    "datasets": [
+      "deepghs/anime_real_cls"
+    ],
+    "metrics": [
+      "f1",
+      "accuracy"
+    ],
+    "pipeline_tag": "image-classification",
+    "tags": [
+      "art"
+    ]
+  },
+  "siblings": [
+    {
+      "rfilename": ".gitattributes",
+      "blobId": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+      "size": 1519
+    },
+    {
+      "rfilename": "README.md",
+      "blobId": "be89d305e262a14fb458302aa2be18aac988493a",
+      "size": 4144
+    },
+    {
+      "rfilename": "caformer_s36_v0/meta.json",
+      "blobId": "997b992156cbcd0bbe04d9815b9480211bec8f57",
+      "size": 132
+    },
+    {
+      "rfilename": "caformer_s36_v0/metrics.json",
+      "blobId": "4694690434d4e42711faabbe5b95b546428f7eef",
+      "size": 148
+    },
+    {
+      "rfilename": "caformer_s36_v0/model.ckpt",
+      "blobId": "ddba2ef343ad91d7f70953e7912f4a22b87ba75b",
+      "size": 164411311,
+      "lfs": {
+        "sha256": "710033acced597e9a12156a51eba56b968ffeb8332d34a61b43f509032400e94",
+        "size": 164411311,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v0/model.onnx",
+      "blobId": "9cbbe870de9250d4c299c3f1d15f99400212edcf",
+      "size": 149574704,
+      "lfs": {
+        "sha256": "7d47f80d8253bae389e30f6fe72832a45e5e9208a86c70944dccc7b41846d4d9",
+        "size": 149574704,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_confusion.png",
+      "blobId": "dc1514ff7780a527fa561d780e799371acac6d24",
+      "size": 20899
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_f1_curve.png",
+      "blobId": "f359ba4f7f2e9eb281d630da25381734541d1943",
+      "size": 18637
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_p_curve.png",
+      "blobId": "0e8b3032315113fedaf478e3de5184580c0f74ae",
+      "size": 19332
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_pr_curve.png",
+      "blobId": "9936e07084a4d5cb8d56057d2d0f378eb04c987b",
+      "size": 19221
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_r_curve.png",
+      "blobId": "36e8dbe22f5daa4e44779979cfa5b8cda0eceb30",
+      "size": 18423
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_roc_curve.png",
+      "blobId": "ae127681565363f601af8978525b37027b2efeaa",
+      "size": 21513
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_sample_anime.png",
+      "blobId": "2c272801a8a0f22a58580c5adab21ba67e9adcf9",
+      "size": 186387
+    },
+    {
+      "rfilename": "caformer_s36_v0/plot_sample_real.png",
+      "blobId": "23a25e2bc29369d090dd6f0a3b11d2298588ef76",
+      "size": 175547
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/meta.json",
+      "blobId": "997b992156cbcd0bbe04d9815b9480211bec8f57",
+      "size": 132
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/metrics.json",
+      "blobId": "3de09c0f17af95bc64e70ce2f75ece2fa303c5f7",
+      "size": 148
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/model.ckpt",
+      "blobId": "5152addb813d432d3c076a7a92e170a92ecef56e",
+      "size": 164418479,
+      "lfs": {
+        "sha256": "ad8c03645ba5f422b40e9627c82db6007ddcde3c39126b419dfe8b46d5030233",
+        "size": 164418479,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/model.onnx",
+      "blobId": "cf818b96a90d381a5fae315cb5220694c3dfe896",
+      "size": 149574704,
+      "lfs": {
+        "sha256": "db7724edaad7b00cd301e7a9a49e0a9288a6f2f3c375713176dca32937951ccf",
+        "size": 149574704,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_confusion.png",
+      "blobId": "3f353c2d8ef4250f328284a9a494d706aae10f24",
+      "size": 23201
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_f1_curve.png",
+      "blobId": "ec1856365ff8c262055912dea68318714faca901",
+      "size": 18558
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_p_curve.png",
+      "blobId": "ec1382896dd40ba2bacc0e2c383ffbc9093e81b8",
+      "size": 19628
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_pr_curve.png",
+      "blobId": "3dfc18dd1ee9acfe1a441c077ea6860543f884be",
+      "size": 19734
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_r_curve.png",
+      "blobId": "48380029b14ba39b3c00937523a2e58b58cc0342",
+      "size": 18769
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_roc_curve.png",
+      "blobId": "7c2859b72efc0b440856e27a7c119fa1f81e3f1b",
+      "size": 22338
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_sample_anime.png",
+      "blobId": "b5fd60382b7bec239e1ed77bc0807c0683033815",
+      "size": 177294
+    },
+    {
+      "rfilename": "caformer_s36_v1.1/plot_sample_real.png",
+      "blobId": "d897f272a4cae1f182e4664058b5e46112d4e472",
+      "size": 167916
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/meta.json",
+      "blobId": "997b992156cbcd0bbe04d9815b9480211bec8f57",
+      "size": 132
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/metrics.json",
+      "blobId": "e97ecee3e0d7e3166e55fb2efa109b92a3865745",
+      "size": 146
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/model.ckpt",
+      "blobId": "4075c1835c9f0d204a200ec696ea1db3bc183609",
+      "size": 164433455,
+      "lfs": {
+        "sha256": "6698bc614475a5a842603b529468697796f2e0652e79b9fc1ceab0a06554b446",
+        "size": 164433455,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/model.onnx",
+      "blobId": "89566eed17f80a3ef9f5012ed057f0b3e0716c77",
+      "size": 149574704,
+      "lfs": {
+        "sha256": "483aba1b029c66c995c731893e3a3173e7351d5e317acfdcefc9622281ae87bf",
+        "size": 149574704,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_confusion.png",
+      "blobId": "8dbafc284e41570512a82fdccc94f9f275fe44c7",
+      "size": 23030
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_f1_curve.png",
+      "blobId": "20176bcb7762fd3f5027202d3d5bd0b1277bb7ca",
+      "size": 24469
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_p_curve.png",
+      "blobId": "31333b332a3d5e7686b1d056fb4e87562b065aae",
+      "size": 22629
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_pr_curve.png",
+      "blobId": "58b5b2826377d55c2072cf9a245493d8cd96d004",
+      "size": 20191
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_r_curve.png",
+      "blobId": "388061aba3a4bae21d5291d44b67148116707b62",
+      "size": 23968
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_roc_curve.png",
+      "blobId": "21e57fed514fc4084216afdaa508f1481854f6e4",
+      "size": 21762
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_sample_anime.png",
+      "blobId": "b4721a9598935798b21f0087fe8c748959218f0f",
+      "size": 181469
+    },
+    {
+      "rfilename": "caformer_s36_v1.1_ls0.1/plot_sample_real.png",
+      "blobId": "c04726ef520791fe9167ec0c041fb6d49a28fa68",
+      "size": 164414
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/meta.json",
+      "blobId": "997b992156cbcd0bbe04d9815b9480211bec8f57",
+      "size": 132
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/metrics.json",
+      "blobId": "f3488e06aeff22c92e16c7823a15fe41deeb9de7",
+      "size": 150
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/model.ckpt",
+      "blobId": "2a31cbbd174d8df07b0a310dcf836a14b2de5f51",
+      "size": 164499183,
+      "lfs": {
+        "sha256": "9b52ee7a67c31d56a7f59757a7b07ce3d0eb5f7575de79fa8e8d202a0712a3be",
+        "size": 164499183,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/model.onnx",
+      "blobId": "44e101f4657a1a450d79069bcf8fc91f05936880",
+      "size": 149574704,
+      "lfs": {
+        "sha256": "04dfe35edc8de2bdeec6c8ebab132ffc88646aa4c0cbd4f0117f3c02789981f7",
+        "size": 149574704,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_confusion.png",
+      "blobId": "9158228256616187a582495350549203167f3f54",
+      "size": 22770
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_f1_curve.png",
+      "blobId": "392f6efee65515dca33bf897da096a08313e7644",
+      "size": 25101
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_p_curve.png",
+      "blobId": "f27495dfb8cd858ff42e0750e38277b621b5dce8",
+      "size": 23894
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_pr_curve.png",
+      "blobId": "81a6962c90c93cca4744606ebdd85f266cb3410b",
+      "size": 19070
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_r_curve.png",
+      "blobId": "e96e81e46e9cddf787144f7b55831812c14d5404",
+      "size": 23448
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_roc_curve.png",
+      "blobId": "8edef29275a45ec09bb105b3b9ed1cecc5cb5d1f",
+      "size": 21469
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_sample_anime.png",
+      "blobId": "f1233c9d73c795c76c48c899f57b0fdc73d7ce69",
+      "size": 188753
+    },
+    {
+      "rfilename": "caformer_s36_v1.2/plot_sample_real.png",
+      "blobId": "787633d0f76ac639beb734a6ea263e0d627fb741",
+      "size": 166260
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/meta.json",
+      "blobId": "13a2578195c5db491a8dc58b424d00f877de97e7",
+      "size": 153
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/metrics.json",
+      "blobId": "3f8b05e5489d109be3e1897fd500977f25eab59f",
+      "size": 148
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/model.ckpt",
+      "blobId": "b16e9a65d79d20ca650ec99274d32529fb7dd5f2",
+      "size": 164477935,
+      "lfs": {
+        "sha256": "19d77c9e258554e48eeb1c158455c39b921f627229ffa22bafa3e8eae2e75e03",
+        "size": 164477935,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/model.onnx",
+      "blobId": "5dc7c08cbbfd9b56880e1fe74445a351167d5c6c",
+      "size": 149583500,
+      "lfs": {
+        "sha256": "efa262983f8c303d69206ca1f2da41082c3d21f380fa3658c8b019d26c661932",
+        "size": 149583500,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_confusion.png",
+      "blobId": "26280840ef0bf0c71f2db8cfe205fd41fb56c0a9",
+      "size": 20818
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_f1_curve.png",
+      "blobId": "8ec659104e162806c83412a92fa16fbf061217c3",
+      "size": 23175
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_p_curve.png",
+      "blobId": "bdf496225a86fae6adb4371f6cfe636d7126b948",
+      "size": 22536
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_pr_curve.png",
+      "blobId": "955aaafff2536550d84edfa721431f4ce0060715",
+      "size": 19713
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_r_curve.png",
+      "blobId": "51d15b8f58a93ec5d5b1bdd603a13cffb88c4364",
+      "size": 22824
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_roc_curve.png",
+      "blobId": "03e6317cfc60510e625643622ab26b9865b1c56f",
+      "size": 21342
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_sample_anime.png",
+      "blobId": "38d80ed000271c2ad78fde3487e71135a6ae391a",
+      "size": 183906
+    },
+    {
+      "rfilename": "caformer_s36_v1.3/plot_sample_real.png",
+      "blobId": "703b31297d323c5594f3c5ffbe7c633a8a81ca00",
+      "size": 170886
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/events.out.tfevents.1726903340.dd381fc62bdfa9ecca29a7a9c2e134137902c3050389946c1ab5ffd4.71546.0",
+      "blobId": "b11069d4daebd94507df76139f81998e287ecd13",
+      "size": 22840951,
+      "lfs": {
+        "sha256": "6dff7157cb3836d1d8db0a48e156b10520ebc136e13b3e889e402a8378ffcbc7",
+        "size": 22840951,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/meta.json",
+      "blobId": "9b4db3a7922810e691037bc1bede823e0dbc49e3",
+      "size": 180
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/metrics.json",
+      "blobId": "fea327fc55f23b9efb0dcf8f1c1a8a63b20fdad5",
+      "size": 150
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/model.ckpt",
+      "blobId": "ce63c6b8364168fd506a50441f9456af74179ec9",
+      "size": 164494575,
+      "lfs": {
+        "sha256": "4941b1e2bd8646be3d98561dc014302b66055761035e129287dad4628c20426b",
+        "size": 164494575,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/model.onnx",
+      "blobId": "2b2d85cf386df00b8a9c0318b404023bb2616514",
+      "size": 149583500,
+      "lfs": {
+        "sha256": "5ebb541330237e942c869b1a35bd95feb4eead5dc06fce165cd1d9d9b42b2f6a",
+        "size": 149583500,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_confusion.png",
+      "blobId": "d419564ff750c90eed4fa30b14cfe78f5eac1a59",
+      "size": 21088
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_f1_curve.png",
+      "blobId": "7a447a76907d69109b5dea51365a9894b36f2a5d",
+      "size": 23670
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_p_curve.png",
+      "blobId": "4e7f7c48606be0949011eb46434e973b68ad2c86",
+      "size": 23424
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_pr_curve.png",
+      "blobId": "3edb97719681248eb637ed3708ec64369cb347dc",
+      "size": 19449
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_r_curve.png",
+      "blobId": "757c539c9106edae499a0ffaab6e07da91005338",
+      "size": 22581
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_roc_curve.png",
+      "blobId": "45cbad17a448339782abc95c3e5bf6591cef860a",
+      "size": 21257
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_sample_anime.png",
+      "blobId": "c04ad5341bc3cf764c7b994a7607d2dc06f22ae9",
+      "size": 175642
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fixed/plot_sample_real.png",
+      "blobId": "5fdc1296ec9b2130f635d7a782d4a56c092fc251",
+      "size": 162405
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/meta.json",
+      "blobId": "13a2578195c5db491a8dc58b424d00f877de97e7",
+      "size": 153
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/metrics.json",
+      "blobId": "2b72ab1a6fb5bd315e736e0ee5466e6613e6781f",
+      "size": 149
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/model.ckpt",
+      "blobId": "c0fc035cd6afe569f34bdb042a715e2c9e2f137d",
+      "size": 164464367,
+      "lfs": {
+        "sha256": "7e48f798e64d5f4d253fb549c37bdfe127d5b9fc5d6a71a293a7abfd31be1a1a",
+        "size": 164464367,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/model.onnx",
+      "blobId": "1f4fba4ef533dae0ccbc779443fad97f111fa982",
+      "size": 149564300,
+      "lfs": {
+        "sha256": "c1c27f06e5352c842395b90cf7d7730f80529a070d8896fc36860a6869226770",
+        "size": 149564300,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_confusion.png",
+      "blobId": "92b639ec58306cd001d3c997824b82902a49f010",
+      "size": 21006
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_f1_curve.png",
+      "blobId": "0eda1dbf2e0b8fb35e21d86324f8677038d6d6b2",
+      "size": 25232
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_p_curve.png",
+      "blobId": "3c47accd0af6e21e3b90a61e081659509ccc18e7",
+      "size": 24052
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_pr_curve.png",
+      "blobId": "65b9db27f2342326cf91de9c8ac8b0d7b8c9d0bc",
+      "size": 19646
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_r_curve.png",
+      "blobId": "29136af823fb9a30b405817df944c213196429bc",
+      "size": 23447
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_roc_curve.png",
+      "blobId": "2706665750007aad598258fc80ae2b3c82c5efda",
+      "size": 21296
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_sample_anime.png",
+      "blobId": "acc1f4f998a569af49fc82d4b319115c0e7ada77",
+      "size": 182915
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_fp32/plot_sample_real.png",
+      "blobId": "cee845ffed92f0429a45eab204b0730d07abce65",
+      "size": 165961
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/meta.json",
+      "blobId": "13a2578195c5db491a8dc58b424d00f877de97e7",
+      "size": 153
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/metrics.json",
+      "blobId": "e17b4388d681d8571f647be04433a158401f0eaf",
+      "size": 147
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/model.ckpt",
+      "blobId": "12007b4bea15219141cedc252dc996a9a307c74d",
+      "size": 164449455,
+      "lfs": {
+        "sha256": "6951ca28cea0b038b26a12a9279f366fe60a3a960b23f688395c85513a78704c",
+        "size": 164449455,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/model.onnx",
+      "blobId": "212c84890592a36f2a1886d8bd44c4885edef675",
+      "size": 149583500,
+      "lfs": {
+        "sha256": "7ce946842116435bae3741c14ff16af1a2175d8741fccf553255022d006de211",
+        "size": 149583500,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_confusion.png",
+      "blobId": "93ac9a4ca9c32c84d4666075ff3abc016b1e0579",
+      "size": 20720
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_f1_curve.png",
+      "blobId": "e2e7b7423d906c4a66aeb388460b7833ab3ed049",
+      "size": 22875
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_p_curve.png",
+      "blobId": "59f81b13a68b37ef75d20ee3c1be14c83307184e",
+      "size": 21934
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_pr_curve.png",
+      "blobId": "0e742f1cd921fb93932be333a29056d1cb1f119f",
+      "size": 20843
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_r_curve.png",
+      "blobId": "e1fe3e704664526520e44768cfb9963cc76bb16f",
+      "size": 22451
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_roc_curve.png",
+      "blobId": "3ac646939b2174d30f3de7a08c92b91d3619553e",
+      "size": 21608
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_sample_anime.png",
+      "blobId": "aa5d28555b9eb7f92f15c228207d9f4714f1306a",
+      "size": 182491
+    },
+    {
+      "rfilename": "caformer_s36_v1.3_ls0.1/plot_sample_real.png",
+      "blobId": "20b99d75cc187790abdd7b5b7a78c3639c35e501",
+      "size": 169604
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/events.out.tfevents.1729842109.679b526be80a17292d66892be7b862bb00288f0918687366a7497fda.36740.0",
+      "blobId": "122b719ba90fe66480752405bf47c86ce61a7c5c",
+      "size": 20035244,
+      "lfs": {
+        "sha256": "984709888d0783c2f5da2fb88a8e5ca21c3a22c0b2c4f1687fa0fb64d704af96",
+        "size": 20035244,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/meta.json",
+      "blobId": "9b4db3a7922810e691037bc1bede823e0dbc49e3",
+      "size": 180
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/metrics.json",
+      "blobId": "dfd235ee246a4bc17c79e9cfe47d76d31f5b7a5d",
+      "size": 150
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/model.ckpt",
+      "blobId": "a3cc4e7b17598ca0e75024fbcddadce3d22bfc2b",
+      "size": 164500399,
+      "lfs": {
+        "sha256": "a794a59cda11d79d93a3ada0f2b53dd091f4f7b04f9e0ce2c935693762411588",
+        "size": 164500399,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/model.onnx",
+      "blobId": "32d62c8b8d8b4aa803055638366374097d6e5e9c",
+      "size": 149583500,
+      "lfs": {
+        "sha256": "2f5883dc88c166c2a7ac6700ab62a3464f9faa4e1af15b15f071a14bc7a1600b",
+        "size": 149583500,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_confusion.png",
+      "blobId": "b1ff160e0e3ea3d6d89afe5c8df2f122816abae0",
+      "size": 23133
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_f1_curve.png",
+      "blobId": "8470f71c229dcd166b870e51f54d21145e4588b1",
+      "size": 26669
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_p_curve.png",
+      "blobId": "6d6ffbff0cc818b2511fdab5be59c42114cb44bf",
+      "size": 24150
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_pr_curve.png",
+      "blobId": "6049285b83c88f248b55b4474c4bc17e1c039b55",
+      "size": 19250
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_r_curve.png",
+      "blobId": "eb7f6a045a417374ff322d159c07f8d2348d6f5a",
+      "size": 24594
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_roc_curve.png",
+      "blobId": "282b9f079c77de2d3fa3d180ea7abd0e1a59ca96",
+      "size": 21116
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_sample_anime.png",
+      "blobId": "80d5da6441411920beb539258d33eeafb091535a",
+      "size": 171583
+    },
+    {
+      "rfilename": "caformer_s36_v1.4/plot_sample_real.png",
+      "blobId": "feaf7b66bd3d4a5cd86dafbe6d4f729fe67dacbc",
+      "size": 183311
+    },
+    {
+      "rfilename": "caformer_s36_v1/meta.json",
+      "blobId": "997b992156cbcd0bbe04d9815b9480211bec8f57",
+      "size": 132
+    },
+    {
+      "rfilename": "caformer_s36_v1/metrics.json",
+      "blobId": "c6ba022abf1c775a25b2b68581ec91b396013901",
+      "size": 149
+    },
+    {
+      "rfilename": "caformer_s36_v1/model.ckpt",
+      "blobId": "f8617ebbe14c5c5d027054a3203c78347ffb915a",
+      "size": 164494319,
+      "lfs": {
+        "sha256": "723752da514fed6fcee63e654f1cb3e63974f565a4ced5a56d33f2912fa89b35",
+        "size": 164494319,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1/model.onnx",
+      "blobId": "421b86d421c2b2f02e561d2725cb48062a0e1bae",
+      "size": 149574704,
+      "lfs": {
+        "sha256": "09b55db05d4ffc876597a8b38b6da9cd111d3df189067c93e10903af6abed67e",
+        "size": 149574704,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_confusion.png",
+      "blobId": "efefffa62fcb41305d9f03b3cb4982af4fdcad3c",
+      "size": 23087
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_f1_curve.png",
+      "blobId": "9755658150a75dc94d64ebbd9ded4da16792a3d0",
+      "size": 18307
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_p_curve.png",
+      "blobId": "19ae22f0f9e24241540e124c14ac387ff0ba9445",
+      "size": 19109
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_pr_curve.png",
+      "blobId": "e3036ee233efdf9efd7752bca2a1daef633a18b5",
+      "size": 19219
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_r_curve.png",
+      "blobId": "e3c9fee2417a5fc43a2c97c0b4e022878b677a0b",
+      "size": 18027
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_roc_curve.png",
+      "blobId": "017b734a3f6cf7ede25f54b9faabf3e5cc7806c5",
+      "size": 21666
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_sample_anime.png",
+      "blobId": "60122e5370e7f44989e158787f21615abab974d1",
+      "size": 171593
+    },
+    {
+      "rfilename": "caformer_s36_v1/plot_sample_real.png",
+      "blobId": "15d9d7844634ef35a093aec320bf7d72c0d44dd8",
+      "size": 182020
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/meta.json",
+      "blobId": "997b992156cbcd0bbe04d9815b9480211bec8f57",
+      "size": 132
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/metrics.json",
+      "blobId": "201a7cea5a6de70c19c18adb56287501336f9065",
+      "size": 147
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/model.ckpt",
+      "blobId": "294f4da1da7f19ee847071b102466dfab5c3679f",
+      "size": 164480047,
+      "lfs": {
+        "sha256": "5235e3063e04010449d60597d0158bc08be73fd06226f97c7a6d827406d4c6ed",
+        "size": 164480047,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/model.onnx",
+      "blobId": "f287b965220be7c6f3d0eb67d23178a2d506e7bb",
+      "size": 149574704,
+      "lfs": {
+        "sha256": "6c31539f150e6962d8a32ad7907940fc77e79ceb305f3a6f8d4345f7d048896e",
+        "size": 149574704,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_confusion.png",
+      "blobId": "b0435e9e7c8d9f14bd1c9086719ead716105be40",
+      "size": 23220
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_f1_curve.png",
+      "blobId": "42d8e5c9649374eb45d3ecd0d9954681a3731d7e",
+      "size": 24351
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_p_curve.png",
+      "blobId": "5c21f0c2001ad171dee754ece9c3aa1516be7bdb",
+      "size": 22295
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_pr_curve.png",
+      "blobId": "d3a1d955d631ca669dabc209a78aba291341a54d",
+      "size": 20093
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_r_curve.png",
+      "blobId": "20d9d4b03fab153efed29a70b1c6ae94bd50a12c",
+      "size": 22980
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_roc_curve.png",
+      "blobId": "c563bd7248f8c37cd640ac1f4c870611f5367537",
+      "size": 21667
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_sample_anime.png",
+      "blobId": "65707f950fa5dcdbb879c4e487c9427487dea1dd",
+      "size": 172796
+    },
+    {
+      "rfilename": "caformer_s36_v1_ls0.1/plot_sample_real.png",
+      "blobId": "a00e218b637f8168e3789cfa9668293b0a1594f6",
+      "size": 170519
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/meta.json",
+      "blobId": "b9e0c806f8607efeb9eb7ba5c6857c38aa835476",
+      "size": 118
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/metrics.json",
+      "blobId": "429b12b215fc5a09ee1eb94ac59abdbd2b191d8a",
+      "size": 154
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/model.ckpt",
+      "blobId": "5db95b5bc51792887c28cbfe86521050f6b09558",
+      "size": 32066443,
+      "lfs": {
+        "sha256": "1dba545d99ba08fcdff3962e4d331aa55aaf3dc9ed278dc9efee4365a6615b92",
+        "size": 32066443,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/model.onnx",
+      "blobId": "e5a7b1179ae6485e74b5d1500382b2fc40610dd0",
+      "size": 16822434,
+      "lfs": {
+        "sha256": "e393dfc6731844cf3c7be44111d481f7cff904a1519997dc24cb2de2439f915b",
+        "size": 16822434,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_confusion.png",
+      "blobId": "0100287adfa7cd9c7c6b5c5ef4dc6a30290f3b59",
+      "size": 20688
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_f1_curve.png",
+      "blobId": "a2a35c49795262771ff4b43f9f5b845c49cc08ab",
+      "size": 18627
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_p_curve.png",
+      "blobId": "6213fb2b6566152b3e7a6779b40dff73a1737842",
+      "size": 19102
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_pr_curve.png",
+      "blobId": "267ef9671b661b56f7743992f3df8f8746f1e74f",
+      "size": 19128
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_r_curve.png",
+      "blobId": "44d28b265e1bd4c681a4ec33b990e48f48631abd",
+      "size": 18698
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_roc_curve.png",
+      "blobId": "16edbc5148933e3338866a3deba806dbff234e64",
+      "size": 21869
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_sample_anime.png",
+      "blobId": "017dc2e9941d8a64ccb2cf2131b2cbb29ccff381",
+      "size": 181842
+    },
+    {
+      "rfilename": "mobilenetv3_v0_dist/plot_sample_real.png",
+      "blobId": "b6ab734ea34063072afb7dbebf668341255004cb",
+      "size": 176450
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/meta.json",
+      "blobId": "b9e0c806f8607efeb9eb7ba5c6857c38aa835476",
+      "size": 118
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/metrics.json",
+      "blobId": "0df68ebaca4ad6cfece0094fb2cfd3f0d2db7a4d",
+      "size": 152
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/model.ckpt",
+      "blobId": "a6f1b0ff3c5528468e9248cc484c57df9b1f04aa",
+      "size": 32078155,
+      "lfs": {
+        "sha256": "d78a0af745091be2488fb44eaeec2e3cafa1176127005b6625f9087d55109987",
+        "size": 32078155,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/model.onnx",
+      "blobId": "34faf36362b40fb3180802ebf5ab5745bd091062",
+      "size": 16822434,
+      "lfs": {
+        "sha256": "069af06467459bf88a3b26d30b08d72bec2239ff4784ead6523def33c81290da",
+        "size": 16822434,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_confusion.png",
+      "blobId": "662e672a3d07d097dacaacbea58c7cee786fcf87",
+      "size": 23409
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_f1_curve.png",
+      "blobId": "ecd7cb1da7e085c17fd22b21f0179723fd4cb6e0",
+      "size": 25485
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_p_curve.png",
+      "blobId": "4b402c35230395ce3c14793cc6bb2dadec354442",
+      "size": 23058
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_pr_curve.png",
+      "blobId": "c7bab3c49d6abd45bcf4f7a23973ce4a04766cdd",
+      "size": 20488
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_r_curve.png",
+      "blobId": "4785a97d7f806c6bee2eefaa21074b1ac7057574",
+      "size": 24205
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_roc_curve.png",
+      "blobId": "4c97b956fe7d4238e2c43c646f60a9ca1aef43fd",
+      "size": 22717
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_sample_anime.png",
+      "blobId": "eaeaa8117401dd2f747a3925082a53113dd26973",
+      "size": 175397
+    },
+    {
+      "rfilename": "mobilenetv3_v1.1_dist_ls0.1/plot_sample_real.png",
+      "blobId": "f3152ca274c7fab7e202025f446a068ad3e1e3a5",
+      "size": 168142
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/meta.json",
+      "blobId": "b9e0c806f8607efeb9eb7ba5c6857c38aa835476",
+      "size": 118
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/metrics.json",
+      "blobId": "3dcaed3641b0f194380e32b4c8ad996b68e3116d",
+      "size": 151
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/model.ckpt",
+      "blobId": "0bfb61ea254d28c0758069f30fdc6e7386af07d2",
+      "size": 32122059,
+      "lfs": {
+        "sha256": "8bdd4703804e07ce29e3329d1d04f613acb8875d9a3e5f746ebac3ee9f4695b9",
+        "size": 32122059,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/model.onnx",
+      "blobId": "08009add358354f34130e0bbc55f8e8946d2ca31",
+      "size": 16822434,
+      "lfs": {
+        "sha256": "a6c80d116e601839be8a59089120c76721a7b2a2eaf3d3f0ed21f6dcc4368dc6",
+        "size": 16822434,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_confusion.png",
+      "blobId": "e1ec2a24488afcc88ac8b3b333e3078aae10b62f",
+      "size": 23250
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_f1_curve.png",
+      "blobId": "2cba15351e82e940252f832720f441274b83ed65",
+      "size": 25351
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_p_curve.png",
+      "blobId": "0bc31541a3cdf34e438dbb26d681ec39b2817f81",
+      "size": 23927
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_pr_curve.png",
+      "blobId": "f463a4383538bc5c0856065ca1aca3fe7669f99a",
+      "size": 19523
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_r_curve.png",
+      "blobId": "7311b3b3994ff74d7aa50eec7dc6f12c5c6a78cd",
+      "size": 24112
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_roc_curve.png",
+      "blobId": "0fcff3ce0517dfec60c04c77cd1672bb79dda153",
+      "size": 21969
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_sample_anime.png",
+      "blobId": "bb32f28327d362a318a74fdadebf76ddac5c9b72",
+      "size": 193207
+    },
+    {
+      "rfilename": "mobilenetv3_v1.2_dist/plot_sample_real.png",
+      "blobId": "f966ef27319bc3331d002e9926b1b34c38adbc45",
+      "size": 172584
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/meta.json",
+      "blobId": "b9e0c806f8607efeb9eb7ba5c6857c38aa835476",
+      "size": 118
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/metrics.json",
+      "blobId": "9dfca58f34cbc2d39f2fa7eacc6cb5a94a0f80d2",
+      "size": 153
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/model.ckpt",
+      "blobId": "55babee963c386d1637d68af71853e4dee0d803b",
+      "size": 32091275,
+      "lfs": {
+        "sha256": "36af682a220c6f65db883f750b139435ec9754efcaa42c5c34c032470b8a0316",
+        "size": 32091275,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/model.onnx",
+      "blobId": "a53fa6ef65e110fed56b0abbf9ac37b1d0e9937f",
+      "size": 16821107,
+      "lfs": {
+        "sha256": "de603b242a9d5106bd10b9a9882b5e791e5cfed3ba9db29096d4547b9108d23a",
+        "size": 16821107,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_confusion.png",
+      "blobId": "e1b760d157d6a5688fc9d7c528d5d09429200d8a",
+      "size": 21031
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_f1_curve.png",
+      "blobId": "4001b17591b1e0cc9eba30596260f9997ae44fee",
+      "size": 23380
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_p_curve.png",
+      "blobId": "7d333f5867df8de9926dfb169c29556fa9f520d3",
+      "size": 22817
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_pr_curve.png",
+      "blobId": "2d17f82c0c9e6e8bfeff86a65744dd55b566a9e3",
+      "size": 19955
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_r_curve.png",
+      "blobId": "8db1b8edf4bab537c12fe9e52262adc2843c3872",
+      "size": 23240
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_roc_curve.png",
+      "blobId": "756674135ac065e39b1d1d4e5ba00518196ddbae",
+      "size": 21545
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_sample_anime.png",
+      "blobId": "dfec0ad7fdadfa686953380b84e1ffb2529c9bab",
+      "size": 179160
+    },
+    {
+      "rfilename": "mobilenetv3_v1.3_dist/plot_sample_real.png",
+      "blobId": "490fcea963e012004040deed8dcd7a05e436a2b5",
+      "size": 161447
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/events.out.tfevents.1730142354.679b526be80a17292d66892be7b862bb00288f0918687366a7497fda.2270269.0",
+      "blobId": "640a7419472817848373ada4501b4fa50eb35da2",
+      "size": 51938039,
+      "lfs": {
+        "sha256": "8cef28f6cd000dcef1691bca12966981935df742a3906bf9601aae01b06893ae",
+        "size": 51938039,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/meta.json",
+      "blobId": "b9e0c806f8607efeb9eb7ba5c6857c38aa835476",
+      "size": 118
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/metrics.json",
+      "blobId": "d813272bde252ded3883f84ec3a33ea348d6698c",
+      "size": 152
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/model.ckpt",
+      "blobId": "d0b7d3c1a8280ac5993157e7d070f6ecbbee44c0",
+      "size": 32124769,
+      "lfs": {
+        "sha256": "fb550081eae3d76ff5b4280dc1f2ddacf183d8d8456dd8ecd9341f43e9eff08b",
+        "size": 32124769,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/model.onnx",
+      "blobId": "5312655ec47d45991027ba312d25457504f95196",
+      "size": 16821153,
+      "lfs": {
+        "sha256": "c02d68cc7f56dbcbcd4f41a10df190385c1f963f22c4eefb8d162869800ed3b0",
+        "size": 16821153,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_confusion.png",
+      "blobId": "4d858cea71b0f2153b44ba66d879c44e242318f9",
+      "size": 23255
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_f1_curve.png",
+      "blobId": "d8eefc1a80357c9126e4c7f98b0c430e5f3fbf43",
+      "size": 26383
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_p_curve.png",
+      "blobId": "ee136f92820a5ca3928f545d30501dfab1899034",
+      "size": 24897
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_pr_curve.png",
+      "blobId": "7edb5efdaec1e76f411f62d8fdc306c9ff4e4124",
+      "size": 22121
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_r_curve.png",
+      "blobId": "3c174ddf00c9fc3018872a33d5c620cff9aecad9",
+      "size": 24721
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_roc_curve.png",
+      "blobId": "ef05e5911cc9e134d6fde598669acd33f4e14e86",
+      "size": 22007
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_sample_anime.png",
+      "blobId": "17cc9d521d303a248c45503dc34379e4013bb74a",
+      "size": 169923
+    },
+    {
+      "rfilename": "mobilenetv3_v1.4_dist/plot_sample_real.png",
+      "blobId": "55ebc31dc19306c74c3b1d3d95d7f027fe58b0f4",
+      "size": 182045
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/meta.json",
+      "blobId": "b9e0c806f8607efeb9eb7ba5c6857c38aa835476",
+      "size": 118
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/metrics.json",
+      "blobId": "4c532bce38333701939320ce6f6b1ff4d34f8137",
+      "size": 151
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/model.ckpt",
+      "blobId": "0d7bd196dc15d8660b4aab537340404edd02e15e",
+      "size": 32040267,
+      "lfs": {
+        "sha256": "010728458f1a93787f22781e65ffa3f4408d6b6fa689dfae32cd8f28556de334",
+        "size": 32040267,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/model.onnx",
+      "blobId": "8b02173151b36244b40f41b4a6c82318b6215b4a",
+      "size": 16822434,
+      "lfs": {
+        "sha256": "cf64ca9f68ac3f55621915b1cced71b39e73d17042984a2b369de8f93a91ab42",
+        "size": 16822434,
+        "pointerSize": 133
+      }
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_confusion.png",
+      "blobId": "5adf5aee0725c44a8688f606afac512bae0b8852",
+      "size": 23160
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_f1_curve.png",
+      "blobId": "31ebcdd3f53e191ecf95856a7cb7304c4a0c12c5",
+      "size": 24974
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_p_curve.png",
+      "blobId": "d9f2e0d3ea42938915c8a23e07b5efb71bbbda59",
+      "size": 22576
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_pr_curve.png",
+      "blobId": "45c31a665990943f5f9f1fab1bba95a021b048ed",
+      "size": 19602
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_r_curve.png",
+      "blobId": "c9056b843bb73b743c61c09576adcdcef91b4445",
+      "size": 23943
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_roc_curve.png",
+      "blobId": "ca2b580353ddc9bd8cd43f2df34ad71384cc755d",
+      "size": 22214
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_sample_anime.png",
+      "blobId": "11477215cb2903940206c3f05c556d02759b7d9b",
+      "size": 162934
+    },
+    {
+      "rfilename": "mobilenetv3_v1_dist_ls0.1/plot_sample_real.png",
+      "blobId": "fb05cb81792545b177ca95f6100c82445a44c9d4",
+      "size": 176717
+    }
+  ],
+  "spaces": [
+    "deepghs/anime_image_classification",
+    "AppleHarem/anime_image_classification",
+    "takkki/anime_image_classification",
+    "svjack/anime_image_classification"
+  ],
+  "createdAt": "2023-12-15T20:29:47.000Z",
+  "usedStorage": 11350017564
+}

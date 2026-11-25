@@ -438,6 +438,9 @@ class ArtistTable:
         self.remote_repo = ""
         self.remote_file = ""       # 在线**单表**形态
         self.remote_dir = ""        # 在线**分片目录**形态
+        self.revision = None
+        self.center_shard = ''
+        self.center_source = ''
         self.error: str = ""
         self._single: dict[int, list[str]] | None = None
         self._shards: dict[str, dict[int, list[str]]] = {}
@@ -460,7 +463,9 @@ class ArtistTable:
         不猜"是文件还是目录"：带 `.parquet` 就是单表，其余一律当分片目录。
         猜错的代价是一整批静默无画师，不如让写法有唯一解。
         """
-        rest = raw[len(self.HF_SCHEME):].strip("/")
+        rest, _, revision = raw[len(self.HF_SCHEME):].partition('?revision=')
+        self.revision = revision or None
+        rest = rest.strip("/")
         if rest.startswith("datasets/"):
             rest = rest[len("datasets/"):]
         parts = [p for p in rest.split("/") if p]
@@ -558,7 +563,7 @@ class ArtistTable:
         try:
             local = hf_hub_download(
                 repo_id=self.remote_repo, filename=filename, repo_type="dataset",
-                cache_dir=str(cache_dir))
+                cache_dir=str(cache_dir), revision=self.revision)
         except Exception as exc:                       # noqa: BLE001
             self._complain(
                 f"{self.remote_repo}/{filename}",
@@ -601,6 +606,13 @@ class ArtistTable:
             self.error = "查画师表需要 pyarrow：pip install pyarrow"
             return None
         try:
+            if path.suffix == '.json':
+                data = json.loads(path.read_text(encoding='utf-8'))
+                self.center_shard = self.shard_stem(data.get('shard',''))
+                self.center_source = data.get('source','')
+                if expect and self.shard_stem(data.get('shard', '')) != expect:
+                    raise ValueError('中心画师表与分片不一致')
+                return self._normalize(data['mapping'], path, expect)
             tbl = pq.read_table(path, columns=["id", "artists"])
         except Exception as exc:                       # noqa: BLE001
             why = f"读不了画师表 {path.name}：{type(exc).__name__} {exc}"
@@ -699,7 +711,11 @@ class ArtistTable:
             return []
         # 单表：本地文件，或在线以 `.parquet` 结尾的地址
         if self.remote_file or (self.path is not None and self.path.is_file()):
-            return self._single_dict().get(pid, [])
+            table = self._single_dict()
+            if self.center_shard and shard and self.shard_stem(shard) != self.center_shard:
+                self._complain(self.shard_stem(shard),'中心画师表与当前分片不一致')
+                return []
+            return table.get(pid, [])
         if not shard:
             return []
         return self._shard_dict(shard).get(pid, [])

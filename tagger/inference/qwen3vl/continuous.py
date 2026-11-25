@@ -125,7 +125,8 @@ class CaptionSession:
             tokens = [state.tokens[-1] if enabled else 0 for state, enabled in zip(states, decoding)]
             offsets = [len(state.tokens) - 1 if enabled else 0 for state, enabled in zip(states, decoding)]
             self.cache.active = decoding
-            if DecodeGraph.supported(self.engine):
+            length = max(n + int(enabled) for n, enabled in zip(self.cache.lengths, decoding))
+            if DecodeGraph.supported(self.engine, length):
                 if self.decode_graph is None:
                     self.decode_graph = DecodeGraph(self.engine, self.cache, self.logits)
                 positions = [offset + state.position if state is not None else 0

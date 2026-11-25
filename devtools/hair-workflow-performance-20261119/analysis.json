@@ -1,0 +1,168 @@
+{
+  "sources": [
+    "devtools/hair-color-packs-20261119/model-results.json",
+    "devtools/hair-color-packs-20261119/people/model-results.json",
+    "devtools/toriigate-evaluation-20261119/torii-results.json",
+    "devtools/toriigate-evaluation-20261119/qwen-results.json",
+    "tagger/hair_color/models.py",
+    "tagger/hair_color/service.py",
+    "tagger/cpu_tagger.py"
+  ],
+  "baseline": {
+    "pixai_s_mean": 0.2562858333333334,
+    "mobile_s_warm_mean": 0.01679042372881356,
+    "caformer_s_warm_mean": 0.23276855932203389,
+    "pixai_load_seconds": [
+      10.09,
+      9.64
+    ],
+    "pixai_batch": 2,
+    "onnx_provider": "CPUExecutionProvider",
+    "onnx_intra_op_threads": 4,
+    "qwen_s_mean": 1.3183174603174603,
+    "torii_s_mean": 2.7638333333333334
+  },
+  "scenarios": [
+    {
+      "vlm_review_fraction": 0,
+      "caformer_fraction_assumed": 0.7,
+      "classifier_s_per_input": 0.17972841525423727,
+      "qwen": {
+        "total_s_per_input": 0.43601424858757065,
+        "10000_minutes": 72.66904143126177,
+        "additional_s_to_pixai": 0.17972841525423727
+      },
+      "torii": {
+        "total_s_per_input": 0.43601424858757065,
+        "10000_minutes": 72.66904143126177,
+        "additional_s_to_pixai": 0.17972841525423727
+      }
+    },
+    {
+      "vlm_review_fraction": 0.1,
+      "caformer_fraction_assumed": 0.7,
+      "classifier_s_per_input": 0.17972841525423727,
+      "qwen": {
+        "total_s_per_input": 0.5678459946193167,
+        "10000_minutes": 94.64099910321946,
+        "additional_s_to_pixai": 0.31156016128598335
+      },
+      "torii": {
+        "total_s_per_input": 0.7123975819209041,
+        "10000_minutes": 118.73293032015069,
+        "additional_s_to_pixai": 0.4561117485875707
+      }
+    },
+    {
+      "vlm_review_fraction": 0.3,
+      "caformer_fraction_assumed": 0.7,
+      "classifier_s_per_input": 0.17972841525423727,
+      "qwen": {
+        "total_s_per_input": 0.8315094866828088,
+        "10000_minutes": 138.5849144471348,
+        "additional_s_to_pixai": 0.5752236533494755
+      },
+      "torii": {
+        "total_s_per_input": 1.2651642485875705,
+        "10000_minutes": 210.86070809792844,
+        "additional_s_to_pixai": 1.0088784152542372
+      }
+    },
+    {
+      "vlm_review_fraction": 0.5,
+      "caformer_fraction_assumed": 0.7,
+      "classifier_s_per_input": 0.17972841525423727,
+      "qwen": {
+        "total_s_per_input": 1.0951729787463007,
+        "10000_minutes": 182.52882979105013,
+        "additional_s_to_pixai": 0.8388871454129674
+      },
+      "torii": {
+        "total_s_per_input": 1.8179309152542373,
+        "10000_minutes": 302.9884858757062,
+        "additional_s_to_pixai": 1.561645081920904
+      }
+    },
+    {
+      "vlm_review_fraction": 1,
+      "caformer_fraction_assumed": 0.7,
+      "classifier_s_per_input": 0.17972841525423727,
+      "qwen": {
+        "total_s_per_input": 1.754331708905031,
+        "10000_minutes": 292.3886181508385,
+        "additional_s_to_pixai": 1.4980458755716977
+      },
+      "torii": {
+        "total_s_per_input": 3.199847581920904,
+        "10000_minutes": 533.3079303201507,
+        "additional_s_to_pixai": 2.9435617485875705
+      }
+    }
+  ],
+  "replays": [
+    {
+      "threshold_added_to_both_early_accept_conditions": null,
+      "count": 120,
+      "caformer_calls": 85,
+      "vlm_calls": 76,
+      "caformer_rate": 0.7083333333333334,
+      "vlm_rate": 0.6333333333333333,
+      "hypothetical_reviewer_totals": {
+        "qwen": {
+          "total_s_per_input": 1.2789706532485876,
+          "10000_minutes": 213.16177554143127,
+          "vlm_increment_s_per_input": 0.8410166666666666
+        },
+        "torii": {
+          "total_s_per_input": 2.2931623199152544,
+          "10000_minutes": 382.19371998587576,
+          "vlm_increment_s_per_input": 1.8552083333333333
+        }
+      }
+    },
+    {
+      "threshold_added_to_both_early_accept_conditions": 0.7,
+      "count": 120,
+      "caformer_calls": 92,
+      "vlm_calls": 86,
+      "caformer_rate": 0.7666666666666667,
+      "vlm_rate": 0.7166666666666667,
+      "hypothetical_reviewer_totals": {
+        "qwen": {
+          "total_s_per_input": 1.3971071525423728,
+          "10000_minutes": 232.85119209039547,
+          "vlm_increment_s_per_input": 0.9455749999999999
+        },
+        "torii": {
+          "total_s_per_input": 2.514540485875706,
+          "10000_minutes": 419.0900809792844,
+          "vlm_increment_s_per_input": 2.0630083333333333
+        }
+      }
+    }
+  ],
+  "notes": {
+    "method": "No new GPU runs. Offline analysis of current source and previously persisted measurements; model means, not medians, used for workload projections.",
+    "formula": "T = t_pixai + t_mobile + c*t_caformer + p*t_VLM; sequential stages with model reuse, excluding input fetch/disk/decode/exports, model start/stop and human review.",
+    "caption_reuse": "If a suitable per-character caption is already generated, extraction avoids a second VLM call; this is reuse of the same observation, not independent verification. Remaining conflicts may require another request.",
+    "prototype": "pixai_predict creates, loads and disposes PixAI for every image; cascade elapsed_ms starts after PixAI, excludes model loading/tagging and full end-to-end request time. Existing ONNX sessions are cached.",
+    "production_scores": "Current PixAI predict_batch does not keep all raw scores by default; snapshot_scores=True invokes a second full forward. Hair score capture should reuse original forward while preserving existing threshold semantics rather than invoke _full_scores again for every image. No implementation change made.",
+    "gpu_serial": "All underlying GPU measurements were serial. Proposed GPU batches should run PixAI, release it, anime Torii, release it, real Qwen. No cross-window automatic locking implemented.",
+    "limits": [
+      "Projections are not measured end-to-end batch throughput of the proposed workflow.",
+      "120 original images are mixed synthetic repository contents, with sparse anime; threshold replay is not accuracy evaluation and does not include new visible-hair/people decisions.",
+      "Current early acceptance rule is preserved in replay; threshold>=70% only changes confidence requirement, not the complete proposed decision policy.",
+      "No head detection/hair segmentation runtime is included. Multiple head requests multiply VLM cost.",
+      "Single-GPU serial timing assumption; no concurrency speedup or larger-batch throughput claimed.",
+      "Mean Torii 2.764s is mixed set; 8 manually inspected anime cases average 3.644s, 5 group anime cases average 4.331s, so anime-heavy workloads can cost more.",
+      "VLM prompts/output lengths differ; this is configuration cost comparison, not equal-task model ranking.",
+      "RAM/continuous VRAM peaks not measured; request-after full GPU used snapshots: Torii6592MiB Qwen10329MiB, inclusive of desktop."
+    ]
+  },
+  "verification": {
+    "original_inputs": 120,
+    "cpu_warm_samples_per_model": 118,
+    "new_gpu_runs": 0,
+    "threshold_replay_counts_verified": true
+  }
+}

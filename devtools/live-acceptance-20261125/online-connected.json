@@ -1,0 +1,235 @@
+{
+  "identity": {
+    "user_id": "live-test-member",
+    "device_id": "7029e7adcedc",
+    "server": "http://127.0.0.1:31841",
+    "server_id": "fox-01"
+  },
+  "runtime": {
+    "active": true,
+    "status": "managed_idle",
+    "message": "\u8bbe\u5907\u5df2\u6258\u7ba1\uff0c\u7b49\u5f85\u4e2d\u5fc3\u6307\u4ee4",
+    "error": "",
+    "preparing": false,
+    "hosting_mode": "passive",
+    "telemetry": {
+      "sampled_at": 1795547627.8037279,
+      "cpu_percent": 8.265626692666018,
+      "gpus": [
+        {
+          "physical_index": 0,
+          "device": "cuda:0",
+          "name": "NVIDIA GeForce RTX 4070 Ti SUPER",
+          "util": 34.0,
+          "mem_used_mb": 9872,
+          "mem_total_mb": 16376,
+          "mem_pct": 60.3
+        }
+      ]
+    },
+    "probe": {},
+    "pending_action": "",
+    "resolved": {},
+    "managed": {
+      "session_id": "9cac17cbe70e468b8631fbdde63650d8",
+      "status": "online",
+      "error": "",
+      "waiting_reason": "\u7ba1\u7406\u5458\u5df2\u6682\u505c\u81ea\u52a8\u6d3e\u5355\uff1b\u5f53\u524d\u5206\u7247\u53ef\u7ee7\u7eed\uff0c\u4e0b\u4e00\u7247\u7b49\u5f85\u7ba1\u7406\u5458\u542f\u52a8",
+      "automation": {
+        "device_id": "7029e7adcedc",
+        "desired": "running",
+        "pause_reason": "",
+        "changed_at": 0.0,
+        "changed_by": "",
+        "dispatch": {
+          "running": false,
+          "changed_at": 1795547341.848545,
+          "changed_by": "live-test"
+        },
+        "limit": {
+          "device_id": "7029e7adcedc",
+          "run_id": "4213de8d5ac74512bd13e2482b87fb2d",
+          "max_packages": 1,
+          "completed": 0
+        },
+        "pending_results": [],
+        "parallel": {
+          "tag_batch": {
+            "value": 2,
+            "source": "\u672c\u673a\u914d\u7f6e"
+          },
+          "concurrency": {
+            "value": 2,
+            "source": "\u672c\u673a\u914d\u7f6e"
+          }
+        },
+        "workspace": null
+      },
+      "start_pending": false,
+      "start_intent": "start",
+      "last_seq": 0,
+      "results": []
+    }
+  },
+  "workspace": {
+    "ok": true,
+    "items": [
+      {
+        "repo": "lulynx/live-acceptance",
+        "id": "shard-000000.tar",
+        "size": 358400,
+        "sha256": "b4a586d1ed5ff9f18ac7063ab5cf1244d3bbc7b24f1ed8af61c92b1b9057d301",
+        "status": "available",
+        "owner": null,
+        "claimed_at": null,
+        "completed_at": null,
+        "downloaded_at": null,
+        "note": null,
+        "updated_at": "2026-11-25T03:09:01+08:00",
+        "lease_device": null,
+        "lease_user": null,
+        "lease_until": null,
+        "last_beat": null,
+        "progress": null,
+        "prelock_device": null,
+        "prelock_user": null,
+        "prelock_until": null,
+        "tag_status": "",
+        "nl_status": "",
+        "tag_by": null,
+        "nl_by": null,
+        "leases": [],
+        "pending_results": [],
+        "missing_parts": [
+          "tag",
+          "nl"
+        ],
+        "unassigned_parts": [
+          "tag",
+          "nl"
+        ],
+        "reserved_user": null,
+        "assignments": [],
+        "annotation": {},
+        "claimable_parts": [
+          "tag",
+          "nl"
+        ],
+        "claimable": true,
+        "working_device": null,
+        "assigned_device": null,
+        "verification": null,
+        "source_verification": {
+          "state": "disabled"
+        },
+        "source_submitted": false
+      },
+      {
+        "repo": "lulynx/live-acceptance",
+        "id": "shard-000001.tar",
+        "size": 358400,
+        "sha256": "9eaab3aa90a2b537d2f44b4fc96aa51b6f24f5df87def4d4aab3fb9c06457e91",
+        "status": "available",
+        "owner": null,
+        "claimed_at": null,
+        "completed_at": null,
+        "downloaded_at": null,
+        "note": null,
+        "updated_at": "2026-11-25T03:09:01+08:00",
+        "lease_device": null,
+        "lease_user": null,
+        "lease_until": null,
+        "last_beat": null,
+        "progress": null,
+        "prelock_device": null,
+        "prelock_user": null,
+        "prelock_until": null,
+        "tag_status": "",
+        "nl_status": "",
+        "tag_by": null,
+        "nl_by": null,
+        "leases": [],
+        "pending_results": [],
+        "missing_parts": [
+          "tag",
+          "nl"
+        ],
+        "unassigned_parts": [
+          "tag",
+          "nl"
+        ],
+        "reserved_user": null,
+        "assignments": [],
+        "annotation": {},
+        "claimable_parts": [
+          "tag",
+          "nl"
+        ],
+        "claimable": true,
+        "working_device": null,
+        "assigned_device": null,
+        "verification": null,
+        "source_verification": {
+          "state": "disabled"
+        },
+        "source_submitted": false
+      },
+      {
+        "repo": "lulynx/live-acceptance",
+        "id": "shard-000002.tar",
+        "size": 358400,
+        "sha256": "282cc825b0e2d45d5a90fef1d8e19a12d6a20357c761c03a2fa88f7711153943",
+        "status": "available",
+        "owner": null,
+        "claimed_at": null,
+        "completed_at": null,
+        "downloaded_at": null,
+        "note": null,
+        "updated_at": "2026-11-25T03:09:01+08:00",
+        "lease_device": null,
+        "lease_user": null,
+        "lease_until": null,
+        "last_beat": null,
+        "progress": null,
+        "prelock_device": null,
+        "prelock_user": null,
+        "prelock_until": null,
+        "tag_status": "",
+        "nl_status": "",
+        "tag_by": null,
+        "nl_by": null,
+        "leases": [],
+        "pending_results": [],
+        "missing_parts": [
+          "tag",
+          "nl"
+        ],
+        "unassigned_parts": [
+          "tag",
+          "nl"
+        ],
+        "reserved_user": null,
+        "assignments": [],
+        "annotation": {},
+        "claimable_parts": [
+          "tag",
+          "nl"
+        ],
+        "claimable": true,
+        "working_device": null,
+        "assigned_device": null,
+        "verification": null,
+        "source_verification": {
+          "state": "disabled"
+        },
+        "source_submitted": false
+      }
+    ],
+    "total": 3,
+    "next_offset": null,
+    "workspace": null,
+    "allow_manual_claim": false,
+    "queue_only": false,
+    "empty_reason": ""
+  }
+}

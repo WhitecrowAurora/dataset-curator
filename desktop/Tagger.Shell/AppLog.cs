@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using Tagger.Shell.Services;
 
 namespace Tagger.Shell;
 
@@ -11,7 +12,7 @@ internal static class AppLog
 {
     private static readonly object Gate = new();
 
-    internal static string LogPath { get; } = Path.Combine(
+    internal static string LogPath { get; private set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Tagger", "shell.log");
 
@@ -34,8 +35,22 @@ internal static class AppLog
 
             lock (Gate)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-                File.AppendAllText(LogPath, sb.ToString(), Encoding.UTF8);
+                foreach (var folder in ShellStorage.Folders(PythonServer.FindRoot()))
+                {
+                    var path = Path.Combine(folder, "shell.log");
+                    try
+                    {
+                        Directory.CreateDirectory(folder);
+                        File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
+                        LogPath = path;
+                        return;
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    {
+                        System.Diagnostics.Trace.WriteLine($"日志目录不可写：{path}：{error.Message}");
+                    }
+                }
+                System.Diagnostics.Trace.WriteLine(sb.ToString());
             }
         }
         catch (IOException)

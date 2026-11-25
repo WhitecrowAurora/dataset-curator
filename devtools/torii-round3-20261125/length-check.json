@@ -1,0 +1,73 @@
+{
+  "soft": 384,
+  "hard": 512,
+  "prompt_instruction": "- Aim for at most 384 tokens of description. This is a soft target: essential detail may exceed it, but the final training text must not exceed 512 tokens. Prioritize the subject and setting; shorten repeated details and small print. Do not pad to reach the target.",
+  "tokenizer": "H:\\tagger\\models\\text\\qwen3.5-0.8b",
+  "rows": [
+    {
+      "image": 1,
+      "raw_json_generation_tokens": 274,
+      "description_tokens": 239,
+      "final_tokens": 239,
+      "shortened": false,
+      "over_soft": false
+    },
+    {
+      "image": 10,
+      "raw_json_generation_tokens": 506,
+      "description_tokens": 432,
+      "final_tokens": 432,
+      "shortened": false,
+      "over_soft": true
+    },
+    {
+      "image": 101,
+      "raw_json_generation_tokens": 321,
+      "description_tokens": 284,
+      "final_tokens": 284,
+      "shortened": false,
+      "over_soft": false
+    },
+    {
+      "image": 102,
+      "raw_json_generation_tokens": 429,
+      "description_tokens": 373,
+      "final_tokens": 373,
+      "shortened": false,
+      "over_soft": false
+    },
+    {
+      "image": 103,
+      "raw_json_generation_tokens": 272,
+      "description_tokens": 241,
+      "final_tokens": 241,
+      "shortened": false,
+      "over_soft": false
+    },
+    {
+      "image": 104,
+      "raw_json_generation_tokens": 203,
+      "description_tokens": 187,
+      "final_tokens": 187,
+      "shortened": false,
+      "over_soft": false
+    },
+    {
+      "image": 105,
+      "raw_json_generation_tokens": 526,
+      "description_tokens": 429,
+      "final_tokens": 429,
+      "shortened": false,
+      "over_soft": true
+    },
+    {
+      "image": 106,
+      "raw_json_generation_tokens": 246,
+      "description_tokens": 225,
+      "final_tokens": 225,
+      "shortened": false,
+      "over_soft": false
+    }
+  ],
+  "long_with_artist_final_tokens": 510
+}

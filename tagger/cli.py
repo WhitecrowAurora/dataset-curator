@@ -1113,43 +1113,10 @@ def cmd_dedup(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------- 客户端
 
 
-def _make_progress_writer(path: Path):
-    """把打标进度写成派工端能直接读的 `{"done", "total"}`。
-
-    为什么走文件而不是回调：派工端（fox-label 的 `worker.py`）是用 `--cmd` 起的
-    **另一个进程**，它每 0.3s 读一次这个文件，再塞进心跳报给服务端。跨进程没有
-    更便宜的通道。
-
-    为什么节流 1s：30 万张的批次上一张写一次文件纯属浪费，而心跳 120s 才发一拍。
-    但**最后一条一定写**，否则收尾时进度会停在 99%。
-
-    `total` 是"数据源已经吐出的条目数"：tar/parquet 是流式读的，跑之前数不出总数，
-    它只能贴着 done 一起涨。派工端只用 done 算速率与"进度是否停滞"，所以不影响判活。
-    """
-    from .storage.atomic import write_json
-
-    path = Path(path)
-    state = {"last": 0.0}
-
-    def hook(kind: str, task, outcome, stats) -> None:
-        # 有归属的条目都算"过了这一张"：完成 / 跳过 / 失败 / 重试后依然失败 / 被别的进程
-        # 占着 / 无内容图被剔除。最后那个不能漏：它既不在 done 也不在 skipped，
-        # 漏了就会永远显示"差 N 张"，而主循环其实早跑完了。
-        # getattr 兜底：测试和外部脚本会塞只实现这几个字段的假 stats 对象，
-        # 为一个新计数器把整条打标路径带崩不值得。
-        handled = (stats.done + stats.skipped + stats.failed
-                   + stats.blacklisted + stats.busy
-                   + getattr(stats, "blank_skipped", 0))
-        now = time.monotonic()
-        if handled < stats.total and now - state["last"] < 1.0:
-            return
-        state["last"] = now
-        try:
-            write_json(path, {"done": handled, "total": stats.total, "phase": "tag"})
-        except OSError:
-            pass            # 进度写不出去不该拖垮打标
-
-    return hook
+def _make_progress_writer(path: Path, mode="both"):
+    """跨进程进度节流写入，并在结束时补齐最终计数。"""
+    from .center_runtime.progress import ProgressWriter
+    return ProgressWriter(path, mode)
 
 
 def cmd_client(args: argparse.Namespace) -> int:
@@ -1165,7 +1132,8 @@ def cmd_client(args: argparse.Namespace) -> int:
     if center_execution:
         resolved = json.loads(center_execution)
         allowed = {"url", "model_name", "mode", "tag_backend", "tag_device",
-                   "tag_precision", "tag_batch", "tag_model_dir", "tag_model", "concurrency"}
+                   "tag_precision", "tag_batch", "tag_model_dir", "tag_model", "concurrency",
+                   "caption_format", "runtime_fingerprint"}
         for name, value in resolved.items():
             if name in allowed:
                 setattr(args, name, value)
@@ -1173,14 +1141,21 @@ def cmd_client(args: argparse.Namespace) -> int:
     table = load_tier_table(args.tiers)
     ops = load_ops(table)
     # 进度文件只给派工端用（心跳报进度）；不传时行为与以前完全一致。
-    hook = _make_progress_writer(args.progress_file) if args.progress_file else None
+    from .center_runtime.annotation import ENV_KEY, apply as apply_annotation
+    ops = apply_annotation(ops, os.environ.get(ENV_KEY))
+    mode = os.environ.get("FOXLABEL_PARTS") or args.mode or ops.output_spec().mode
+    hook = _make_progress_writer(args.progress_file, mode if mode in ("tag", "nl") else "both") if args.progress_file else None
     # 重试轮数缺省取配置（output.retry_failed_rounds）；命令行显式给了就用它。
     budget = getattr(args, "retry_budget", None)
     if budget is None:
         budget = ops.output_spec().retry_failed_rounds
-    return run_client(args, ops, table, on_progress=hook,
-                      only_failed=bool(getattr(args, "only_failed", False)),
-                      retry_budget=int(budget or 0))
+    try:
+        return run_client(args, ops, table, on_progress=hook,
+                          only_failed=bool(getattr(args, "only_failed", False)),
+                          retry_budget=int(budget or 0))
+    finally:
+        if hook:
+            hook.finish()
 
 
 # ---------------------------------------------------------------- 合并
@@ -2606,6 +2581,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     _setup_console()
+    from .runtime.portable import configure
+    configure()
     args = build_parser().parse_args(argv)
     try:
         return int(args.func(args) or 0)

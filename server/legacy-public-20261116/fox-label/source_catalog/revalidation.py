@@ -31,15 +31,18 @@ def defer(c, lease, package, body):
     c.execute('DELETE FROM package_queue WHERE repo=? AND pkg=? AND device_id=?', (lease['repo'], lease['pkg'], lease['device_id']))
 
 
-def refresh(c, dispatch, repo, package):
+def refresh(c, dispatch, repo, package, report=None):
     from delivery.reconciliation import merge
     name, sha = package["id"], package["sha256"]
-    artifact = c.execute("SELECT * FROM package_artifacts WHERE repo=? AND pkg=? AND source_sha256=?", (repo, name, sha)).fetchone()
-    if not artifact:
-        return
-    report = merge(c, repo, name, sha, json.loads(artifact["expected_json"]), json.loads(artifact["rows_json"]))
+    if report is None:
+        artifact = c.execute("SELECT * FROM package_artifacts WHERE repo=? AND pkg=? AND source_sha256=?", (repo, name, sha)).fetchone()
+        if not artifact:
+            return
+        report = merge(c, repo, name, sha, json.loads(artifact["expected_json"]), json.loads(artifact["rows_json"]))
     if report.get("source_verification", {}).get("state") != "ready":
         return
+    from scheduling.pending_results import finalize
+    finalize(c,repo,name,sha,report)
     for part in ('tag', 'nl'):
         if part not in report['complete_parts']:
             c.execute(f"UPDATE packages SET {part}_status='',{part}_by=NULL WHERE repo=? AND id=? AND {part}_status='done'",

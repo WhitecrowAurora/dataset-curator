@@ -1,0 +1,35 @@
+{
+  "checks": [
+    "首击与取消均无请求",
+    "键盘首击与更换选择无请求",
+    "正常轮询保留同一分片确认",
+    "换片及旧片重现均需重新确认",
+    "预取转当前使原确认失效",
+    "断连使确认失效，重连需重新确认",
+    "服务准备期间禁止释放并清理确认",
+    "确认当前包只提交一次且目标正确",
+    "预取包也需确认，目标与类型正确",
+    "手机宽度确认与取消通过"
+  ],
+  "calls": [
+    {
+      "path": "/api/center/release",
+      "body": {
+        "lease_id": "active-1",
+        "kind": "active"
+      }
+    },
+    {
+      "path": "/api/center/release",
+      "body": {
+        "lease_id": "prelock-1",
+        "kind": "prelock"
+      }
+    }
+  ],
+  "automatic_calls": [
+    "/api/center/history/discover",
+    "/api/center/dispatch-plans/check"
+  ],
+  "errors": []
+}

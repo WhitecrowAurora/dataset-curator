@@ -1,0 +1,295 @@
+{
+  "version": {
+    "version": "lulynx-qwen35-0.3",
+    "runtime": {
+      "device": "cuda:0",
+      "precision": "torch.float16",
+      "linear_attention": "torch",
+      "max_pixels": 1000000,
+      "libraries": {
+        "torch": "2.13.0+cu132",
+        "transformers": "5.14.1"
+      },
+      "batch_size": 4
+    }
+  },
+  "seconds": 9.048168600000281,
+  "results": [
+    {
+      "request": 0,
+      "seconds": 4.3711073000004035,
+      "id": "chatcmpl-06bc1f05aa83450d93d6a7864471d3b6",
+      "object": "chat.completion",
+      "created": 1795254747,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "The image features a"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 4,
+        "total_tokens": 771
+      }
+    },
+    {
+      "request": 1,
+      "seconds": 9.039360099999612,
+      "id": "chatcmpl-202878bb6a5c4374b8c54b6ac0560126",
+      "object": "chat.completion",
+      "created": 1795254751,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\n  \"character"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 5,
+        "total_tokens": 772
+      }
+    },
+    {
+      "request": 2,
+      "seconds": 4.365586799999619,
+      "id": "chatcmpl-9811ca11de43445fb5e7e67f0a3a6b4e",
+      "object": "chat.completion",
+      "created": 1795254747,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "The image features a stylized"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 6,
+        "total_tokens": 773
+      }
+    },
+    {
+      "request": 3,
+      "seconds": 6.636619700000665,
+      "id": "chatcmpl-6365b689ac414a258cbccf271c9784f9",
+      "object": "chat.completion",
+      "created": 1795254749,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\n  \"character\": \""
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 7,
+        "total_tokens": 774
+      }
+    },
+    {
+      "request": 4,
+      "seconds": 6.635961299999508,
+      "id": "chatcmpl-ab99a13dbcbc4fefa5eab73369f1b1a6",
+      "object": "chat.completion",
+      "created": 1795254749,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "The image features a stylized girl with"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 8,
+        "total_tokens": 775
+      }
+    },
+    {
+      "request": 5,
+      "seconds": 9.036594100000002,
+      "id": "chatcmpl-e234a3c77d074f63a2d39cd3daa1cb8d",
+      "object": "chat.completion",
+      "created": 1795254751,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\n  \"character\": \"The image"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 9,
+        "total_tokens": 776
+      }
+    },
+    {
+      "request": 6,
+      "seconds": 6.632405400000607,
+      "id": "chatcmpl-f12e130bfcdc452a9ff9a407e1135cd9",
+      "object": "chat.completion",
+      "created": 1795254749,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "The image features a stylized girl with short brown"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 10,
+        "total_tokens": 777
+      }
+    },
+    {
+      "request": 7,
+      "seconds": 6.633573099999921,
+      "id": "chatcmpl-7e6cfbdc5d434cd692fb57e94865383b",
+      "object": "chat.completion",
+      "created": 1795254749,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\n  \"character\": \"The image features a"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 11,
+        "total_tokens": 778
+      }
+    },
+    {
+      "request": 8,
+      "seconds": 4.358436299999994,
+      "id": "chatcmpl-260934c558144880b56006fe404e6e6f",
+      "object": "chat.completion",
+      "created": 1795254747,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "The image features a stylized girl with short brown hair in"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 12,
+        "total_tokens": 779
+      }
+    },
+    {
+      "request": 9,
+      "seconds": 9.034112000000277,
+      "id": "chatcmpl-937e1f7433744808be15060f3f98f37e",
+      "object": "chat.completion",
+      "created": 1795254751,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\n  \"character\": \"The image features a stylized"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 13,
+        "total_tokens": 780
+      }
+    },
+    {
+      "request": 10,
+      "seconds": 4.35775410000042,
+      "id": "chatcmpl-422cfe630ae74454895c84c2c591e01c",
+      "object": "chat.completion",
+      "created": 1795254747,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "The image features a stylized girl with short brown hair in a bowl"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 14,
+        "total_tokens": 781
+      }
+    },
+    {
+      "request": 11,
+      "seconds": 9.030672599999889,
+      "id": "chatcmpl-040f679da9a743b9a3e19849c45f24a3",
+      "object": "chat.completion",
+      "created": 1795254751,
+      "model": "torii",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "length",
+          "message": {
+            "role": "assistant",
+            "content": "{\n  \"character\": \"The image features a stylized, simplistic"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 767,
+        "completion_tokens": 15,
+        "total_tokens": 782
+      }
+    }
+  ]
+}

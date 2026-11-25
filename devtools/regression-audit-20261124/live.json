@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "read_only": true,
+  "http": {
+    "/": 200,
+    "/offline-workorders?ws=Dru768": 200,
+    "/ai-access": 200,
+    "/static/workspace.js": 200,
+    "/static/offline-jobs.js": 200,
+    "/static/dispatch-assistant.js": 200,
+    "/api/workspaces": 200,
+    "/api/offline-tasks?ws_id=Dru768": 200,
+    "/api/managed/devices": 200,
+    "/api/ai-access": 200,
+    "/mcp_without_key": 401
+  },
+  "services": {
+    "lulynx-label.service": "active",
+    "lulynx-panel.service": "active"
+  },
+  "hashes_match": true,
+  "unique_repository_ownership": true,
+  "dangling_workspace_references": {
+    "users": 0,
+    "devices": 0,
+    "user_groups": 0
+  },
+  "duplicate_open_parts": 0,
+  "offline_jobs_preserved": 23,
+  "dispatch_plans_preserved": 1,
+  "packages_total": 874,
+  "live_online_leases": 1,
+  "worker_manifest_matches": true,
+  "production_test_users_created": 0
+}

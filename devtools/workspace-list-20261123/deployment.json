@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"deployed\": true, \"backup\": \"/tagger/.delete/workspace-list-20261123\", \"source_sha256\": \"d9a1174a0fe46da2ef4b460b8323ad7a5af2c3078c52b388cf88e1cced752abf\", \"static\": {\"http://127.0.0.1:31832/static/app.js\": {\"sha256\": \"5f647de0703a40e8fd6105f929ea755d0046ebb86f70b8cf042a49596527be8e\", \"cache\": \"no-cache\"}, \"http://119.28.16.93/static/app.js\": {\"sha256\": \"5f647de0703a40e8fd6105f929ea755d0046ebb86f70b8cf042a49596527be8e\", \"cache\": \"no-cache\"}}, \"services\": {\"lulynx-label.service\": \"active\", \"lulynx-panel.service\": \"active\"}, \"processes_unchanged\": true, \"workspaces\": [{\"id\": \"Dru768\", \"name\": \"Dru768_仅nl打标\"}, {\"id\": \"Fox768Test\", \"name\": \"Fox768Test\"}, {\"id\": \"dan\", \"name\": \"dan\"}], \"integrity\": true}\n",
+  "stderr": ""
+}

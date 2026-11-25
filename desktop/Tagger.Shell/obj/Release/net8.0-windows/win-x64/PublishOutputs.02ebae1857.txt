@@ -1,0 +1,9 @@
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Tagger.Shell.exe
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\runtimes\win-x64\native\WebView2Loader.dll
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Tagger.Shell.dll
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Tagger.Shell.deps.json
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Tagger.Shell.runtimeconfig.json
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\WebView2Loader.dll
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Microsoft.Web.WebView2.Core.dll
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Microsoft.Web.WebView2.WinForms.dll
+H:\lulynx-trainer\backend\smoke\tagger-webview-startup-20261123\app\Microsoft.Web.WebView2.Wpf.dll

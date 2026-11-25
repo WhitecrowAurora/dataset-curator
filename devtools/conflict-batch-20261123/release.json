@@ -1,0 +1,18 @@
+{
+  "path": "H:\\tagger\\dist\\tagger-20261123-conflicts-native.zip",
+  "bytes": 77001499,
+  "sha256": "a61e6be46ab2b52e30d89b52cd1eecd53fa959960a7bea22d79c21c2012bf17b",
+  "included": {
+    "tagger/runtime/python_dev.py": "378110682726125dea440a3c236e7a8d10dcb022ad571f372252890f1117f2ac",
+    "tagger/inference/qwen3vl/runtime.py": "1714040af2b449237e33d27f1546e06d073c48aaaa017f252812234b03fb35a4",
+    "tagger/web/deps.py": "5a46462f33e642f8ab77e5359563f99f9f9f4d531e58b53243b290ce5dd1bfae",
+    "devtools/setup_embedded_env.ps1": "645356dc953fa0427edaa8991a7bbb8798ed52d1ecfbe5263f98de198cc67304",
+    "env/initialization/python-3.12.9-dev-amd64.zip": "44012b94a23186c7637f5fb4267195e95baff9d640f0fd93a9ba92bc08b32d3b",
+    "env/initialization/python-3.12.9-dev-LICENSE.txt": "e502c6b880ff58d614901495a9009c136539cd0b1e2a2abb8fc00b934c203419",
+    "tagger/web/ui/dist/index.html": "14a5b0d86d33ad773f35a619ef67cd635bfe360ef762b59cdb8a3007d20288b7",
+    "tagger/web/ui/dist/assets/index-Dx1LAHHR.js": "a9d736f9399e9994bd9df2eb297a5ebc5821b856af5a89590e5ab0299328c708"
+  },
+  "zip_integrity": true,
+  "local_data_excluded": true,
+  "known_secrets_absent": true
+}

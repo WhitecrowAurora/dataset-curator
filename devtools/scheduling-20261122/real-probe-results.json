@@ -1,0 +1,40 @@
+{
+  "sample_count": 4,
+  "rows": [
+    {
+      "field": "concurrency",
+      "requested": 1,
+      "actual": 1,
+      "rate_per_s": 0.043,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 216.3
+    },
+    {
+      "field": "concurrency",
+      "requested": 2,
+      "actual": 2,
+      "rate_per_s": 0.044,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 208.4
+    },
+    {
+      "field": "concurrency",
+      "requested": 4,
+      "actual": 4,
+      "rate_per_s": 0.081,
+      "successful": 4,
+      "failed": 0,
+      "rc": 0,
+      "elapsed_s": 129.9
+    }
+  ],
+  "recommended": {
+    "concurrency": 4
+  },
+  "created_at": 1795359756.6490579,
+  "note": "小样本预热与真实打标测量；建议值需确认下发，长期稳定性仍需正式任务观察"
+}

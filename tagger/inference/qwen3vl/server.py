@@ -15,12 +15,17 @@ from .service.continuous import ContinuousScheduler
 from .service.requests import caption_request
 
 
-def create_app(spec, engine_factory=load_engine):
+def create_app(spec, engine_factory=load_engine, *, request_factory=caption_request, version=VERSION):
     @asynccontextmanager
     async def lifespan(app):
         engine = await asyncio.to_thread(engine_factory, spec)
-        scheduler_type = ContinuousScheduler if spec.get("continuous_batching") else BatchScheduler
-        scheduler = scheduler_type(engine, spec["batch_size"])
+        app.state.runtime_info = getattr(engine, "runtime_info", None)
+        if spec.get("continuous_batching") and getattr(engine, "supports_continuous", True):
+            scheduler = ContinuousScheduler(engine, spec["batch_size"],
+                                             batch_window_s=spec.get("batch_window_s", 0.01))
+        else:
+            scheduler = BatchScheduler(engine, spec["batch_size"],
+                                       batch_window_s=spec.get("batch_window_s", 0.01))
         scheduler.start()
         app.state.scheduler = scheduler
         try:
@@ -35,8 +40,9 @@ def create_app(spec, engine_factory=load_engine):
         return {"status": "ok"}
 
     @app.get("/version")
-    def version():
-        return {"version": VERSION}
+    def runtime_version():
+        info = getattr(app.state, "runtime_info", None)
+        return {"version": version, **({"runtime": info} if info else {})}
 
     @app.get("/v1/models")
     def models():
@@ -46,7 +52,7 @@ def create_app(spec, engine_factory=load_engine):
     async def completion(request: Request):
         try:
             body = await request.json()
-            item = await asyncio.to_thread(caption_request, body, spec)
+            item = await asyncio.to_thread(request_factory, body, spec)
             result = await app.state.scheduler.submit(item)
         except asyncio.QueueFull as exc:
             raise HTTPException(429, "推理队列已满，请稍后重试") from exc

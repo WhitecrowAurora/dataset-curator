@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Tagger.Shell")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+955f0e1e811dc207663a26f84b6401aaa8ee1a59")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+dfcc477fc778d971e1f859e4c641b48a65c6e7a0")]
 [assembly: System.Reflection.AssemblyProductAttribute("Tagger.Shell")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Tagger.Shell")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.1.0.0")]

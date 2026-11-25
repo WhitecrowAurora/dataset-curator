@@ -1,0 +1,104 @@
+[
+  {
+    "id": "4",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 499.7
+  },
+  {
+    "id": "26",
+    "hair_area": 0.1003265380859375,
+    "hair_mean_probability": 0.6167868375778198,
+    "ms": 84.7
+  },
+  {
+    "id": "41",
+    "hair_area": 0.0405426025390625,
+    "hair_mean_probability": 0.915654182434082,
+    "ms": 64.9
+  },
+  {
+    "id": "42",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 72.9
+  },
+  {
+    "id": "45",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 76.4
+  },
+  {
+    "id": "58",
+    "hair_area": 0.39642333984375,
+    "hair_mean_probability": 0.6631462574005127,
+    "ms": 74.1
+  },
+  {
+    "id": "61",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 75.5
+  },
+  {
+    "id": "95",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 73.6
+  },
+  {
+    "id": "101",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 73.7
+  },
+  {
+    "id": "102",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 75.5
+  },
+  {
+    "id": "103",
+    "hair_area": 0.0983428955078125,
+    "hair_mean_probability": 0.957305371761322,
+    "ms": 73.9
+  },
+  {
+    "id": "107",
+    "hair_area": 0.06805419921875,
+    "hair_mean_probability": 0.8248461484909058,
+    "ms": 64.1
+  },
+  {
+    "id": "portrait",
+    "hair_area": 0.27734375,
+    "hair_mean_probability": 0.9123522043228149,
+    "ms": 70.2
+  },
+  {
+    "id": "hutao",
+    "hair_area": 0.3782501220703125,
+    "hair_mean_probability": 0.7491691708564758,
+    "ms": 75.3
+  },
+  {
+    "id": "mostima",
+    "hair_area": 0.01409912109375,
+    "hair_mean_probability": 0.47356653213500977,
+    "ms": 73.8
+  },
+  {
+    "id": "101-head",
+    "hair_area": 3.0517578125e-05,
+    "hair_mean_probability": 0.3549184799194336,
+    "ms": 76.0
+  },
+  {
+    "id": "107-head",
+    "hair_area": 0.405364990234375,
+    "hair_mean_probability": 0.9246900081634521,
+    "ms": 75.0
+  }
+]

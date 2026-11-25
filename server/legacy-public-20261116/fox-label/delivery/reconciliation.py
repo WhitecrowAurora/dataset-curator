@@ -32,10 +32,13 @@ def snapshot(c, repo, pkg, sha):
                              for r in conflicts.records(c, repo, pkg, sha) if r['state'] != 'pending']}
 
 
-def merge(c, repo, pkg, sha, expected, rows, submitted_at=None):
+def merge(c, repo, pkg, sha, expected, rows, submitted_at=None, *, artist_normalized=False, annotation=None):
     import time
     from source_catalog.revalidation import expected as authority, decorate
     expected, source = authority(c, repo, pkg, sha, expected)
+    if not artist_normalized:
+        from annotation.maintenance import cached
+        rows = cached(c, repo, pkg, sha, rows, annotation=annotation)
     old = c.execute("SELECT * FROM package_artifacts WHERE repo=? AND pkg=? AND source_sha256=?",
                     (repo, pkg, sha)).fetchone()
     old_rows = json.loads(old['rows_json']) if old else []
@@ -88,17 +91,34 @@ def merge(c, repo, pkg, sha, expected, rows, submitted_at=None):
 
 
 def accept(store, dispatch, c, lease, device):
+    from scheduling.lifetime import expired
+    if expired(lease):
+        raise dispatch.LeaseError('租约已连续 48 小时未上报而过期，请重新领取后续做')
     with store.delivery.connect() as d:
         files = d.execute("SELECT * FROM files WHERE lease_id=?", (lease["lease_id"],)).fetchall()
     proof_file = next((r for r in files if Path(r["name"]).name == 'proof.json'), None)
     if not proof_file:
         raise ValueError("尚未回传逐图检查报告")
     proof = json.loads(uploads.local_file(store.delivery, proof_file).read_text(encoding="utf-8"))
+    rows = list(read_rows([uploads.local_file(store.delivery, r) for r in files if r['name'].endswith('.jsonl')]))
+    return accept_rows(dispatch, c, lease, proof, rows)
+
+
+def accept_rows(dispatch, c, lease, proof, rows):
+    """普通回传与管理员离线导入使用相同的源校验、分项过滤和归并。"""
+    from scheduling.lifetime import expired
+    if expired(lease):
+        raise dispatch.LeaseError('租约已连续 48 小时未上报而过期，请重新领取后续做')
+    if not isinstance(proof, dict) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError('回传检查报告和产物记录必须是 JSON 对象')
+    if any(not isinstance(row.get('image_id'), str) or not row['image_id']
+           or not isinstance(row.get('outcomes') or {}, dict)
+           or not isinstance(row.get('excluded') or {}, dict) for row in rows):
+        raise ValueError('回传产物缺少有效 image_id 或逐项结果格式错误')
     pkg = dispatch._row(c, "SELECT * FROM packages WHERE repo=? AND id=?", (lease["repo"], lease["pkg"]))
-    if proof.get("source_sha256") != pkg["sha256"] or proof.get("source_bytes") != pkg["size"]:
+    if not pkg or proof.get("source_sha256") != pkg["sha256"] or proof.get("source_bytes") != pkg["size"]:
         raise ValueError("回传源分片与租约不一致")
     expected = proof.get("expected_ids")
-    rows = list(read_rows([uploads.local_file(store.delivery, r) for r in files if r['name'].endswith('.jsonl')]))
     if not rows:
         raise ValueError("尚未回传打标产物")
     from scheduling.leases import parts
@@ -110,7 +130,8 @@ def accept(store, dispatch, c, lease, device):
                          **({"outcomes": {k: {"status": "excluded", "reason": row["excluded"].get("reason", "")}
                                          for k in assigned}} if row.get("excluded", {}).get("kind") in
                             ("excluded", "excused", "artist", "skipped") and row["excluded"].get("reason") else {})})
-    result = merge(c, lease["repo"], lease["pkg"], pkg["sha256"], expected, filtered, lease['issued_at'])
+    result = merge(c, lease["repo"], lease["pkg"], pkg["sha256"], expected, filtered, lease['issued_at'],
+                   annotation=json.loads(lease.get('annotation_json') or '{}'))
     return {"ok": True, "report": result}
 
 

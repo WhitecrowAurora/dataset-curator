@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "settings saved",
+    "upload real crop cascade",
+    "candidate probability and color samples",
+    "manual silver saved across reload",
+    "undo",
+    "server status filter",
+    "mobile 390px no overflow"
+  ],
+  "errors": []
+}

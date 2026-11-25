@@ -1,0 +1,38 @@
+[
+  {
+    "batch": 1,
+    "mode": "before",
+    "ms": 0.2669080000487156,
+    "exact": true
+  },
+  {
+    "batch": 1,
+    "mode": "grouped",
+    "ms": 0.26155500003369525,
+    "exact": true
+  },
+  {
+    "batch": 8,
+    "mode": "before",
+    "ms": 1.1135180000565015,
+    "exact": true
+  },
+  {
+    "batch": 8,
+    "mode": "grouped",
+    "ms": 1.1445399999502115,
+    "exact": true
+  },
+  {
+    "batch": 32,
+    "mode": "before",
+    "ms": 5.359019000025,
+    "exact": true
+  },
+  {
+    "batch": 32,
+    "mode": "grouped",
+    "ms": 5.398864000017056,
+    "exact": true
+  }
+]

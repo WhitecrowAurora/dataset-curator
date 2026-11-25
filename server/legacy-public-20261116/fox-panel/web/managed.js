@@ -18,7 +18,7 @@
   function commandId() {return Array.from(crypto.getRandomValues(new Uint8Array(16)), function (n) {return n.toString(16).padStart(2, "0");}).join("");}
   function mount() {
     host = node("section", "", "fp-card fp-managed"); host.id = "managed-devices";
-    var hd = node("div", "", "fp-card__hd"); hd.appendChild(node("h2", "被动托管"));
+    var hd = node("div", "", "fp-card__hd"); hd.appendChild(node("h2", "自动托管"));
     refresh = button("刷新", load, hd); host.appendChild(hd);
     var label = node("label", "", "fp-field"); label.appendChild(node("span", "托管设备"));
     picker = node("select"); picker.setAttribute("aria-label", "托管设备"); label.appendChild(picker); host.appendChild(label);
@@ -32,7 +32,7 @@
     if (busy) return; busy = true; update(); message.textContent = "下发中…";
     callbacks.write(path, body).then(function (r) {
       if (!r.ok) throw Error(r.body.error || "下发失败");
-      message.textContent = "已下发，等待设备执行"; return load();
+      message.textContent = r.body.pending_reconnect ? "停工意图已保存，设备重连后执行" : "已下发，等待设备执行"; return load();
     }).catch(function (e) {message.textContent = e.message;}).finally(function () {busy = false; update();});
   }
   function update() {
@@ -46,26 +46,40 @@
     var d = device(); detail.replaceChildren(); detail.hidden = !d;
     if (!d) {status.textContent = "暂无托管设备"; return;}
     var s = d.state || {}, cfg = d.config || {};
-    if(d.desired === "paused") s = Object.assign({},s,{status:"paused"});
+    if(d.desired === "paused" && !s.running) s = Object.assign({},s,{status:"paused"});
       status.textContent = (d.released ? "已退出" : d.online ? states[s.status] || s.status : "离线")
         + " · " + d.last_seen_ago + " 秒前" + ((s.error || d.automation_error) ? " · " + (s.error || d.automation_error) : "");
     var working = s.running || s.history_running || ["preparing", "starting", "downloading", "quantizing", "starting_service", "checking_service", "loading_classifier", "recovering", "stopping"].indexOf(s.status) >= 0;
-    var writable = d.online && !d.released && callbacks.writable() && !busy;
+    var enabled = d.enabled !== false && callbacks.writable() && !busy;
+    var writable = d.online && !d.released && enabled;
     var grid = node("dl", "", "fp-managed-grid"); detail.appendChild(grid);
+    if (window.foxManagedTuning) window.foxManagedTuning(detail, d, writable, write, commandId);
     Object.keys(labels).forEach(function (k) {
+      if(k.indexOf('tag_')===0&&cfg.mode==='nl'||(k.indexOf('nl_')===0||k==='concurrency'||k==='served_name')&&cfg.mode==='tag')return;
       var cell = node("div"); cell.append(node("dt", labels[k]), node("dd", String(cfg[k] === undefined || cfg[k] === "" ? "自动" : cfg[k]))); grid.appendChild(cell);
     });
     var bar = node("div", "", "fp-managed-actions"); detail.appendChild(bar);
     ["start", "stop"].forEach(function (action) {
       button(actions[action], function () {
         write("/api/managed/commands", {id: commandId(), device_id: d.device_id, session_id: d.session_id, action: action, config: {}});
-      }, bar, !writable || action === "start" && working);
+      }, bar, action === 'stop' ? !enabled : !writable || working);
     });
+    button("强制继续", function () {
+      write("/api/managed/commands", {id: commandId(), device_id: d.device_id, session_id: d.session_id,
+        action: "start", config: {}, force_continue: true});
+    }, bar, !writable || working || (d.capabilities.actions || []).indexOf('force_continue') < 0);
+    if ((d.capabilities.actions || []).indexOf('force_continue') < 0)
+      detail.appendChild(node("p", "升级客户端后可使用强制继续；当前可使用开始打标。"));
+    if (d.changed_at) detail.appendChild(node("p", "接单状态更新：" + new Date(d.changed_at * 1000).toLocaleString()
+      + " · " + (d.changed_by || "来源未记录")));
+    if (d.waiting_reason) detail.appendChild(node("p", d.waiting_reason));
     detail.appendChild(node("h3", "历史分片"));
     (inventory.candidates || []).filter(function (r) {return r.device_id === selected;}).forEach(function (r) {
       var box = node("div", "", "fp-managed-actions"); box.appendChild(node("span", r.repo + " / " + r.package));
       var pending = (inventory.checks || []).some(function (c) {return c.device_id === selected && c.session_id === d.session_id && c.status === "pending";});
       button("检查", function () {write("/api/history/check", {device_id: d.device_id, candidate_id: r.candidate_id});}, box, !writable || working || pending || r.status !== "ready");
+      button("补注入画师", function () {write("/api/history/check", {device_id: d.device_id, candidate_id: r.candidate_id, reinject: 'missing'});}, box, !writable || working || pending || r.status !== "ready");
+      button("强制重新注入", function () {write("/api/history/check", {device_id: d.device_id, candidate_id: r.candidate_id, reinject: 'force'});}, box, !writable || working || pending || r.status !== "ready");
       detail.appendChild(box);
     });
     (inventory.checks || []).filter(function (r) {return r.device_id === selected;}).slice(0, 8).forEach(function (r) {

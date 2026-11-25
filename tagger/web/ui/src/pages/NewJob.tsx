@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ConcurrencyControl } from '../components/ui/ConcurrencyControl'
 import {
   Boxes,
   Cloud,
@@ -44,6 +45,8 @@ import {
 } from '../lib/api'
 import { basename, fmtBytes, fmtCount } from '../lib/format'
 import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/ui/launcher'
+import { AdvancedSettings, FormSections } from '../components/ui/FormSections'
+import { HairSettingsPanel } from '../components/conflicts/HairSettingsPanel'
 import { ChoiceGrid, ChoiceMulti, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { FieldNotice } from '../components/ui/FieldNotice'
 import { failureAdvice, httpUrlError } from '../lib/guidance'
@@ -56,6 +59,7 @@ import { QuantizeDialog } from '../components/QuantizeDialog'
 import { ShardAssets } from '../components/ShardAssets'
 import { PackShards } from '../components/PackShards'
 import { usePresets } from '../lib/presets'
+import { hairApi } from '../components/conflicts/hairApi'
 
 const BACKENDS = [
   { value: 'wd-eva02', label: 'wd-eva02（本地权重，推荐）' },
@@ -514,6 +518,11 @@ export function NewJob({
   // slot"和"每槽并发多少条"——这两个数必须一致：服务开 8 个 slot 而任务
   // 只发 2 条，等于把卡闲着一半。
   const [multiGpu, setMultiGpu] = useState(false)
+  const [hairReview, setHairReview] = useState(false)
+  const [nlByMedia, setNlByMedia] = useState(false)
+  const [hairMedia, setHairMedia] = useState<'anime' | 'photo' | 'unknown'>('unknown')
+  const [hairDefaults, setHairDefaults] = useState<Awaited<ReturnType<typeof hairApi.settings>>['settings'] | null>(null)
+  useEffect(() => { void hairApi.settings().then((r) => setHairDefaults(r.settings)).catch(() => undefined) }, [])
   const [perCardSeqs, setPerCardSeqs] = useState(0)
   // 这组参数会解析成什么（分档/权重/max_model_len/警告）。点启动之前就看到，
   // 省掉"选了 8B 才发现掉档 / OOM"那几分钟。
@@ -728,6 +737,9 @@ export function NewJob({
     hfReserveGb,
     hfProxy,
     cacheOn,
+    hairReview,
+    nlByMedia,
+    hairMedia,
   }
 
   // 用 JSON 串当依赖：对象每次渲染都是新引用，直接当依赖等于"渲染一次存一次"。
@@ -1089,6 +1101,12 @@ export function NewJob({
     if (Object.keys(saved.spec).length) applySpecForm(saved.spec)
     if (Object.keys(saved.form).length) applyStateForm(saved.form)
   }, [active, defaults, saved])
+
+  useEffect(() => {
+    if (!hairDefaults || !saved || !restoredRef.current) return
+    if (typeof saved.form.hairReview !== 'boolean' && typeof saved.spec.hair_review !== 'boolean') setHairReview(hairDefaults.enabled)
+    if (!saved.form.hairMedia && !saved.spec.hair_media) setHairMedia(hairDefaults.media)
+  }, [hairDefaults, saved, defaults])
 
   const appliedSetup = useRef<Record<string, unknown> | null>(null)
   useEffect(() => {
@@ -1584,6 +1602,9 @@ export function NewJob({
    * 让用户自己重填那一项，而不是把一个字符串塞进数字输入框。
    */
   function applySpecForm(s: Record<string, unknown>) {
+    if (typeof s.hair_review === 'boolean') setHairReview(s.hair_review)
+    if (typeof s.nl_by_media === 'boolean') setNlByMedia(s.nl_by_media)
+    if (s.hair_media === 'anime' || s.hair_media === 'photo' || s.hair_media === 'unknown') setHairMedia(s.hair_media)
     const str = (k: string) => (typeof s[k] === 'string' ? (s[k] as string) : null)
     const num = (k: string) =>
       typeof s[k] === 'number' && Number.isFinite(s[k]) ? (s[k] as number) : null
@@ -1769,6 +1790,9 @@ export function NewJob({
   /** 把逐项快照灌回去。键名与 state 同名，类型对不上就跳过——旧版本可能把
    *  某个字段存成字符串而现在是数字，宁可留默认值也不要往输入框里塞 NaN。 */
   function applyStateForm(f: Record<string, unknown>) {
+    if (typeof f.nlByMedia === 'boolean') setNlByMedia(f.nlByMedia)
+    if (typeof f.hairReview === 'boolean') setHairReview(f.hairReview)
+    if (f.hairMedia === 'anime' || f.hairMedia === 'photo' || f.hairMedia === 'unknown') setHairMedia(f.hairMedia)
     const putS = (k: string, set: (v: string) => void) => {
       const v = f[k]
       if (typeof v === 'string') set(v)
@@ -1992,9 +2016,9 @@ export function NewJob({
             cache: cacheOn,
             // 推理来源。API 模式不需要本地服务地址，也不吃 file:// 直传
             // （云端读不到本机路径）；地址留空时后端按来源取默认域名。
-            vlm_provider: vlmProvider,
-            api_base: vlmProvider === 'local' ? '' : apiBase.trim(),
-            api_key: vlmProvider === 'local' ? '' : apiKey,
+            vlm_provider: nlByMedia ? 'local' : vlmProvider,
+            api_base: nlByMedia || vlmProvider === 'local' ? '' : apiBase.trim(),
+            api_key: nlByMedia || vlmProvider === 'local' ? '' : apiKey,
             url: vlmUrl,
             vlm_model: vlmModel.trim(),
             output_mode: mode,
@@ -2095,6 +2119,9 @@ export function NewJob({
           // 同上：存不下顶多下次重贴。
         }
       }
+      spec.hair_review = mode !== 'nl' && hairReview
+      spec.nl_by_media = mode !== 'tag' && nlByMedia
+      spec.hair_media = hairMedia
       const snap = await api.createJob(spec)
       // 记住这次用的参数，下次打开就是这套（凭据由后端剔掉，不会落到这个文件里）。
       // 不 await：记不住顶多下次重填，任务已经起来了。
@@ -2132,7 +2159,7 @@ export function NewJob({
   const missingInput = isVlm ? !hfRepo.trim() && !inputDir.trim() : !inputDir.trim()
   // API 模式的两个必需项。缺了就在按钮上拦住，而不是让后端 400——
   // 这两项填错的报错信息（"模型不存在" / "401"）都很难和"表单没填全"区分。
-  const apiIncomplete = isApiMode && (!apiBase.trim() || !vlmModel.trim())
+  const apiIncomplete = !nlByMedia && isApiMode && (!apiBase.trim() || !vlmModel.trim())
   const backendOptions = isVlm ? BACKENDS_VLM : BACKENDS
   const keepOptions = defaults?.keep_categories ?? []
 
@@ -2142,9 +2169,6 @@ export function NewJob({
         icon={<FolderSearch size={17} />}
         eyebrow={mode === 'both' ? 'Tag + NL' : mode === 'nl' ? 'NL 打标' : 'Tag 打标'}
         title="新建打标任务"
-        description={
-          mode === 'both' ? 'tag 与 NL 同批产出' : mode === 'nl' ? '只出 .nl' : '只出 .tag'
-        }
         actions={
           <>
             <button type="button" className="lx-btn-ghost" onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}>
@@ -2191,1407 +2215,1478 @@ export function NewJob({
       )}
 
       <div className="grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_318px]">
-        <div className="flex min-w-0 flex-col gap-3.5">
-          <SectionPanel title="打标方式">
-            <ChoiceGrid
-              options={MODES}
-              value={mode}
-              onChange={changeMode}
-              className="grid-cols-3"
-              renderLabel={(v) => (v === 'tag' ? 'Tag 打标' : v === 'nl' ? 'NL 打标' : '同时')}
-              ariaLabel="打标方式"
-            />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-lx pt-3">
-              <span className="text-[11px] text-lx-dim">
-                {mode === 'tag'
-                  ? `tag 分类头（${tagBackendLabel}）· 出 .tag`
-                  : mode === 'nl'
-                    ? `${vlmModelHint} · 出 .nl`
-                    : `tag 分类头 + ${vlmModelHint} · 两个文件都出`}
-              </span>
-              <button
-                type="button"
-                className="lx-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px]"
-                onClick={onOpenModels}
-              >
-                <Layers size={12} />
-                模型管理
-              </button>
-            </div>
-          </SectionPanel>
-
-          {/* 标了必填的地方就是"不填点不动开始"。星号只给这几处，
-              满屏星号等于没有星号。 */}
-          <SectionPanel title="输入">
-            {isVlm && (
-              <div className="mb-3">
-                <ChoiceGrid
-                  options={['local', 'hf'] as const}
-                  value={inputMode}
-                  onChange={changeInputMode}
-                  className="grid-cols-2"
-                  renderLabel={(v) => (v === 'local' ? '本地文件' : '在线仓库')}
-                  ariaLabel="输入来源"
-                />
-                <p className="mt-2 text-[11px] leading-relaxed text-lx-dim">
-                  {inputMode === 'local'
-                    ? '读本机的分片或装着分片的目录'
-                    : '填 org/name，只下勾选的分片'}
-                </p>
-              </div>
-            )}
-
-            {packs.length > 0 && (
-              <SettingRow
-                label="已下载的离线包"
-                help="「分片下载」页备好的本地分片，选中后直接读本地"
-                description={`${packs.length} 个包 · ${fmtBytes(
-                  packs.reduce((acc, p) => acc + p.bytes, 0),
-                )}${packShardSel.length ? ` · 本次只打勾选的 ${packShardSel.length} 片` : ''}`}
-                icon={<HardDriveDownload size={14} />}
-              >
-                <div className="flex gap-2">
-                  <select
-                    className="lx-input"
-                    value={packSelected ? inputDir : ''}
-                    onChange={(e) => {
-                      setInputDir(e.target.value)
-                      // 换包必须清掉勾选：旧包的绝对路径在新包里不存在，
-                      // 留着会变成"勾了三片、实际一片也跑不到"。
-                      setPackShardSel([])
-                      // 选了本地包就把 HF 仓库清掉，避免"两个输入同时给"被后端拒；
-                      // 模式也要跟着回到本地，否则输入区还停在"填仓库名"那一屏。
-                      if (e.target.value) {
-                        setHfRepo('')
-                        setInputMode('local')
-                      }
-                    }}
-                  >
-                    <option value="">不使用（走下面的仓库 / 本地路径）</option>
-                    {packs.map((p) => (
-                      <option key={p.dir} value={p.dir}>
-                        {p.repo} · {p.count} 片 · {fmtBytes(p.bytes)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
-                    disabled={!currentPack}
-                    title="勾选要打的分片"
-                    onClick={() => setPackScanOpen(true)}
-                  >
-                    <ListChecks size={13} />
-                    分片管理
-                  </button>
+        <FormSections label="新建任务选项分类" sections={[
+          { id: 'input', title: '数据输入', content: (<>
+            {/* 标了必填的地方就是"不填点不动开始"。星号只给这几处，
+                满屏星号等于没有星号。 */}
+            <SectionPanel title="输入">
+              {isVlm && (
+                <div className="mb-3">
+                  <ChoiceGrid
+                    options={['local', 'hf'] as const}
+                    value={inputMode}
+                    onChange={changeInputMode}
+                    className="grid-cols-2"
+                    renderLabel={(v) => (v === 'local' ? '本地文件' : '在线仓库')}
+                    ariaLabel="输入来源"
+                  />
                 </div>
-              </SettingRow>
-            )}
+              )}
 
-            {isVlm && inputMode === 'hf' && (
-              <>
+              {packs.length > 0 && (
                 <SettingRow
-                  label="HF 团队仓库"
-                  notice={!hfRepo.trim() ? '请填写要读取的 HF 仓库，格式为 org/name。' : ''}
-                  description="org/name"
-                  icon={<Cloud size={14} />}
+                  label="已下载的离线包"
+                  description={`${packs.length} 个包 · ${fmtBytes(
+                    packs.reduce((acc, p) => acc + p.bytes, 0),
+                  )}${packShardSel.length ? ` · 已选 ${packShardSel.length} 片` : ''}`}
+                  icon={<HardDriveDownload size={14} />}
                 >
                   <div className="flex gap-2">
-                    <input
-                      className="lx-input font-mono text-xs"
-                      value={hfRepo}
-                      onChange={(e) => setHfRepo(e.target.value)}
-                      placeholder="my-team/image-shards"
-                      spellCheck={false}
-                    />
+                    <select
+                      className="lx-input"
+                      value={packSelected ? inputDir : ''}
+                      onChange={(e) => {
+                        setInputDir(e.target.value)
+                        // 换包必须清掉勾选：旧包的绝对路径在新包里不存在，
+                        // 留着会变成"勾了三片、实际一片也跑不到"。
+                        setPackShardSel([])
+                        // 选了本地包就把 HF 仓库清掉，避免"两个输入同时给"被后端拒；
+                        // 模式也要跟着回到本地，否则输入区还停在"填仓库名"那一屏。
+                        if (e.target.value) {
+                          setHfRepo('')
+                          setInputMode('local')
+                        }
+                      }}
+                    >
+                      <option value="">不使用（走下面的仓库 / 本地路径）</option>
+                      {packs.map((p) => (
+                        <option key={p.dir} value={p.dir}>
+                          {p.repo} · {p.count} 片 · {fmtBytes(p.bytes)}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      className="lx-btn-ghost shrink-0 px-3"
-                      disabled={!hfRepo.trim() || hfBusy}
-                      onClick={() => void loadHfFiles()}
+                      className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
+                      disabled={!currentPack}
+                      title="勾选要打的分片"
+                      onClick={() => setPackScanOpen(true)}
                     >
-                      {hfBusy ? '读取中…' : '查看文件列表'}
+                      <ListChecks size={13} />
+                      分片管理
                     </button>
                   </div>
                 </SettingRow>
+              )}
 
-                {hfRepo.trim() !== '' && (
-                  <>
-                    <SettingRow
-                      label="访问令牌"
-                      notice={errorKind === 'hf' && error && /401|403|gated|unauthorized|forbidden|鉴权|受限/i.test(error)
-                        && !hfToken.trim() ? failureAdvice(error, 'download') : ''}
-                      // "换了仓库就不沿用"必须常驻显示，不能只放 help：用户
-                      // 明明记住过令牌、这里却要重填，不说出来他会以为存档坏了。
-                      description={
-                        savedHf && !savedHfApplies
-                          ? `已记住的令牌属于 ${savedHf.repo}，本仓库不沿用，需要重新填或勾「记住」覆盖`
-                          : undefined
-                      }
-                      help={
-                        savedHfApplies
-                          ? `已记住 ${savedHf!.token_masked}，留空即用它`
-                          : '需要 read 权限；留空 = 匿名访问（公共仓库够用）'
-                      }
-                    >
+              {isVlm && inputMode === 'hf' && (
+                <>
+                  <SettingRow
+                    label="HF 团队仓库"
+                    notice={!hfRepo.trim() ? '请填写要读取的 HF 仓库，格式为 org/name。' : ''}
+                    icon={<Cloud size={14} />}
+                  >
+                    <div className="flex gap-2">
                       <input
                         className="lx-input font-mono text-xs"
-                        type="password"
-                        value={hfToken}
-                        onChange={(e) => setHfToken(e.target.value)}
-                        placeholder={
-                          savedHfApplies ? `${savedHf!.token_masked}（已记住）` : 'hf_...'
-                        }
-                        spellCheck={false}
-                        autoComplete="off"
-                      />
-                      {/* 和 API 密钥同一个口径：默认不存，勾了才写
-                          configs/nl_api.json。存档绑仓库，换仓库要重新勾。 */}
-                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-lx-muted">
-                        <input
-                          type="checkbox"
-                          className="lx-check"
-                          checked={rememberHf}
-                          onChange={(e) => void toggleRememberHf(e.target.checked)}
-                        />
-                        记住到本机（明文存 configs/nl_api.json，仅对{' '}
-                        {hfRepo.trim() || '该仓库'} 生效）
-                      </label>
-                    </SettingRow>
-
-                    <SettingRow label="分支" help="默认 main">
-                      <input
-                        className="lx-input font-mono text-xs"
-                        value={hfRevision}
-                        onChange={(e) => setHfRevision(e.target.value)}
-                        placeholder="main"
+                        value={hfRepo}
+                        onChange={(e) => setHfRepo(e.target.value)}
+                        placeholder="my-team/image-shards"
                         spellCheck={false}
                       />
-                    </SettingRow>
-
-                    <SettingRow
-                      label="代理"
-                      help="留空用「分片下载」页的代理。支持 http / https / socks5"
-                    >
-                      <input
-                        className="lx-input font-mono text-xs"
-                        value={hfProxy}
-                        onChange={(e) => setHfProxy(e.target.value)}
-                        placeholder="http://127.0.0.1:7890"
-                        spellCheck={false}
-                        autoComplete="off"
-                      />
-                    </SettingRow>
-
-                    <SettingRow
-                      label="仓库格式"
-                      help="auto：有 parquet 走流式，否则按 tar 下到本地"
-                    >
-                      <select
-                        className="lx-input"
-                        value={hfFormat}
-                        onChange={(e) =>
-                          setHfFormat(
-                            e.target.value as 'auto' | 'parquet' | 'webdataset',
-                          )
-                        }
+                      <button
+                        type="button"
+                        className="lx-btn-ghost shrink-0 px-3"
+                        disabled={!hfRepo.trim() || hfBusy}
+                        onClick={() => void loadHfFiles()}
                       >
-                        <option value="auto">自动</option>
-                        <option value="parquet">parquet 流式（不落盘）</option>
-                        <option value="webdataset">tar 分片（落盘，打完即删）</option>
-                      </select>
-                    </SettingRow>
+                        {hfBusy ? '读取中…' : '查看文件列表'}
+                      </button>
+                    </div>
+                  </SettingRow>
 
-                    {hfFormat !== 'parquet' && (
-                      <>
-                        <SettingRow
-                          label="多线程下载"
-                          help="分片切多段并发拉取，更吃带宽"
+                  {hfRepo.trim() !== '' && (
+                    <>
+                      <SettingRow
+                        label="访问令牌"
+                        notice={errorKind === 'hf' && error && /401|403|gated|unauthorized|forbidden|鉴权|受限/i.test(error)
+                          && !hfToken.trim() ? failureAdvice(error, 'download') : ''}
+                        description={
+                          savedHf && !savedHfApplies
+                            ? `已记住令牌属于 ${savedHf.repo}，本仓库需重填或覆盖`
+                            : undefined
+                        }
+                        help={savedHfApplies ? `已记住 ${savedHf!.token_masked}，留空即用` : undefined}
+                      >
+                        <input
+                          className="lx-input font-mono text-xs"
+                          type="password"
+                          value={hfToken}
+                          onChange={(e) => setHfToken(e.target.value)}
+                          placeholder={
+                            savedHfApplies ? `${savedHf!.token_masked}（已记住）` : 'hf_...（公共仓库可留空）'
+                          }
+                          spellCheck={false}
+                          autoComplete="off"
+                        />
+                        {/* 和 API 密钥同一个口径：默认不存，勾了才写
+                            configs/nl_api.json。存档绑仓库，换仓库要重新勾。 */}
+                        <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-lx-muted">
+                          <input
+                            type="checkbox"
+                            className="lx-check"
+                            checked={rememberHf}
+                            onChange={(e) => void toggleRememberHf(e.target.checked)}
+                          />
+                          记住到本机（明文存 configs/nl_api.json，仅对 {hfRepo.trim() || '该仓库'} 生效）
+                        </label>
+                      </SettingRow>
+
+                      <SettingRow label="分支">
+                        <input
+                          className="lx-input font-mono text-xs"
+                          value={hfRevision}
+                          onChange={(e) => setHfRevision(e.target.value)}
+                          placeholder="main"
+                          spellCheck={false}
+                        />
+                      </SettingRow>
+
+                      <SettingRow
+                        label="代理"
+                        help="留空走全局代理，支持 http / https / socks5"
+                      >
+                        <input
+                          className="lx-input font-mono text-xs"
+                          value={hfProxy}
+                          onChange={(e) => setHfProxy(e.target.value)}
+                          placeholder="http://127.0.0.1:7890"
+                          spellCheck={false}
+                          autoComplete="off"
+                        />
+                      </SettingRow>
+
+                      <SettingRow label="仓库格式">
+                        <select
+                          className="lx-input"
+                          value={hfFormat}
+                          onChange={(e) =>
+                            setHfFormat(
+                              e.target.value as 'auto' | 'parquet' | 'webdataset',
+                            )
+                          }
                         >
-                          <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
-                            <input
-                              type="checkbox"
-                              className="accent-lx-accent"
-                              checked={hfMulti}
-                              onChange={(e) => setHfMulti(e.target.checked)}
-                            />
-                            启用（文件小于 16 MB 或服务端不支持 Range 时自动退回单连接）
-                          </label>
-                        </SettingRow>
-                        {hfMulti && (
+                          <option value="auto">自动</option>
+                          <option value="parquet">Parquet（流式）</option>
+                          <option value="webdataset">Tar 分片</option>
+                        </select>
+                      </SettingRow>
+
+                      {hfFormat !== 'parquet' && (
+                        <>
+                          <SettingRow label="多线程下载">
+                            <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
+                              <input
+                                type="checkbox"
+                                className="accent-lx-accent"
+                                checked={hfMulti}
+                                onChange={(e) => setHfMulti(e.target.checked)}
+                              />
+                              启用（不支持 Range 时自动回退单连接）
+                            </label>
+                          </SettingRow>
+                          {hfMulti && (
+                            <SettingRow
+                              label="并发线程数"
+                              help="单分片连接数，建议 4~8"
+                            >
+                              <input
+                                type="number"
+                                className="lx-input font-mono tabular-nums"
+                                min={2}
+                                max={16}
+                                value={hfConns}
+                                onChange={(e) =>
+                                  setHfConns(
+                                    Math.max(2, Math.min(16, Number(e.target.value) || 2)),
+                                  )
+                                }
+                              />
+                            </SettingRow>
+                          )}
                           <SettingRow
-                            label="并发线程数"
-                            help="单个分片的连接数，4~8 条足够；再多只是抢同一份带宽"
+                            label="预取分片"
+                            help="0 = 串行"
                           >
                             <input
                               type="number"
                               className="lx-input font-mono tabular-nums"
-                              min={2}
-                              max={16}
-                              value={hfConns}
+                              min={0}
+                              max={8}
+                              value={hfPrefetch}
                               onChange={(e) =>
-                                setHfConns(
-                                  Math.max(2, Math.min(16, Number(e.target.value) || 2)),
+                                setHfPrefetch(
+                                  Math.max(0, Math.min(8, Number(e.target.value) || 0)),
                                 )
                               }
                             />
                           </SettingRow>
-                        )}
-                        <SettingRow
-                          label="预取分片"
-                          help="提前下载下几片，与打标并行；0 = 串行"
-                        >
-                          <input
-                            type="number"
-                            className="lx-input font-mono tabular-nums"
-                            min={0}
-                            max={8}
-                            value={hfPrefetch}
-                            onChange={(e) =>
-                              setHfPrefetch(
-                                Math.max(0, Math.min(8, Number(e.target.value) || 0)),
-                              )
+                          <SettingRow
+                            label="分片缓存目录"
+                            description={
+                              cacheSameAsOut
+                                ? '将缓存至产物目录同盘的 hf-cache'
+                                : cachePath
+                                  ? `实际：${cachePath}`
+                                  : undefined
                             }
-                          />
-                        </SettingRow>
-                        <SettingRow
-                          label="分片缓存目录"
-                          help="留空 = run/hf-cache（与「分片下载」页共用缓存，提前下好的片直接命中）"
-                          description={
-                            cacheSameAsOut
-                              ? '与产物目录同盘：建在产物目录的父目录下（hf-cache）'
-                              : cachePath
-                                ? `实际：${cachePath}`
-                                : undefined
-                          }
-                        >
-                          <div className="flex flex-col gap-2">
-                            <div className="flex gap-2">
-                              <input
-                                className="lx-input font-mono text-xs"
-                                value={cacheSameAsOut ? '' : hfCache}
-                                onChange={(e) => setHfCache(e.target.value)}
-                                placeholder={cacheSameAsOut ? '（跟随产物目录）' : 'run/hf-cache'}
-                                spellCheck={false}
-                                disabled={cacheSameAsOut}
-                              />
-                              <button
-                                type="button"
-                                className="lx-btn-ghost shrink-0 px-3"
-                                disabled={cacheSameAsOut}
-                                onClick={() => folder.pick(hfCache || outDir || undefined, setHfCache)}
-                              >
-                                浏览
-                              </button>
-                            </div>
-                            <label className="flex cursor-pointer items-center gap-2 text-[11px] text-lx-secondary">
-                              <input
-                                type="checkbox"
-                                className="accent-lx-accent"
-                                checked={cacheSameAsOut}
-                                onChange={(e) => setHfCache(e.target.checked ? '@out' : '')}
-                              />
-                              与产物目录同盘（只填一个目录：缓存放进那块盘的 hf-cache，不进产物目录）
-                            </label>
-                          </div>
-                        </SettingRow>
-                        <SettingRow
-                          label="磁盘余量（GB）"
-                          help="0 = 自动（最大分片的 30%，不少于 2 GB）；不够就暂停下载"
-                          description={
-                            diskFree === null
-                              ? undefined
-                              : `缓存盘剩余 ${(diskFree / 1024 ** 3).toFixed(1)} GB`
-                          }
-                        >
-                          <input
-                            type="number"
-                            className="lx-input font-mono tabular-nums"
-                            min={0}
-                            step={1}
-                            value={hfReserveGb || ''}
-                            placeholder="0"
-                            onChange={(e) =>
-                              setHfReserveGb(Math.max(0, Number(e.target.value) || 0))
-                            }
-                          />
-                        </SettingRow>
-                      </>
-                    )}
-
-                    {hfAvailable !== null && (
-                      <SettingRow
-                        label="文件"
-                        description={
-                          hfFiles.length
-                            ? `只处理勾选的 ${hfFiles.length} / ${hfAvailable.length} 个分片`
-                            : `不勾 = 处理全部 ${hfAvailable.length} 个分片`
-                        }
-                      >
-                        {hfAvailable.length === 0 ? (
-                          <p className="text-xs text-lx-warning">
-                            {hfFormat === 'parquet'
-                              ? '仓库里没有 *.parquet 分片。'
-                              : hfFormat === 'webdataset'
-                                ? '仓库里没有 *.tar 分片。'
-                                : '仓库里没有 *.parquet 也没有 *.tar 分片。'}
-                          </p>
-                        ) : (
-                          <div className="lx-sheet-inset max-h-44 space-y-1 overflow-y-auto p-2">
-                            {hfAvailable.map((f) => (
-                              <label
-                                key={f}
-                                className="flex cursor-pointer items-center gap-2 rounded-lx-sm px-1.5 py-1 font-mono text-[11px] hover:bg-lx-accent-subtle"
-                              >
+                          >
+                            <div className="flex flex-col gap-2">
+                              <div className="flex gap-2">
+                                <input
+                                  className="lx-input font-mono text-xs"
+                                  value={cacheSameAsOut ? '' : hfCache}
+                                  onChange={(e) => setHfCache(e.target.value)}
+                                  placeholder={cacheSameAsOut ? '（跟随产物目录）' : 'run/hf-cache'}
+                                  spellCheck={false}
+                                  disabled={cacheSameAsOut}
+                                />
+                                <button
+                                  type="button"
+                                  className="lx-btn-ghost shrink-0 px-3"
+                                  disabled={cacheSameAsOut}
+                                  onClick={() => folder.pick(hfCache || outDir || undefined, setHfCache)}
+                                >
+                                  浏览
+                                </button>
+                              </div>
+                              <label className="flex cursor-pointer items-center gap-2 text-[11px] text-lx-secondary">
                                 <input
                                   type="checkbox"
-                                  checked={hfFiles.includes(f)}
-                                  onChange={() => toggleHfFile(f)}
                                   className="accent-lx-accent"
+                                  checked={cacheSameAsOut}
+                                  onChange={(e) => setHfCache(e.target.checked ? '@out' : '')}
                                 />
-                                <span className="min-w-0 flex-1 truncate text-lx-secondary" title={f}>
-                                  {f}
-                                </span>
+                                缓存与输出同盘（hf-cache）
                               </label>
-                            ))}
-                          </div>
-                        )}
-                      </SettingRow>
+                            </div>
+                          </SettingRow>
+                          <SettingRow
+                            label="磁盘余量（GB）"
+                            help="0 = 自动（最大分片 30%，不少于 2 GB）"
+                            description={
+                              diskFree === null
+                                ? undefined
+                                : `缓存盘剩余 ${(diskFree / 1024 ** 3).toFixed(1)} GB`
+                            }
+                          >
+                            <input
+                              type="number"
+                              className="lx-input font-mono tabular-nums"
+                              min={0}
+                              step={1}
+                              value={hfReserveGb || ''}
+                              placeholder="0"
+                              onChange={(e) =>
+                                setHfReserveGb(Math.max(0, Number(e.target.value) || 0))
+                              }
+                            />
+                          </SettingRow>
+                        </>
+                      )}
+
+                      {hfAvailable !== null && (
+                        <SettingRow
+                          label="文件"
+                          description={
+                            hfFiles.length
+                              ? `只处理勾选的 ${hfFiles.length} / ${hfAvailable.length} 个分片`
+                              : `不勾 = 处理全部 ${hfAvailable.length} 个分片`
+                          }
+                        >
+                          {hfAvailable.length === 0 ? (
+                            <p className="text-xs text-lx-warning">
+                              {hfFormat === 'parquet'
+                                ? '仓库里没有 *.parquet 分片。'
+                                : hfFormat === 'webdataset'
+                                  ? '仓库里没有 *.tar 分片。'
+                                  : '仓库里没有 *.parquet 也没有 *.tar 分片。'}
+                            </p>
+                          ) : (
+                            <div className="lx-sheet-inset max-h-44 space-y-1 overflow-y-auto p-2">
+                              {hfAvailable.map((f) => (
+                                <label
+                                  key={f}
+                                  className="flex cursor-pointer items-center gap-2 rounded-lx-sm px-1.5 py-1 font-mono text-[11px] hover:bg-lx-accent-subtle"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={hfFiles.includes(f)}
+                                    onChange={() => toggleHfFile(f)}
+                                    className="accent-lx-accent"
+                                  />
+                                  <span className="min-w-0 flex-1 truncate text-lx-secondary" title={f}>
+                                    {f}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </SettingRow>
+                      )}
+                    </>
+                  )}
+
+                </>
+              )}
+
+              {isVlm && inputMode === 'local' && (
+                <>
+                  <SettingRow
+                    label="本地分片"
+                    notice={!hfRepo.trim() && !inputDir.trim() ? '请选择本地分片文件或存放分片的目录。' : ''}
+                    icon={<HardDrive size={14} />}
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        className="lx-input"
+                        value={inputDir}
+                        onChange={(e) => setInputDir(e.target.value)}
+                        placeholder="D:\shards\pack-00000.parquet"
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="lx-btn-ghost shrink-0 px-3"
+                        onClick={() =>
+                          folder.pick(inputDir || defaults?.models_dir, setInputDir, ['parquet'])
+                        }
+                      >
+                        浏览
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-lx-muted underline-offset-2 hover:text-lx-secondary hover:underline"
+                      onClick={() => setAssetsOpen(true)}
+                    >
+                      <Layers size={11} />
+                      查看本机已打包的 parquet（带行数）
+                    </button>
+                    {/* 不阻断，只提醒：目录也可能装的是分片文件，凭路径判断不了。
+                        但"直接选图片目录"这条死路必须提前说出来。 */}
+                    {inputDir.trim() !== '' && !looksLikeShard(inputDir) && (
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-lx-warning">
+                      这不像分片。散图目录不会被打标，先去「数据打包」页封包。
+                      </p>
                     )}
-                  </>
-                )}
+                  </SettingRow>
+                </>
+              )}
 
-              </>
-            )}
-
-            {isVlm && inputMode === 'local' && (
-              <>
+              {!isVlm && (
                 <SettingRow
-                  label="本地分片"
-                  notice={!hfRepo.trim() && !inputDir.trim() ? '请选择本地分片文件或存放分片的目录。' : ''}
-                  help="分片文件或存放分片的目录"
-                  icon={<HardDrive size={14} />}
+                  label="输入路径"
+                  notice={!inputDir.trim() ? '请选择素材目录或素材包。' : ''}
+                  required
+                  description={
+                    scan
+                      ? `${fmtCount(scan.images)} 张图${scan.zips ? ` · ${scan.zips} 个素材包` : ''}${
+                          recursive && includeZips ? '（含子目录与包内）' : ''
+                        }`
+                      : undefined
+                  }
+                  icon={<FolderOpen size={14} />}
                 >
                   <div className="flex gap-2">
                     <input
                       className="lx-input"
                       value={inputDir}
                       onChange={(e) => setInputDir(e.target.value)}
-                      placeholder="D:\shards\pack-00000.parquet"
+                      placeholder="D:\datasets\my-images 或 D:\datasets\shard-0001.tar"
                       spellCheck={false}
                     />
                     <button
                       type="button"
                       className="lx-btn-ghost shrink-0 px-3"
-                      onClick={() =>
-                        folder.pick(inputDir || defaults?.models_dir, setInputDir, ['parquet'])
-                      }
+                      onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}
                     >
                       浏览
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-lx-muted underline-offset-2 hover:text-lx-secondary hover:underline"
-                    onClick={() => setAssetsOpen(true)}
-                  >
-                    <Layers size={11} />
-                    查看本机已打包的 parquet（带行数）
-                  </button>
-                  {/* 不阻断，只提醒：目录也可能装的是分片文件，凭路径判断不了。
-                      但"直接选图片目录"这条死路必须提前说出来。 */}
-                  {inputDir.trim() !== '' && !looksLikeShard(inputDir) && (
-                    <p className="mt-1.5 text-[11px] leading-relaxed text-lx-warning">
-                    这不像分片。散图目录不会被打标，先去「数据打包」页封包。
-                    </p>
-                  )}
                 </SettingRow>
-              </>
-            )}
+              )}
 
-            {!isVlm && (
-              <SettingRow
-                label="输入路径"
-                notice={!inputDir.trim() ? '请选择素材目录或素材包。' : ''}
-                required
+              {!isVlm && (
+                <>
+                  <SettingRow label="扫描范围">
+                    <div className="space-y-2">
+                      <ToggleRow checked={recursive} onChange={setRecursive} label="包含子目录" />
+                      <ToggleRow checked={includeZips} onChange={setIncludeZips} label="读取包内图片（.zip / .tar）" />
+                      <ToggleRow checked={includeLoose} onChange={setIncludeLoose} label="包含散图" />
+                    </div>
+                  </SettingRow>
+                </>
+              )}
+
+              <SettingRow label="只跑前 N 张">
+                <input
+                  type="number"
+                  className="lx-input font-mono tabular-nums"
+                  min={0}
+                  value={limit || ''}
+                  placeholder="不限"
+                  onChange={(e) => setLimit(Math.max(0, Number(e.target.value) || 0))}
+                />
+              </SettingRow>
+
+              <SettingRow label="强制重打">
+                <ToggleRow checked={force} onChange={setForce} label="忽略已有产物，全部重算" />
+              </SettingRow>
+            </SectionPanel>
+          </>) },
+          { id: 'content', title: '打标内容', content: (<>
+            <SectionPanel title="打标方式">
+              <ChoiceGrid
+                options={MODES}
+                value={mode}
+                onChange={changeMode}
+                className="grid-cols-3"
+                renderLabel={(v) => (v === 'tag' ? '标签打标' : v === 'nl' ? '自然语言描述' : '同时生成')}
+                ariaLabel="打标方式"
+              />
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-lx pt-3">
+                <span className="text-[11px] text-lx-dim">
+                  {mode === 'tag'
+                    ? `tag 分类头（${tagBackendLabel}）· 出 .tag`
+                    : mode === 'nl'
+                      ? `${vlmModelHint} · 出 .nl`
+                      : `tag 分类头 + ${vlmModelHint} · 两个文件都出`}
+                </span>
+                <button
+                  type="button"
+                  className="lx-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px]"
+                  onClick={onOpenModels}
+                >
+                  <Layers size={12} />
+                  模型管理
+                </button>
+              </div>
+            </SectionPanel>
+
+            {<SectionPanel title="发色与描述流程" description="复核冲突进入「冲突与决策」">
+              {mode !== 'nl' && <ToggleRow checked={hairReview} onChange={setHairReview} label="复核发色并更新标签" />}
+              {mode !== 'tag' && <ToggleRow checked={nlByMedia} onChange={setNlByMedia} label="描述使用动漫 Torii / 真人 Qwen" />}
+              {(hairReview || nlByMedia) && <SettingRow label="数据类型"><select aria-label="发色复核数据类型" className="lx-input text-xs" value={hairMedia} onChange={(e) => setHairMedia(e.target.value as typeof hairMedia)}><option value="anime">动漫 · Torii</option><option value="photo">真人 · Qwen</option><option value="unknown">混合 / 未知 · 逐图自动</option></select></SettingRow>}
+              {nlByMedia && hairMedia !== 'photo' && <p className="text-xs text-lx-muted">Torii 模式下自定义提示词与中文比例不生效。</p>}
+            </SectionPanel>}
+          </>) },
+          { id: 'models', title: '模型与规则', content: (<>
+            {isVlm && nlByMedia && <HairSettingsPanel captionMedia={hairMedia} />}
+            {isVlm && nlByMedia && hairMedia !== 'photo' && <SettingRow label="Torii 并发"
+              help="native 支持 1~256，llama.cpp 固定 1 槽">
+              <ConcurrencyControl value={concurrency} onChange={setConcurrency} />
+            </SettingRow>}
+            {hasTag && (
+              <SectionPanel
+                title="Tag 模型"
                 description={
-                  scan
-                    ? `${fmtCount(scan.images)} 张图${scan.zips ? ` · ${scan.zips} 个素材包` : ''}${
-                        recursive && includeZips ? '（含子目录与包内）' : ''
-                      }`
-                    : undefined
+                  isVlm && backend === 'none' ? 'tag 由 VLM 生成' : undefined
                 }
-                help="目录，或单个素材包"
-                icon={<FolderOpen size={14} />}
               >
+                <SettingRow
+                  label="后端"
+                  help={isVlm ? 'none = 由 VLM 出 tag' : undefined}
+                >
+                  <select
+                    className="lx-select"
+                    value={backend}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      setBackend(next)
+                      // 预设模型是按后端分组的：切后端时把不属于新后端的选中项
+                      // 退回「配置默认」，否则会把上一个后端的仓库名喂给新后端。
+                      const owner = backendOfRepo(modelRepo)
+                      if (owner && owner !== next) setModelRepo('')
+                      // ★权重目录也是按后端分的（models/wd-eva02、models/pixai…），
+                      //   跟着仓库名一起切走。留着一个指向旧后端目录的路径，新后端
+                      //   要么加载失败，要么悄悄退回联网——正是"下好了还一直载入"。
+                      const preset = defaults?.models_dir
+                      if (preset && next !== 'none') setModelDir(`${preset}\\${next}`)
+                    }}
+                  >
+                    {backendOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+
+              <SettingRow
+                label="阈值"
+                icon={<Gauge size={14} />}
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    className="lx-slider"
+                    min={0.05}
+                    max={0.95}
+                    step={0.01}
+                    value={threshold}
+                    onChange={(e) => setThreshold(Number(e.target.value))}
+                    aria-label="阈值"
+                  />
+                  <span className="w-12 shrink-0 text-right font-mono text-sm tabular-nums text-lx">
+                    {threshold.toFixed(2)}
+                  </span>
+                </div>
+              </SettingRow>
+
+              {keepOptions.length > 0 && (
+                <SettingRow
+                  label="保留类别"
+                  help="不勾则沿用配置默认"
+                >
+                  <div className="flex flex-wrap gap-1.5">
+                    {keepOptions.map((c) => {
+                      const active = keepCategories.includes(c)
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => toggleKeep(c)}
+                          aria-pressed={active}
+                          className={`rounded-lx-sm border px-2 py-1 font-mono text-[11px] transition-colors ${
+                            active
+                              ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
+                              : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </SettingRow>
+              )}
+
+              {keepOptions.length > 0 && (
+                <details className="pt-1">
+                  <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wide text-lx-muted hover:text-lx-secondary">
+                    按类别阈值
+                  </summary>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
+                    {keepOptions.map((c) => (
+                      <label key={c} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-20 shrink-0 truncate font-mono text-lx-muted" title={c}>
+                          {c}
+                        </span>
+                        <input
+                          type="number"
+                          className="lx-input px-1.5 py-1 font-mono text-[11px] tabular-nums"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={catThresholds[c] ?? ''}
+                          placeholder="默认"
+                          onChange={(e) =>
+                            setCatThresholds((prev) => ({ ...prev, [c]: e.target.value }))
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              <SettingRow
+                label="tag 模型"
+                icon={<Tags size={14} />}
+                description={
+                  isVlm && backend === 'none'
+                    ? '由 VLM 生成，不加载本地模型'
+                    : tagRepoForBackend
+                      ? `默认：${tagRepoForBackend}`
+                      : undefined
+                }
+              >
+                <div className="space-y-2">
+                  <select
+                    className="lx-select"
+                    value={tagModelCustom ? '__custom__' : modelRepo}
+                    disabled={isVlm && backend === 'none'}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === '__custom__') {
+                        setTagModelCustom(true)
+                        return
+                      }
+                      setTagModelCustom(false)
+                      setModelRepo(v)
+                      // 选了别的后端的权重就把后端一起切过去，否则会把
+                      // pixai 的仓库名喂给 wd-eva02，加载直接失败。
+                      const owner = backendOfRepo(v)
+                      if (owner) setBackend(owner)
+                    }}
+                    aria-label="tag 模型"
+                  >
+                    <option value="">
+                      配置默认{tagRepoForBackend ? `（${tagRepoForBackend}）` : '（后端内置）'}
+                    </option>
+                    {tagModelPresets.map(([key, repo]) => (
+                      <option key={key} value={repo}>
+                        {repo} · {key}
+                      </option>
+                    ))}
+                    <option value="__custom__">自定义仓库名…</option>
+                  </select>
+                  {tagModelCustom && (
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={modelRepo}
+                      onChange={(e) => setModelRepo(e.target.value)}
+                      placeholder="org/model-name"
+                      spellCheck={false}
+                      aria-label="自定义 tag 模型仓库"
+                    />
+                  )}
+                </div>
+              </SettingRow>
+
+              <SettingRow
+                label="权重目录"
+                description={defaults?.models_dir || undefined}
+                help="留空由 transformers 自动查找缓存"
+              >
+                {/* 清空按钮是必要的：现在 pixai 也认这个字段，而多数人是从
+                    wd-eva02 切过来的，输入框里还留着上一条路径。不说明白的话，
+                    用户会以为"清空 = 用默认"，实际是"用旧后端那个目录"。 */}
                 <div className="flex gap-2">
                   <input
-                    className="lx-input"
-                    value={inputDir}
-                    onChange={(e) => setInputDir(e.target.value)}
-                    placeholder="D:\datasets\my-images 或 D:\datasets\shard-0001.tar"
+                    className="lx-input font-mono text-xs"
+                    value={modelDir}
+                    onChange={(e) => setModelDir(e.target.value)}
+                    placeholder={`${defaults?.models_dir ?? 'models'}\\${backend === 'none' ? 'wd-eva02' : backend}`}
                     spellCheck={false}
                   />
                   <button
                     type="button"
                     className="lx-btn-ghost shrink-0 px-3"
-                    onClick={() => folder.pick(inputDir || defaults?.models_dir, setInputDir)}
+                    onClick={() => folder.pick(modelDir || defaults?.models_dir, setModelDir)}
                   >
                     浏览
                   </button>
+                  {modelDir && (
+                    <button
+                      type="button"
+                      className="lx-btn-ghost shrink-0 px-2 text-[11px]"
+                      onClick={() => setModelDir('')}
+                    >
+                      清空
+                    </button>
+                  )}
                 </div>
               </SettingRow>
+              </SectionPanel>
             )}
+            {isVlm && !nlByMedia && (
+              <SectionPanel
+                title="NL 模型"
+                trailing={
+                  // API 模式没有"本机服务状态"可言：既没有进程也没有指纹，
+                  // 如实显示来源，别把本机服务的状态芯片挂在外部 API 上。
+                  isApiMode ? (
+                    <StatusChip tone="neutral">{providerLabel(vlmProvider)}</StatusChip>
+                  ) : (
+                    <StatusChip
+                      tone={
+                        vllm?.status === 'ready'
+                          ? 'success'
+                          : vllm?.status === 'failed'
+                            ? 'danger'
+                            : vllm?.status === 'starting' || vllm?.status === 'stopping'
+                              ? 'warning'
+                              : 'neutral'
+                      }
+                    >
+                      {vllmStatusLabel(vllm)}
+                    </StatusChip>
+                  )
+                }
+              >
+                {/* 推理来源放在最前面：它决定下面整块长什么样。本机/自建要起服务、
+                    有环境指纹；API 模式只填地址 + 密钥 + 模型名，什么都不用启。 */}
+                <SettingRow
+                  label="推理来源"
+                  icon={<Cloud size={14} />}
+                >
+                  <select
+                    className="lx-input"
+                    value={vlmProvider}
+                    onChange={(e) => changeProvider(e.target.value as VlmProvider)}
+                    aria-label="推理来源"
+                  >
+                    {providerList.length === 0 && (
+                      <option value="local">本机 / 自建服务</option>
+                    )}
+                    {providerList.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
 
-            <SettingRow
-              label="输出目录"
-              help={isVlm ? '分片产物目录；留空 = work/out' : '留空 = <输入名>-tags；封包时指回这里'}
-              icon={<HardDrive size={14} />}
-            >
-              <div className="flex gap-2">
-                <input
-                  className="lx-input min-w-0 flex-1 font-mono text-xs"
-                  value={outDir}
-                  onChange={(e) => setOutDir(e.target.value)}
-                  placeholder={effectiveOut || '跟随输入路径'}
-                  spellCheck={false}
-                />
-                {/* 输出目录以前只能手填。它的起点常是"输入目录旁边"，用同一个
-                    选择器挑一下比照着输入路径抄一遍再改末尾省事得多。 */}
-                <button
-                  type="button"
-                  className="lx-btn-ghost shrink-0 px-3"
-                  onClick={() =>
-                    folder.pick(outDir || inputDir || defaults?.models_dir, setOutDir)
+                {/* 本机服务整块：API 模式下不渲染，而不是灰着。里面一半字段
+                    （端口、引擎、分档、放行目录）对 API 毫无意义。 */}
+                {!isApiMode && (
+                  <>
+                <SettingRow
+                  label="本机服务"
+                  icon={<Server size={14} />}
+                  description={
+                    vllm?.status === 'failed'
+                      ? vllm.error || '启动失败（查看日志）'
+                      : vllm && !vllm.local_ok
+                        ? vllm.local_reason.split('\n')[0]
+                        : undefined
                   }
                 >
-                  浏览
-                </button>
-              </div>
-            </SettingRow>
-
-            {!isVlm && (
-              <>
-                <SettingRow label="递归扫描">
-                  <ToggleRow checked={recursive} onChange={setRecursive} label="包含子目录" />
-                </SettingRow>
-
-                <SettingRow label="读取包内图片">
-                  <ToggleRow
-                    checked={includeZips}
-                    onChange={setIncludeZips}
-                    label="展开 .zip / .tar"
-                  />
-                </SettingRow>
-
-                <SettingRow label="读取散图">
-                  <ToggleRow checked={includeLoose} onChange={setIncludeLoose} label="目录里直接放的图也算" />
-                </SettingRow>
-              </>
-            )}
-
-            <SettingRow label="忽略已有产物" help="默认断点续跑；打开后全部重算">
-              <ToggleRow checked={force} onChange={setForce} label="强制重打" />
-            </SettingRow>
-          </SectionPanel>
-
-          {isVlm && (
-            <SectionPanel
-              title="NL 模型"
-              trailing={
-                // API 模式没有"本机服务状态"可言：既没有进程也没有指纹，
-                // 如实显示来源，别把本机服务的状态芯片挂在外部 API 上。
-                isApiMode ? (
-                  <StatusChip tone="neutral">{providerLabel(vlmProvider)}</StatusChip>
-                ) : (
-                  <StatusChip
-                    tone={
-                      vllm?.status === 'ready'
-                        ? 'success'
-                        : vllm?.status === 'failed'
-                          ? 'danger'
-                          : vllm?.status === 'starting' || vllm?.status === 'stopping'
-                            ? 'warning'
-                            : 'neutral'
-                    }
-                  >
-                    {vllmStatusLabel(vllm)}
-                  </StatusChip>
-                )
-              }
-            >
-              {/* 推理来源放在最前面：它决定下面整块长什么样。本机/自建要起服务、
-                  有环境指纹；API 模式只填地址 + 密钥 + 模型名，什么都不用启。 */}
-              <SettingRow
-                label="推理来源"
-                icon={<Cloud size={14} />}
-                help="本机/自建 = 本地起服务；API = 外部接口，不加载权重"
-              >
-                <select
-                  className="lx-input"
-                  value={vlmProvider}
-                  onChange={(e) => changeProvider(e.target.value as VlmProvider)}
-                  aria-label="推理来源"
-                >
-                  {providerList.length === 0 && (
-                    <option value="local">本机 / 自建服务</option>
-                  )}
-                  {providerList.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </SettingRow>
-
-              {/* 本机服务整块：API 模式下不渲染，而不是灰着。里面一半字段
-                  （端口、引擎、分档、放行目录）对 API 毫无意义。 */}
-              {!isApiMode && (
-                <>
-              <SettingRow
-                label="本机服务"
-                help="先启动服务，状态变「就绪」再提交"
-                icon={<Server size={14} />}
-                description={
-                  vllm?.status === 'failed'
-                    ? vllm.error || '启动失败（日志里通常有原因）'
-                    : vllm && !vllm.local_ok
-                      ? vllm.local_reason.split('\n')[0]
-                      : undefined
-                }
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="number"
-                    className="lx-input w-24 font-mono tabular-nums"
-                    min={1024}
-                    max={65535}
-                    value={vllmPort}
-                    disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
-                    onChange={(e) =>
-                      setVllmPort(Math.min(65535, Math.max(1024, Number(e.target.value) || 8000)))
-                    }
-                    aria-label="服务端口"
-                  />
-                  {vllm?.status === 'starting' || vllm?.status === 'ready' ? (
-                    <button
-                      type="button"
-                      className="lx-btn-ghost inline-flex items-center gap-1.5 px-3"
-                      disabled={vllmBusy}
-                      onClick={() => void stopVllm()}
-                    >
-                      <Square size={12} />
-                      {vllmBusy ? '停止中…' : '停止服务'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="lx-btn-ghost inline-flex items-center gap-1.5 px-3"
-                      disabled={vllmBusy || capOk === false}
-                      title={capOk === false ? capReason : undefined}
-                      onClick={() => void startVllm()}
-                    >
-                      <Play size={12} />
-                      {vllmBusy ? '启动中…' : '启动服务'}
-                    </button>
-                  )}
-                  {vllm?.pid != null && (
-                    <span className="font-mono text-[11px] text-lx-dim">pid {vllm.pid}</span>
-                  )}
-                </div>
-              </SettingRow>
-
-              {/* 引擎决定"这台机器到底能不能起"。Windows 原生只有 llama.cpp
-                  能用（vLLM 官方只有 Linux 版，要 WSL2）；两者产出的指纹不同，
-                  换引擎等于换一代数据，所以放在最前面、且起了服务就锁住。 */}
-              <SettingRow
-                label="引擎"
-                help="Windows 原生只能选 llama.cpp；vLLM 需要 Linux / WSL2"
-              >
-                <select
-                  className="lx-select"
-                  value={vllmEngine}
-                  disabled={vllmLocked}
-                  onChange={(e) => setVllmEngine(e.target.value)}
-                  aria-label="推理引擎"
-                >
-                  <option value="vllm">vLLM（Linux / WSL2）</option>
-                  <option value="llamacpp">llama.cpp（Windows 原生）</option>
-                  <option value="native">lulynx 专用（实验）</option>
-                </select>
-              </SettingRow>
-
-              {/* llama-server 不是 pip 包：找不到时直接给安装入口，
-                  否则「启动服务」只会弹一句让人去命令行的报错。 */}
-              {vllmEngine === 'llamacpp' && (
-                <LlamaSetup onInstalled={() => setCapTick((n) => n + 1)} />
-              )}
-              {vllmEngine === 'native' && <SettingRow label="NL 计算设备">
-                <select className="lx-select" value={vllmDevice} disabled={vllmLocked}
-                  onChange={(e) => setVllmDevice(e.target.value)} aria-label="专用引擎设备">
-                  <option value="auto">GPU 优先（自动）</option><option value="cpu">CPU</option>
-                  {(defaults?.devices || []).filter((d) => d.startsWith('cuda:')).map((d) =>
-                    <option key={d} value={d}>{d}</option>)}
-                </select>
-              </SettingRow>}
-
-              {/* 多卡：一台机器插了多张卡时，一卡一进程各打各的。
-                  放在「引擎」下面是因为它复用同一个引擎选择——换引擎等于
-                  换一代指纹，不能两块面板各写各的。 */}
-              <MultiGpuPanel
-                engine={vllmEngine}
-                enabled={multiGpu}
-                onEnabledChange={setMultiGpu}
-                perCardSeqs={perCardSeqs}
-                onPerCardSeqsChange={setPerCardSeqs}
-              />
-
-              {/* 换权重是最常被问的"在哪儿换模型"。放在这里是因为它只对
-                  本机拉起的服务有效——远程服务的模型由那台机器决定。 */}
-              <SettingRow
-                label="模型"
-                icon={<Boxes size={14} />}
-                // 一列卡片（每条要放名称、状态和一个「下载 / 去量化」按钮），
-                // 塞进右侧那 260~360px 的窄列会全部折行
-                wide
-                help="留空按显存自动选；灰掉的是权重还没就绪"
-                description={
-                  vllmLocked
-                    ? '服务运行中：换模型要先停止服务。'
-                    : activePlan && !activePlan.ok
-                      ? `这组参数解析不了：${activePlan.error}`
-                      : activePlan && activePlan.ok
-                        ? `${vllmLocked ? '正在跑' : '将落'} ${activePlan.tier} 档 · ${activePlan.model} · ${activePlan.precision}${
-                            // 意图与能力不一致时必须显式说出来：选了 W4A16 但
-                            // 没有量化权重，服务实际是按 BF16 加载的。
-                            activePlan.precision === 'w4a16' && !activePlan.weight_quantized
-                              ? ' → BF16（缺量化权重）'
-                              : ''
-                          } · 上下文 ${activePlan.max_model_len}${
-                            // llama.cpp 的并发是槽位（-np）。这里的 max_num_seqs
-                            // 只是分档表按 vLLM 口径写的数，llama-server 一个字节
-                            // 都不吃——照它显示等于告诉人一个假数。
-                            vllmEngine === 'llamacpp'
-                              ? slotPlan
-                                ? ` · 槽位 ${slotPlan.slots}`
-                                : ''
-                              : ` · 默认并发 ${activePlan.max_num_seqs}`
-                          }${
-                            // 选项里挑的是"配置里有这号模型"，不代表权重已经在盘上。
-                            // 细节（缺哪个文件、跳转按钮）在下面那条提示里。
-                            weightsMissing ? ' · 权重未下载' : ''
-                          }`
-                        : undefined
-                }
-              >
-                {/* 不用 <select>：原生 option 放不了按钮，而"这套没下 / 没压"
-                    的每一条都得带一个能点的出口（去下载 / 去量化）。灰色行仍然
-                    保留，但右侧那个按钮是活的——置灰只是说"现在选不了"。 */}
-                <div className="flex flex-col gap-1.5" aria-label="VLM 权重">
-                  <button
-                    type="button"
-                    disabled={vllmLocked}
-                    onClick={() => {
-                      setVllmModelKey('')
-                      setBlockedPrecision('')
-                    }}
-                    className={`rounded-lx-sm border px-2.5 py-1.5 text-left text-[12.5px] ${
-                      vllmModelKey === ''
-                        ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
-                        : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
-                    } ${vllmLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-                  >
-                    {/* 把落档结果写进去：默认口径就是破限版，但"自动"两个字
-                        看不出会加载哪套权重，用户会以为还得自己挑一次。 */}
-                    {activePlan && activePlan.ok
-                      ? `自动（按显存落档 → ${activePlan.model}）`
-                      : '自动（按显存落档）'}
-                  </button>
-
-                  {vllmModels.map((m) => {
-                    const active = m.key === vllmModelKey
-                    const usable = modelUsable(m)
-                    const needsQuantize = !usable && Boolean(m.exists && m.raw_ready)
-                    return (
-                      <div
-                        key={m.key}
-                        className={`flex items-center gap-2 rounded-lx-sm border px-2.5 py-1.5 ${
-                          active
-                            ? 'border-lx-accent bg-lx-accent-subtle'
-                            : 'border-lx bg-lx-surface-raised'
-                        } ${usable ? '' : 'opacity-60'}`}
-                      >
-                        <button
-                          type="button"
-                          disabled={vllmLocked || !usable}
-                          title={usable ? undefined : '这套权重现在还加载不了：先下载 / 先本地量化'}
-                          onClick={() => {
-                            setVllmModelKey(m.key)
-                            setBlockedPrecision('')
-                          }}
-                          className={`min-w-0 flex-1 text-left ${
-                            vllmLocked || !usable ? 'cursor-not-allowed' : 'cursor-pointer'
-                          }`}
-                        >
-                          <span
-                            className={`block truncate text-[12.5px] ${
-                              usable ? 'text-lx' : 'text-lx-muted'
-                            }`}
-                          >
-                            {m.key}
-                            {m.note ? ` · ${m.note}` : ''}
-                          </span>
-                          <span className="mt-0.5 block truncate text-[10.5px] text-lx-dim">
-                            {basename(m.path)} · {modelStatusText(m)}
-                          </span>
-                        </button>
-                        {!usable && (
-                          <button
-                            type="button"
-                            className="lx-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-0.5 text-[11px]"
-                            title={
-                              needsQuantize
-                                ? '去「模型管理」点这条模型的「量化」，压出一档 GGUF'
-                                : '去「模型管理」下这套原始权重'
-                            }
-                            onClick={onOpenModels}
-                          >
-                            <HardDriveDownload size={11} />
-                            {needsQuantize ? '去量化' : '下载'}
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </SettingRow>
-
-              {/* 缺权重时给一个能点的出口。原来只在说明文字里提一句"去模型管理
-                  页"，而这句话埋在灰色小字里，用户点完启动才看到报错。 */}
-              {weightsMissing && (
-                <div className="flex flex-wrap items-center gap-2 rounded-lx-sm border border-lx-warning/40 bg-lx-warning/5 px-3 py-2 text-[11px] text-lx-warning">
-                  <span>
-                    {weightsError
-                      ? shortWeightError(weightsError)
-                      : picked
-                        ? `这套权重还用不了：${modelStatusText(picked)}`
-                        : '这套权重还没下好'}
-                  </span>
-                  <button
-                    type="button"
-                    className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-0.5 text-[11px]"
-                    onClick={onOpenModels}
-                  >
-                    <Layers size={11} />
-                    去模型管理
-                  </button>
-                </div>
-              )}
-
-              {/* 分档与权重是两件事：档位定 max_model_len / 默认并发 / 精度，
-                  权重定加载哪个仓库。8B 落在 low-16g 上就会上下文偏短——
-                  想让它跑得开就跟着改这里。 */}
-              <SettingRow
-                label="分档"
-                help="留空按显存自动；「自定义」则在下方高级里手填"
-              >
-
-                <select
-                  className="lx-select"
-                  value={vllmTier}
-                  disabled={vllmLocked}
-                  onChange={(e) => setVllmTier(e.target.value)}
-                  aria-label="VLM 分档"
-                >
-                  <option value="">自动（按显存）</option>
-                  {/* 三档是粗粒度：卡上留多少给 KV、能开多大窗口，用户自己更清楚 */}
-                  <option value="custom">自定义（下面「高级」里自己填）</option>
-                  {vllmTiers.map((t) => (
-                    <option key={t.name} value={t.name}>
-                      {t.name} · {t.vram_min}–{t.vram_max === 999 ? '∞' : t.vram_max}G ·{' '}
-                      {t.max_model_len} 上下文
-                      {/* 分档表里的并发是 vLLM 口径（max_num_seqs），llama.cpp
-                          的并发由槽位按显存算，照抄只会给出一个不生效的数。 */}
-                      {vllmEngine === 'vllm' ? ` · 并发 ${t.max_num_seqs}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </SettingRow>
-
-              {/* 精度覆盖分档表。只有当前引擎认的档会被列出来（详见
-                  enginePrecisions 的共享清单）；换档等于换一代数据
-                  （model_id 里带 precision），所以服务运行中锁住，必须先停止。 */}
-              <SettingRow
-                label="权重精度"
-                icon={<Gauge size={14} />}
-                help={
-                  vllmEngine === 'vllm'
-                    ? 'W4A16 需要预量化的 AWQ / GPTQ 权重'
-                    : vllmEngine === 'native' ? 'Q4 / Q5 / Q6 / Q8 使用 GGUF；FP8 / INT8 可从原始权重量化'
-                    : '每档对应一个 .gguf 文件'
-                }
-                description={
-                  vllmPrecision === 'f16'
-                    ? '完整权重 · 8B 约 15.6G'
-                    : vllmPrecision === 'q4'
-                      ? '8B 约 4.7G · 最省显存'
-                      : vllmPrecision === 'q5'
-                        ? '8B 约 5.4G · 显存与精度折中'
-                      : vllmPrecision === 'q6'
-                        ? '8B 约 6.4G · 长尾 tag 比 Q4 稳'
-                        : vllmPrecision === 'q8'
-                          ? '8B 约 8.1G · 接近原精度'
-                          : vllmPrecision === 'fp8'
-                            ? '显存约省一半 · 长尾 tag 可能少量改判'
-                            : vllmPrecision === 'w4a16'
-                              ? vllmEngine === 'native' ? '4bit 权重 · 需要已有 packed W4A16 文件' : '4bit 权重 · 没有量化权重会回退 BF16'
-                              : vllmPrecision === 'int8' ? '8bit 权重与激活 · 运行时量化'
-                              : '原精度 · 精度最稳、显存最贵'
-                }
-              >
-                <ChoiceGrid
-                  options={enginePrecisions(vllmEngine)}
-                  value={vllmPrecision}
-                  onChange={choosePrecision}
-                  className="grid-cols-3"
-                  size="sm"
-                  mono
-                  disabled={vllmLocked}
-                  ariaLabel="VLM 权重精度"
-                  renderLabel={(v) => ALL_PRECISION_LABELS[v] ?? v}
-                  // 没有对应文件的档置灰，但还能点——点了下面会说明去哪儿压。
-                  // 真设成 HTML disabled，用户只看到一个按不动的灰块。
-                  optionDisabled={(v) => !precisionUsable(v)}
-                  onBlocked={(v) => setBlockedPrecision(v)}
-                />
-              </SettingRow>
-
-              {blockedPrecisionNow && (
-                <div className="flex flex-wrap items-center gap-2 rounded-lx-sm border border-lx-warning/40 bg-lx-warning/5 px-3 py-2 text-[11px] text-lx-warning">
-                  <span>
-                    {ALL_PRECISION_LABELS[blockedPrecisionNow] ?? blockedPrecisionNow}
-                    {picked ? `（${picked.key}）` : ''} 这档还没有权重文件：在「模型管理」里
-                    点这条模型的「量化」，选中{' '}
-                    {ALL_PRECISION_LABELS[blockedPrecisionNow] ?? blockedPrecisionNow}{' '}
-                    压一份出来，之后这里就能选。
-                  </span>
-                  <button
-                    type="button"
-                    className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-0.5 text-[11px]"
-                    onClick={onOpenModels}
-                  >
-                    <Layers size={11} />
-                    去模型管理量化
-                  </button>
-                </div>
-              )}
-
-              {activePlan && activePlan.ok && activePlan.warnings.length > 0 && (
-                <details className="border-b border-lx py-2.5">
-                  <summary className="cursor-pointer select-none text-[11px] text-lx-warning hover:text-lx-secondary">
-                    模型提示（{activePlan.warnings.length} 条）
-                  </summary>
-                  <ul className="mt-1.5 space-y-1 text-[11px] leading-relaxed text-lx-muted">
-                    {activePlan.warnings.map((w) => (
-                      <li key={w} className="flex gap-1.5">
-                        <span className="shrink-0 text-lx-warning">·</span>
-                        <span>{w}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-
-              {/* 批调度：并发调大而单步 token 预算不跟上，吞吐不会涨。
-                  收在 details 里是因为默认值就够用，改它的前提是跑过 bench。 */}
-              <details className="border-b border-lx py-2.5">
-                <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
-                  批调度（并发调不动时先看这里）
-                  {/* 摘要按引擎取字段：llama.cpp 生效的是 -np，overrides 里的
-                      max_num_seqs 是分档表的数，写出来等于报一个假值。 */}
-                  {vllm?.status === 'ready' &&
-                    (vllmEngine === 'llamacpp'
-                      ? slotPlan && (
-                          <span className="ml-1.5 text-lx-dim">· 当前 {slotPlan.slots} 槽</span>
-                        )
-                      : vllmEngine === 'native' ? (
-                          <span className="ml-1.5 text-lx-dim">
-                            · 当前 {activePlan?.ok ? activePlan.max_num_seqs : vllm.overrides.slots ?? 4} 槽
-                          </span>
-                        ) : vllm.overrides.max_num_seqs != null && (
-                          <span className="ml-1.5 text-lx-dim">
-                            · 当前 seqs {vllm.overrides.max_num_seqs}
-                            {vllm.overrides.max_num_batched_tokens != null &&
-                              ` / batched ${vllm.overrides.max_num_batched_tokens}`}
-                          </span>
-                        ))}
-                </summary>
-                <div className="mt-2 space-y-2">
-                  <SettingRow
-                    label="上下文长度"
-                    help={
-                      vllmEngine === 'llamacpp'
-                        ? '0 = 分档表的值。每槽最多 3072，低于约 1400 放不下一张图'
-                        : vllmEngine === 'native' ? '0 = 默认 2048，可调整。调大占更多 KV 显存'
-                        : '0 = 分档表的值（16G 档 4096）。调大占更多显存，过大会 OOM'
-                    }
-                  >
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="number"
-                      className="lx-input w-32 font-mono tabular-nums"
-                      min={0}
-                      max={262144}
-                      step={1024}
-                      value={vllmMaxLen}
+                      className="lx-input w-24 font-mono tabular-nums"
+                      min={1024}
+                      max={65535}
+                      value={vllmPort}
                       disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
                       onChange={(e) =>
-                        setVllmMaxLen(
-                          Math.min(262144, Math.max(0, Number(e.target.value) || 0)),
-                        )
+                        setVllmPort(Math.min(65535, Math.max(1024, Number(e.target.value) || 8000)))
                       }
-                      aria-label="上下文长度"
+                      aria-label="服务端口"
                     />
-                  </SettingRow>
-                  {/* max_num_seqs 是 vLLM 的开关（--max-num-seqs）。llama-server
-                      那边对应的是 -np（槽位），传这个过去会被忽略。 */}
-                  {vllmEngine === 'vllm' && (
-                    <SettingRow
-                      label="max_num_seqs"
-                      help="0 = 分档表的值（16G 档 8）"
-                    >
-                      <input
-                        type="number"
-                        className="lx-input w-32 font-mono tabular-nums"
-                        min={0}
-                        max={512}
-                        value={vllmSeqs}
-                        disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
-                        onChange={(e) =>
-                          setVllmSeqs(Math.min(512, Math.max(0, Number(e.target.value) || 0)))
-                        }
-                        aria-label="服务端并发上限"
-                      />
-                    </SettingRow>
-                  )}
-                  {/* 只对 llama.cpp 显示：vLLM 的并发由调度器动态分配，
-                      给一个 -np 输入框等于让人以为改了，其实没生效。 */}
-                  {vllmEngine !== 'vllm' && (
-                    <SettingRow
-                      label={vllmEngine === 'native' ? '并发槽位' : '槽位（-np）'}
-                      help={
-                        vllmEngine === 'native' ? '0 = 默认 4。完成后自动补入新请求；调小可减少 KV 显存'
-                        : slotPlan
-                          ? `0 = 自动（本机给 ${slotPlan.slots_default ?? '?'}）。想给别的程序让显存就调小，调「任务并发」没用`
-                          : '0 = 自动。想给别的程序让显存就调小'
-                      }
-                    >
-                      <input
-                        type="number"
-                        className="lx-input w-32 font-mono tabular-nums"
-                        min={0}
-                        max={64}
-                        value={vllmSlots}
-                        disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
-                        onChange={(e) =>
-                          setVllmSlots(
-                            Math.min(64, Math.max(0, Math.round(Number(e.target.value) || 0))),
-                          )
-                        }
-                        aria-label={vllmEngine === 'native' ? '专用引擎并发槽位' : 'llama.cpp 槽位数'}
-                      />
-                    </SettingRow>
-                  )}
-                  {slotPlan && (
-                    <p className="text-[11px] leading-relaxed text-lx-dim">
-                      {slotPlan.slots_manual ? '手动' : '自动'} {slotPlan.slots} 槽 × 每槽{' '}
-                      {slotPlan.ctx_per_slot} 上下文 = {slotPlan.ctx_total} 总窗口，
-                      KV 约 {slotPlan.kv_total_gib} GiB
-                      {slotPlan.slots_default != null && slotPlan.slots < slotPlan.slots_default
-                        ? `（比默认省约 ${(
-                            (slotPlan.kv_per_slot_gib ?? 0) *
-                            (slotPlan.slots_default - slotPlan.slots)
-                          ).toFixed(1)} GiB）`
-                        : ''}
-                      。槽位越少越省显存，但每秒出的张数也越低。
-                    </p>
-                  )}
-                  {/* 下面四项全是 vLLM 的开关（--max-num-batched-tokens /
-                      --gpu-memory-utilization / --allowed-local-media-path）。
-                      llama-server 一个都不认：它的显存由槽位与上下文决定，
-                      图片只收 base64。照着显示等于让人白调一遍。 */}
-                  {vllmEngine === 'vllm' && (
-                    <>
-                      <SettingRow
-                        label="max_num_batched_tokens"
-                        help="0 = vLLM 默认；调大才能同时 prefill 多张图"
-                      >
-                        <input
-                          type="number"
-                          className="lx-input w-32 font-mono tabular-nums"
-                          min={0}
-                          max={262144}
-                          step={1024}
-                          value={vllmBatched}
-                          disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
-                          onChange={(e) =>
-                            setVllmBatched(
-                              Math.min(262144, Math.max(0, Number(e.target.value) || 0)),
-                            )
-                          }
-                          aria-label="服务端单步 token 预算"
-                        />
-                      </SettingRow>
-                      <SettingRow
-                        label="显存占比"
-                        help="0 = 配置值（0.88）；调太高会起不来"
-                      >
-                        <input
-                          type="number"
-                          className="lx-input w-32 font-mono tabular-nums"
-                          min={0}
-                          max={0.98}
-                          step={0.01}
-                          value={vllmGpuMem}
-                          disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
-                          onChange={(e) =>
-                            setVllmGpuMem(Math.min(0.98, Math.max(0, Number(e.target.value) || 0)))
-                          }
-                          aria-label="显存占比"
-                        />
-                      </SettingRow>
-                      <SettingRow
-                        label="file:// 放行目录"
-                        help={
-                          allowedMediaRoot
-                            ? `已放行 ${allowedMediaRoot}`
-                            : '留空 = 只收 base64；填了才能用 file:// 传图'
-                        }
-                      >
-                        <div className="flex gap-2">
-                          <input
-                            className="lx-input font-mono text-xs"
-                            value={vllmMediaRoot}
-                            disabled={vllmLocked}
-                            onChange={(e) => setVllmMediaRoot(e.target.value)}
-                            placeholder="留空 = 不收 file://"
-                            spellCheck={false}
-                          />
-                          <button
-                            type="button"
-                            className="lx-btn-ghost shrink-0 px-3"
-                            disabled={vllmLocked}
-                            onClick={() => folder.pick(vllmMediaRoot || undefined, setVllmMediaRoot)}
-                          >
-                            浏览
-                          </button>
-                        </div>
-                      </SettingRow>
-                      <p className="text-[11px] leading-relaxed text-lx-dim">
-                        改完要重启服务才生效。每张图约 576 图像 token + 400 指令 token，
-                        单步预算给到 seqs × 1024 左右才排得开。
-                      </p>
-                    </>
-                  )}
-                </div>
-              </details>
-
-              {vllmError && (
-                <ErrorBox error={vllmError} title="推理服务操作失败" nextStep={failureAdvice(vllmError, 'service')} />
-              )}
-              {vllm?.status === 'failed' && !vllmError && <FieldNotice
-                message={failureAdvice(vllm.error || vllm.log_tail.slice(-3).join('\n'), 'service')} />}
-
-              {/* 环境原因常常是好几行（"WSL2 / 换台机器"两条路），
-                  一整段塞在左栏会把表单挤乱，收起来看完整版。 */}
-              {vllm && !vllm.local_ok && vllm.local_reason.includes('\n') && (
-                <details className="border-b border-lx py-2.5">
-                  <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
-                    为什么不能在本机起服务
-                  </summary>
-                  <pre className="mt-1.5 whitespace-pre-wrap rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
-                    {vllm.local_reason}
-                  </pre>
-                </details>
-              )}
-
-              {vllm && (
-                <div className="space-y-1.5 border-b border-lx py-3 text-[11px] text-lx-muted">
-                  <div className="flex justify-between gap-2">
-                    <span>地址</span>
-                    <span className="truncate font-mono text-lx-secondary">{vllm.url || '—'}</span>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <span>环境指纹</span>
-                    <span className="truncate text-lx-secondary">
-                      {vllm.fingerprint
-                        ? `${String(vllm.fingerprint.model_id ?? '?')} · max_pixels ${
-                            vllm.fingerprint.max_pixels ?? '?'
-                          }`
-                        : '缺失（provenance 会残，重试提分辨率也不会生效）'}
-                    </span>
-                  </div>
-                  {vllm.log_tail.length > 0 && (
-                    <details className="pt-1">
-                      <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
-                        服务日志（最近 {vllm.log_tail.length} 行）
-                      </summary>
-                      <pre className="mt-1.5 max-h-56 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
-                        {vllm.log_tail.join('\n')}
-                      </pre>
-                    </details>
-                  )}
-                </div>
-              )}
-
-                </>
-              )}
-
-              {/* API 模式的两个字段只在真的走外部 API 时出现：本机模式下
-                  它们恒为空，摆着只会让人以为哪里填漏了。 */}
-              {isApiMode && (
-                <>
-                  <SettingRow
-                    label="API 地址"
-                    notice={httpUrlError(apiBase, 'API 地址')}
-                    required={isApiMode}
-                    help="留空用默认域名；自建网关填自己的地址"
-                  >
-                    <div className="flex gap-2">
-                      <input
-                        className="lx-input font-mono text-xs"
-                        value={apiBase}
-                        onChange={(e) => {
-                          setApiBase(e.target.value)
-                          setApiProbe(null)
-                        }}
-                        placeholder={providerBase(vlmProvider)}
-                        spellCheck={false}
-                      />
+                    {vllm?.status === 'starting' || vllm?.status === 'ready' ? (
                       <button
                         type="button"
-                        className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
-                        disabled={apiProbeBusy || !vlmModel.trim()}
-                        onClick={() => void probeApi()}
-                        title="发一张 8×8 的小图走一次真实请求"
+                        className="lx-btn-ghost inline-flex items-center gap-1.5 px-3"
+                        disabled={vllmBusy}
+                        onClick={() => void stopVllm()}
                       >
-                        <RefreshCw size={12} className={apiProbeBusy ? 'animate-spin' : undefined} />
-                        {apiProbeBusy ? '测试中…' : '测试连接'}
+                        <Square size={12} />
+                        {vllmBusy ? '停止中…' : '停止服务'}
                       </button>
-                    </div>
-                    {apiProbe && (
-                      <p
-                        className={`mt-1.5 text-[11px] leading-relaxed ${
-                          apiProbe.ok ? 'text-lx-success' : 'text-lx-danger'
-                        }`}
+                    ) : (
+                      <button
+                        type="button"
+                        className="lx-btn-ghost inline-flex items-center gap-1.5 px-3"
+                        disabled={vllmBusy || capOk === false}
+                        title={capOk === false ? capReason : undefined}
+                        onClick={() => void startVllm()}
                       >
-                        {apiProbe.ok
-                          ? `通 · ${apiProbe.latency_ms}ms · 入 ${apiProbe.prompt_tokens} / 出 ${apiProbe.completion_tokens} token${
-                              apiProbe.text ? ` · 回「${apiProbe.text.slice(0, 24)}」` : ''
-                            }`
-                          : apiProbe.error}
+                        <Play size={12} />
+                        {vllmBusy ? '启动中…' : '启动服务'}
+                      </button>
+                    )}
+                    {vllm?.pid != null && (
+                      <span className="font-mono text-[11px] text-lx-dim">pid {vllm.pid}</span>
+                    )}
+                  </div>
+                </SettingRow>
+
+                {/* 引擎决定"这台机器到底能不能起"。Windows 原生只有 llama.cpp
+                    能用（vLLM 官方只有 Linux 版，要 WSL2）；两者产出的指纹不同，
+                    换引擎等于换一代数据，所以放在最前面、且起了服务就锁住。 */}
+                <SettingRow
+                  label="引擎"
+                  help="Windows 原生用 llama.cpp；vLLM 需 Linux / WSL2"
+                >
+                  <select
+                    className="lx-select"
+                    value={vllmEngine}
+                    disabled={vllmLocked}
+                    onChange={(e) => setVllmEngine(e.target.value)}
+                    aria-label="推理引擎"
+                  >
+                    <option value="vllm">vLLM（Linux / WSL2）</option>
+                    <option value="llamacpp">llama.cpp（Windows 原生）</option>
+                    <option value="native">lulynx 专用（实验）</option>
+                  </select>
+                </SettingRow>
+
+                {/* llama-server 不是 pip 包：找不到时直接给安装入口，
+                    否则「启动服务」只会弹一句让人去命令行的报错。 */}
+                {vllmEngine === 'llamacpp' && (
+                  <LlamaSetup onInstalled={() => setCapTick((n) => n + 1)} />
+                )}
+                {vllmEngine === 'native' && <SettingRow label="NL 计算设备">
+                  <select className="lx-select" value={vllmDevice} disabled={vllmLocked}
+                    onChange={(e) => setVllmDevice(e.target.value)} aria-label="专用引擎设备">
+                    <option value="auto">GPU 优先（自动）</option><option value="cpu">CPU</option>
+                    {(defaults?.devices || []).filter((d) => d.startsWith('cuda:')).map((d) =>
+                      <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </SettingRow>}
+
+                {/* 多卡：一台机器插了多张卡时，一卡一进程各打各的。
+                    放在「引擎」下面是因为它复用同一个引擎选择——换引擎等于
+                    换一代指纹，不能两块面板各写各的。 */}
+                <MultiGpuPanel
+                  engine={vllmEngine}
+                  enabled={multiGpu}
+                  onEnabledChange={setMultiGpu}
+                  perCardSeqs={perCardSeqs}
+                  onPerCardSeqsChange={setPerCardSeqs}
+                />
+
+                {/* 换权重是最常被问的"在哪儿换模型"。放在这里是因为它只对
+                    本机拉起的服务有效——远程服务的模型由那台机器决定。 */}
+                <SettingRow
+                  label="模型"
+                  icon={<Boxes size={14} />}
+                  // 一列卡片（每条要放名称、状态和一个「下载 / 去量化」按钮），
+                  // 塞进右侧那 260~360px 的窄列会全部折行
+                  wide
+                  description={
+                    vllmLocked
+                      ? '服务运行中：换模型需先停止服务'
+                      : activePlan && !activePlan.ok
+                        ? activePlan.error
+                        : activePlan && activePlan.ok
+                          ? `${activePlan.tier} · ${activePlan.model} · ${activePlan.precision}${
+                              activePlan.precision === 'w4a16' && !activePlan.weight_quantized
+                                ? ' → BF16（缺量化权重）'
+                                : ''
+                            } · ctx ${activePlan.max_model_len}${
+                              vllmEngine === 'llamacpp'
+                                ? slotPlan
+                                  ? ` · ${slotPlan.slots} 槽`
+                                  : ''
+                                : ` · 并发 ${activePlan.max_num_seqs}`
+                            }${weightsMissing ? ' · 权重未下载' : ''}`
+                          : undefined
+                  }
+                >
+                  {/* 不用 <select>：原生 option 放不了按钮，而"这套没下 / 没压"
+                      的每一条都得带一个能点的出口（去下载 / 去量化）。灰色行仍然
+                      保留，但右侧那个按钮是活的——置灰只是说"现在选不了"。 */}
+                  <div className="flex flex-col gap-1.5" aria-label="VLM 权重">
+                    <button
+                      type="button"
+                      disabled={vllmLocked}
+                      onClick={() => {
+                        setVllmModelKey('')
+                        setBlockedPrecision('')
+                      }}
+                      className={`rounded-lx-sm border px-2.5 py-1.5 text-left text-[12.5px] ${
+                        vllmModelKey === ''
+                          ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
+                          : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
+                      } ${vllmLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                    >
+                      {/* 把落档结果写进去：默认口径就是破限版，但"自动"两个字
+                          看不出会加载哪套权重，用户会以为还得自己挑一次。 */}
+                      {activePlan && activePlan.ok
+                        ? `自动（按显存落档 → ${activePlan.model}）`
+                        : '自动（按显存落档）'}
+                    </button>
+
+                    {vllmModels.map((m) => {
+                      const active = m.key === vllmModelKey
+                      const usable = modelUsable(m)
+                      const needsQuantize = !usable && Boolean(m.exists && m.raw_ready)
+                      return (
+                        <div
+                          key={m.key}
+                          className={`flex items-center gap-2 rounded-lx-sm border px-2.5 py-1.5 ${
+                            active
+                              ? 'border-lx-accent bg-lx-accent-subtle'
+                              : 'border-lx bg-lx-surface-raised'
+                          } ${usable ? '' : 'opacity-60'}`}
+                        >
+                          <button
+                            type="button"
+                            disabled={vllmLocked || !usable}
+                            title={usable ? undefined : '这套权重现在还加载不了：先下载 / 先本地量化'}
+                            onClick={() => {
+                              setVllmModelKey(m.key)
+                              setBlockedPrecision('')
+                            }}
+                            className={`min-w-0 flex-1 text-left ${
+                              vllmLocked || !usable ? 'cursor-not-allowed' : 'cursor-pointer'
+                            }`}
+                          >
+                            <span
+                              className={`block truncate text-[12.5px] ${
+                                usable ? 'text-lx' : 'text-lx-muted'
+                              }`}
+                            >
+                              {m.key}
+                              {m.note ? ` · ${m.note}` : ''}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[10.5px] text-lx-dim">
+                              {basename(m.path)} · {modelStatusText(m)}
+                            </span>
+                          </button>
+                          {!usable && (
+                            <button
+                              type="button"
+                              className="lx-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-0.5 text-[11px]"
+                              title={
+                                needsQuantize
+                                  ? '去「模型管理」点这条模型的「量化」，压出一档 GGUF'
+                                  : '去「模型管理」下这套原始权重'
+                              }
+                              onClick={onOpenModels}
+                            >
+                              <HardDriveDownload size={11} />
+                              {needsQuantize ? '去量化' : '下载'}
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </SettingRow>
+
+                {/* 缺权重时给一个能点的出口。原来只在说明文字里提一句"去模型管理
+                    页"，而这句话埋在灰色小字里，用户点完启动才看到报错。 */}
+                {weightsMissing && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lx-sm border border-lx-warning/40 bg-lx-warning/5 px-3 py-2 text-[11px] text-lx-warning">
+                    <span>
+                      {weightsError
+                        ? shortWeightError(weightsError)
+                        : picked
+                          ? `这套权重还用不了：${modelStatusText(picked)}`
+                          : '这套权重还没下好'}
+                    </span>
+                    <button
+                      type="button"
+                      className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-0.5 text-[11px]"
+                      onClick={onOpenModels}
+                    >
+                      <Layers size={11} />
+                      去模型管理
+                    </button>
+                  </div>
+                )}
+
+                <SettingRow label="分档">
+                  <select
+                    className="lx-select"
+                    value={vllmTier}
+                    disabled={vllmLocked}
+                    onChange={(e) => setVllmTier(e.target.value)}
+                    aria-label="VLM 分档"
+                  >
+                    <option value="">自动（按显存）</option>
+                    <option value="custom">自定义</option>
+                    {vllmTiers.map((t) => (
+                      <option key={t.name} value={t.name}>
+                        {t.name} · {t.vram_min}–{t.vram_max === 999 ? '∞' : t.vram_max}G ·{' '}
+                        {t.max_model_len} ctx
+                        {vllmEngine === 'vllm' ? ` · 并发 ${t.max_num_seqs}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </SettingRow>
+
+                <SettingRow
+                  label="权重精度"
+                  icon={<Gauge size={14} />}
+                  help={
+                    vllmEngine === 'vllm'
+                      ? 'W4A16 需预量化权重'
+                      : vllmEngine === 'native' ? '支持 GGUF 及量化权重'
+                      : '对应 .gguf 量化文件'
+                  }
+                  description={
+                    vllmPrecision === 'f16'
+                      ? '完整权重 · 8B ~15.6G'
+                      : vllmPrecision === 'q4'
+                        ? '8B ~4.7G'
+                        : vllmPrecision === 'q5'
+                          ? '8B ~5.4G'
+                        : vllmPrecision === 'q6'
+                          ? '8B ~6.4G'
+                          : vllmPrecision === 'q8'
+                            ? '8B ~8.1G'
+                            : vllmPrecision === 'fp8'
+                              ? '显存约减半'
+                              : vllmPrecision === 'w4a16'
+                                ? vllmEngine === 'native' ? '4bit 量化权重' : '4bit（缺权重则回退 BF16）'
+                                : vllmPrecision === 'int8' ? '8bit 运行时量化'
+                                : '原精度'
+                  }
+                >
+                  <ChoiceGrid
+                    options={enginePrecisions(vllmEngine)}
+                    value={vllmPrecision}
+                    onChange={choosePrecision}
+                    className="grid-cols-3"
+                    size="sm"
+                    mono
+                    disabled={vllmLocked}
+                    ariaLabel="VLM 权重精度"
+                    renderLabel={(v) => ALL_PRECISION_LABELS[v] ?? v}
+                    // 没有对应文件的档置灰，但还能点——点了下面会说明去哪儿压。
+                    // 真设成 HTML disabled，用户只看到一个按不动的灰块。
+                    optionDisabled={(v) => !precisionUsable(v)}
+                    onBlocked={(v) => setBlockedPrecision(v)}
+                  />
+                </SettingRow>
+
+                {blockedPrecisionNow && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lx-sm border border-lx-warning/40 bg-lx-warning/5 px-3 py-2 text-[11px] text-lx-warning">
+                    <span>
+                      {ALL_PRECISION_LABELS[blockedPrecisionNow] ?? blockedPrecisionNow}
+                      {picked ? `（${picked.key}）` : ''} 这档还没有权重文件：在「模型管理」里
+                      点这条模型的「量化」，选中{' '}
+                      {ALL_PRECISION_LABELS[blockedPrecisionNow] ?? blockedPrecisionNow}{' '}
+                      压一份出来，之后这里就能选。
+                    </span>
+                    <button
+                      type="button"
+                      className="lx-btn-ghost inline-flex items-center gap-1 px-2 py-0.5 text-[11px]"
+                      onClick={onOpenModels}
+                    >
+                      <Layers size={11} />
+                      去模型管理量化
+                    </button>
+                  </div>
+                )}
+
+                {activePlan && activePlan.ok && activePlan.warnings.length > 0 && (
+                  <details className="border-b border-lx py-2.5">
+                    <summary className="cursor-pointer select-none text-[11px] text-lx-warning hover:text-lx-secondary">
+                      模型提示（{activePlan.warnings.length} 条）
+                    </summary>
+                    <ul className="mt-1.5 space-y-1 text-[11px] leading-relaxed text-lx-muted">
+                      {activePlan.warnings.map((w) => (
+                        <li key={w} className="flex gap-1.5">
+                          <span className="shrink-0 text-lx-warning">·</span>
+                          <span>{w}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+
+                <details className="border-b border-lx py-2.5">
+                  <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
+                    批调度参数
+                    {vllm?.status === 'ready' &&
+                      (vllmEngine === 'llamacpp'
+                        ? slotPlan && (
+                            <span className="ml-1.5 text-lx-dim">· 当前 {slotPlan.slots} 槽</span>
+                          )
+                        : vllmEngine === 'native' ? (
+                            <span className="ml-1.5 text-lx-dim">
+                              · 当前 {activePlan?.ok ? activePlan.max_num_seqs : vllm.overrides.slots ?? 4} 槽
+                            </span>
+                          ) : vllm.overrides.max_num_seqs != null && (
+                            <span className="ml-1.5 text-lx-dim">
+                              · 当前 seqs {vllm.overrides.max_num_seqs}
+                              {vllm.overrides.max_num_batched_tokens != null &&
+                                ` / batched ${vllm.overrides.max_num_batched_tokens}`}
+                            </span>
+                          ))}
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    <SettingRow
+                      label="上下文长度"
+                      help={
+                        vllmEngine === 'llamacpp'
+                          ? '每槽上限 3072（低于 ~1400 放不下图片）'
+                          : vllmEngine === 'native' ? '默认 2048，越大 KV 显存越高'
+                          : '沿用分档（16G 档默认 4096）'
+                      }
+                    >
+                      <input
+                        type="number"
+                        className="lx-input w-32 font-mono tabular-nums"
+                        min={0}
+                        max={262144}
+                        step={1024}
+                        value={vllmMaxLen || ''}
+                        placeholder="自动"
+                        disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                        onChange={(e) =>
+                          setVllmMaxLen(
+                            Math.min(262144, Math.max(0, Number(e.target.value) || 0)),
+                          )
+                        }
+                        aria-label="上下文长度"
+                      />
+                    </SettingRow>
+                    {vllmEngine === 'vllm' && (
+                      <SettingRow label="max_num_seqs">
+                        <input
+                          type="number"
+                          className="lx-input w-32 font-mono tabular-nums"
+                          min={0}
+                          max={512}
+                          value={vllmSeqs || ''}
+                          placeholder="自动"
+                          disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                          onChange={(e) =>
+                            setVllmSeqs(Math.min(512, Math.max(0, Number(e.target.value) || 0)))
+                          }
+                          aria-label="服务端并发上限"
+                        />
+                      </SettingRow>
+                    )}
+                    {vllmEngine !== 'vllm' && (
+                      <SettingRow
+                        label={vllmEngine === 'native' ? '并发槽位' : '槽位（-np）'}
+                      >
+                        <input
+                          type="number"
+                          className="lx-input w-32 font-mono tabular-nums"
+                          min={0}
+                          max={64}
+                          value={vllmSlots || ''}
+                          placeholder={
+                            vllmEngine === 'native'
+                              ? '默认 4'
+                              : slotPlan?.slots_default != null
+                                ? `自动 (${slotPlan.slots_default})`
+                                : '自动'
+                          }
+                          disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                          onChange={(e) =>
+                            setVllmSlots(
+                              Math.min(64, Math.max(0, Math.round(Number(e.target.value) || 0))),
+                            )
+                          }
+                          aria-label={vllmEngine === 'native' ? '专用引擎并发槽位' : 'llama.cpp 槽位数'}
+                        />
+                      </SettingRow>
+                    )}
+                    {slotPlan && (
+                      <p className="text-[11px] leading-relaxed text-lx-dim">
+                        {slotPlan.slots_manual ? '手动' : '自动'} {slotPlan.slots} 槽 × {slotPlan.ctx_per_slot} ctx = {slotPlan.ctx_total} · KV ~{slotPlan.kv_total_gib} GiB
+                        {slotPlan.slots_default != null && slotPlan.slots < slotPlan.slots_default
+                          ? `（省 ~${(
+                              (slotPlan.kv_per_slot_gib ?? 0) *
+                              (slotPlan.slots_default - slotPlan.slots)
+                            ).toFixed(1)} GiB）`
+                          : ''}
                       </p>
                     )}
-                  </SettingRow>
-                  <SettingRow
-                    label="API 密钥"
-                    notice={apiProbe && !apiProbe.ok && /401|403|unauthorized|forbidden|鉴权/i.test(apiProbe.error)
-                      && !apiKey.trim() ? failureAdvice(apiProbe.error, 'task') : ''}
-                    help={
-                      savedKey
-                        ? `已记住 ${savedKey.key_masked}，留空即用它`
-                        : providerEnvKey(vlmProvider)
-                          ? `留空读环境变量 ${providerEnvKey(vlmProvider)}`
-                          : '留空 = 不带鉴权头'
-                    }
-                  >
+                    {vllmEngine === 'vllm' && (
+                      <>
+                        <SettingRow
+                          label="max_num_batched_tokens"
+                          help="单步并发 prefill token 预算"
+                        >
+                          <input
+                            type="number"
+                            className="lx-input w-32 font-mono tabular-nums"
+                            min={0}
+                            max={262144}
+                            step={1024}
+                            value={vllmBatched || ''}
+                            placeholder="自动"
+                            disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                            onChange={(e) =>
+                              setVllmBatched(
+                                Math.min(262144, Math.max(0, Number(e.target.value) || 0)),
+                              )
+                            }
+                            aria-label="服务端单步 token 预算"
+                          />
+                        </SettingRow>
+                        <SettingRow label="显存占比">
+                          <input
+                            type="number"
+                            className="lx-input w-32 font-mono tabular-nums"
+                            min={0}
+                            max={0.98}
+                            step={0.01}
+                            value={vllmGpuMem || ''}
+                            placeholder="0.88"
+                            disabled={vllm?.status === 'starting' || vllm?.status === 'ready'}
+                            onChange={(e) =>
+                              setVllmGpuMem(Math.min(0.98, Math.max(0, Number(e.target.value) || 0)))
+                            }
+                            aria-label="显存占比"
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          label="file:// 放行目录"
+                          help={allowedMediaRoot ? `已放行 ${allowedMediaRoot}` : '留空则只走 base64'}
+                        >
+                          <div className="flex gap-2">
+                            <input
+                              className="lx-input font-mono text-xs"
+                              value={vllmMediaRoot}
+                              disabled={vllmLocked}
+                              onChange={(e) => setVllmMediaRoot(e.target.value)}
+                              placeholder="留空 = 仅 base64"
+                              spellCheck={false}
+                            />
+                            <button
+                              type="button"
+                              className="lx-btn-ghost shrink-0 px-3"
+                              disabled={vllmLocked}
+                              onClick={() => folder.pick(vllmMediaRoot || undefined, setVllmMediaRoot)}
+                            >
+                              浏览
+                            </button>
+                          </div>
+                        </SettingRow>
+                        <p className="text-[11px] leading-relaxed text-lx-dim">
+                          修改后需重启服务生效（单图约需 seqs × 1024 token 预算）。
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </details>
+
+                {vllmError && (
+                  <ErrorBox error={vllmError} title="推理服务操作失败" nextStep={failureAdvice(vllmError, 'service')} />
+                )}
+                {vllm?.status === 'failed' && !vllmError && <FieldNotice
+                  message={failureAdvice(vllm.error || vllm.log_tail.slice(-3).join('\n'), 'service')} />}
+
+                {/* 环境原因常常是好几行（"WSL2 / 换台机器"两条路），
+                    一整段塞在左栏会把表单挤乱，收起来看完整版。 */}
+                {vllm && !vllm.local_ok && vllm.local_reason.includes('\n') && (
+                  <details className="border-b border-lx py-2.5">
+                    <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
+                      为什么不能在本机起服务
+                    </summary>
+                    <pre className="mt-1.5 whitespace-pre-wrap rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
+                      {vllm.local_reason}
+                    </pre>
+                  </details>
+                )}
+
+                {vllm && (
+                  <div className="space-y-1.5 border-b border-lx py-3 text-[11px] text-lx-muted">
+                    <div className="flex justify-between gap-2">
+                      <span>地址</span>
+                      <span className="truncate font-mono text-lx-secondary">{vllm.url || '—'}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span>环境指纹</span>
+                      <span className="truncate text-lx-secondary">
+                        {vllm.fingerprint
+                          ? `${String(vllm.fingerprint.model_id ?? '?')} · max_pixels ${
+                              vllm.fingerprint.max_pixels ?? '?'
+                            }`
+                          : '缺失（provenance 会残，重试提分辨率也不会生效）'}
+                      </span>
+                    </div>
+                    {vllm.log_tail.length > 0 && (
+                      <details className="pt-1">
+                        <summary className="cursor-pointer select-none text-[11px] text-lx-muted hover:text-lx-secondary">
+                          服务日志（最近 {vllm.log_tail.length} 行）
+                        </summary>
+                        <pre className="mt-1.5 max-h-56 overflow-auto rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
+                          {vllm.log_tail.join('\n')}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                )}
+
+                  </>
+                )}
+
+                {/* API 模式的两个字段只在真的走外部 API 时出现：本机模式下
+                    它们恒为空，摆着只会让人以为哪里填漏了。 */}
+                {isApiMode && (
+                  <>
+                    <SettingRow
+                      label="API 地址"
+                      notice={httpUrlError(apiBase, 'API 地址')}
+                      required={isApiMode}
+                    >
+                      <div className="flex gap-2">
+                        <input
+                          className="lx-input font-mono text-xs"
+                          value={apiBase}
+                          onChange={(e) => {
+                            setApiBase(e.target.value)
+                            setApiProbe(null)
+                          }}
+                          placeholder={providerBase(vlmProvider)}
+                          spellCheck={false}
+                        />
+                        <button
+                          type="button"
+                          className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
+                          disabled={apiProbeBusy || !vlmModel.trim()}
+                          onClick={() => void probeApi()}
+                          title="发一张 8×8 的小图走一次真实请求"
+                        >
+                          <RefreshCw size={12} className={apiProbeBusy ? 'animate-spin' : undefined} />
+                          {apiProbeBusy ? '测试中…' : '测试连接'}
+                        </button>
+                      </div>
+                      {apiProbe && (
+                        <p
+                          className={`mt-1.5 text-[11px] leading-relaxed ${
+                            apiProbe.ok ? 'text-lx-success' : 'text-lx-danger'
+                          }`}
+                        >
+                          {apiProbe.ok
+                            ? `通 · ${apiProbe.latency_ms}ms · 入 ${apiProbe.prompt_tokens} / 出 ${apiProbe.completion_tokens} token${
+                                apiProbe.text ? ` · 回「${apiProbe.text.slice(0, 24)}」` : ''
+                              }`
+                            : apiProbe.error}
+                        </p>
+                      )}
+                    </SettingRow>
+                    <SettingRow
+                      label="API 密钥"
+                      notice={apiProbe && !apiProbe.ok && /401|403|unauthorized|forbidden|鉴权/i.test(apiProbe.error)
+                        && !apiKey.trim() ? failureAdvice(apiProbe.error, 'task') : ''}
+                      help={
+                        savedKey
+                          ? `已记住 ${savedKey.key_masked}，留空即用它`
+                          : providerEnvKey(vlmProvider)
+                            ? `留空读环境变量 ${providerEnvKey(vlmProvider)}`
+                            : '留空 = 不带鉴权头'
+                      }
+                    >
+                      <input
+                        type="password"
+                        className="lx-input font-mono text-xs"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder={savedKey ? `${savedKey.key_masked}（已记住）` : '粘贴密钥'}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      {/* 默认不存：密钥落盘是明文，勾了才写 configs/nl_api.json。 */}
+                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-lx-muted">
+                        <input
+                          type="checkbox"
+                          className="lx-check"
+                          checked={rememberKey}
+                          onChange={(e) => void toggleRemember(e.target.checked)}
+                        />
+                        记住到本机（明文存 configs/nl_api.json）
+                      </label>
+                    </SettingRow>
+                  </>
+                )}
+
+                {!isApiMode && (
+                  <>
+                <SettingRow
+                  label="服务地址"
+                  notice={httpUrlError(vlmUrl, '推理服务地址')}
+                >
+                  <div className="flex gap-2">
                     <input
-                      type="password"
                       className="lx-input font-mono text-xs"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder={savedKey ? `${savedKey.key_masked}（已记住）` : '粘贴密钥'}
-                      autoComplete="off"
+                      value={vlmUrl}
+                      onChange={(e) => {
+                        setVlmUrl(e.target.value)
+                        setProbe(null)
+                      }}
+                      placeholder="http://127.0.0.1:8000"
                       spellCheck={false}
                     />
-                    {/* 默认不存：密钥落盘是明文，勾了才写 configs/nl_api.json。 */}
-                    <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-lx-muted">
-                      <input
-                        type="checkbox"
-                        className="lx-check"
-                        checked={rememberKey}
-                        onChange={(e) => void toggleRemember(e.target.checked)}
-                      />
-                      记住到本机（明文存 configs/nl_api.json）
-                    </label>
-                  </SettingRow>
-                </>
-              )}
+                    <button
+                      type="button"
+                      className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
+                      disabled={probeBusy || !vlmUrl.trim()}
+                      onClick={() => void probeVlm()}
+                    >
+                      <RefreshCw size={12} className={probeBusy ? 'animate-spin' : undefined} />
+                      {probeBusy ? '探测中…' : '探测'}
+                    </button>
+                  </div>
+                  {probe && (
+                    <p
+                      className={`mt-1.5 text-[11px] leading-relaxed ${
+                        probe.ok ? 'text-lx-success' : 'text-lx-danger'
+                      }`}
+                    >
+                      {probe.ok
+                        ? `在线${probe.version ? ` · vllm ${probe.version}` : ''}${
+                            probe.models.length ? ` · 模型 ${probe.models.join(', ')}` : ''
+                          }`
+                        : probe.error}
+                    </p>
+                  )}
+                  {/* 指本机但服务没起：任务会在第一张图就超时失败，而"连不上"
+                      与"模型名写错"在页面上长得一样，先说清是哪一种。 */}
+                  {localVlmUrl && vllm?.status !== 'ready' && (
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-lx-warning">
+                      这是本机地址，但本机服务
+                      {vllm?.status === 'starting'
+                        ? '还在启动（首次加载要几分钟）'
+                        : vllm?.status === 'failed'
+                          ? '启动失败'
+                          : '没在运行'}
+                      ：先在上面拉起服务，或把地址改成别的机器。
+                    </p>
+                  )}
+                </SettingRow>
+                  </>
+                )}
 
-              {!isApiMode && (
-                <>
-              <SettingRow
-                label="服务地址"
-                notice={httpUrlError(vlmUrl, '推理服务地址')}
-                help="本机服务就绪后自动填；远程填 IP"
-              >
-                <div className="flex gap-2">
+                <SettingRow
+                  label="模型名"
+                  notice={isApiMode && !vlmModel.trim() ? '请填写 API 提供的模型 ID。' : ''}
+                  required={isApiMode}
+                  help={isApiMode ? undefined : '对应 --served-model-name'}
+                >
                   <input
                     className="lx-input font-mono text-xs"
-                    value={vlmUrl}
+                    value={vlmModel}
                     onChange={(e) => {
-                      setVlmUrl(e.target.value)
-                      setProbe(null)
+                      setVlmModel(e.target.value)
+                      setApiProbe(null)
                     }}
-                    placeholder="http://127.0.0.1:8000"
+                    placeholder={isApiMode ? '模型 ID（如 gpt-4o）' : 'tagger'}
+                    list={isApiMode ? 'vlm-api-model-hints' : undefined}
                     spellCheck={false}
                   />
-                  <button
-                    type="button"
-                    className="lx-btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3"
-                    disabled={probeBusy || !vlmUrl.trim()}
-                    onClick={() => void probeVlm()}
-                  >
-                    <RefreshCw size={12} className={probeBusy ? 'animate-spin' : undefined} />
-                    {probeBusy ? '探测中…' : '探测'}
-                  </button>
-                </div>
-                {probe && (
-                  <p
-                    className={`mt-1.5 text-[11px] leading-relaxed ${
-                      probe.ok ? 'text-lx-success' : 'text-lx-danger'
-                    }`}
-                  >
-                    {probe.ok
-                      ? `在线${probe.version ? ` · vllm ${probe.version}` : ''}${
-                          probe.models.length ? ` · 模型 ${probe.models.join(', ')}` : ''
-                        }`
-                      : probe.error}
-                  </p>
-                )}
-                {/* 指本机但服务没起：任务会在第一张图就超时失败，而"连不上"
-                    与"模型名写错"在页面上长得一样，先说清是哪一种。 */}
-                {localVlmUrl && vllm?.status !== 'ready' && (
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-lx-warning">
-                    这是本机地址，但本机服务
-                    {vllm?.status === 'starting'
-                      ? '还在启动（首次加载要几分钟）'
-                      : vllm?.status === 'failed'
-                        ? '启动失败'
-                        : '没在运行'}
-                    ：先在上面拉起服务，或把地址改成别的机器。
-                  </p>
-                )}
-              </SettingRow>
-                </>
-              )}
+                  {/* 常见 id 只是提示：写错了的表现是 404 一张张失败，而
+                      下拉列表不可能穷举账号里能用的模型。 */}
+                  {isApiMode && (
+                    <datalist id="vlm-api-model-hints">
+                      {(providerMeta(vlmProvider)?.models ?? []).map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  )}
+                </SettingRow>
 
-              <SettingRow
-                label="模型名"
-                notice={isApiMode && !vlmModel.trim() ? '请填写 API 提供的模型 ID。' : ''}
-                required={isApiMode}
-                help={
-                  isApiMode
-                    ? 'API 侧的模型 id，如 gpt-4o'
-                    : '对应 --served-model-name，只是路由名'
-                }
-              >
-                <input
-                  className="lx-input font-mono text-xs"
-                  value={vlmModel}
-                  onChange={(e) => {
-                    setVlmModel(e.target.value)
-                    setApiProbe(null)
-                  }}
-                  placeholder={isApiMode ? '填 API 提供的模型 id' : 'tagger'}
-                  list={isApiMode ? 'vlm-api-model-hints' : undefined}
-                  spellCheck={false}
-                />
-                {/* 常见 id 只是提示：写错了的表现是 404 一张张失败，而
-                    下拉列表不可能穷举账号里能用的模型。 */}
-                {isApiMode && (
-                  <datalist id="vlm-api-model-hints">
-                    {(providerMeta(vlmProvider)?.models ?? []).map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
-                )}
-              </SettingRow>
-
-              <SettingRow
-                label="并发请求数"
-                help={
-                  isApiMode
-                    ? '0 = 该来源的建议值；调太高会撞 429'
-                    : vllmEngine === 'llamacpp'
-                      ? '0 = 跟服务端槽位（-np）'
-                      : '0 = 跟服务端 max_num_seqs'
-                }
-                description={
-                  concurrency === 0
-                    ? `自动 · ${effectiveSeqs}${isApiMode ? `（${providerLabel(vlmProvider)} 建议）` : ''}`
-                    : undefined
-                }
-              >
-                <input
-                  type="number"
-                  className="lx-input font-mono tabular-nums"
-                  min={0}
-                  max={32}
-                  value={concurrency}
-                  onChange={(e) =>
-                    setConcurrency(Math.min(32, Math.max(0, Number(e.target.value) || 0)))
+                <SettingRow
+                  label="并发请求数"
+                  description={
+                    concurrency === 0
+                      ? `自动 · ${effectiveSeqs}`
+                      : undefined
                   }
-                />
-              </SettingRow>
+                >
+                  <input
+                    type="number"
+                    className="lx-input font-mono tabular-nums"
+                    min={0}
+                    max={32}
+                    value={concurrency || ''}
+                    placeholder={`自动 (${effectiveSeqs})`}
+                    onChange={(e) =>
+                      setConcurrency(Math.min(32, Math.max(0, Number(e.target.value) || 0)))
+                    }
+                  />
+                </SettingRow>
 
-              <details className="pt-1">
-                <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wide text-lx-muted hover:text-lx-secondary">
-                  生成参数（一般不用动）
-                </summary>
-                <div className="mt-2 space-y-0">
-                  <SettingRow label="温度" help="越低越稳，打标建议 ≤0.3">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        className="lx-slider"
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={temperature}
-                        onChange={(e) => setTemperature(Number(e.target.value))}
-                        aria-label="温度"
-                      />
-                      <span className="w-12 shrink-0 text-right font-mono text-sm tabular-nums text-lx">
-                        {temperature.toFixed(2)}
-                      </span>
-                    </div>
-                  </SettingRow>
-
-                  <SettingRow label="top_p">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        className="lx-slider"
-                        min={0.1}
-                        max={1}
-                        step={0.05}
-                        value={topP}
-                        onChange={(e) => setTopP(Number(e.target.value))}
-                        aria-label="top_p"
-                      />
-                      <span className="w-12 shrink-0 text-right font-mono text-sm tabular-nums text-lx">
-                        {topP.toFixed(2)}
-                      </span>
-                    </div>
-                  </SettingRow>
-
+                <div className="mt-4 border-t border-lx pt-3">
+                  <h3 className="mb-1 text-sm font-medium text-lx">描述与提示词</h3>
                   {/* 提示词：内置那份按「描述长度」「中文比例」现场生成。选 prompt/*.json
                       是整段替换；再勾 prompts/*.md 的规则片段则按勾选顺序追加在后面。 */}
-                  <SettingRow
-                    label="NL 提示词"
-                    help="prompt/ 的 JSON 打底，可再叠加 prompts/ 的规则片段"
-                    wide
-                  >
+                  <SettingRow label="NL 提示词" wide>
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="relative min-w-[12rem] flex-1">
@@ -3700,8 +3795,7 @@ export function NewJob({
                                   )
                                 })}
                                 <p className="mt-2 border-t border-lx px-1 pt-2 text-[10.5px] leading-relaxed text-lx-dim">
-                                  勾选顺序就是拼接顺序：成品整段在前，片段按当前模式/语言
-                                  渲染后追加。片段单独用不了，至少要勾一份成品。
+                                  按勾选顺序拼接；规则片段需搭配一份成品使用。
                                 </p>
                               </div>
                             </>
@@ -3769,42 +3863,23 @@ export function NewJob({
                       )}
                       {!promptMissing && !promptSel && (
                         <p className="text-[11px] leading-relaxed text-lx-dim">
-                          内置提示词随「描述长度」「中文 caption 比例」变化；
-                          {promptDir || 'prompt/'} 里放 JSON 就能换成自己写的。
+                          内置提示词随描述长度与中文比例动态生成。
                         </p>
                       )}
                       {promptOnlyRules && (
                         <p className="text-[11px] leading-relaxed text-lx-danger">
-                          只勾了规则片段：请再勾一份成品（prompt/ 里的 json）打底——
-                          光靠几节条款顶掉整份指令，产出规格（长度、数量、格式）会一起丢。
+                          仅选规则片段会丢失格式规范，请至少再选一份成品打底。
                         </p>
                       )}
                       {promptFileCount > 1 && (
                         <p className="text-[11px] leading-relaxed text-lx-warn">
-                          勾了 {promptFileCount} 份成品：两段完整指令拼在一起会互相覆盖要求，
-                          通常只该留一份打底。
+                          同时选了 {promptFileCount} 份成品，通常只需保留一份。
                         </p>
                       )}
                     </div>
                   </SettingRow>
 
-                  <SettingRow label="max_tokens" help="0 = 自动（NL + 全量 tag 放得下）">
-                    <input
-                      type="number"
-                      className="lx-input font-mono tabular-nums"
-                      min={0}
-                      value={maxTokens}
-                      onChange={(e) => setMaxTokens(Math.max(0, Number(e.target.value) || 0))}
-                    />
-                  </SettingRow>
-
-                  {/* 描述长度：只决定"往多长写"，不动合格线（nl_min/max_tokens）。
-                      实测 400-1024 → 250-500：字数 −33%、单张 −36%，
-                      六段要素覆盖只掉 2~3pp，所以这是最省机时的一个旋钮。 */}
-                  <SettingRow
-                    label="描述长度"
-                    help="字符数下限-上限。空 = 400-1024；短了更快、要素更少"
-                  >
+                  <SettingRow label="描述长度（字符）">
                     <div className="flex items-center gap-1.5">
                       <input
                         type="number"
@@ -3832,13 +3907,7 @@ export function NewJob({
                     </div>
                   </SettingRow>
 
-                  {/* 中文 NL 比例：按 (seed, image_id) 抽签，抽中的图用中文指令写
-                      caption。tag 段永远是英文 danbooru——中文 tag 在训练侧没有
-                      对应词表，混进去只是脏数据。拉满 = 全中文，拉到 0 = 全英文。 */}
-                  <SettingRow
-                    label="中文 caption 比例"
-                    help="抽中的图用中文写描述，tag 仍为英文"
-                  >
+                  <SettingRow label="中文 caption 比例">
                     <div className="flex items-center gap-3">
                       <input
                         type="range"
@@ -3855,29 +3924,56 @@ export function NewJob({
                       </span>
                     </div>
                   </SettingRow>
-
-                  <SettingRow label="请求超时（秒）">
-                    <input
-                      type="number"
-                      className="lx-input font-mono tabular-nums"
-                      min={10}
-                      value={timeoutS}
-                      onChange={(e) => setTimeoutS(Math.max(10, Number(e.target.value) || 90))}
-                    />
+                </div>
+                <AdvancedSettings title="高级：采样参数">
+                  <SettingRow label="温度" help="打标建议 ≤0.3">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        className="lx-slider"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={temperature}
+                        onChange={(e) => setTemperature(Number(e.target.value))}
+                        aria-label="温度"
+                      />
+                      <span className="w-12 shrink-0 text-right font-mono text-sm tabular-nums text-lx">
+                        {temperature.toFixed(2)}
+                      </span>
+                    </div>
                   </SettingRow>
 
-                  <SettingRow label="像素预算" help="0 = 配置默认；超预算的图会先缩">
+                  <SettingRow label="top_p">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        className="lx-slider"
+                        min={0.1}
+                        max={1}
+                        step={0.05}
+                        value={topP}
+                        onChange={(e) => setTopP(Number(e.target.value))}
+                        aria-label="top_p"
+                      />
+                      <span className="w-12 shrink-0 text-right font-mono text-sm tabular-nums text-lx">
+                        {topP.toFixed(2)}
+                      </span>
+                    </div>
+                  </SettingRow>
+
+                  <SettingRow label="max_tokens">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
-                      step={50000}
-                      value={maxPixels}
-                      onChange={(e) => setMaxPixels(Math.max(0, Number(e.target.value) || 0))}
+                      value={maxTokens || ''}
+                      placeholder="自动"
+                      onChange={(e) => setMaxTokens(Math.max(0, Number(e.target.value) || 0))}
                     />
                   </SettingRow>
 
-                  <SettingRow label="随机种子" help="留空 = 不固定">
+                  <SettingRow label="随机种子">
                     <input
                       className="lx-input font-mono tabular-nums"
                       value={seed}
@@ -3885,66 +3981,59 @@ export function NewJob({
                       placeholder="不固定"
                     />
                   </SettingRow>
-
-                  <SettingRow
-                    label="质检放行线"
-                    help={`1~5 分，≥ 这条直接收（0 = 配置的 ${qPassDef}）。越高重打越多`}
-                  >
+                </AdvancedSettings>
+                <AdvancedSettings title="质量检查与重试">
+                  <SettingRow label="质检放行线（1–5 分）">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       max={5}
                       step={0.1}
-                      value={qualityPass}
+                      value={qualityPass || ''}
+                      placeholder={`默认 ${qPassDef}`}
                       onChange={(e) =>
                         setQualityPass(Math.min(5, Math.max(0, Number(e.target.value) || 0)))
                       }
                     />
                   </SettingRow>
 
-                  <SettingRow
-                    label="质检丢弃线"
-                    help={`< 这条直接丢，不重打（0 = 配置的 ${qDropDef}）。必须低于放行线`}
-                  >
+                  <SettingRow label="质检丢弃线">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       max={5}
                       step={0.1}
-                      value={qualityDrop}
+                      value={qualityDrop || ''}
+                      placeholder={`默认 ${qDropDef}`}
                       onChange={(e) =>
                         setQualityDrop(Math.min(5, Math.max(0, Number(e.target.value) || 0)))
                       }
                     />
                   </SettingRow>
 
-                  <SettingRow
-                    label="重打次数上限"
-                    help={`不合格时最多再打几次（0 = 配置的 ${qAttemptsDef}）`}
-                  >
+                  <SettingRow label="重打次数上限">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       max={5}
-                      value={qualityAttempts}
+                      value={qualityAttempts || ''}
+                      placeholder={`默认 ${qAttemptsDef}`}
                       onChange={(e) =>
                         setQualityAttempts(Math.min(5, Math.max(0, Number(e.target.value) || 0)))
                       }
                     />
                   </SettingRow>
 
-                  <SettingRow
-                    label="失败跳过阈值"
-                    help="同一张图累计失败几次后不再尝试（0 = 不限）"
-                  >
+                  <SettingRow label="失败跳过阈值">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
-                      value={maxFailures}
+                      value={maxFailures || ''}
+                      placeholder="不限"
                       onChange={(e) =>
                         setMaxFailures(Math.max(0, Number(e.target.value) || 0))
                       }
@@ -3954,64 +4043,56 @@ export function NewJob({
                   <div className="px-1 pb-1 pt-2 text-[11px] uppercase tracking-wide text-lx-muted">
                     重试阶梯
                   </div>
-                  <SettingRow
-                    label="温度上调"
-                    help={`每次重打升多少温度（0 = 配置的 ${qTempStepDef}）`}
-                  >
+                  <SettingRow label="温度上调">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       max={1}
                       step={0.05}
-                      value={retryTempStep}
+                      value={retryTempStep || ''}
+                      placeholder={`默认 ${qTempStepDef}`}
                       onChange={(e) =>
                         setRetryTempStep(Math.min(1, Math.max(0, Number(e.target.value) || 0)))
                       }
                     />
                   </SettingRow>
-                  <SettingRow
-                    label="温度封顶"
-                    help={`温度上限（0 = 配置的 ${qTempCapDef}）。太高会把描述带偏`}
-                  >
+                  <SettingRow label="温度封顶">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       max={2}
                       step={0.05}
-                      value={retryTempCap}
+                      value={retryTempCap || ''}
+                      placeholder={`默认 ${qTempCapDef}`}
                       onChange={(e) =>
                         setRetryTempCap(Math.min(2, Math.max(0, Number(e.target.value) || 0)))
                       }
                     />
                   </SettingRow>
-                  <SettingRow
-                    label="像素放大倍数"
-                    help={`重打时像素预算的倍数（0 = 配置的 ${qPixelsScaleDef}）。服务端 max_pixels 要留余量`}
-                  >
+                  <SettingRow label="像素放大倍数">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       max={4}
                       step={0.1}
-                      value={retryPixelsScale}
+                      value={retryPixelsScale || ''}
+                      placeholder={`默认 ${qPixelsScaleDef}`}
                       onChange={(e) =>
                         setRetryPixelsScale(Math.min(4, Math.max(0, Number(e.target.value) || 0)))
                       }
                     />
                   </SettingRow>
-                  <SettingRow
-                    label="像素封顶"
-                    help={`重打的像素上限（0 = 配置的 ${qPixelsCapDef}）`}
-                  >
+                  <SettingRow label="像素封顶">
                     <input
                       type="number"
                       className="lx-input font-mono tabular-nums"
                       min={0}
                       step={50000}
-                      value={retryPixelsCap}
+                      value={retryPixelsCap || ''}
+                      placeholder={`默认 ${qPixelsCapDef}`}
                       onChange={(e) =>
                         setRetryPixelsCap(Math.max(0, Number(e.target.value) || 0))
                       }
@@ -4023,7 +4104,7 @@ export function NewJob({
                   </div>
                   <SettingRow
                     label="图文 CLIP 打分"
-                    help="抓规则层漏掉的跑题句子。需 open_clip_torch，占显存；开启后并发限为 1"
+                    help="抓跑题描述（需 open_clip_torch；开启后并发限 1）"
                     icon={clipOn ? <Cpu size={14} /> : <CloudOff size={14} />}
                   >
                     <ToggleRow
@@ -4034,26 +4115,21 @@ export function NewJob({
                   </SettingRow>
                   {clipOn && (
                     <>
-                      <SettingRow
-                        label="相似度下限"
-                        help={`低于这条判跑题（0 = 配置的 ${qClipMinDef}）。越高误杀越多`}
-                      >
+                      <SettingRow label="相似度下限">
                         <input
                           type="number"
                           className="lx-input font-mono tabular-nums"
                           min={0}
                           max={1}
                           step={0.01}
-                          value={clipMin}
+                          value={clipMin || ''}
+                          placeholder={`默认 ${qClipMinDef}`}
                           onChange={(e) =>
                             setClipMin(Math.min(1, Math.max(0, Number(e.target.value) || 0)))
                         }
                       />
                     </SettingRow>
-                    <SettingRow
-                      label="CLIP 权重"
-                      help={`留空 = 配置的 ${qDef?.clip_model || 'ViT-L-14'}。换模型等于换打分口径，两批分数不能直接比`}
-                    >
+                    <SettingRow label="CLIP 权重">
                       <input
                         className="lx-input font-mono text-xs"
                         value={clipModel}
@@ -4062,10 +4138,7 @@ export function NewJob({
                         spellCheck={false}
                       />
                     </SettingRow>
-                    <SettingRow
-                      label="预训练来源"
-                      help={`留空 = 配置的 ${qDef?.clip_pretrained || 'openai'}。换来源阈值要重调`}
-                    >
+                    <SettingRow label="预训练来源">
                       <input
                         className="lx-input font-mono text-xs"
                         value={clipPretrained}
@@ -4080,10 +4153,7 @@ export function NewJob({
                   <div className="px-1 pb-1 pt-2 text-[11px] uppercase tracking-wide text-lx-muted">
                     规则层（L1）
                   </div>
-                  <SettingRow
-                    label="最短字符数"
-                    help={`低于这条判过短（留空 = ${qDef?.min_chars ?? 140}，0 = 不设下限）`}
-                  >
+                  <SettingRow label="最短字符数" help="0 = 不设下限">
                     <input
                       className="lx-input font-mono tabular-nums"
                       min={0}
@@ -4093,10 +4163,7 @@ export function NewJob({
                       placeholder={String(qDef?.min_chars ?? 140)}
                     />
                   </SettingRow>
-                  <SettingRow
-                    label="最长字符数"
-                    help={`高于这条判过长（留空 = ${qDef?.max_chars ?? 1200}）。必须不小于最短字符数`}
-                  >
+                  <SettingRow label="建议最多字符数" help="仅记录提示，不扣分">
                     <input
                       className="lx-input font-mono tabular-nums"
                       min={0}
@@ -4108,13 +4175,10 @@ export function NewJob({
                   </SettingRow>
                   {minChars !== '' && maxChars !== '' && Number(minChars) > Number(maxChars) && (
                     <p className="px-1 text-[11px] leading-relaxed text-lx-danger">
-                      最短（{minChars}）大于最长（{maxChars}）：每条都会被判过长，通过率会是 0。
+                      最短（{minChars}）大于最长（{maxChars}）：通过率将为 0。
                     </p>
                   )}
-                  <SettingRow
-                    label="tag 覆盖率下限"
-                    help={`高置信 tag 在 caption 里的覆盖率下限（留空 = ${qDef?.min_tag_coverage ?? 0.6}，0 = 不检查）`}
-                  >
+                  <SettingRow label="tag 覆盖率下限" help="0 = 不检查">
                     <input
                       className="lx-input font-mono tabular-nums"
                       min={0}
@@ -4125,10 +4189,7 @@ export function NewJob({
                       placeholder={String(qDef?.min_tag_coverage ?? 0.6)}
                     />
                   </SettingRow>
-                  <SettingRow
-                    label="重复率上限"
-                    help={`4-gram 重复率上限（留空 = ${qDef?.max_repeat_ratio ?? 0.35}，0 = 不许重复）`}
-                  >
+                  <SettingRow label="重复率上限" help="4-gram 重复率上限（0 = 不许重复）">
                     <input
                       className="lx-input font-mono tabular-nums"
                       min={0}
@@ -4143,10 +4204,7 @@ export function NewJob({
                   <div className="px-1 pb-1 pt-2 text-[11px] uppercase tracking-wide text-lx-muted">
                     重试升级
                   </div>
-                  <SettingRow
-                    label="升级服务地址"
-                    help="重试用尽仍不合格时改打第二个服务（更大的模型）"
-                  >
+                  <SettingRow label="升级服务地址" help="重试用尽后改打该服务">
                     <input
                       className="lx-input font-mono text-xs"
                       value={escalateUrl}
@@ -4156,10 +4214,7 @@ export function NewJob({
                     />
                   </SettingRow>
                   {escalateUrl.trim() !== '' && (
-                    <SettingRow
-                      label="升级模型名"
-                      help="那个服务的 --served-model-name；与地址都填才生效"
-                    >
+                    <SettingRow label="升级模型名" help="对应 --served-model-name">
                       <input
                         className="lx-input font-mono text-xs"
                         value={escalateModel}
@@ -4174,12 +4229,29 @@ export function NewJob({
                       地址和模型名要一起填
                     </p>
                   )}
-                  {escalateUrl.trim() !== '' && escalateModel.trim() !== '' && (
-                    <p className="px-1 text-[11px] leading-relaxed text-lx-secondary">
-                      升级出来的样本会在 provenance 里标 <code>escalated</code> 与
-                      <code> escalated_model</code>，可与正常产物区分。
-                    </p>
-                  )}
+                </AdvancedSettings>
+                <AdvancedSettings title="高级：请求与图片传输">
+                  <SettingRow label="请求超时（秒）">
+                    <input
+                      type="number"
+                      className="lx-input font-mono tabular-nums"
+                      min={10}
+                      value={timeoutS}
+                      onChange={(e) => setTimeoutS(Math.max(10, Number(e.target.value) || 90))}
+                    />
+                  </SettingRow>
+
+                  <SettingRow label="像素预算">
+                    <input
+                      type="number"
+                      className="lx-input font-mono tabular-nums"
+                      min={0}
+                      step={50000}
+                      value={maxPixels || ''}
+                      placeholder="默认"
+                      onChange={(e) => setMaxPixels(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </SettingRow>
 
                   {/* file:// 只有本机引擎认：API 模式必走 base64，这个开关
                       露出来只会让人以为能省 33% 体积，实际每张都会被拒。 */}
@@ -4192,8 +4264,8 @@ export function NewJob({
                     label="file:// 直传"
                     help={
                       allowedMediaRoot
-                        ? `已放行 ${allowedMediaRoot}；开启后省掉 33% 体积`
-                        : '服务端没开放行目录，开了会被 400 拒绝'
+                        ? `已放行 ${allowedMediaRoot}`
+                        : '需先配置放行目录'
                     }
                   >
                     <ToggleRow
@@ -4220,866 +4292,627 @@ export function NewJob({
                   })()}
                     </>
                   )}
-                </div>
-              </details>
-            </SectionPanel>
-          )}
-
-          {isVlm && (
-            <SectionPanel title="打标产物">
+                </AdvancedSettings>
+              </SectionPanel>
+            )}
+          </>) },
+          { id: 'output', title: '输出与回传', content: (<>
+            <SectionPanel title="保存位置">
               <SettingRow
-                label="产物形态"
-                help="jsonl 默认，一个分包一个文件；逐图 json 便于单张排查"
-                icon={<Package size={14} />}
+                label="输出目录"
+                icon={<HardDrive size={14} />}
               >
-                <ChoiceGrid
-                  options={ARTIFACT_FORMATS}
-                  value={artifactFormat}
-                  onChange={setArtifactFormat}
-                  className="grid-cols-3"
-                  size="sm"
-                  mono
-                  ariaLabel="分片格式"
-                  renderLabel={(v) => ARTIFACT_LABELS[v]}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="lx-input min-w-0 flex-1 font-mono text-xs"
+                    value={outDir}
+                    onChange={(e) => setOutDir(e.target.value)}
+                    placeholder={effectiveOut || '跟随输入路径'}
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    className="lx-btn-ghost shrink-0 px-3"
+                    onClick={() =>
+                      folder.pick(outDir || inputDir || defaults?.models_dir, setOutDir)
+                    }
+                  >
+                    浏览
+                  </button>
+                </div>
               </SettingRow>
+            </SectionPanel>
+            {isVlm && (
+              <SectionPanel title="打标产物">
+                <SettingRow
+                  label="产物形态"
+                  icon={<Package size={14} />}
+                >
+                  <ChoiceGrid
+                    options={ARTIFACT_FORMATS}
+                    value={artifactFormat}
+                    onChange={setArtifactFormat}
+                    className="grid-cols-3"
+                    size="sm"
+                    mono
+                    ariaLabel="分片格式"
+                    renderLabel={(v) => ARTIFACT_LABELS[v]}
+                  />
+                </SettingRow>
 
-              {artifactFormat !== 'json' && (
-                <SettingRow label="每片行数" help="写满就封口，2000 便于回传">
+                {artifactFormat !== 'json' && (
+                  <SettingRow label="每片行数">
+                    <input
+                      type="number"
+                      className="lx-input font-mono tabular-nums"
+                      min={100}
+                      value={parquetRows}
+                      onChange={(e) => setParquetRows(Math.max(100, Number(e.target.value) || 2000))}
+                    />
+                  </SettingRow>
+                )}
+
+                <SettingRow label="结果缓存">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
+                    <input
+                      type="checkbox"
+                      className="accent-lx-accent"
+                      checked={cacheOn}
+                      onChange={(e) => setCacheOn(e.target.checked)}
+                    />
+                    开启（共享缓存，上限 8 GB）
+                  </label>
+                </SettingRow>
+
+                <SettingRow
+                  label="画师表"
+                  description={
+                    artistTable.trim()
+                      ? '按 post id 查画师，查不到退回目录名'
+                      : cfgArtistTable
+                        ? `配置：${cfgArtistTable}`
+                        : '仅从目录名提取'
+                  }
+                >
+                  <div className="flex gap-2">
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={artistTable}
+                      onChange={(e) => setArtistTable(e.target.value)}
+                      placeholder={cfgArtistTable || 'parquet / 目录 / hf://datasets/...'}
+                      disabled={!vlmArtist}
+                    />
+                    <button
+                      type="button"
+                      className="lx-btn-ghost shrink-0 px-3"
+                      disabled={!vlmArtist}
+                      onClick={() =>
+                        folder.pick(artistTable || undefined, setArtistTable, ['parquet'])
+                      }
+                    >
+                      浏览
+                    </button>
+                  </div>
+                </SettingRow>
+
+                <SettingRow
+                  label="画师注入"
+                  icon={<Tags size={14} />}
+                >
+                  <ToggleRow
+                    checked={vlmArtist}
+                    onChange={setVlmArtist}
+                    label={vlmArtist ? '写入 .nl / .tag 文本' : '仅保留 JSON 字段'}
+                  />
+                </SettingRow>
+
+                {vlmArtist && (
+                  <>
+                    <SettingRow label="NL 注入">
+                      <ToggleRow
+                        checked={vlmArtistInject}
+                        onChange={setVlmArtistInject}
+                        label="NL 开头加入画师风格句"
+                      />
+                    </SettingRow>
+                    <SettingRow label="TAG 注入">
+                      <ToggleRow
+                        checked={vlmArtistInjectTags}
+                        onChange={setVlmArtistInjectTags}
+                        label="@画师 置于 TAG 最前"
+                      />
+                    </SettingRow>
+                  </>
+                )}
+
+                <p className="text-[11px] leading-relaxed text-lx-muted">
+                  分包前建议先在「去重」页生成排除清单。
+                </p>
+              </SectionPanel>
+            )}
+            {!isVlm && (
+              <SectionPanel title="命名">
+                <SettingRow
+                  label="布局"
+                  icon={<Tags size={14} />}
+                >
+                  <ChoiceGrid
+                    options={LAYOUTS}
+                    value={layout}
+                    onChange={setLayout}
+                    className="grid-cols-2"
+                    size="sm"
+                    renderLabel={(v) => (v === 'flat' ? '平铺改名' : '保持原结构')}
+                    ariaLabel="布局"
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  label="画师表"
+                  description={
+                    artistTable.trim()
+                      ? '按 post id 查画师，查不到退回目录名'
+                      : cfgArtistTable
+                        ? `配置：${cfgArtistTable}`
+                        : '仅从目录名提取'
+                  }
+                >
+                  <div className="flex gap-2">
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={artistTable}
+                      onChange={(e) => setArtistTable(e.target.value)}
+                      placeholder={cfgArtistTable || 'parquet / 目录 / hf://datasets/...'}
+                      disabled={!artist}
+                    />
+                    <button
+                      type="button"
+                      className="lx-btn-ghost shrink-0 px-3"
+                      disabled={!artist}
+                      onClick={() =>
+                        folder.pick(artistTable || undefined, setArtistTable, ['parquet'])
+                      }
+                    >
+                      浏览
+                    </button>
+                  </div>
+                </SettingRow>
+
+                <SettingRow label="画师名">
+                  <ToggleRow checked={artist} onChange={setArtist} label="从目录名提取画师" />
+                </SettingRow>
+
+                <SettingRow
+                  label="取第几层"
+                  help={artist ? '0 = alice/1.jpg → alice；1 = 2024/alice/1.jpg → alice' : undefined}
+                  description={
+                    artist && preview
+                      ? `${preview.artists.count} 个画师 · 覆盖 ${fmtCount(preview.artists.covered)} 张${
+                          preview.artists.missing ? ` · ${fmtCount(preview.artists.missing)} 张未匹配` : ''
+                        }`
+                      : undefined
+                  }
+                >
                   <input
                     type="number"
                     className="lx-input font-mono tabular-nums"
-                    min={100}
-                    value={parquetRows}
-                    onChange={(e) => setParquetRows(Math.max(100, Number(e.target.value) || 2000))}
+                    min={0}
+                    max={8}
+                    value={artistDepth}
+                    disabled={!artist}
+                    onChange={(e) =>
+                      setArtistDepth(Math.min(8, Math.max(0, Number(e.target.value) || 0)))
+                    }
                   />
+                </SettingRow>
+
+                <SettingRow label="画师注入">
+                  <ToggleRow
+                    checked={artist && artistInject}
+                    onChange={(v) => {
+                      setArtistInject(v)
+                      if (v && !artist) setArtist(true)
+                    }}
+                    disabled={!artist}
+                    label="NL 开头加入 @画师"
+                  />
+                </SettingRow>
+
+                <SettingRow label="TAG 注入">
+                  <ToggleRow
+                    checked={artist && artistInjectTags}
+                    onChange={(v) => {
+                      setArtistInjectTags(v)
+                      if (v && !artist) setArtist(true)
+                    }}
+                    disabled={!artist}
+                    label="@画师 置于 TAG 最前"
+                  />
+                </SettingRow>
+
+                <SettingRow label="序号宽度" help="总量上十亿建议用 10 位">
+                  <input
+                    type="number"
+                    className="lx-input font-mono tabular-nums"
+                    min={3}
+                    max={12}
+                    value={seqWidth}
+                    onChange={(e) => setSeqWidth(Math.min(12, Math.max(3, Number(e.target.value) || 6)))}
+                  />
+                </SettingRow>
+
+                <div className="pt-1">
+                  <div className="mb-2 text-[11px] uppercase tracking-wide text-lx-muted">命名预览</div>
+                  {previewError ? (
+                    <p className="text-xs text-lx-danger">{previewError}</p>
+                  ) : !preview ? (
+                    <p className="text-xs text-lx-muted">选好输入后显示命名预览。</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {preview.samples.map((s) => (
+                        <div key={s.image_id} className="flex items-center gap-2 font-mono text-[11px]">
+                          <span className="min-w-0 flex-1 truncate text-lx-muted" title={s.rel}>
+                            {s.rel}
+                          </span>
+                          <span className="shrink-0 text-lx-dim">→</span>
+                          <span className="shrink-0 text-lx-secondary">{s.name}</span>
+                        </div>
+                      ))}
+                      {preview.warnings.map((w) => (
+                        <p key={w} className="pt-1 text-[11px] text-lx-warning">
+                          {w}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </SectionPanel>
+            )}
+            <SectionPanel title="完成后回传">
+              <SettingRow
+                label="完成后自动回传"
+                icon={<CloudUpload size={14} />}
+              >
+                <ToggleRow
+                  checked={autoUpload}
+                  onChange={setAutoUpload}
+                  label="完成后推送到汇总机"
+                />
+                {autoUpload && (
+                  <div className="mt-2.5 space-y-2">
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={autoUploadUrl}
+                      onChange={(e) => setAutoUploadUrl(e.target.value)}
+                      placeholder="http://192.168.1.10:8000"
+                      spellCheck={false}
+                      aria-label="回传地址"
+                    />
+                    <FieldNotice message={httpUrlError(autoUploadUrl, '回传地址')} />
+                    <input
+                      className="lx-input font-mono text-xs"
+                      type="password"
+                      value={autoUploadToken}
+                      onChange={(e) => setAutoUploadToken(e.target.value)}
+                      placeholder="令牌（对端开了鉴权时必填）"
+                      autoComplete="off"
+                      aria-label="回传令牌"
+                    />
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={autoUploadDir}
+                      onChange={(e) => setAutoUploadDir(e.target.value)}
+                      placeholder="远端子目录（留空 = 仓库根）"
+                      spellCheck={false}
+                      aria-label="远端子目录"
+                    />
+                  </div>
+                )}
+              </SettingRow>
+            </SectionPanel>
+          </>) },
+          { id: 'runtime', title: '高级运行', content: (<>
+            {hasTag && (
+              <SectionPanel title="标签执行参数">
+                <AdvancedSettings title="设备、精度与批处理">
+                  <SettingRow
+                    label="分类头精度"
+                    help={
+                      precision === 'fp16'
+                        ? '仅推荐无 bf16 的老卡（如 V100）'
+                        : undefined
+                    }
+                  >
+                    <ChoiceGrid
+                      options={PRECISIONS}
+                      value={precision as (typeof PRECISIONS)[number]}
+                      onChange={(v) => setPrecision(v)}
+                      className="grid-cols-4"
+                      size="sm"
+                      mono
+                      ariaLabel="精度"
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="设备"
+                    help={
+                      tagDevices.length > 1
+                        ? `已选 ${tagDevices.length} 张卡并行`
+                        : '支持多选并发'
+                    }
+                  >
+                    <ChoiceMulti
+                      options={
+                        (defaults?.devices?.length ? defaults.devices : DEVICES_FALLBACK) as string[]
+                      }
+                      value={tagDevices}
+                      onChange={setTagDevices}
+                      // auto / cpu 是"不要多卡"的两种表达，与具体卡互斥
+                      exclusive={['auto', 'cpu']}
+                      className="grid-cols-4"
+                      size="sm"
+                      mono
+                      ariaLabel="设备"
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="多卡分工"
+                    help={
+                      tagDevices.length < 2
+                        ? '多卡生效'
+                        : tagMode === 'pack'
+                          ? '每卡处理整包（包多时推荐）'
+                          : '单批均分给各卡（包少图多时推荐）'
+                    }
+                  >
+                    <ChoiceGrid
+                      options={TAG_MODES}
+                      value={tagMode}
+                      onChange={setTagMode}
+                      className="grid-cols-2"
+                      size="sm"
+                      ariaLabel="多卡分工"
+                      disabled={tagDevices.length < 2}
+                      renderLabel={(v) => (v === 'pack' ? '每卡一个包' : '批内切分')}
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="批大小"
+                    help={
+                      tagDevices.length > 1
+                        ? `每卡 ${batch} 张，共 ${batch * tagDevices.length} 张`
+                        : undefined
+                    }
+                  >
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={BATCH_MIN}
+                          max={BATCH_MAX}
+                          step={1}
+                          value={batch}
+                          onChange={(e) => setBatch(Number(e.target.value))}
+                          aria-label="批大小"
+                          className="h-1.5 min-w-0 flex-1 cursor-pointer accent-lx-accent"
+                        />
+                        {/* 滑动条不好精确停在某个数，配一个数字框；两处都夹到 1..100，
+                            手打 999 不会把服务端打成 OOM。 */}
+                        <input
+                          type="number"
+                          min={BATCH_MIN}
+                          max={BATCH_MAX}
+                          value={batch}
+                          onChange={(e) =>
+                            setBatch(
+                              Math.max(
+                                BATCH_MIN,
+                                Math.min(BATCH_MAX, Math.round(Number(e.target.value) || BATCH_MIN)),
+                              ),
+                            )
+                          }
+                          aria-label="批大小数值"
+                          className="lx-input w-16 px-1.5 py-0.5 text-right font-mono text-xs tabular-nums"
+                        />
+                      </div>
+                      <TagVramHint vram={tagVram} batch={batch} />
+                    </div>
+                  </SettingRow>
+
+                  <SettingRow
+                    label="预处理"
+                    help="GPU 缩放更快，tag 可能略有差异"
+                  >
+                    <ChoiceGrid
+                      options={PREPROCESS}
+                      value={preprocess as (typeof PREPROCESS)[number]}
+                      onChange={(v) => setPreprocess(v)}
+                      className="grid-cols-2"
+                      size="sm"
+                      ariaLabel="预处理"
+                      renderLabel={(v) => PREPROCESS_LABELS[v]}
+                    />
+                  </SettingRow>
+                </AdvancedSettings>
+              </SectionPanel>
+            )}
+            <SectionPanel title="运行保护">
+              <SettingRow
+                label="硬件保护"
+                icon={guard ? <Cpu size={14} /> : <CloudOff size={14} />}
+              >
+                <ToggleRow checked={guard} onChange={setGuard} label="按占空比与温度限流" />
+              </SettingRow>
+
+              {!isVlm && (
+                <SettingRow
+                  label="盘位预算"
+                  help="按预计产出 + 20% 冗余预检"
+                  icon={<HardDrive size={14} />}
+                >
+                  <ToggleRow checked={checkSpace} onChange={setCheckSpace} label="开跑前检查磁盘" />
                 </SettingRow>
               )}
 
-              <SettingRow
-                label="结果缓存"
-                help="同图同参数复用上次产出，不送模型。首轮命中率为 0"
-              >
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-lx-secondary">
-                  <input
-                    type="checkbox"
-                    className="accent-lx-accent"
-                    checked={cacheOn}
-                    onChange={(e) => setCacheOn(e.target.checked)}
-                  />
-                  开启（库在 run/ 下跨任务共享，默认上限 8 GB）
-                </label>
-              </SettingRow>
-
-              <SettingRow
-                label="画师表"
-                help="parquet、分片目录，或 hf://datasets/<repo>/<路径>；留空跟配置走"
-                description={
-                  artistTable.trim()
-                    ? '按 post id 查画师，查不到退回目录名'
-                    : cfgArtistTable
-                      ? `配置：${cfgArtistTable}`
-                      : '未配置，只从目录名取画师'
-                }
-              >
-                <div className="flex gap-2">
-                  <input
-                    className="lx-input font-mono text-xs"
-                    value={artistTable}
-                    onChange={(e) => setArtistTable(e.target.value)}
-                    placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
-                    disabled={!vlmArtist}
-                  />
-                  <button
-                    type="button"
-                    className="lx-btn-ghost shrink-0 px-3"
-                    disabled={!vlmArtist}
-                    onClick={() =>
-                      folder.pick(artistTable || undefined, setArtistTable, ['parquet'])
-                    }
-                  >
-                    浏览
-                  </button>
-                </div>
-              </SettingRow>
-
-              <SettingRow
-                label="画师注入"
-                icon={<Tags size={14} />}
-                help="打开会改写 .nl / .tag 文本，与之前几批不再是同一代数据"
-                description={vlmArtist ? '已启用：文本开头写入 @画师' : '关闭：只留在 JSON 的 artist 字段'}
-              >
-                <ToggleRow
-                  checked={vlmArtist}
-                  onChange={setVlmArtist}
-                  label={vlmArtist ? '写进 .nl / .tag 文本' : '仅保留 JSON 字段'}
-                />
-              </SettingRow>
-
-              {vlmArtist && (
-                <>
-                  <SettingRow
-                    label="NL 注入"
-                    help="开：@画师 写在 .nl 正文开头；关：NL 里不带"
-                  >
-                    <ToggleRow
-                      checked={vlmArtistInject}
-                      onChange={setVlmArtistInject}
-                      label={vlmArtistInject ? '@画师 放在 NL 最前面' : 'NL 里不带画师'}
-                    />
-                  </SettingRow>
-                  <SettingRow
-                    label="TAG 注入"
-                    help="开：@画师 写在 .tag 串最前面；关：TAG 里不带"
-                  >
-                    <ToggleRow
-                      checked={vlmArtistInjectTags}
-                      onChange={setVlmArtistInjectTags}
-                      label={vlmArtistInjectTags ? '@画师 放在 TAG 最前面' : 'TAG 里不带画师'}
-                    />
-                  </SettingRow>
-                </>
-              )}
-
-              <p className="text-[11px] leading-relaxed text-lx-muted">
-                分包前建议先去「去重」页扫一遍，带上排除清单再分包。
-              </p>
-            </SectionPanel>
-          )}
-
-          {!isVlm && (
-            <SectionPanel title="命名">
-              <SettingRow
-                label="布局"
-                help="flat 全部拍平；mirror 保留原目录结构"
-                icon={<Tags size={14} />}
-              >
-                <ChoiceGrid
-                  options={LAYOUTS}
-                  value={layout}
-                  onChange={setLayout}
-                  className="grid-cols-2"
-                  size="sm"
-                  renderLabel={(v) => (v === 'flat' ? '平铺改名' : '保持原结构')}
-                  ariaLabel="布局"
-                />
-              </SettingRow>
-
-              <SettingRow
-                label="画师表"
-                help="parquet、分片目录，或 hf://datasets/<repo>/<路径>；留空跟配置走"
-                description={
-                  artistTable.trim()
-                    ? '按 post id 查画师，查不到退回目录名'
-                    : cfgArtistTable
-                      ? `配置：${cfgArtistTable}`
-                      : '未配置，只从目录名取画师'
-                }
-              >
-                <div className="flex gap-2">
-                  <input
-                    className="lx-input font-mono text-xs"
-                    value={artistTable}
-                    onChange={(e) => setArtistTable(e.target.value)}
-                    placeholder={cfgArtistTable || 'K:/anlia/_artist/shards'}
-                    disabled={!artist}
-                  />
-                  <button
-                    type="button"
-                    className="lx-btn-ghost shrink-0 px-3"
-                    disabled={!artist}
-                    onClick={() =>
-                      folder.pick(artistTable || undefined, setArtistTable, ['parquet'])
-                    }
-                  >
-                    浏览
-                  </button>
-                </div>
-              </SettingRow>
-
-              <SettingRow
-                label="画师名"
-                help="从目录名取画师，写进 image_id 与归档 meta"
-              >
-                <ToggleRow checked={artist} onChange={setArtist} label="从目录名提取画师" />
-              </SettingRow>
-
-              <SettingRow
-                label="取第几层"
-                help={
-                  artist
-                    ? `0 = alice/1.jpg → alice；1 = 2024/alice/1.jpg → alice`
-                    : '先打开上面的「从目录名提取画师」'
-                }
-                description={
-                  artist && preview
-                    ? `${preview.artists.count} 个画师 · 覆盖 ${fmtCount(preview.artists.covered)} 张${
-                        preview.artists.missing ? ` · ${fmtCount(preview.artists.missing)} 张取不到` : ''
-                      }`
-                    : undefined
-                }
-              >
-                <input
-                  type="number"
-                  className="lx-input font-mono tabular-nums"
-                  min={0}
-                  max={8}
-                  value={artistDepth}
-                  disabled={!artist}
-                  onChange={(e) =>
-                    setArtistDepth(Math.min(8, Math.max(0, Number(e.target.value) || 0)))
-                  }
-                />
-              </SettingRow>
-
-              <SettingRow
-                label="画师注入"
-                help={artist ? '开：把 @画师 写到 .nl 开头；关：只留在 JSON 字段' : '先打开「从目录名提取画师」'}
-              >
-                <ToggleRow
-                  checked={artist && artistInject}
-                  onChange={(v) => {
-                    setArtistInject(v)
-                    if (v && !artist) setArtist(true)
-                  }}
-                  disabled={!artist}
-                  label={artist && artistInject ? 'NL 正文开头带 @画师' : 'NL 里不带画师'}
-                />
-              </SettingRow>
-
-              <SettingRow
-                label="TAG 注入"
-                help={artist ? '开：@画师 写在 .tag 串最前面；关：只留在 JSON 字段' : '先打开「从目录名提取画师」'}
-              >
-                <ToggleRow
-                  checked={artist && artistInjectTags}
-                  onChange={(v) => {
-                    setArtistInjectTags(v)
-                    if (v && !artist) setArtist(true)
-                  }}
-                  disabled={!artist}
-                  label={artist && artistInjectTags ? 'TAG 串开头带 @画师' : 'TAG 里不带画师'}
-                />
-              </SettingRow>
-
-              <SettingRow label="序号宽度" help="6 位最多 999999 张；总量上十亿要从首批就用 10 位">
-                <input
-                  type="number"
-                  className="lx-input font-mono tabular-nums"
-                  min={3}
-                  max={12}
-                  value={seqWidth}
-                  onChange={(e) => setSeqWidth(Math.min(12, Math.max(3, Number(e.target.value) || 6)))}
-                />
-              </SettingRow>
-
-              <div className="pt-1">
-                <div className="mb-2 text-[11px] uppercase tracking-wide text-lx-muted">命名预览</div>
-                {previewError ? (
-                  <p className="text-xs text-lx-danger">{previewError}</p>
-                ) : !preview ? (
-                  <p className="text-xs text-lx-muted">选好输入后这里会显示实际会用的名字。</p>
-                ) : (
-                  <div className="space-y-1">
-                    {preview.samples.map((s) => (
-                      <div key={s.image_id} className="flex items-center gap-2 font-mono text-[11px]">
-                        <span className="min-w-0 flex-1 truncate text-lx-muted" title={s.rel}>
-                          {s.rel}
-                        </span>
-                        <span className="shrink-0 text-lx-dim">→</span>
-                        <span className="shrink-0 text-lx-secondary">{s.name}</span>
-                      </div>
-                    ))}
-                    {preview.warnings.map((w) => (
-                      <p key={w} className="pt-1 text-[11px] text-lx-warning">
-                        {w}
-                      </p>
-                    ))}
+              {guard && (
+                <div className="border-b border-lx py-3.5 last:border-b-0">
+                  <div className="mb-2.5 flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium text-lx-secondary">
+                      阈值（仅本次任务）
+                    </span>
+                    <button
+                      type="button"
+                      className="lx-btn-ghost px-2 py-1 text-[11px]"
+                      disabled={!defaults?.guard}
+                      onClick={() => setGuardPolicy({ ...(defaults?.guard ?? {}) })}
+                    >
+                      恢复默认
+                    </button>
                   </div>
-                )}
-              </div>
-            </SectionPanel>
-          )}
 
-          {hasTag && (
-            <SectionPanel
-              title="Tag 模型"
-              description={
-                isVlm && backend === 'none' ? 'tag 由 VLM 出，不加载本地分类头' : undefined
-              }
-            >
-              <SettingRow
-                label="后端"
-                help={isVlm ? 'none = tag 交给 VLM；否则 tag 走本地后端、NL 走 VLM' : undefined}
-              >
-                <select
-                  className="lx-select"
-                  value={backend}
-                  onChange={(e) => {
-                    const next = e.target.value
-                    setBackend(next)
-                    // 预设模型是按后端分组的：切后端时把不属于新后端的选中项
-                    // 退回「配置默认」，否则会把上一个后端的仓库名喂给新后端。
-                    const owner = backendOfRepo(modelRepo)
-                    if (owner && owner !== next) setModelRepo('')
-                    // ★权重目录也是按后端分的（models/wd-eva02、models/pixai…），
-                    //   跟着仓库名一起切走。留着一个指向旧后端目录的路径，新后端
-                    //   要么加载失败，要么悄悄退回联网——正是"下好了还一直载入"。
-                    const preset = defaults?.models_dir
-                    if (preset && next !== 'none') setModelDir(`${preset}\\${next}`)
-                  }}
-                >
-                  {backendOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </SettingRow>
-
-            <SettingRow
-              label="分类头精度"
-              help={
-                precision === 'fp16'
-                  ? '给 V100 等无 bf16 的卡用；fp16 动态范围窄，建议先做一致性校验'
-                  : 'bf16 与 fp32 的 tag 有极小差异'
-              }
-            >
-              <ChoiceGrid
-                options={PRECISIONS}
-                value={precision as (typeof PRECISIONS)[number]}
-                onChange={(v) => setPrecision(v)}
-                className="grid-cols-4"
-                size="sm"
-                mono
-                ariaLabel="精度"
-              />
-            </SettingRow>
-
-            <SettingRow
-              label="设备"
-              help={
-                tagDevices.length > 1
-                  ? `已选 ${tagDevices.length} 张卡：每张各加载一份权重，按批等分`
-                  : '可多选。auto = 单卡（有卡用 cuda:0）；多选即每张卡各跑一份'
-              }
-            >
-              <ChoiceMulti
-                options={
-                  (defaults?.devices?.length ? defaults.devices : DEVICES_FALLBACK) as string[]
-                }
-                value={tagDevices}
-                onChange={setTagDevices}
-                // auto / cpu 是"不要多卡"的两种表达，与具体卡互斥
-                exclusive={['auto', 'cpu']}
-                className="grid-cols-4"
-                size="sm"
-                mono
-                ariaLabel="设备"
-              />
-            </SettingRow>
-
-            <SettingRow
-              label="多卡分工"
-              help={
-                tagDevices.length < 2
-                  ? '选两张以上显卡后才生效'
-                  : tagMode === 'pack'
-                    ? '每个包整体交给一张卡：包多时更快，日志能按卡定位问题'
-                    : '一个包在跑，每批等分给各卡：包少图多时最快'
-              }
-            >
-              <ChoiceGrid
-                options={TAG_MODES}
-                value={tagMode}
-                onChange={setTagMode}
-                className="grid-cols-2"
-                size="sm"
-                ariaLabel="多卡分工"
-                disabled={tagDevices.length < 2}
-                renderLabel={(v) => (v === 'pack' ? '每卡一个包' : '批内切分')}
-              />
-            </SettingRow>
-
-            <SettingRow
-              label="批大小"
-              help={
-                tagDevices.length > 1
-                  ? `每张卡各 ${batch} 张，一次共 ${batch * tagDevices.length} 张`
-                  : '没有越大越快这回事：观测到超出显存就退回来'
-              }
-            >
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={BATCH_MIN}
-                    max={BATCH_MAX}
-                    step={1}
-                    value={batch}
-                    onChange={(e) => setBatch(Number(e.target.value))}
-                    aria-label="批大小"
-                    className="h-1.5 min-w-0 flex-1 cursor-pointer accent-lx-accent"
-                  />
-                  {/* 滑动条不好精确停在某个数，配一个数字框；两处都夹到 1..100，
-                      手打 999 不会把服务端打成 OOM。 */}
-                  <input
-                    type="number"
-                    min={BATCH_MIN}
-                    max={BATCH_MAX}
-                    value={batch}
-                    onChange={(e) =>
-                      setBatch(
-                        Math.max(
-                          BATCH_MIN,
-                          Math.min(BATCH_MAX, Math.round(Number(e.target.value) || BATCH_MIN)),
-                        ),
-                      )
-                    }
-                    aria-label="批大小数值"
-                    className="lx-input w-16 px-1.5 py-0.5 text-right font-mono text-xs tabular-nums"
-                  />
-                </div>
-                <TagVramHint vram={tagVram} batch={batch} />
-              </div>
-            </SettingRow>
-
-            <SettingRow
-              label="预处理"
-              help={'大 PNG 快约 1.5×，JPEG 基本不赚；线稿类图约一成 tag 会变'}
-            >
-              <ChoiceGrid
-                options={PREPROCESS}
-                value={preprocess as (typeof PREPROCESS)[number]}
-                onChange={(v) => setPreprocess(v)}
-                className="grid-cols-2"
-                size="sm"
-                ariaLabel="预处理"
-                renderLabel={(v) => PREPROCESS_LABELS[v]}
-              />
-            </SettingRow>
-
-            <SettingRow
-              label="阈值"
-              help="全局阈值；分类别覆盖在下方「按类别阈值」"
-              icon={<Gauge size={14} />}
-            >
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  className="lx-slider"
-                  min={0.05}
-                  max={0.95}
-                  step={0.01}
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  aria-label="阈值"
-                />
-                <span className="w-12 shrink-0 text-right font-mono text-sm tabular-nums text-lx">
-                  {threshold.toFixed(2)}
-                </span>
-              </div>
-            </SettingRow>
-
-            {keepOptions.length > 0 && (
-              <SettingRow
-                label="保留类别"
-                help="不勾 = 配置默认；勾选后只保留这些类别的 tag"
-              >
-                <div className="flex flex-wrap gap-1.5">
-                  {keepOptions.map((c) => {
-                    const active = keepCategories.includes(c)
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => toggleKeep(c)}
-                        aria-pressed={active}
-                        className={`rounded-lx-sm border px-2 py-1 font-mono text-[11px] transition-colors ${
-                          active
-                            ? 'border-lx-accent bg-lx-accent-subtle text-lx-selected'
-                            : 'border-lx bg-lx-surface-raised text-lx-muted hover:text-lx'
-                        }`}
-                      >
-                        {c}
-                      </button>
-                    )
-                  })}
-                </div>
-              </SettingRow>
-            )}
-
-            {keepOptions.length > 0 && (
-              <details className="pt-1">
-                <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wide text-lx-muted hover:text-lx-secondary">
-                  按类别阈值（空 = 用全局）
-                </summary>
-                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
-                  {keepOptions.map((c) => (
-                    <label key={c} className="flex items-center gap-2 text-[11px]">
-                      <span className="w-20 shrink-0 truncate font-mono text-lx-muted" title={c}>
-                        {c}
+                  <label className="mb-3 flex flex-col gap-1.5">
+                    <span className="flex items-baseline justify-between gap-2 text-[11px] text-lx-secondary">
+                      <span>占空比</span>
+                      <span className="font-mono tabular-nums text-lx">
+                        {guardPolicy.duty_cycle != null ? guardPolicy.duty_cycle.toFixed(2) : '—'}
+                        <span className="ml-1 text-[10px] text-lx-dim">
+                          {guardPolicy.duty_cycle != null
+                            ? `（空闲 ${Math.round((1 - guardPolicy.duty_cycle) * 100)}%）`
+                            : ''}
+                        </span>
                       </span>
-                      <input
-                        type="number"
-                        className="lx-input px-1.5 py-1 font-mono text-[11px] tabular-nums"
+                    </span>
+                    <input
+                      type="range"
+                      className="lx-slider"
+                      min={0.2}
+                      max={1}
+                      step={0.05}
+                      value={guardPolicy.duty_cycle ?? 0.7}
+                      onChange={(e) => setKnob('duty_cycle', Number(e.target.value))}
+                      aria-label="占空比"
+                    />
+                  </label>
+
+                  <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
+                    <GuardKnob
+                      label="温度闭环目标"
+                      suffix="°C"
+                      min={0}
+                      max={95}
+                      step={1}
+                      value={guardPolicy.target_temp_c ?? 0}
+                      onChange={(v) => setKnob('target_temp_c', v)}
+                      hint="0 = 关闭闭环"
+                    />
+                    <GuardKnob
+                      label="警告温度"
+                      suffix="°C"
+                      min={30}
+                      max={100}
+                      step={1}
+                      value={guardPolicy.temp_warn_c ?? 72}
+                      onChange={(v) => setKnob('temp_warn_c', v)}
+                    />
+                    <GuardKnob
+                      label="熔断温度"
+                      suffix="°C"
+                      min={40}
+                      max={110}
+                      step={1}
+                      value={guardPolicy.temp_cutoff_c ?? 82}
+                      onChange={(v) => setKnob('temp_cutoff_c', v)}
+                    />
+                    <GuardKnob
+                      label="恢复温度"
+                      suffix="°C"
+                      min={30}
+                      max={105}
+                      step={1}
+                      value={guardPolicy.temp_resume_c ?? 70}
+                      onChange={(v) => setKnob('temp_resume_c', v)}
+                      hint="需低于熔断温度"
+                    />
+                    <GuardKnob
+                      label="连续运行"
+                      suffix="分钟"
+                      min={0}
+                      max={1440}
+                      step={10}
+                      value={guardPolicy.continuous_minutes ?? 0}
+                      onChange={(v) => setKnob('continuous_minutes', v)}
+                      hint="0 = 不限"
+                    />
+                    <GuardKnob
+                      label="单次休息"
+                      suffix="分钟"
+                      min={0}
+                      max={240}
+                      step={1}
+                      value={guardPolicy.rest_minutes ?? 5}
+                      onChange={(v) => setKnob('rest_minutes', v)}
+                    />
+                  </div>
+
+                  <details className="mt-3 border-t border-lx pt-3">
+                    <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wide text-lx-muted hover:text-lx-secondary">
+                      闭环 PID 细调
+                    </summary>
+                    <div className="mt-2.5 grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
+                      <GuardKnob
+                        label="比例 kp"
                         min={0}
                         max={1}
                         step={0.01}
-                        value={catThresholds[c] ?? ''}
-                        placeholder="默认"
-                        onChange={(e) =>
-                          setCatThresholds((prev) => ({ ...prev, [c]: e.target.value }))
-                        }
+                        value={guardPolicy.kp ?? 0.04}
+                        onChange={(v) => setKnob('kp', v)}
                       />
-                    </label>
-                  ))}
-                </div>
-              </details>
-            )}
-
-            <SettingRow
-              label="tag 模型（分类头）"
-              icon={<Tags size={14} />}
-              help="tag 分类头的权重，与出 NL 的大模型无关"
-              description={
-                isVlm && backend === 'none'
-                  ? '当前 tag 由 VLM 出，不加载本地分类头'
-                  : tagRepoForBackend
-                    ? `默认：${tagRepoForBackend}`
-                    : undefined
-              }
-            >
-              <div className="space-y-2">
-                <select
-                  className="lx-select"
-                  value={tagModelCustom ? '__custom__' : modelRepo}
-                  disabled={isVlm && backend === 'none'}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (v === '__custom__') {
-                      setTagModelCustom(true)
-                      return
-                    }
-                    setTagModelCustom(false)
-                    setModelRepo(v)
-                    // 选了别的后端的权重就把后端一起切过去，否则会把
-                    // pixai 的仓库名喂给 wd-eva02，加载直接失败。
-                    const owner = backendOfRepo(v)
-                    if (owner) setBackend(owner)
-                  }}
-                  aria-label="tag 模型"
-                >
-                  <option value="">
-                    配置默认{tagRepoForBackend ? `（${tagRepoForBackend}）` : '（后端内置）'}
-                  </option>
-                  {tagModelPresets.map(([key, repo]) => (
-                    <option key={key} value={repo}>
-                      {repo} · {key}
-                    </option>
-                  ))}
-                  <option value="__custom__">自定义仓库名…</option>
-                </select>
-                {tagModelCustom && (
-                  <input
-                    className="lx-input font-mono text-xs"
-                    value={modelRepo}
-                    onChange={(e) => setModelRepo(e.target.value)}
-                    placeholder="org/model-name"
-                    spellCheck={false}
-                    aria-label="自定义 tag 模型仓库"
-                  />
-                )}
-              </div>
-            </SettingRow>
-
-            <SettingRow
-              label="权重目录"
-              description={defaults?.models_dir || undefined}
-              help="填了就不走 HF 缓存，也不会再去问网络；留空 = 交给 transformers 自己找缓存"
-            >
-              {/* 清空按钮是必要的：现在 pixai 也认这个字段，而多数人是从
-                  wd-eva02 切过来的，输入框里还留着上一条路径。不说明白的话，
-                  用户会以为"清空 = 用默认"，实际是"用旧后端那个目录"。 */}
-              <div className="flex gap-2">
-                <input
-                  className="lx-input font-mono text-xs"
-                  value={modelDir}
-                  onChange={(e) => setModelDir(e.target.value)}
-                  placeholder={`${defaults?.models_dir ?? 'models'}\\${backend === 'none' ? 'wd-eva02' : backend}`}
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="lx-btn-ghost shrink-0 px-3"
-                  onClick={() => folder.pick(modelDir || defaults?.models_dir, setModelDir)}
-                >
-                  浏览
-                </button>
-                {modelDir && (
-                  <button
-                    type="button"
-                    className="lx-btn-ghost shrink-0 px-2 text-[11px]"
-                    onClick={() => setModelDir('')}
-                  >
-                    清空
-                  </button>
-                )}
-              </div>
-            </SettingRow>
-            </SectionPanel>
-          )}
-
-          <SectionPanel title="运行保护">
-            <SettingRow label="只跑前 N 张" help="0 = 不限">
-              <input
-                type="number"
-                className="lx-input font-mono tabular-nums"
-                min={0}
-                value={limit}
-                onChange={(e) => setLimit(Math.max(0, Number(e.target.value) || 0))}
-              />
-            </SettingRow>
-
-            <SettingRow
-              label="硬件保护"
-              help="按占空比、温度与休息时长限制"
-              icon={guard ? <Cpu size={14} /> : <CloudOff size={14} />}
-            >
-              <ToggleRow checked={guard} onChange={setGuard} label="开启" />
-            </SettingRow>
-
-            {/* 只对本地引擎生效：VLM 的产物是 parquet 流式写出，总量要跑到
-                中途才知道，没法在开跑前判盘。本地引擎有完整 plan，可以估。
-                之前这个开关只在「数据打包」页有，打标这边写满盘就被吞了。 */}
-            {!isVlm && (
-              <SettingRow
-                label="盘位预算"
-                help="按预计产出 + 20% 冗余判断；关掉则用配置的固定磁盘阈值"
-                icon={<HardDrive size={14} />}
-              >
-                <ToggleRow checked={checkSpace} onChange={setCheckSpace} label="开跑前检查磁盘" />
-              </SettingRow>
-            )}
-
-            {/* 打标完成后自动回传。默认关：回传是"另一件事"，失败了不该影响
-                "打标成功"这个结论，所以它只往日志里写一条，不改任务状态。 */}
-            <SettingRow
-              label="完成后自动回传"
-              help="走分块通道；重传只会补缺的块，回传失败不影响任务状态"
-              icon={<CloudUpload size={14} />}
-            >
-              <ToggleRow
-                checked={autoUpload}
-                onChange={setAutoUpload}
-                label="打标完成后把产物推到汇总机"
-              />
-              {autoUpload && (
-                <div className="mt-2.5 space-y-2">
-                  <input
-                    className="lx-input font-mono text-xs"
-                    value={autoUploadUrl}
-                    onChange={(e) => setAutoUploadUrl(e.target.value)}
-                    placeholder="http://192.168.1.10:8000"
-                    spellCheck={false}
-                    aria-label="回传地址"
-                  />
-                  <FieldNotice message={httpUrlError(autoUploadUrl, '回传地址')} />
-                  <input
-                    className="lx-input font-mono text-xs"
-                    type="password"
-                    value={autoUploadToken}
-                    onChange={(e) => setAutoUploadToken(e.target.value)}
-                    placeholder="令牌（对端开了鉴权时必填）"
-                    autoComplete="off"
-                    aria-label="回传令牌"
-                  />
-                  <input
-                    className="lx-input font-mono text-xs"
-                    value={autoUploadDir}
-                    onChange={(e) => setAutoUploadDir(e.target.value)}
-                    placeholder="远端子目录（留空 = 仓库根）"
-                    spellCheck={false}
-                    aria-label="远端子目录"
-                  />
+                      <GuardKnob
+                        label="积分 ki"
+                        min={0}
+                        max={0.5}
+                        step={0.001}
+                        value={guardPolicy.ki ?? 0.004}
+                        onChange={(v) => setKnob('ki', v)}
+                      />
+                      <GuardKnob
+                        label="死区"
+                        suffix="°C"
+                        min={0.5}
+                        max={10}
+                        step={0.5}
+                        value={guardPolicy.temp_deadband_c ?? 2}
+                        onChange={(v) => setKnob('temp_deadband_c', v)}
+                      />
+                      <GuardKnob
+                        label="最低占空比"
+                        min={0.02}
+                        max={1}
+                        step={0.02}
+                        value={guardPolicy.min_duty ?? 0.2}
+                        onChange={(v) => setKnob('min_duty', v)}
+                      />
+                      <GuardKnob
+                        label="单次让步上限"
+                        suffix="秒"
+                        min={1}
+                        max={120}
+                        step={1}
+                        value={guardPolicy.max_sleep_s ?? 30}
+                        onChange={(v) => setKnob('max_sleep_s', v)}
+                      />
+                    </div>
+                  </details>
                 </div>
               )}
-            </SettingRow>
+            </SectionPanel>
+          </>) },
+        ]} />
 
-            {/* 阈值的默认值来自 tiers.yaml 的 limits 段（后端 /api/defaults 转出来），
-                这里改只影响本次任务，不写回配置文件——配置文件是"团队的默认口径"，
-                一次试跑就把它改掉，下一批人跑出来的东西就不是同一个东西了。 */}
-            {guard && (
-              <div className="border-b border-lx py-3.5 last:border-b-0">
-                <div className="mb-2.5 flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium text-lx-secondary">
-                    阈值（只影响本次任务）
-                  </span>
-                  <button
-                    type="button"
-                    className="lx-btn-ghost px-2 py-1 text-[11px]"
-                    disabled={!defaults?.guard}
-                    onClick={() => setGuardPolicy({ ...(defaults?.guard ?? {}) })}
-                  >
-                    恢复配置默认
-                  </button>
-                </div>
-
-                <label className="mb-3 flex flex-col gap-1.5">
-                  <span className="flex items-baseline justify-between gap-2 text-[11px] text-lx-secondary">
-                    <span>占空比</span>
-                    <span className="font-mono tabular-nums text-lx">
-                      {guardPolicy.duty_cycle != null ? guardPolicy.duty_cycle.toFixed(2) : '—'}
-                      <span className="ml-1 text-[10px] text-lx-dim">
-                        {guardPolicy.duty_cycle != null
-                          ? `留 ${Math.round((1 - guardPolicy.duty_cycle) * 100)}% 空闲`
-                          : ''}
-                      </span>
-                    </span>
-                  </span>
-                  <input
-                    type="range"
-                    className="lx-slider"
-                    min={0.2}
-                    max={1}
-                    step={0.05}
-                    value={guardPolicy.duty_cycle ?? 0.7}
-                    onChange={(e) => setKnob('duty_cycle', Number(e.target.value))}
-                    aria-label="占空比"
-                  />
-                  <span className="text-[10px] leading-snug text-lx-dim">
-                    1.00 = 全速；0.70 = 每忙 7 份睡 3 份
-                  </span>
-                </label>
-
-                <div className="grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
-                  <GuardKnob
-                    label="温度闭环目标"
-                    suffix="°C"
-                    min={0}
-                    max={95}
-                    step={1}
-                    value={guardPolicy.target_temp_c ?? 0}
-                    onChange={(v) => setKnob('target_temp_c', v)}
-                    hint="0 = 关闭闭环，只靠下面的硬线"
-                  />
-                  <GuardKnob
-                    label="警告温度"
-                    suffix="°C"
-                    min={30}
-                    max={100}
-                    step={1}
-                    value={guardPolicy.temp_warn_c ?? 72}
-                    onChange={(v) => setKnob('temp_warn_c', v)}
-                    hint="只记警告，不停任务"
-                  />
-                  <GuardKnob
-                    label="熔断温度"
-                    suffix="°C"
-                    min={40}
-                    max={110}
-                    step={1}
-                    value={guardPolicy.temp_cutoff_c ?? 82}
-                    onChange={(v) => setKnob('temp_cutoff_c', v)}
-                    hint="到这条线立即停止提交"
-                  />
-                  <GuardKnob
-                    label="恢复温度"
-                    suffix="°C"
-                    min={30}
-                    max={105}
-                    step={1}
-                    value={guardPolicy.temp_resume_c ?? 70}
-                    onChange={(v) => setKnob('temp_resume_c', v)}
-                    hint="必须低于熔断温度"
-                  />
-                  <GuardKnob
-                    label="连续运行"
-                    suffix="分钟"
-                    min={0}
-                    max={1440}
-                    step={10}
-                    value={guardPolicy.continuous_minutes ?? 0}
-                    onChange={(v) => setKnob('continuous_minutes', v)}
-                    hint="0 = 不限；到点强制休息一次"
-                  />
-                  <GuardKnob
-                    label="单次休息"
-                    suffix="分钟"
-                    min={0}
-                    max={240}
-                    step={1}
-                    value={guardPolicy.rest_minutes ?? 5}
-                    onChange={(v) => setKnob('rest_minutes', v)}
-                    hint="只在「连续运行」非 0 时生效"
-                  />
-                </div>
-
-                {/* 温度闭环的细调参数。只在闭环目标非 0 时才起作用——
-                    目标为 0 表示不闭环，这些系数没有任何输入。 */}
-                <details className="mt-3 border-t border-lx pt-3">
-                  <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wide text-lx-muted hover:text-lx-secondary">
-                    闭环细调（目标非 0 时才生效）
-                  </summary>
-                  <div className="mt-2.5 grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
-                    <GuardKnob
-                      label="比例 kp"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={guardPolicy.kp ?? 0.04}
-                      onChange={(v) => setKnob('kp', v)}
-                      hint="压占空比的速度；太大会震荡"
-                    />
-                    <GuardKnob
-                      label="积分 ki"
-                      min={0}
-                      max={0.5}
-                      step={0.001}
-                      value={guardPolicy.ki ?? 0.004}
-                      onChange={(v) => setKnob('ki', v)}
-                      hint="消掉稳态误差；太大会超调"
-                    />
-                    <GuardKnob
-                      label="死区"
-                      suffix="°C"
-                      min={0.5}
-                      max={10}
-                      step={0.5}
-                      value={guardPolicy.temp_deadband_c ?? 2}
-                      onChange={(v) => setKnob('temp_deadband_c', v)}
-                      hint="目标温度上下这个范围内不调整"
-                    />
-                    <GuardKnob
-                      label="最低占空比"
-                      min={0.02}
-                      max={1}
-                      step={0.02}
-                      value={guardPolicy.min_duty ?? 0.2}
-                      onChange={(v) => setKnob('min_duty', v)}
-                      hint="闭环能压到的最低点"
-                    />
-                    <GuardKnob
-                      label="单次让步上限"
-                      suffix="秒"
-                      min={1}
-                      max={120}
-                      step={1}
-                      value={guardPolicy.max_sleep_s ?? 30}
-                      onChange={(v) => setKnob('max_sleep_s', v)}
-                      hint="单次让步的时长上限；太大会过冲"
-                    />
-                  </div>
-                  <p className="mt-2 text-[10px] leading-snug text-lx-dim">
-                    kp / ki 同时为 0 时，闭环只按最低占空比跑。
-                  </p>
-                </details>
-              </div>
-            )}
-          </SectionPanel>
-        </div>
-
-        {/* 右栏跟滚：左栏有十几个面板，走到「运行保护」时页顶的「开始打标」
+        {/* 右栏跟滚：左栏按任务分类切换，页顶的「开始打标」
             早就滚出视野了。sticky 之后，机器/产出/产物/提交一直在手边。 */}
         <aside className="flex min-w-0 flex-col gap-3.5 lg:sticky lg:top-3.5 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
           <SectionPanel

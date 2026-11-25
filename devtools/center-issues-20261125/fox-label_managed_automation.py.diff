@@ -1,0 +1,14 @@
+--- server/fox-label/managed/automation.py
++++ candidate/fox-label/managed/automation.py
+@@ -70,7 +70,10 @@
+                 if different:
+                     return '预派任务等待本机配置匹配：' + different + '；请退出托管后调整配置再开始'
+             return reason(c, session, device, state)
+-    changes={key:value for key,value in required(c,device,package).items() if cfg.get(key)!=value}
++    changes={key:value for key,value in required(c,device,package).items()
++             if cfg.get(key)!=value and permissions(caps).get(key, False)}
++    if 'configure' not in caps.get('actions', []):
++        changes = {}
+     if changes:
+         from .tuning import validate
+         try:

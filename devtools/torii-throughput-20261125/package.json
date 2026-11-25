@@ -1,0 +1,67 @@
+{
+  "base_snapshot_sha256": "09998a5db446d6350f80306dfb87e1231ea9751004df0f06c2d66546a07eedfa",
+  "final_overrides": [
+    "tagger/inference/qwen35/projections.py"
+  ],
+  "unrelated_benchmark_changes_excluded": true,
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-torii-throughput.zip",
+    "bytes": 77101609,
+    "sha256": "152233d49a4027b679c5851fb095a17409f717e789e0651607f93148aec9ed05",
+    "crc_ok": true,
+    "source_scope_matches": true,
+    "snapshot_files": 681,
+    "private_settings_excluded": true
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-torii-throughput-patch.zip",
+    "bytes": 63276716,
+    "sha256": "e8fd79173e64207201878ac7194ac3de223267d7620f2d65780f31ca6c9d34c0",
+    "crc_ok": true,
+    "source_scope_matches": true,
+    "snapshot_files": 520,
+    "private_settings_excluded": true
+  },
+  "tests": {
+    "tests.xml": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "1",
+      "tests": "88",
+      "time": "29.072",
+      "timestamp": "2026-11-25T22:13:39.118444+08:00",
+      "hostname": "DESKTOP-310LLIR"
+    },
+    "web-tests.xml": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "19",
+      "time": "18.597",
+      "timestamp": "2026-11-25T22:15:58.975226+08:00",
+      "hostname": "DESKTOP-310LLIR"
+    },
+    "capacity-tests.xml": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "36",
+      "time": "14.983",
+      "timestamp": "2026-11-25T22:46:36.433398+08:00",
+      "hostname": "DESKTOP-310LLIR"
+    },
+    "final-regression.xml": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "21",
+      "time": "1.683",
+      "timestamp": "2026-11-25T22:41:18.892553+08:00",
+      "hostname": "DESKTOP-310LLIR"
+    }
+  }
+}

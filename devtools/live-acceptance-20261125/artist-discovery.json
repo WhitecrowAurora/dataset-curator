@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "revision": "bfb2dce5c795b9797604e376c02dd7bec1b9904c",
+  "candidate": {
+    "directory": "artist",
+    "files": 844,
+    "matched": 1,
+    "missing": 0,
+    "missing_samples": [],
+    "ambiguous": 0,
+    "sample_package": "shard-000000.tar",
+    "sample_path": "artist/shard-000000.artist.parquet",
+    "validated": true,
+    "error": "",
+    "sample_rows": 9472,
+    "sample_with_artist": 9195
+  },
+  "saved": true
+}

@@ -84,6 +84,9 @@ class JobRequest(BaseModel):
 
     # ---- 引擎。local = 本地 tag 后端；vlm = vLLM 出 NL（tag 可由本地后端并行出）
     engine: str = "local"
+    hair_review: bool = False
+    nl_by_media: bool = False
+    hair_media: str = "unknown"
 
     # ---- 打标
     backend: str = "wd-eva02"
@@ -260,7 +263,7 @@ class ModelsRequest(BaseModel):
 class ModelTarget(BaseModel):
     """模型管理页对单个模型的动作目标（下载 / 取消 / 删文件 / 开目录）。"""
 
-    kind: str = "vlm"          # vlm | tag
+    kind: str = "vlm"          # vlm | tag | review
     key: str
     # 只对下载有意义：q4/q5/q6/q8 时只下这一档 + 配套 mmproj，空 = 按清单下。
     precision: str | None = None
@@ -501,6 +504,8 @@ class CenterLoginRequest(BaseModel):
     server: str
     user_id: str
     secret: str = ""
+    proxy_mode: Literal["auto", "direct", "custom"] | None = None
+    proxy_url: str | None = None
 
 
 CenterExecutionPatch = create_model("CenterExecutionPatch", **{
@@ -512,6 +517,12 @@ CenterExecutionPatch = create_model("CenterExecutionPatch", **{
 class CenterRunRequest(CenterExecutionPatch):
     """托管 fox worker 的运行参数。全部可省略 = 沿用上次保存的配置。"""
     tag_url: str | None = None
+    force_continue: bool | None = None
+    auto_start_on_connect: bool | None = None
+    proxy_mode: Literal["auto", "direct", "custom"] | None = None
+    proxy_url: str | None = None
+    download_proxy_mode: Literal["auto", "direct", "custom", "center"] | None = None
+    download_proxy_url: str | None = None
     mode: str | None = None
     # 派工倾向（2026-11-12）：只影响服务端排序，不改变本机产出什么。
     # 空串 = 不挑，是有效值，所以这里不能用 exclude_none 之外的默认值兜。
@@ -1292,7 +1303,7 @@ def _artist_context_default(enabled: bool, depth: int, inject: bool = True,
 
 # 单卡服务与多卡组共用一把启动锁：抢的是同一批显卡，两边同时起来时谁先
 # OOM 取决于加载顺序，而报错只会指向模型或显存，看不出是冲突。
-from .gpu_start import GPU_START_LOCK as _GPU_START_LOCK
+from .gpu_start import GPU_START_LOCK as _GPU_START_LOCK, model_start_slot
 
 
 def _gpu_busy(status: str) -> bool:
@@ -1334,6 +1345,10 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         CENTER.restore()
         yield
         CENTER.shutdown()
+        from .conflict_hair import service as hair_service
+        if hair_service.cache_info().currsize:
+            hair_service().close()
+            hair_service.cache_clear()
         # 先停清扫线程再收其它进程：它是唯一会碰块仓库的后台线程，
         # 留着会在下面删成品/目录时和它抢文件。
         try:
@@ -1366,6 +1381,16 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     # FTP 是"给你个账号就能用"，这条要求对端跑着本服务，能力更强（见 blobs.py）。
     app.include_router(BLOB_ROUTER)
     app.include_router(SETUP_ROUTER)
+    from .benchmark.routes import router as benchmark_router
+    app.include_router(benchmark_router(CENTER))
+    from .resource_settings import router as resource_settings_router
+    app.include_router(resource_settings_router)
+    from .conflict_hair import router as conflict_hair_router
+    app.include_router(conflict_hair_router)
+    from .conflict_learning import router as conflict_learning_router
+    app.include_router(conflict_learning_router)
+    from .result_review import router as result_review_router
+    app.include_router(result_review_router)
     from .tools import router as tools_router
     app.include_router(tools_router)
     dist = Path(ui_dist) if ui_dist else DIST_DIR
@@ -1426,7 +1451,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     @app.post("/api/models/download")
     def start_model_download(req: ModelTarget) -> dict:
         try:
-            # precision 可选：传了就只下这一档 + 配套 mmproj；不传按条目清单下。
+            # 通用 VLM 下载原始权重；复核包下载固定版本的 ONNX / GGUF。
             return MODELS.start_download(req.kind, req.key, req.precision, token=req.token)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -2538,7 +2563,8 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         payload = res.as_dict(offset=max(0, offset), limit=max(1, min(500, limit)))
         payload["index"] = True
         payload["decisions"] = res.decided_count
-        return payload
+        from ..review_learning.service import annotate
+        return annotate(payload, cf.dir_of())
 
     @app.post("/api/conflicts/scan")
     def conflicts_scan(req: "ConflictScanRequest") -> dict:
@@ -2560,7 +2586,8 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
         payload["index"] = True
         payload["index_path"] = str(path)
         payload["decisions"] = result.decided_count
-        return payload
+        from ..review_learning.service import annotate
+        return annotate(payload, cf.dir_of())
 
     @app.post("/api/conflicts/decide")
     def conflicts_decide(req: "ConflictDecideRequest") -> dict:
@@ -2704,7 +2731,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def vllm_start(req: VllmStartRequest) -> dict:
         # 与 /api/multi/start 同一把锁：检查和启动之间不允许插进另一个启动
         # 请求，否则两个并发点击都能通过检查，最后两套服务各占一半卡互相 OOM。
-        with _GPU_START_LOCK:
+        with _GPU_START_LOCK, model_start_slot():
             if _gpu_busy(MULTI.snapshot()["status"]):
                 raise HTTPException(
                     409, "多卡服务正在运行（或正在停），会跟单卡服务抢显存；"
@@ -2960,7 +2987,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
 
     @app.post("/api/multi/start", status_code=202)
     def multi_start(req: MultiStartRequest) -> dict:
-        with _GPU_START_LOCK:
+        with _GPU_START_LOCK, model_start_slot():
             # 单卡服务占着的卡不能再给 worker：两个进程抢同一张卡时，谁先 OOM
             # 取决于加载顺序，而报错会指向模型，看不出是冲突。判定与启动必须
             # 在同一把锁里——先检查后启动，中间能插进一个 /api/vllm/start。
@@ -3214,7 +3241,8 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     @app.post("/api/center/login")
     def center_login(req: CenterLoginRequest) -> dict:
         try:
-            CENTER.login(req.server, req.user_id, req.secret)
+            CENTER.login(req.server, req.user_id, req.secret,
+                         proxy_mode=req.proxy_mode, proxy_url=req.proxy_url)
         except CenterError as exc:
             raise HTTPException(400, str(exc)) from exc
         return CENTER.snapshot()
@@ -3223,7 +3251,7 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     def center_start(req: CenterRunRequest) -> dict:
         try:
             return CENTER.start(**req.model_dump(exclude_none=True))
-        except (CenterError, ValueError) as exc:
+        except (CenterError, ValueError, ConfigError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/api/center/logout")
@@ -3236,6 +3264,16 @@ def create_app(*, ui_dist: Path | None = None) -> FastAPI:
     @app.post("/api/center/stop")
     def center_stop() -> dict:
         return CENTER.stop()
+
+    from .center_runtime.logs import router as center_logs_router
+    app.include_router(center_logs_router(CENTER, VLLM))
+
+    @app.post("/api/center/probe", status_code=202)
+    def center_probe() -> dict:
+        try:
+            return CENTER.runtime.probe()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     # ---- 静态前端
 

@@ -1,0 +1,158 @@
+/* 公共工作台控件。只负责外观与过渡，表单状态由组件保留。 */
+.lx-sidebar {
+  background: var(--lx-sidebar-bg);
+}
+
+.lx-nav-selection {
+  background: var(--lx-selected-bg);
+  box-shadow: var(--lx-shadow-inset), var(--lx-shadow-panel);
+}
+
+.lx-topbar,
+.lx-statusbar {
+  background: var(--lx-surface);
+}
+
+.lx-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--lx-border);
+  border-radius: var(--lx-radius);
+  background: var(--lx-surface);
+}
+
+.lx-tab {
+  position: relative;
+  padding: 8px 14px;
+  border-radius: var(--lx-radius-sm);
+  color: var(--lx-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  transition: color var(--lx-duration-fast), background-color var(--lx-duration-fast);
+}
+
+.lx-tab:hover {
+  color: var(--lx-text);
+  background: var(--lx-hover-bg);
+}
+
+.lx-tab[aria-selected='true'] {
+  color: var(--lx-selected-fg);
+}
+
+.lx-tab-selection {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--lx-selected-border);
+  border-radius: inherit;
+  background: var(--lx-selected-bg);
+  box-shadow: var(--lx-shadow-panel);
+}
+
+.lx-form-panel:not([hidden]) {
+  animation: lx-page-enter-kf var(--lx-duration-normal) var(--lx-ease-bounce) both;
+}
+
+.lx-choice {
+  border: 1px solid var(--lx-border);
+  border-radius: var(--lx-radius-sm);
+  background: var(--lx-surface-raised);
+  color: var(--lx-text-muted);
+  box-shadow: var(--lx-shadow-inset);
+  transition: background-color var(--lx-duration-fast), border-color var(--lx-duration-fast), color var(--lx-duration-fast);
+}
+
+.lx-choice:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--lx-border-hover);
+  color: var(--lx-text);
+}
+
+.lx-choice:is([aria-checked='true'], [aria-pressed='true']) {
+  border-color: var(--lx-selected-border);
+  background: var(--lx-selected-bg);
+  color: var(--lx-selected-fg);
+  box-shadow: var(--lx-shadow-inset), inset 0 -2px 0 var(--lx-accent);
+}
+
+.lx-switch-track {
+  display: block;
+  width: 30px;
+  height: 18px;
+  border: 1px solid var(--lx-border-hover);
+  border-radius: 999px;
+  background: var(--lx-bar-track);
+  transition: background-color var(--lx-duration-normal), border-color var(--lx-duration-normal);
+}
+
+.lx-switch-track::before {
+  content: '';
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--lx-text-muted);
+  transition: transform var(--lx-duration-normal) var(--lx-ease-bounce), background-color var(--lx-duration-normal);
+}
+
+.lx-switch-input:checked + .lx-switch-track {
+  background: var(--lx-accent);
+  border-color: var(--lx-accent);
+}
+
+.lx-switch-input:checked + .lx-switch-track::before {
+  transform: translateX(12px);
+  background: #ffffff;
+}
+
+.lx-switch-input:focus-visible + .lx-switch-track {
+  outline: 2px solid var(--lx-accent);
+  outline-offset: 3px;
+}
+
+.lx-advanced {
+  margin: 12px 0;
+  border: 1px solid var(--lx-border);
+  border-radius: var(--lx-radius-sm);
+  background: var(--lx-surface-raised);
+}
+
+.lx-advanced > summary {
+  border-radius: inherit;
+  transition: background-color var(--lx-duration-fast), color var(--lx-duration-fast);
+}
+
+.lx-advanced > summary:hover {
+  background: var(--lx-hover-bg);
+  color: var(--lx-text);
+}
+
+/* 不支持自动高度过渡的浏览器仍使用原生 details 的展开行为。 */
+@supports (interpolate-size: allow-keywords) {
+  .lx-advanced::details-content {
+    interpolate-size: allow-keywords;
+    height: 0;
+    overflow: clip;
+    opacity: 0;
+    transition: height var(--lx-duration-normal) var(--lx-ease-bounce), opacity var(--lx-duration-normal), content-visibility var(--lx-duration-normal) allow-discrete;
+  }
+
+  .lx-advanced[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+}
+
+.lx-progress-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  transform-origin: left;
+  transition: transform var(--lx-duration-slow) var(--lx-ease-smooth), background-color var(--lx-duration-normal);
+}
+
+.lx-setting-row {
+  border-color: var(--lx-rule);
+}

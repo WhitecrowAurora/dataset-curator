@@ -1,0 +1,700 @@
+[
+  {
+    "mode": "endpoints",
+    "health": {
+      "status": "ok"
+    },
+    "version": {
+      "version": "lulynx-qwen35-0.5",
+      "runtime": {
+        "device": "cuda:0",
+        "precision": "gguf_packed_fp16",
+        "linear_attention": "fla",
+        "max_pixels": 1000000,
+        "libraries": {
+          "torch": "2.13.0+cu132",
+          "transformers": "5.14.1",
+          "flash-linear-attention": "0.6.0",
+          "triton": "3.7.1"
+        },
+        "batch_size": 4,
+        "batch_window_s": 0.1,
+        "continuous_batching": true,
+        "decode_graph": true
+      }
+    },
+    "models": {
+      "object": "list",
+      "data": [
+        {
+          "id": "torii-test",
+          "object": "model",
+          "owned_by": "lulynx"
+        }
+      ]
+    }
+  },
+  {
+    "mode": "http_12_requests",
+    "repeat": 0,
+    "seconds": 9.109388199998648,
+    "results": [
+      {
+        "index": 0,
+        "status": 200,
+        "elapsed": 2.7011673000088194,
+        "body": {
+          "id": "chatcmpl-d8dd3cc5543541e99c7264deed2b4b80",
+          "object": "chat.completion",
+          "created": 1795615635,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"A mystical white fox"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 8,
+            "total_tokens": 1183
+          }
+        }
+      },
+      {
+        "index": 1,
+        "status": 200,
+        "elapsed": 7.075707700001658,
+        "body": {
+          "id": "chatcmpl-0da12158eb5b4ed4b8262a20e23ad15b",
+          "object": "chat.completion",
+          "created": 1795615640,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 96,
+            "total_tokens": 1271
+          }
+        }
+      },
+      {
+        "index": 2,
+        "status": 200,
+        "elapsed": 5.701840100009576,
+        "body": {
+          "id": "chatcmpl-376d6eaec6c44f2db867d2ec6a0b6319",
+          "object": "chat.completion",
+          "created": 1795615638,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 24,
+            "total_tokens": 1199
+          }
+        }
+      },
+      {
+        "index": 3,
+        "status": 200,
+        "elapsed": 8.688674300006824,
+        "body": {
+          "id": "chatcmpl-1c9bfcb2a6d14402b8bd2529bda8f8fd",
+          "object": "chat.completion",
+          "created": 1795615641,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle,"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 64,
+            "total_tokens": 1239
+          }
+        }
+      },
+      {
+        "index": 4,
+        "status": 200,
+        "elapsed": 2.702760100000887,
+        "body": {
+          "id": "chatcmpl-92bdd54dc8844902bd6be20d75b71cd8",
+          "object": "chat.completion",
+          "created": 1795615635,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"A mystical white fox"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 8,
+            "total_tokens": 1183
+          }
+        }
+      },
+      {
+        "index": 5,
+        "status": 200,
+        "elapsed": 7.666624200006481,
+        "body": {
+          "id": "chatcmpl-a50cf0e422f44c67abf8780759339f14",
+          "object": "chat.completion",
+          "created": 1795615640,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 96,
+            "total_tokens": 1271
+          }
+        }
+      },
+      {
+        "index": 6,
+        "status": 200,
+        "elapsed": 4.847977299999911,
+        "body": {
+          "id": "chatcmpl-a1aef205c164482cbb434755989e8354",
+          "object": "chat.completion",
+          "created": 1795615637,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 24,
+            "total_tokens": 1199
+          }
+        }
+      },
+      {
+        "index": 7,
+        "status": 200,
+        "elapsed": 8.970440400007647,
+        "body": {
+          "id": "chatcmpl-92bc4529d1f24455802a33cf50506e2d",
+          "object": "chat.completion",
+          "created": 1795615641,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle,"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 64,
+            "total_tokens": 1239
+          }
+        }
+      },
+      {
+        "index": 8,
+        "status": 200,
+        "elapsed": 2.704213700009859,
+        "body": {
+          "id": "chatcmpl-6383a1f5470f463b8edfc44a468f2f74",
+          "object": "chat.completion",
+          "created": 1795615635,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"A mystical white fox"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 8,
+            "total_tokens": 1183
+          }
+        }
+      },
+      {
+        "index": 9,
+        "status": 200,
+        "elapsed": 7.663118800002849,
+        "body": {
+          "id": "chatcmpl-d011c4685e9846f293a43716d782b445",
+          "object": "chat.completion",
+          "created": 1795615640,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 96,
+            "total_tokens": 1271
+          }
+        }
+      },
+      {
+        "index": 10,
+        "status": 200,
+        "elapsed": 6.545152400009101,
+        "body": {
+          "id": "chatcmpl-86264e737fa7476cb10f5e1ff3ad5d4e",
+          "object": "chat.completion",
+          "created": 1795615639,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 24,
+            "total_tokens": 1199
+          }
+        }
+      },
+      {
+        "index": 11,
+        "status": 200,
+        "elapsed": 9.109334699998726,
+        "body": {
+          "id": "chatcmpl-ee7803b5ceb24e5e9e488d6ea34fd366",
+          "object": "chat.completion",
+          "created": 1795615642,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle,"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 64,
+            "total_tokens": 1239
+          }
+        }
+      }
+    ],
+    "allocated": 6005203968
+  },
+  {
+    "mode": "http_12_requests",
+    "repeat": 1,
+    "seconds": 7.093402500002412,
+    "results": [
+      {
+        "index": 0,
+        "status": 200,
+        "elapsed": 1.5292907999973977,
+        "body": {
+          "id": "chatcmpl-ddec4582ea1d4e1580093efb038f5093",
+          "object": "chat.completion",
+          "created": 1795615643,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"A mystical white fox"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 8,
+            "total_tokens": 1183
+          }
+        }
+      },
+      {
+        "index": 1,
+        "status": 200,
+        "elapsed": 4.714665000006789,
+        "body": {
+          "id": "chatcmpl-94b8a222e409449f97ef41f410e2b05a",
+          "object": "chat.completion",
+          "created": 1795615646,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 96,
+            "total_tokens": 1271
+          }
+        }
+      },
+      {
+        "index": 2,
+        "status": 200,
+        "elapsed": 3.7409211000049254,
+        "body": {
+          "id": "chatcmpl-bc33bf10f42848aba72d971abb788b9f",
+          "object": "chat.completion",
+          "created": 1795615645,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 24,
+            "total_tokens": 1199
+          }
+        }
+      },
+      {
+        "index": 3,
+        "status": 200,
+        "elapsed": 7.093207500001881,
+        "body": {
+          "id": "chatcmpl-9ddfc45865014476a57d12dc08acad89",
+          "object": "chat.completion",
+          "created": 1795615649,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle,"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 64,
+            "total_tokens": 1239
+          }
+        }
+      },
+      {
+        "index": 4,
+        "status": 200,
+        "elapsed": 1.5319663999980548,
+        "body": {
+          "id": "chatcmpl-2cd5340e7123419daac97050a1be6025",
+          "object": "chat.completion",
+          "created": 1795615643,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"A mystical white fox"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 8,
+            "total_tokens": 1183
+          }
+        }
+      },
+      {
+        "index": 5,
+        "status": 200,
+        "elapsed": 5.286420000004,
+        "body": {
+          "id": "chatcmpl-33fe80ce502f4f8ea60cb5c934c0b361",
+          "object": "chat.completion",
+          "created": 1795615647,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 96,
+            "total_tokens": 1271
+          }
+        }
+      },
+      {
+        "index": 6,
+        "status": 200,
+        "elapsed": 2.8651671999978134,
+        "body": {
+          "id": "chatcmpl-e4b419bc022c4763b090ff26f61e93c9",
+          "object": "chat.completion",
+          "created": 1795615644,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 24,
+            "total_tokens": 1199
+          }
+        }
+      },
+      {
+        "index": 7,
+        "status": 200,
+        "elapsed": 6.251627100005862,
+        "body": {
+          "id": "chatcmpl-dee1b6c5bbfa4b91af2785e33857f580",
+          "object": "chat.completion",
+          "created": 1795615648,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle,"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 64,
+            "total_tokens": 1239
+          }
+        }
+      },
+      {
+        "index": 8,
+        "status": 200,
+        "elapsed": 1.5327471000055084,
+        "body": {
+          "id": "chatcmpl-420a4f3100c64a48bf1899ef405686c4",
+          "object": "chat.completion",
+          "created": 1795615643,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"A mystical white fox"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 8,
+            "total_tokens": 1183
+          }
+        }
+      },
+      {
+        "index": 9,
+        "status": 200,
+        "elapsed": 5.283827100007329,
+        "body": {
+          "id": "chatcmpl-f597901ec87d485290fac9a276a6fb0a",
+          "object": "chat.completion",
+          "created": 1795615647,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"The image is a digital composite showing nine headshots of older men arranged in a 3x3 grid on a blurred soccer field background. Each portrait is framed with a dark blue border and numbered 1 to 9. The men wear formal suits with ties or neckties, and each has a nameplate below their portrait with their name and country. The top of the image features bold white text reading 'Top FIFA 19 Management codis.' The"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 96,
+            "total_tokens": 1271
+          }
+        }
+      },
+      {
+        "index": 10,
+        "status": 200,
+        "elapsed": 6.253386900003534,
+        "body": {
+          "id": "chatcmpl-2867a0c32f2743339fc95f26479d60d9",
+          "object": "chat.completion",
+          "created": 1795615648,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Three armed girls stand in a ruined urban battlefield under a cloudy, overcast sky. The background shows"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 24,
+            "total_tokens": 1199
+          }
+        }
+      },
+      {
+        "index": 11,
+        "status": 200,
+        "elapsed": 7.0933623000019,
+        "body": {
+          "id": "chatcmpl-b2e7b52d200c48b08e48b84269da48f8",
+          "object": "chat.completion",
+          "created": 1795615649,
+          "model": "torii-test",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"General\": \"Seven characters from the Sword Art Online universe stand on a lush green field under a bright blue sky with scattered clouds. Behind them float several large, rocky islands topped with castles and towers, connected by visible beams of light, creating a magical fantasy atmosphere. The group is arranged in a semi-circle,"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1175,
+            "completion_tokens": 64,
+            "total_tokens": 1239
+          }
+        }
+      }
+    ],
+    "allocated": 6040253440
+  },
+  {
+    "mode": "isolation",
+    "statuses": [
+      400,
+      400,
+      200
+    ]
+  },
+  {
+    "mode": "full_caption",
+    "status": 200,
+    "json_valid": true,
+    "usage": {
+      "prompt_tokens": 1175,
+      "completion_tokens": 303,
+      "total_tokens": 1478
+    },
+    "finish": "stop"
+  },
+  {
+    "mode": "shutdown",
+    "thread_stopped": true
+  }
+]

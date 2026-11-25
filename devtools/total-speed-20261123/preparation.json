@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"backup\": \"/tagger/.delete/total-speed-20261123-1730\", \"baseline\": {\"fox-label/managed/throughput.py\": null, \"fox-label/server.py\": \"dca48bf0ac12b48b3f785563efdd61ced5f8f8fdfbae9cee79f80763feb973d0\", \"fox-panel/panel.py\": \"5be3fc5ccd08e06fcde00913fc67a5d57f4434a43f69cca673f6c8e00988a8c5\", \"fox-panel/web/throughput.js\": null, \"fox-panel/web/app.js\": \"c4c8d027b392121c159c59c18f31a8ecc6da5aa928e1b1242846e60643fd76e3\", \"fox-panel/web/index.html\": \"d1d3e5365d93e250da0214a31bc3a02cae6e4199a123a65ec8b46830db850577\", \"fox-panel/web/selection.css\": \"50268cc70132388454a7a15972dc592af8336689f42f0c55e26e49dac7f50176\"}}\n",
+  "stderr": ""
+}

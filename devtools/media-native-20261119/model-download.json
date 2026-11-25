@@ -1,0 +1,17 @@
+{
+  "repo": "deepghs/anime_real_cls",
+  "revision": "097a6c1e9e62866a435810c883a45a7cb2c7077d",
+  "license": "OpenRAIL (repository metadata)",
+  "files": [
+    {
+      "file": "H:\\tagger\\models\\media\\mobilenetv3_v1.4_dist\\model.onnx",
+      "bytes": 16821153,
+      "sha256": "c02d68cc7f56dbcbcd4f41a10df190385c1f963f22c4eefb8d162869800ed3b0"
+    },
+    {
+      "file": "H:\\tagger\\models\\media\\mobilenetv3_v1.4_dist\\meta.json",
+      "bytes": 118,
+      "sha256": "38007daebaa3e162f0adf2ab1da526b16765b98a21883153ec95e8160d675605"
+    }
+  ]
+}

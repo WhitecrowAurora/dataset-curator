@@ -9,21 +9,25 @@ import {
   KeyRound,
   Loader2,
   Play,
-  PlugZap,
   RefreshCw,
   Square,
-  Terminal,
 } from 'lucide-react'
 import { api, ApiError, type CenterState, type CenterExecution } from '../lib/api'
-import { DEFAULT_EXECUTION, ExecutionSettings } from '../components/center/ExecutionSettings'
-import { WorkspacePackages } from '../components/center/WorkspacePackages'
+import { DEFAULT_EXECUTION, ExecutionSettings, ExecutionCredentials, ExecutionDownloads, ExecutionLifecycle } from '../components/center/ExecutionSettings'
+import { AdvancedSettings, FormSections } from '../components/ui/FormSections'
+import { ExecutionStatus } from '../components/center/ExecutionStatus'
+import { ExecutionMonitor } from '../components/center/ExecutionMonitor'
+import { CenterOverview } from '../components/center/CenterOverview'
+import { LeasePanel } from '../components/center/LeasePanel'
+import { ConnectionNetwork, type ProxyMode } from '../components/center/ConnectionNetwork'
+import { DownloadNetwork } from '../components/center/DownloadNetwork'
 import { OfflineTasks } from '../components/center/OfflineTasks'
+import { DispatchPlans } from '../components/center/DispatchPlans'
 import { HistoryArtifacts } from '../components/center/HistoryArtifacts'
 import { ChoiceGrid, ErrorBox, ToggleRow } from '../components/ui/controls'
 import { failureAdvice, httpUrlError, localServiceUrlError, latestCenterFailure } from '../lib/guidance'
 import { useFolderPicker } from '../components/FolderPicker'
 import {
-  MiniMetricCard,
   PageHeader,
   SectionPanel,
   SettingRow,
@@ -73,6 +77,9 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   const [pollError, setPollError] = useState('')
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState('')
+  const [serviceLog, setServiceLog] = useState<{ path: string; tail: string[] } | null>(null)
+  const [logLocation, setLogLocation] = useState('')
+  const [section, setSection] = useState('work')
   // 身份三项是**草稿**：存下来的值只在第一次拉到时灌进来。否则用户改了一半
   // 又被轮询覆盖回去，会以为输入框坏了。
   const [server, setServer] = useState('')
@@ -85,13 +92,17 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   const [partsPref, setPartsPref] = useState('')
   const [tagUrl, setTagUrl] = useState('')
   const [outDir, setOutDir] = useState('')
-  const [waitMode, setWaitMode] = useState(true)
   // 存成字符串而不是数字：输入框清空时得能表达"没填"，转成 NaN 再回填会变成 0
   const [maxPkgs, setMaxPkgs] = useState('0')
   // 下载口径：连接数同样存字符串（清空后按默认 4 处理），选优是开关
   const [dlConns, setDlConns] = useState('4')
   const [cdnProbe, setCdnProbe] = useState(true)
+  const [proxyMode, setProxyMode] = useState<ProxyMode>('auto')
+  const [proxyUrl, setProxyUrl] = useState('')
+  const [downloadProxyMode, setDownloadProxyMode] = useState<ProxyMode | 'center'>('auto')
+  const [downloadProxyUrl, setDownloadProxyUrl] = useState('')
   const [autoUpload, setAutoUpload] = useState(true)
+  const [autoStartOnConnect, setAutoStartOnConnect] = useState(true)
   const seeded = useRef(false)
   const folder = useFolderPicker()
 
@@ -103,6 +114,10 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
       if (!seeded.current) {
         seeded.current = true
         setServer(s.config.server)
+        setProxyMode(s.config.proxy_mode ?? 'auto')
+        setProxyUrl(s.config.proxy_url ?? '')
+        setDownloadProxyMode(s.config.download_proxy_mode ?? 'auto')
+        setDownloadProxyUrl(s.config.download_proxy_url ?? '')
         setExecution(Object.fromEntries(Object.keys(DEFAULT_EXECUTION).map((key) =>
           [key, s.config[key as keyof CenterExecution] ?? DEFAULT_EXECUTION[key as keyof CenterExecution]])) as CenterExecution)
         setRememberHf(s.credentials?.remember_hf ?? false)
@@ -111,11 +126,11 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         setPartsPref(s.config.parts_pref ?? '')
         setTagUrl(s.config.tag_url)
         setOutDir(s.config.out_dir)
-        setWaitMode(s.config.wait ?? true)
         setMaxPkgs(String(s.config.max_packages ?? 0))
         setDlConns(String(s.config.download_conns ?? 4))
         setCdnProbe(s.config.cdn_probe ?? true)
         setAutoUpload(s.config.auto_upload ?? true)
+        setAutoStartOnConnect(s.config.auto_start_on_connect ?? true)
       }
       if (s.runtime?.active && s.runtime.hosting_mode === 'passive') {
         setExecution(Object.fromEntries(Object.keys(DEFAULT_EXECUTION).map((key) =>
@@ -160,13 +175,12 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   }
 
   const running = Boolean(state?.runtime?.active || state?.runtime?.preparing || state?.running || state?.history?.running)
+  const releasing = Boolean(state?.release?.running)
   const ident = state?.identity ?? {}
-  const board = state?.board
-  const leases = board?.leases ?? []
-  // 只有连上看板、且服务端真的给了这项统计才显示（老服务端 → undefined）
-  const pool = board?.ok ? board.parts : undefined
   const serverNotice = seeded.current ? httpUrlError(server, '调度中心地址') : ''
   const idNotice = seeded.current && !userId.trim() ? '请填写用户 ID，调度中心按这个 ID 记录产出。' : ''
+  const proxyNotice = proxyMode === 'custom' ? httpUrlError(proxyUrl, '代理地址') : ''
+  const downloadProxyNotice = downloadProxyMode === 'custom' ? httpUrlError(downloadProxyUrl, '下载代理地址') : ''
   const serviceNotice = seeded.current && mode !== 'tag'
     ? httpUrlError(tagUrl, '推理服务地址') || (execution.inference_source === 'local' ? localServiceUrlError(tagUrl) : '') : ''
   const outNotice = seeded.current && !outDir.trim() ? '请选择产物目录，下载的分片和打标结果会保存到这里。' : ''
@@ -174,17 +188,19 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
   const failureDetail = state?.runtime?.error || (runtimeFailure && state?.last_rc != null ? latestCenterFailure(state.log) : '') || runtimeFailure
   // 打标服务与产物目录空着就不让开始：后端对空串是"保持原值"（免得把配置
   // 清成空以后再起不来），所以输入框显示空、实际却用着旧地址，是更难查的错。
-  const startBlocked = !ident.device_id
-    ? '先在上面连接'
+  const startBlocked = proxyNotice || downloadProxyNotice || (!ident.device_id
+    ? '先到「连接与账号」连接调度中心'
     : mode !== 'tag' && !tagUrl.trim()
       ? '打标服务地址不能为空'
       : !outDir.trim()
         ? '产物目录不能为空'
-        : ''
+        : '')
   const payload = () => ({ ...execution, tag_url: tagUrl, mode, out_dir: outDir,
-    wait: waitMode, max_packages: Number(maxPkgs || 0),
+    hosting_mode: 'passive' as const, wait: false, idle_timeout: 0, max_packages: Number(maxPkgs || 0),
     download_conns: Math.max(1, Math.min(16, Number(dlConns) || 4)),
-    cdn_probe: cdnProbe, parts_pref: partsPref, auto_upload: autoUpload,
+    cdn_probe: cdnProbe, parts_pref: partsPref, auto_upload: autoUpload, auto_start_on_connect: autoStartOnConnect,
+    proxy_mode: proxyMode, proxy_url: proxyUrl,
+    download_proxy_mode: downloadProxyMode, download_proxy_url: downloadProxyUrl,
     remember_hf: rememberHf, ...(hfToken.trim() ? { hf_token: hfToken.trim() } : {}),
   })
 
@@ -194,7 +210,6 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         icon={<CircleDot size={18} />}
         eyebrow="局域网协作"
         title="调度中心"
-        description="自动分工，分到的分片在本机打标"
         badges={
           running ? (
             <StatusChip tone="success">{state?.running ? `运行中 · ${fmtUptime(state?.uptime_s ?? 0)}`
@@ -215,208 +230,33 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
         }
       />
 
-      <WorkspacePackages connected={!!ident.device_id} onChanged={() => void pull()} />
-      <OfflineTasks />
-      <HistoryArtifacts locked={running || Boolean(state?.history?.running)} />
+      <ExecutionMonitor state={state} unavailable={Boolean(pollError)} />
+
       {(actionError || pollError) && <ErrorBox error={actionError || pollError}
         nextStep={failureAdvice(actionError || pollError, 'center')} />}
       {runtimeFailure && <ErrorBox error={failureDetail} title="调度运行失败"
         nextStep={failureAdvice(failureDetail, 'center')}
         actions={<button type="button" className="lx-btn-ghost"
-          onClick={() => document.getElementById('center-logs')?.scrollIntoView({ block: 'start' })}>查看调度日志</button>} />}
-      {state?.runtime?.message && <p className="text-xs text-lx-muted">{state.runtime.message}</p>}
-      {state?.runtime?.managed && <div className="rounded-lx-sm border border-lx p-3 text-xs text-lx-muted">
-        托管连接：{({ online: '已连接', connecting: '连接中', unsupported: '等待服务端升级',
-          offline: '连接中断，自动重连', released: '已退出托管' } as Record<string, string>)[state.runtime.managed.status]
-          ?? state.runtime.managed.status}
-        {state.runtime.managed.error && <p className="mt-1 text-lx-warning">{state.runtime.managed.error}</p>}
-        {state.runtime.managed.results.slice(-3).map((r) => <p key={r.id} className="mt-1">
-          指令 {r.seq}：{({ accepted: '准备执行', applied: '已执行', failed: '失败', canceled: '已取消' } as Record<string, string>)[r.status] ?? r.status}
-          {r.error && ` · ${r.error}`}
-        </p>)}
-      </div>}
+          onClick={() => {
+            setSection('records')
+            requestAnimationFrame(() => document.getElementById('center-logs')?.scrollIntoView({ block: 'start' }))
+          }}>查看调度日志</button>} />}
+      <CenterOverview state={state} />
 
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <MiniMetricCard
-          icon={<PlugZap size={14} />}
-          label="连接"
-          value={ident.server ? '已连接' : '未连接'}
-          detail={ident.server || '填地址与 ID'}
-          tone={ident.server ? 'success' : 'neutral'}
-        />
-        <MiniMetricCard
-          icon={<Terminal size={14} />}
-          label="当前派工"
-          value={String(leases.length)}
-          detail={board?.reason || (board?.ok ? `档位 ${board?.tier || '?'}` : '—')}
-          tone={leases.length > 0 ? 'accent' : 'neutral'}
-        />
-        {/* 全池余量：谁想补哪一侧，看这两个数决定要不要开工。
-            老服务端没有这项统计——此时整组都不显示，免得把"没统计"读成"一片不缺"。 */}
-        {pool && (
-          <>
-            <MiniMetricCard
-              icon={<CircleDot size={14} />}
-              label="全池剩余"
-              value={String(pool.remaining)}
-              detail={`共 ${pool.total} 片 · 已完成 ${pool.done}`}
-              tone={pool.remaining > 0 ? 'accent' : 'success'}
-            />
-            <MiniMetricCard
-              icon={<CircleDot size={14} />}
-              label="缺 NL"
-              value={String(pool.missing_nl)}
-              detail="只等描述的那一侧"
-              tone={pool.missing_nl > 0 ? 'warning' : 'success'}
-            />
-            <MiniMetricCard
-              icon={<CircleDot size={14} />}
-              label="缺 TAG"
-              value={String(pool.missing_tag)}
-              detail="只等标签的那一侧"
-              tone={pool.missing_tag > 0 ? 'warning' : 'success'}
-            />
-          </>
-        )}
-        <MiniMetricCard
-          icon={<Loader2 size={14} />}
-          label="上次退出码"
-          value={state?.last_rc === null || state?.last_rc === undefined ? '—' : String(state.last_rc)}
-          detail={running ? '正在跑' : state?.last_rc === 0 ? '正常结束' : ''}
-          tone={
-            state?.last_rc === null || state?.last_rc === undefined
-              ? 'neutral'
-              : state.last_rc === 0
-                ? 'success'
-                : 'warning'
-          }
-        />
-      </div>
-
+      <ExecutionStatus state={state} busy={Boolean(busy) || releasing}
+        onResume={() => void act('resume', () => api.centerStart({}))}
+        onForceContinue={() => void act('force', () => api.centerStart({force_continue: true}))} />
+      <LeasePanel state={state} busy={Boolean(busy)} onRelease={(id, kind) => void act('release', () => api.centerRelease(id, kind))} />
+      <DispatchPlans connected={!!ident.device_id} locked={running || Boolean(state?.history?.running) || releasing || Boolean(busy)} onApplied={() => { seeded.current = false; void pull() }} />
       <SectionPanel
-        title="身份"
-        description={running ? '运行中不能改，先停止' : '换 ID 将按新身份单独记录'}
-      >
-        <SettingRow
-          label="调度中心地址"
-          notice={serverNotice}
-          help="形如 http://1.2.3.4:31831"
-          required
-        >
-          <input
-            className="lx-input font-mono text-xs"
-            value={server}
-            aria-label="调度中心地址"
-            aria-invalid={Boolean(serverNotice)}
-            onChange={(e) => setServer(e.target.value)}
-            placeholder="http://1.2.3.4:31831"
-            spellCheck={false}
-            disabled={running}
-          />
-        </SettingRow>
-        <SettingRow label="ID" help="服务端按它记录你的产出" required notice={idNotice}>
-          <input
-            className="lx-input text-xs"
-            value={userId}
-            aria-label="用户 ID"
-            aria-invalid={Boolean(idNotice)}
-            onChange={(e) => setUserId(e.target.value)}
-            placeholder="zhangsan"
-            spellCheck={false}
-            disabled={running}
-          />
-        </SettingRow>
-        <SettingRow
-          label="密钥"
-          help="留空 = 本机自动生成；同名被别的机器占着时，让管理员先清空该用户"
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="password"
-              className="lx-input font-mono text-xs"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              placeholder={ident.device_id ? '已登录' : '留空 = 本机自动生成'}
-              autoComplete="off"
-              spellCheck={false}
-              disabled={running}
-            />
-            <button
-              type="button"
-              className="lx-btn-primary shrink-0"
-              disabled={running || busy === 'login'}
-              onClick={() =>
-                void act('login', async () => {
-                  const s = await api.centerLogin({ server, user_id: userId, secret })
-                  setSecret('')
-                  // 身份落盘了，顶栏那盏灯该立刻变绿：
-                  // 页面内虽然已经显示设备号，但用户看的是全屏的角落。
-                  onLinked?.()
-                  return s
-                })
-              }
-            >
-              {busy === 'login' ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-              <span className="ml-1.5">连接</span>
-            </button>
-          </div>
-        </SettingRow>
-
-        {ident.device_id && (
-          <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1.5 text-[11px] sm:grid-cols-2">
-            <div className="flex justify-between gap-2">
-              <dt className="text-lx-muted">设备</dt>
-              <dd className="truncate font-mono text-lx-secondary" title={ident.device_id}>
-                {ident.device_id}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-lx-muted">服务端</dt>
-              <dd className="truncate font-mono text-lx-secondary" title={ident.server_id || ident.server}>
-                {ident.server_id || ident.server || '—'}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-lx-muted">心跳</dt>
-              <dd className="font-mono tabular-nums text-lx-secondary">
-                {ident.beat_interval ? `${ident.beat_interval}s` : '—'}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-lx-muted">ID</dt>
-              <dd className="truncate text-lx-secondary">{ident.user_id || '—'}</dd>
-            </div>
-          </dl>
-        )}
-
-        {ident.device_id && (
-          <div className="mt-3 flex items-center justify-between gap-3 border-t border-lx pt-3">
-            <p className="text-[10.5px] leading-relaxed text-lx-dim">
-              断开只清除设备身份，地址与 ID 保留
-            </p>
-            <button
-              type="button"
-              className="lx-btn-ghost shrink-0"
-              disabled={running || busy === 'logout'}
-              title={running ? '跑着的时候不能断开，先停止' : ''}
-              onClick={() => void act('logout', api.centerLogout)}
-            >
-              {busy === 'logout' ? <Loader2 size={14} className="animate-spin" /> : null}
-              <span className={busy === 'logout' ? 'ml-1.5' : ''}>断开</span>
-            </button>
-          </div>
-        )}
-      </SectionPanel>
-
-      <SectionPanel
-        title="运行"
-        description="启动一个 worker 子进程，自动领片、打标、上报"
+        title="接单控制"
+        description="退出托管保留租约 48 小时；归还分片请点停止并释放"
         trailing={
           running ? (
             <button
               type="button"
-              className="lx-btn-danger"
-              disabled={busy === 'stop'}
+              className="lx-btn-danger inline-flex items-center"
+              disabled={Boolean(busy) || releasing}
               onClick={() => void act('stop', api.centerStop)}
             >
               {busy === 'stop' ? (
@@ -430,10 +270,15 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
             <div className="flex gap-2">
             <button type="button" className="lx-btn-ghost" disabled={Boolean(busy) || !seeded.current}
               onClick={() => void act('save', () => api.centerConfigure(payload()))}>保存配置</button>
+            <button type="button" className="lx-btn-ghost" disabled={Boolean(busy) || !seeded.current}
+              onClick={() => void act('probe', async () => {
+                await api.centerConfigure(payload())
+                return api.centerProbe()
+              })}>探测并发</button>
             <button
               type="button"
-              className="lx-btn-primary"
-              disabled={Boolean(busy) || !seeded.current || Boolean(startBlocked)}
+              className="lx-btn-primary inline-flex items-center"
+              disabled={Boolean(busy) || releasing || !seeded.current || Boolean(startBlocked)}
               title={startBlocked}
               onClick={() =>
                 void act('start', () =>
@@ -442,212 +287,345 @@ export function Center({ onLinked }: { onLinked?: () => void }) {
               }
             >
               {busy === 'start' ? <Loader2 size={14} className="animate-spin" /> : <Play size={13} />}
-              <span className="ml-1.5">{execution.hosting_mode === 'passive' ? '开始托管' : '开始'}</span>
+              <span className="ml-1.5">开始自动接单</span>
             </button>
             </div>
           )
         }
       >
-        <ExecutionSettings value={execution} onChange={setExecution} mode={mode} disabled={running}
-          token={hfToken} onToken={setHfToken} remember={rememberHf} onRemember={setRememberHf}
-          tokenSet={state?.credentials?.hf_token_set ?? false}
-          onClear={() => void act('clear-token', () => api.centerConfigure({ hf_token: '', remember_hf: false }))} />
-        <SettingRow label="产出模式" help="both 出 tag 与 NL；单模式更快">
-          <ChoiceGrid
-            options={MODES}
-            value={mode}
-            onChange={(v) => {
-              setMode(v)
-              if (v === 'tag' && execution.tag_backend === 'none') setExecution({ ...execution, tag_backend: 'wd-eva02' })
-              // 切成单侧时，指向另一侧的倾向当场清掉。留着的话表单看起来
-              // 正常，点「开始」才被后端 400 拦下——那是最难自查的一类错。
-              if (!prefFitsMode(partsPref, v)) setPartsPref('')
-            }}
-            disabled={running}
-            size="sm"
-            ariaLabel="产出模式"
-            renderLabel={(v) => MODE_LABEL[v] ?? v}
-          />
-        </SettingRow>
-        {/* 派工倾向：服务端据此决定"先把哪种片派给你"。它与产出模式正交，
-            但正交不等于可以随便组合——单侧模式下只有同侧才有意义。 */}
-        <SettingRow
-          label="派工倾向"
-          help={
-            mode === 'both'
-              ? '只影响先派哪种片，不改变本机产出什么'
-              : `产出模式是单侧，只能接缺 ${mode === 'tag' ? 'tag' : 'NL'} 的片`
-          }
-        >
-          {mode === 'both' ? (
-            <div className="flex flex-col gap-1">
-              <select
-                className="lx-select text-xs"
-                value={partsPref}
-                onChange={(e) => setPartsPref(e.target.value)}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-lx-muted">
+          <span>{MODE_LABEL[mode] ?? mode} · 由中心统一派发</span>
+          {!ident.device_id && <button type="button" className="lx-btn-ghost text-xs" onClick={() => setSection('connection')}>先连接调度中心</button>}
+        </div>
+        {startBlocked && <p className="mt-2 text-xs text-lx-warning">{startBlocked}</p>}
+      </SectionPanel>
+
+      <FormSections label="调度中心选项分类" value={section} onChange={setSection} sections={[
+        { id: 'work', title: '接单与托管', content: (<>
+          <SectionPanel title="接单与托管">
+            <SettingRow label="产出模式">
+              <ChoiceGrid
+                options={MODES}
+                value={mode}
+                onChange={(v) => {
+                  setMode(v)
+                  if (v === 'tag' && execution.tag_backend === 'none') setExecution({ ...execution, tag_backend: 'wd-eva02' })
+                  // 切成单侧时，指向另一侧的倾向当场清掉。留着的话表单看起来
+                  // 正常，点「开始」才被后端 400 拦下——那是最难自查的一类错。
+                  if (!prefFitsMode(partsPref, v)) setPartsPref('')
+                }}
                 disabled={running}
-                aria-label="派工倾向"
-              >
-                {PREF_OPTIONS.map((o) => (
-                  <option key={o.value || 'none'} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <span className="text-xs text-lx-muted">
-              自动：只接缺 {mode === 'tag' ? 'tag' : 'NL'} 的片
-            </span>
-          )}
-        </SettingRow>
-        {mode !== 'tag' && <SettingRow label={execution.inference_source === 'local' ? '本机服务地址' : '打标服务地址'}
-          notice={serviceNotice}
-          help={execution.inference_source === 'local' ? '本机自动启动使用此端口' : '已有模型推理服务地址'}>
-          <input
-            className="lx-input font-mono text-xs"
-            value={tagUrl}
-            onChange={(e) => setTagUrl(e.target.value)}
-            placeholder="http://127.0.0.1:8000"
-            spellCheck={false}
-            disabled={running}
-            aria-label="推理服务地址"
-            aria-invalid={Boolean(serviceNotice)}
-          />
-        </SettingRow>}
-        <SettingRow label="产物目录" help="分片与打标产物都落这里" notice={outNotice}>
-          <div className="flex gap-2">
-            <input
-              className="lx-input font-mono text-xs"
-              value={outDir}
-              onChange={(e) => setOutDir(e.target.value)}
-              placeholder="work/fox-work"
-              spellCheck={false}
-              disabled={running}
-              aria-label="产物目录"
-              aria-invalid={Boolean(outNotice)}
-            />
-            <button
-              type="button"
-              className="lx-btn-ghost shrink-0 px-3"
-              disabled={running}
-              onClick={() => folder.pick(outDir || undefined, setOutDir)}
+                size="sm"
+                ariaLabel="产出模式"
+                renderLabel={(v) => MODE_LABEL[v] ?? v}
+              />
+            </SettingRow>
+            <AdvancedSettings title="高级：派工偏好"><SettingRow
+              label="派工倾向"
+              help={
+                mode === 'both'
+                  ? '仅影响优先派发类型'
+                  : undefined
+              }
             >
-              <FolderOpen size={14} className="mr-1 inline" />
-              浏览
-            </button>
-          </div>
-        </SettingRow>
+              {mode === 'both' ? (
+                <div className="flex flex-col gap-1">
+                  <select
+                    className="lx-select text-xs"
+                    value={partsPref}
+                    onChange={(e) => setPartsPref(e.target.value)}
+                    disabled={running}
+                    aria-label="派工倾向"
+                  >
+                    {PREF_OPTIONS.map((o) => (
+                      <option key={o.value || 'none'} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <span className="text-xs text-lx-muted">
+                  自动：只接缺 {mode === 'tag' ? 'tag' : 'NL'} 的片
+                </span>
+              )}
+            </SettingRow></AdvancedSettings>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-lx-muted">分片上限</span>
+                <input
+                  className="lx-input w-24 font-mono text-xs tabular-nums"
+                  inputMode="numeric"
+                  value={maxPkgs}
+                  onChange={(e) => setMaxPkgs(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="不限"
+                  disabled={running}
+                />
+              </label>
+              <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
+                0 或留空为不限；达上限后暂停接单
+              </p>
+            </div>
+            <AdvancedSettings title="高级：自动恢复与服务行为">
+              <ExecutionLifecycle value={execution} onChange={setExecution} mode={mode} disabled={running} />
+            </AdvancedSettings>
+          </SectionPanel>
+        </>) },
+        { id: 'connection', title: '连接与账号', content: (<>
+          <SectionPanel
+                  title="连接与账号"
+                  description={running ? '运行中不可修改' : undefined}
+                >
+                  <SettingRow
+                    label="调度中心地址"
+                    notice={serverNotice}
+                    required
+                  >
+                    <input
+                      className="lx-input font-mono text-xs"
+                      value={server}
+                      aria-label="调度中心地址"
+                      aria-invalid={Boolean(serverNotice)}
+                      onChange={(e) => setServer(e.target.value)}
+                      placeholder="http://1.2.3.4:31831"
+                      spellCheck={false}
+                      disabled={running}
+                    />
+                  </SettingRow>
+                  <ConnectionNetwork mode={proxyMode} address={proxyUrl} onMode={setProxyMode}
+                    onAddress={setProxyUrl} disabled={running || Boolean(busy)} notice={proxyNotice} />
+                  <ToggleRow checked={autoStartOnConnect} onChange={setAutoStartOnConnect} disabled={running || Boolean(busy)}
+                    label="连接后自动接单" />
+                  <SettingRow label="ID" required notice={idNotice}>
+                    <input
+                      className="lx-input text-xs"
+                      value={userId}
+                      aria-label="用户 ID"
+                      aria-invalid={Boolean(idNotice)}
+                      onChange={(e) => setUserId(e.target.value)}
+                      placeholder="zhangsan"
+                      spellCheck={false}
+                      disabled={running}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label="密钥"
+                    help="同名冲突需管理员清理旧设备"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="password"
+                        className="lx-input font-mono text-xs"
+                        value={secret}
+                        onChange={(e) => setSecret(e.target.value)}
+                        placeholder={ident.device_id ? '已登录' : '留空 = 本机自动生成'}
+                        autoComplete="off"
+                        spellCheck={false}
+                        disabled={running}
+                      />
+                      <button
+                        type="button"
+                        className="lx-btn-primary shrink-0"
+                        disabled={running || Boolean(busy) || Boolean(serverNotice || idNotice || proxyNotice)}
+                        onClick={() =>
+                          void act('login', async () => {
+                            await api.centerConfigure(payload())
+                            const s = await api.centerLogin({ server, user_id: userId, secret,
+                              proxy_mode: proxyMode, proxy_url: proxyUrl })
+                            setSecret('')
+                            setSection('work')
+                            // 身份落盘了，顶栏那盏灯该立刻变绿：
+                            // 页面内虽然已经显示设备号，但用户看的是全屏的角落。
+                            onLinked?.()
+                            return s
+                          })
+                        }
+                      >
+                        {busy === 'login' ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                        <span className="ml-1.5">连接</span>
+                      </button>
+                    </div>
+                  </SettingRow>
 
-        <div className="mt-4 border-t border-lx pt-3">
-          <ToggleRow
-            checked={autoUpload}
-            onChange={setAutoUpload}
-            disabled={running}
-            label="自动回传"
-          />
-          <ToggleRow
-            checked={waitMode}
-            onChange={setWaitMode}
-            disabled={running}
-            label="等待派工"
-          />
-          <div className="mt-3 flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-lx-muted">分片上限</span>
-              <input
-                className="lx-input w-24 font-mono text-xs tabular-nums"
-                inputMode="numeric"
-                value={maxPkgs}
-                onChange={(e) => setMaxPkgs(e.target.value.replace(/[^\d]/g, ''))}
-                placeholder="0"
-                disabled={running || !waitMode}
-              />
-            </label>
-            <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
-              0 = 不限，跑够就停并归还多派的片
-              {!waitMode && '（仅「挂着等派工」时生效）'}
-            </p>
-          </div>
-        </div>
+                  {ident.device_id && (
+                    <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1.5 text-[11px] sm:grid-cols-2">
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-lx-muted">设备</dt>
+                        <dd className="truncate font-mono text-lx-secondary" title={ident.device_id}>
+                          {ident.device_id}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-lx-muted">服务端</dt>
+                        <dd className="truncate font-mono text-lx-secondary" title={ident.server_id || ident.server}>
+                          {ident.server_id || ident.server || '—'}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-lx-muted">心跳</dt>
+                        <dd className="font-mono tabular-nums text-lx-secondary">
+                          {state?.runtime.active && state.runtime.hosting_mode === 'passive' ? '托管中每 5 秒轮询上报' : state?.running ? '执行中每 30 秒上报' : '执行已停止'}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-lx-muted">ID</dt>
+                        <dd className="truncate text-lx-secondary">{ident.user_id || '—'}</dd>
+                      </div>
+                    </dl>
+                  )}
 
-        {/* 下载口径。两件事一起决定"这片多久能到"：单条 TCP 常被限速（多连接），
-            以及 DNS 给的那个边缘未必最快（开工前测速选优）。 */}
-        <div className="mt-3 border-t border-lx pt-3">
-          <ToggleRow
-            checked={cdnProbe}
-            onChange={setCdnProbe}
-            disabled={running}
-            label="CDN 测速"
-          />
-          <div className="mt-3 flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-lx-muted">下载连接数</span>
+                  {ident.device_id && (
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-lx pt-3">
+                      <p className="text-[10.5px] leading-relaxed text-lx-dim">
+                        断开只清除设备身份，地址与 ID 保留
+                      </p>
+                      <button
+                        type="button"
+                        className="lx-btn-ghost shrink-0"
+                        disabled={running || busy === 'logout'}
+                        title={running ? '跑着的时候不能断开，先停止' : ''}
+                        onClick={() => void act('logout', api.centerLogout)}
+                      >
+                        {busy === 'logout' ? <Loader2 size={14} className="animate-spin" /> : null}
+                        <span className={busy === 'logout' ? 'ml-1.5' : ''}>断开</span>
+                      </button>
+                    </div>
+                  )}
+                </SectionPanel>
+          <SectionPanel title="下载凭证">
+            <ExecutionCredentials token={hfToken} onToken={setHfToken} remember={rememberHf} onRemember={setRememberHf}
+              tokenSet={state?.credentials?.hf_token_set ?? false} disabled={running}
+              onClear={() => void act('clear-token', () => api.centerConfigure({ hf_token: '', remember_hf: false }))} />
+          </SectionPanel>
+        </>) },
+        { id: 'models', title: '模型与执行', content: (<>
+          <SectionPanel title="模型与执行">
+            <ExecutionSettings modelsOnly value={execution} onChange={setExecution} mode={mode} disabled={running}
+              token={hfToken} onToken={setHfToken} remember={rememberHf} onRemember={setRememberHf}
+              tokenSet={state?.credentials?.hf_token_set ?? false}
+              onClear={() => void act('clear-token', () => api.centerConfigure({ hf_token: '', remember_hf: false }))} />
+            {mode !== 'tag' && <SettingRow label={execution.inference_source === 'local' ? '本机服务地址' : '打标服务地址'}
+              notice={serviceNotice}>
               <input
-                className="lx-input w-24 font-mono text-xs tabular-nums"
-                inputMode="numeric"
-                value={dlConns}
-                onChange={(e) => setDlConns(e.target.value.replace(/[^\d]/g, ''))}
-                placeholder="4"
+                className="lx-input font-mono text-xs"
+                value={tagUrl}
+                onChange={(e) => setTagUrl(e.target.value)}
+                placeholder="http://127.0.0.1:8000"
+                spellCheck={false}
                 disabled={running}
+                aria-label="推理服务地址"
+                aria-invalid={Boolean(serviceNotice)}
               />
-            </label>
-            <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
-              1 = 单连接；国内单条 TCP 常被限速，4~8 条足够，再多只是抢同一份带宽
-            </p>
-          </div>
-        </div>
-
-        <details className="mt-3 border-t border-lx pt-3">
-          <summary className="cursor-pointer text-[11px] text-lx-muted">高级：实际执行的命令</summary>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
-            {state?.cmd || '—'}
-          </pre>
-          <p className="mt-1.5 text-[10px] leading-relaxed text-lx-dim">
-            由后端按上面的配置拼出，不支持逐字编辑
-          </p>
-        </details>
-      </SectionPanel>
-
-      <SectionPanel
-        title={leases.length ? `当前租约 · ${leases.length}` : '当前租约'}
-        description="只读，不会领走任务"
-      >
-        {!board?.ok && (
-          <p className="text-[11px] text-lx-muted">{board?.reason || '还没连上调度中心。'}</p>
-        )}
-        {board?.ok && leases.length === 0 && (
-          <p className="text-[11px] text-lx-muted">当前没有租约</p>
-        )}
-        {leases.length > 0 && (
-          <div className="flex flex-col divide-y divide-lx">
-            {leases.map((l) => (
-              <div key={l.lease_id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
-                <StatusChip tone={l.kind === 'active' ? 'accent' : 'neutral'}>
-                  {l.kind === 'active' ? '在跑' : '预占'}
-                </StatusChip>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-lx-secondary" title={`${l.repo}/${l.package}`}>
-                  {l.repo}/{l.package}
-                </span>
-                <span className="shrink-0 font-mono text-[11px] tabular-nums text-lx-muted">
-                  {typeof l.expires_in === 'number' ? `剩 ${Math.round(l.expires_in)}s` : '待申报完成'}
-                </span>
+            </SettingRow>}
+          </SectionPanel>
+        </>) },
+        { id: 'delivery', title: '下载与交付', content: (<>
+          <SectionPanel title="下载与交付">
+            <SettingRow label="产物目录" notice={outNotice}>
+              <div className="flex gap-2">
+                <input
+                  className="lx-input font-mono text-xs"
+                  value={outDir}
+                  onChange={(e) => setOutDir(e.target.value)}
+                  placeholder="work/fox-work"
+                  spellCheck={false}
+                  disabled={running}
+                  aria-label="产物目录"
+                  aria-invalid={Boolean(outNotice)}
+                />
+                <button
+                  type="button"
+                  className="lx-btn-ghost shrink-0 px-3"
+                  disabled={running}
+                  onClick={() => folder.pick(outDir || undefined, setOutDir)}
+                >
+                  <FolderOpen size={14} className="mr-1 inline" />
+                  浏览
+                </button>
               </div>
-            ))}
-          </div>
-        )}
-      </SectionPanel>
+            </SettingRow>
+            <ExecutionDownloads value={execution} onChange={setExecution} disabled={running} />
+            <ToggleRow
+              checked={autoUpload}
+              onChange={setAutoUpload}
+              disabled={running}
+              label="自动回传（推荐）"
+            />
+            {!autoUpload && <p className="text-xs text-lx-warning">关闭后产物保留在本地，需在「任务与记录」手动上报。</p>}
+            <DownloadNetwork mode={downloadProxyMode} address={downloadProxyUrl} onMode={setDownloadProxyMode}
+              onAddress={setDownloadProxyUrl} disabled={running} notice={downloadProxyNotice} />
+            <AdvancedSettings title="高级：下载连接与 CDN 测速">
+              <div className="mt-3 border-t border-lx pt-3">
+                <ToggleRow
+                  checked={cdnProbe}
+                  onChange={setCdnProbe}
+                  disabled={running}
+                  label="CDN 测速（仅直连时选路）"
+                />
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-lx-muted">下载连接数</span>
+                    <input
+                      className="lx-input w-24 font-mono text-xs tabular-nums"
+                      inputMode="numeric"
+                      aria-label="下载连接数"
+                      value={dlConns}
+                      onChange={(e) => setDlConns(e.target.value.replace(/[^\d]/g, ''))}
+                      placeholder="4"
+                      disabled={running}
+                    />
+                  </label>
+                  <p className="flex-1 text-[10.5px] leading-relaxed text-lx-dim">
+                    建议 4~8 条
+                  </p>
+                </div>
+              </div>
+            </AdvancedSettings>
+          </SectionPanel>
+        </>) },
+        { id: 'records', title: '任务与记录', content: (<>
+                <OfflineTasks />
+                <HistoryArtifacts locked={running || Boolean(state?.history?.running)} />
 
-      <div id="center-logs" className="scroll-mt-4" />
-      <SectionPanel title="日志" description="最近 120 行">
-        {state && state.log.length > 0 ? (
-          <pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed text-lx-muted">
-            {state.log.join('\n')}
-          </pre>
-        ) : (
-          <p className="text-[11px] text-lx-muted">暂无输出</p>
-        )}
-      </SectionPanel>
+                <div id="center-logs" className="scroll-mt-4" />
+                <SectionPanel title="日志">
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {(['center', 'service'] as const).map((kind) => <button key={kind} type="button" className="lx-btn-ghost"
+                      onClick={async () => {
+                        try {
+                          const result = await api.centerRevealLogs(kind)
+                          setLogLocation([result.detail, result.path].filter(Boolean).join(' · '))
+                        } catch (e) { setActionError(String(e)) }
+                      }}>{kind === 'center' ? '打开调度日志目录' : '打开模型日志目录'}</button>)}
+                    <button type="button" className="lx-btn-ghost" onClick={async () => {
+                      try { setServiceLog(await api.centerLogs('service')) } catch (e) { setActionError(String(e)) }
+                    }}>查看最近模型日志</button>
+                  </div>
+                  {logLocation && <p className="mb-2 break-all text-xs text-lx-muted">{logLocation}</p>}
+                  {state?.log_path && <p className="mb-2 break-all text-xs text-lx-dim">{state.log_path}</p>}
+                  {state && state.log.length > 0 ? (
+                    <pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed text-lx-muted">
+                      {state.log.join('\n')}
+                    </pre>
+                  ) : (
+                    <p className="text-[11px] text-lx-muted">暂无输出</p>
+                  )}
+                  {serviceLog && <div className="mt-3 border-t border-lx pt-3">
+                    <p className="mb-2 break-all text-xs text-lx-dim">{serviceLog.path || '暂无模型日志'}</p>
+                    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-[10.5px] text-lx-muted">{serviceLog.tail.join('\n')}</pre>
+                  </div>}
+                </SectionPanel>
+
+          <SectionPanel title="执行诊断">
+            <details className="mt-3 border-t border-lx pt-3">
+              <summary className="cursor-pointer text-[11px] text-lx-muted">高级：实际执行的命令</summary>
+              <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lx-sm bg-lx-surface-raised px-2.5 py-2 font-mono text-[10px] leading-relaxed text-lx-muted">
+                {state?.cmd || '—'}
+              </pre>
+            </details>
+          </SectionPanel>
+        </>) },
+      ]} />
 
       {folder.dialog}
     </div>

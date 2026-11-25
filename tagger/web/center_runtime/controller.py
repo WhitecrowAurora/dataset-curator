@@ -27,10 +27,15 @@ class Controller:
         self._capabilities = None
         self._capabilities_at = 0.0
         self._polling = False
+        from .telemetry import Telemetry
+        self.telemetry = Telemetry()
+        self.pending = None
+        self.probe_result = {}
+        self.probing = False
 
     @property
     def working(self):
-        return self.preparing or self.stopping or self.center.running or bool(self.center._next_spawn) or self.center.history.running
+        return self.preparing or self.stopping or self.center.running or bool(getattr(self.center, '_next_spawn', 0)) or self.center.history.running
 
     def phase(self, status, message=""):
         with self.lock:
@@ -43,12 +48,16 @@ class Controller:
         return {"active": self.active, "status": self.status, "message": self.message,
                 "error": self.error, "preparing": self.preparing,
                 "hosting_mode": cfg["hosting_mode"],
+                "telemetry": self.telemetry.value, "probe": self.probe_result,
+                "pending_action": self.pending[0]["action"] if self.pending else "",
                 "resolved": {k: v for k, v in self.resolved.items()
                              if k not in ("extra_args", "cmd_template")},
                 "managed": self.session.snapshot() if self.session else None}
 
-    def start(self):
+    def start(self, *, request_start=True, force=False):
         with self.lock:
+            if getattr(self.center, 'leases', None) and self.center.leases.running:
+                raise ValueError('正在释放租约，请等待服务器确认')
             if self.active:
                 return
             if self.preparing or self.stopping:
@@ -56,23 +65,57 @@ class Controller:
             if getattr(self.center,"offline",None) and self.center.offline.running:
                 raise ValueError("请先停止离线任务")
             execution_config(self.center.config())
+            from ...text_encoding.tokenizer import require_training_text
+            require_training_text(self.center.config()['mode'])
             if self.center.history.running:
                 raise ValueError("请等待历史检查结束")
             if not self.center.identity().get("device_id"):
                 raise ValueError("请先连接调度中心")
+            session = ManagedSession(self.center)
+            if request_start:
+                session.request_start(force=force)
             self.active = True
             self.error = ""
-            self.session = None
+            self.session = session
+            self.pending = None
             self.cancel = threading.Event()
             self._capabilities = None
-            if self.center.config()["hosting_mode"] == "passive":
-                self.session = ManagedSession(self.center)
-                self.phase("managed_idle", "设备已托管，等待中心指令")
-            else:
-                self.launch()
+            self.phase("managed_idle", "设备已托管，等待中心指令")
+
+    def resume(self, *, force=False):
+        with self.lock:
+            if not self.active or not self.session or self.session.closed:
+                raise ValueError('请先开始托管')
+            if self.center.running or self.center.history.running or self.pending or self.preparing or self.stopping:
+                raise ValueError('请等待当前执行或调整结束')
+            # 显式恢复取代失败后的待重启计时，由中心确认后再启动。
+            with self.center._lock:
+                self.center._next_spawn = 0.0
+                self.center._restarts = 0
+                self.center._wanted = False
+            self.session.request_start(force=force)
+            self.error = ''
+            self.center.save_config(wanted=True)
+            self.phase('managed_idle', ('正在强制继续' if force else '正在恢复自动接单') + '，等待中心确认')
+
+    def recover(self):
+        with self.lock:
+            with self.center._lock:
+                if (not self.active or not self.center._wanted or not self.center._next_spawn
+                        or time.time() < self.center._next_spawn or self.center.running
+                        or self.preparing or self.stopping or self.pending or self.center.history.running):
+                    return
+                if self.session and (self.session.automation.get('desired') == 'paused'
+                                     or self.session.automation.get('dispatch', {}).get('running') is False):
+                    self.center._wanted = False
+                    self.center._next_spawn = 0.0
+                    return
+            self.launch()
 
     def launch(self, command=None):
         with self.lock:
+            if getattr(self.center, 'leases', None) and self.center.leases.running:
+                raise ValueError('正在释放租约，请等待服务器确认')
             if self.preparing or self.stopping or self.center.running:
                 raise ValueError("设备已在准备或执行")
             self.preparing = True
@@ -124,6 +167,10 @@ class Controller:
         with self.lock:
             self.stopping = True
             self.cancel.set()
+            if self.pending:
+                self.pending[1].record(self.pending[0], "canceled", "已停止，待执行调整已取消")
+                self.pending = None
+            (self.center.dir / "drain-request").unlink(missing_ok=True)
             self.center.history.cancel.set()
         try:
             self.center._stop_worker()
@@ -149,6 +196,8 @@ class Controller:
             session = self.session
             if session:
                 session.closed = True
+                with session.lock:
+                    session._persist()
         self.stop_work()
         if session:
             session.status = "released"
@@ -165,6 +214,28 @@ class Controller:
     def tick(self):
         if not self.active or self.stopping:
             return
+        self.telemetry.refresh()
+        if self.pending and not self.working:
+            with self.lock:
+                if not self.active or self.stopping or not self.pending or self.working:
+                    return
+                command, session = self.pending
+                self.pending = None
+                (self.center.dir / "drain-request").unlink(missing_ok=True)
+                if command["action"] == "configure":
+                    try:
+                        if any(not self.center.config().get('allow_remote_'+key,False) for key in command['config']):
+                            raise ValueError('本机已关闭对应远程并发授权，调整未应用')
+                        self.inference.stop(True)
+                        self.center.save_config(**command["config"])
+                        self.resolved = {}
+                        session.record(command, "applied")
+                        self.phase("managed_idle", "并发配置已更新，等待自动接单")
+                    except Exception as exc:
+                        session.record(command, 'failed', str(exc))
+                        self.phase('managed_idle', '并发调整失败，请查看指令结果')
+                else:
+                    self._launch_probe(command, session)
         if self.center.running and not self.inference.healthy():
             self.center._push("[center] 模型服务已退出，停止当前任务并准备恢复")
             self.center._stop_worker(graceful=False)
@@ -196,6 +267,7 @@ class Controller:
             if self._capabilities is None or time.monotonic() - self._capabilities_at >= 30:
                 catalog = options()
                 self._capabilities = {"devices": catalog["devices"], "engines": catalog["engines"],
+                                      "actions": ["configure", "probe", "force_continue"],
                                       "engine_status": catalog["engine_status"],
                                       "tag_models": [{"backend": x["backend"], "ready": x["ready"]}
                                                      for x in catalog["tag_models"]],
@@ -205,11 +277,29 @@ class Controller:
                 self._capabilities_at = time.monotonic()
             state = {"status": self.status, "message": self.message, "error": self.error,
                      "running": self.center.running, "last_rc": self.center._last_rc,
+                     "preparing": self.preparing,
                      "progress": self.center.progress(),
+                     "telemetry": self.telemetry.value,
+                     "resolved": {k: self.resolved[k] for k in ("concurrency", "tag_batch", "tag_device", "nl_device", "nl_engine", "nl_model") if k in self.resolved},
+                     "probe": self.probe_result,
+                     "pending_action": self.pending[0]["action"] if self.pending else "",
                      "history_running": self.center.history.running,
                      "history_status": self.center.history.status,
                      "history_message": self.center.history.message}
+            if not self.center.running and getattr(self.center, '_next_spawn', 0):
+                state.update(status='recovering', message='执行暂时中断，等待自动补传或恢复')
+            elif session.start_requested and not self.working and self.status == 'failed':
+                state.update(status='managed_idle', error='', message='等待中心确认恢复接单')
             commands = session.poll(state, self._capabilities)
+            if session.automation.get('desired') == 'paused':
+                with self.lock, self.center._lock:
+                    self.center._next_spawn = 0.0
+                    self.center._wanted = False
+            if (session.automation.get('dispatch', {}).get('running') is False
+                    and not self.center.running and not self.preparing):
+                with self.center._lock:
+                    self.center._next_spawn = 0.0
+                    self.center._wanted = False
             for command in commands:
                 with self.lock:
                     if not self.active or self.session is not session:
@@ -219,8 +309,19 @@ class Controller:
                         if validated is None:
                             continue
                         action, changes = validated
-                        if action == "start" and self.working:
-                            raise ValueError("设备已在执行，请先停止")
+                        if command.get('canceled') is True:
+                            session.last_seq = command['seq']
+                            session.record(command, 'canceled', '中心已取消旧指令')
+                            continue
+                        if action == "start" and (self.center.running or self.preparing) and not self.probing:
+                            # 轮询响应可能使用启动前快照；重复开始按幂等确认处理。
+                            session.last_seq = command["seq"]
+                            session.record(command, "applied")
+                            continue
+                        if action == 'start' and (self.stopping or self.center.history.running or self.pending):
+                            # 开始指令依据请求发出时的快照生成；本机可能刚进入检查。
+                            # 保留未确认指令，下一轮空闲后执行，避免误报失败并永久暂停。
+                            break
                         if action == "check":
                             session.last_seq = command["seq"]
                             session.record(command, "accepted")
@@ -228,6 +329,18 @@ class Controller:
                             continue
                         session.last_seq = command["seq"]
                         session.record(command, "accepted")
+                        if action in ("configure", "probe"):
+                            if self.pending or self.probing:
+                                raise ValueError("已有调整或探测正在执行")
+                            if not self.center.running and not self.preparing:
+                                with self.center._lock:
+                                    self.center._next_spawn = 0.0
+                                    self.center._wanted = False
+                            self.pending = (command, session)
+                            if self.working:
+                                (self.center.dir / "drain-request").touch()
+                                self.message = "完成当前分片后" + ("调整并发" if action == "configure" else "探测并发")
+                            continue
                         if action == "start":
                             self.launch(command)
                         elif action == "stop":
@@ -252,5 +365,50 @@ class Controller:
             if session and not session.closed:
                 session.status = "offline"
                 session.error = self.center.credentials.redact(str(exc))
+                session.failures += 1
+                delay = min(30, 5 * 2 ** min(session.failures - 1, 3))
+                session.next_poll = time.time() + delay
+                if session.failures == 1:
+                    self.center._push(f'[center] 调度中心暂时断连，指令结果已保留；稍后自动重连：{session.error}')
         finally:
             self._polling = False
+
+    def _launch_probe(self, command, session):
+        from .probe import run
+        self.preparing = True
+        self.probing = True
+        self.probe_result = {}
+        self.cancel = threading.Event()
+        self.phase("probing", "使用本机已有图片探测并发")
+        def execute():
+            try:
+                self.probe_result = run(self.center, self.inference, self.cancel, self.phase)
+                if session:
+                    session.record(command, "applied")
+                self.phase("managed_idle" if session else "stopped", "并发探测完成；建议值可在模型配置中采用")
+            except Cancelled:
+                if session:
+                    session.record(command, "canceled", "探测已停止")
+                self.phase("managed_idle" if session else "stopped")
+            except Exception as exc:
+                self.probe_result = {"error": self.center.credentials.redact(str(exc))}
+                if session:
+                    session.record(command, "failed", str(exc))
+                self.phase("managed_idle" if session else "stopped", "探测失败，请查看报告")
+            finally:
+                self.inference.stop(True)
+                self.resolved = {}
+                self.preparing = False
+                self.probing = False
+                self._capabilities = None
+        self.thread = threading.Thread(target=execute, name="center-probe", daemon=True)
+        self.thread.start()
+
+    def probe(self):
+        with self.lock:
+            if getattr(self.center, 'leases', None) and self.center.leases.running:
+                raise ValueError('正在释放租约，请等待服务器确认')
+            if self.active or self.working or self.center.offline.running:
+                raise ValueError("请先停止本机任务；托管设备由服务端下发探测")
+            self._launch_probe(None, None)
+        return self.center.snapshot()

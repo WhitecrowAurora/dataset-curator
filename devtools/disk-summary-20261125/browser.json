@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "errors": [],
+  "persisted": true,
+  "initial": {
+    "gb": "12.5",
+    "percent": "0"
+  },
+  "mobile_overflow": false,
+  "/center": true,
+  "/": true,
+  "/models": true
+}

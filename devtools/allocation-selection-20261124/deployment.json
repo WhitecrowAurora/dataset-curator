@@ -1,0 +1,1 @@
+{"ok": true, "services": ["active", "active"], "health": {"ok": true, "repos": 2, "packages": 874}, "files": 3, "backup": "/tagger/.delete/allocation-selection-20261124/before", "free": 7930159104}

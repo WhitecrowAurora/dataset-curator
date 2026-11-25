@@ -1,0 +1,12 @@
+--- server/fox-label/assignments/preassignment.py
++++ candidate/fox-label/assignments/preassignment.py
+@@ -43,7 +43,8 @@
+ def mismatch(target, current, part, allow_tuning=None):
+     expected = json.loads(target.get('config') or '{}')
+     fields = TAG_FIELDS if part == 'tag' else NL_FIELDS
+-    different = [key for key in fields if key in expected and current.get(key) != expected[key]
++    different = [key for key in fields if key not in ('concurrency', 'tag_batch')
++                 and key in expected and current.get(key) != expected[key]
+                  and not (allow_tuning or {}).get(key,False)]
+     labels = dict(tag_backend='TAG 模型', tag_precision='TAG 精度', tag_batch='TAG 批大小',
+                   inference_source='NL 推理方式', nl_engine='NL 引擎', nl_model='NL 模型',

@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "hashes_match": true,
+  "public_static": true,
+  "services": [
+    "lulynx-label.service",
+    "lulynx-panel.service"
+  ],
+  "backup": "/tagger/.delete/scheduling-20261122",
+  "n_restored": true,
+  "open_leases": 4
+}

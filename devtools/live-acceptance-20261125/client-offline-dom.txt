@@ -1,0 +1,263 @@
+局域网协作
+调度中心
+
+自动分工，分到的分片在本机打标
+
+已停止
+托管连接：已退出托管
+
+指令 1：已执行
+
+连接
+已连接
+http://127.0.0.1:31841
+持有租约
+0
+执行 0 · 预取 0
+全池剩余
+2
+共 3 片 · 已完成 1
+缺 NL
+2
+只等描述的那一侧
+缺 TAG
+2
+只等标签的那一侧
+上次退出码
+0
+正常结束
+实时执行
+
+逐图进度与整包交付分开统计；流式输入读完前不显示百分比
+
+等待任务
+已达到本轮分片上限；点击开始开启下一轮
+强制继续
+
+shard-000002.tar · 中心验收及登记完成
+
+本轮完成 1 片 · 上限 1
+
+接单工作区：客户端实际联动测试
+
+当前分片：shard-000002.tar · 本轮第 1 片 · TAG
+
+已处理 2 张 · 总计 2 · 成功 2 · 跳过 0 · 失败 0 · 有效速度 14.7 张/分钟 · 250 秒前更新
+
+最近结算图片：10006
+
+cuda:0 · NVIDIA GeForce RTX 4070 Ti SUPER · GPU 34% · 显存 9.7 / 16.0 GB
+
+TAG 批大小 2
+
+TAG 批大小：2 · 来源：本机配置
+
+NL 并发：2 · 来源：本机配置
+
+持有分片与释放
+
+当前包和预取包成功上报后均续期 48 小时；释放保留本地产物
+
+当前没有租约
+
+中心分派通知与导入
+
+收到分派后先查看任务与配置，确认应用后再点击开始。支持 JSON 或按用户 ZIP。
+
+分派清单
+浏览
+导入分派
+检查中心分派
+接单控制
+
+开始后由中心自动派发；退出托管保留租约，48 小时内可续做；归还分片请使用停止并释放
+
+保存配置
+探测并发
+开始自动接单
+TAG + NL · 由中心统一派发
+接单与托管
+连接与账号
+模型与执行
+下载与交付
+任务与记录
+
+查看在线任务包、离线任务、历史产物、当前租约与日志。
+
+离线已分配任务
+
+导入管理员的配置清单，从对应仓库下载分片；打标时无需连接调度中心。
+
+离线任务清单
+浏览
+导入
+
+任务 Of21d8707ffb6dc4e · 1 个分包 · 离线打标完成，可联网后补传
+
+本机执行配置
+分片素材目录
+浏览
+产物目录
+浏览
+网页回收包范围
+全部已完成分片
+shard-000002.tar
+开始离线打标
+联网后补传
+导出网页回收包
+停止
+
+换机器补传时，复制整个产物目录并导入里面的任务清单。
+
+始终连不上中心时，导出网页回收包交给管理员上传并确认。不包含原始图片，无需启动模型。
+
+本地已做结果
+重新识别
+
+自动查找本地产物和原分片。核对 TAG / NL 后上报中心，已成功的图片会在后续处理时跳过。
+
+请先停止当前打标，再核对或补注入历史产物
+
+正在处理…查找其他目录
+
+补注入会按图片 ID 核对仓库画师表；未配置目录时自动查找唯一匹配的分表，不运行模型。重复前缀自动合并，画师不一致时列出待核对项；强制模式按表替换完整前缀，原文件保留在 .delete 中。
+
+自动识别本地历史产物
+
+未识别到？补充关联
+需要补充关联：
+
+artifacts-shard-000002.jsonl · 缺少本地原分片或来源关联
+
+日志
+
+按次保存到本机，重启后保留；显示最近 120 行
+
+打开调度日志目录
+打开模型日志目录
+查看最近模型日志
+
+H:\lulynx-trainer\backend\smoke\tagger-live-20261125\runtime\center\logs\center-20261125-030839-52936-433970700.log
+
+[03:24:48]   其中缓存   : 0
+[03:24:48]   跳过（已有）: 0
+[03:24:48]   跳过（重试后依然失败）: 0
+[03:24:48]   失败       : 0
+[03:24:48]   有效张数   : 0
+[03:24:48]   输入 token : 0
+[03:24:48]   输出 token : 0
+[03:24:48]   总耗时     : 0.0 分钟
+[03:24:49] 命令结束，退出码 1，用时 9.3s
+[03:24:49] [retry] 任务命令失败（退出码 1），3s 后重试（1/1）
+[03:24:52] 执行："H:\tagger\env\python\python.exe" -m tagger.cli client --shard "E:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\shard-000002.tar" --out-dir "E:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f" --progress-file "E:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f/.fox-progress"
+[tagger] tag 后端 wd-eva02（模型 ashen-sensored/wd-eva02-tagger-2026-canary，cuda:0）
+[center] 停止：保留当前包及预取包，48 小时内可继续
+[回传] artifacts-shard-000002-delivery.jsonl 文件上传完成 0.0 MB（1 块，0.5s）
+[回传] proof.json 文件上传完成 0.0 MB（1 块，0.5s）
+[回传] 文件已上传，正在等待中心逐图验收
+[验收] 中心已接收检查结果，等待登记本轮完成分项
+[03:24:57] 
+[03:24:57] 收到停止请求，租约保留，48 小时内可续做（本地产物保留）
+[center] 设备已托管，等待中心指令
+[center] 恢复接单已获中心确认：已自动下发开始指令
+[center] 准备本机打标配置
+[center] 连接已有模型服务
+[center] 检查 TAG 模型加载
+[center] 启动：H:\tagger\env\python\python.exe -m tagger.fox_worker run --out D:\tagger-live-20261125\online-results --cmd "H:\tagger\env\python\python.exe" -m tagger.cli client --shard "{shard}" --out-dir "{out}" --progress-file "{out}/.fox-progress" --interval 5 --download-conns 4 --auto-upload
+[center] 模型已就绪，开始领片
+[03:25:11] 身份 live-test-member / 设备 7029e7adcedc　服务端 fox-01
+[03:25:11] 派工：active:shard-000002.tar
+[03:25:11] 本地已有校验通过的分片，跳过下载：D:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\shard-000002.tar
+[03:25:11] 执行："H:\tagger\env\python\python.exe" -m tagger.cli client --shard "D:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\shard-000002.tar" --out-dir "D:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f" --progress-file "D:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f/.fox-progress"
+[tagger] tag 后端 wd-eva02（模型 ashen-sensored/wd-eva02-tagger-2026-canary，cuda:0）
+[tagger] CUDA Graph 已就绪（batch=2）
+[tagger] 已加载 eva02_large_patch14_448（16473 个 tag，cuda:0，bf16，batch=2）
+[client] 目标服务 : http://127.0.0.1:8000  模型名 tagger
+[client] 产出模式 : tag  tag 12~64 个（wd-eva02）
+[client] 分项补齐 : 这一片补 tag
+[client] 产物目录 : D:\tagger-live-20261125\online-results\sources\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f
+[client] 并发     : 2    model_id ashen-sensored/wd-eva02-tagger-2026-canary
+[client] NL 设备  : cuda:0
+[client] tag 设备 : cuda:0（bf16，batch=2）
+[03:25:19] 
+[client] 产物形态 : jsonl 按包分片 （包名 + 进程编号 + 分片序号，每 2000 行落一次盘，已有 0 张将自动跳过）
+[guard] temp 42°C  util 5%  duty 0.70  disk 348G/37%  [ok]
+[client] 本批 : shard-000002.tar  任务 2 张
+[03:25:20]   [1/2] 10005  0.12s  0 tok  1 次
+[03:25:20]   [2/2] 10006  0.16s  0 tok  1 次
+[03:25:20] 
+[03:25:20]   总共       : 2
+[03:25:20]   完成       : 2
+[03:25:20]   其中缓存   : 0
+[03:25:20]   跳过（已有）: 0
+[03:25:20]   跳过（重试后依然失败）: 0
+[03:25:20]   失败       : 0
+[03:25:20]   有效张数   : 2
+[03:25:20]   输入 token : 0
+[03:25:20]   输出 token : 0
+[03:25:20]   平均耗时   : 0.141s/张
+[03:25:20]   总耗时     : 0.0 分钟
+[03:25:20]   吞吐       : 5.44 张/秒
+[03:25:20] 
+[03:25:20]   分段计时   :
+[03:25:20]     read       0.24 ms/次  共      2 次  累计    0.00s
+[03:25:20]     tag       80.16 ms/次  共      2 次  累计    0.16s
+[03:25:20]     write      0.24 ms/次  共      2 次  累计    0.00s
+[03:25:20]     （tag 与 http 是并行跑的，各项累计之和会超过墙钟）
+[03:25:20] 
+[client] 下一步：把整个产物目录交回总机，总机跑 `tagger merge --roots <目录> --shard-dir <分发包目录>` 对账合并。
+[03:25:21] 命令结束，退出码 0，用时 9.6s
+[回传] artifacts-shard-000002-delivery.jsonl 文件上传完成 0.0 MB（1 块，0.5s）
+[回传] proof.json 文件上传完成 0.0 MB（0 块，秒传 1 块，0.4s）
+[回传] 文件已上传，正在等待中心逐图验收
+[验收] 中心已接收检查结果，等待登记本轮完成分项
+[03:25:22] 已交付 shard-000002.tar
+[03:25:22] 服务端没有更多派工，收工
+[center] 进程结束，退出码 0
+[center] 本轮已结束，等待中心指令
+[offline] 连接已有模型服务
+[offline] 下载／复用 shard-000002.tar
+[client][警告] 基线预算 589824 ≥ 服务端上限 589824，重试提分辨率不会生效（全被服务端钳回基线）。
+[03:26:26]           要启用：起服务时用更大的 --max-pixels 留余量（如 1048576），客户端维持配置默认。
+[client] 目标服务 : http://127.0.0.1:8000  模型名 tagger
+[client] 产出模式 : nl  NL 32~384 token
+[client] 分项补齐 : 这一片补 nl
+[client] 产物目录 : D:\tagger-live-20261125\offline-results\L6e65c220506a
+[client] 并发     : 2    model_id qwen3vl-8b-abliterated@unpinned/q6
+[client] NL 设备  : NVIDIA GeForce RTX 4070 Ti SUPER
+[client] tag 设备 : 未启用（tag 由 VLM 出）
+[03:26:26] 
+[client] 产物形态 : jsonl 按包分片 （包名 + 进程编号 + 分片序号，每 2000 行落一次盘）
+[guard] temp 40°C  util 20%  duty 0.70  disk 348G/37%  [ok]
+[client] 本批 : shard-000002.tar  任务 2 张
+[03:26:38]   [1/2] 10005  11.86s  138 tok  1 次
+[03:26:44]   [2/2] 10006  17.10s  213 tok  1 次
+[03:26:46] 
+[03:26:46]   总共       : 2
+[03:26:46]   完成       : 2
+[03:26:46]   其中缓存   : 0
+[03:26:46]   跳过（已有）: 0
+[03:26:46]   跳过（重试后依然失败）: 0
+[03:26:46]   失败       : 0
+[03:26:46]   有效张数   : 2
+[03:26:46]   输入 token : 1534
+[03:26:46]   输出 token : 351
+[03:26:46]   平均耗时   : 14.476s/张
+[03:26:46]   总耗时     : 0.3 分钟
+[03:26:46]   吞吐       : 0.10 张/秒
+[03:26:46] 
+[03:26:46]   分段计时   :
+[03:26:46]     read       0.15 ms/次  共      2 次  累计    0.00s
+[03:26:46]     b64        0.54 ms/次  共      2 次  累计    0.00s
+[03:26:46]     http   14445.17 ms/次  共      2 次  累计   28.89s
+[03:26:46]     parse      0.19 ms/次  共      2 次  累计    0.00s
+[03:26:46]     gate       0.26 ms/次  共      2 次  累计    0.00s
+[03:26:46]     write      0.24 ms/次  共      2 次  累计    0.00s
+[03:26:46]     （tag 与 http 是并行跑的，各项累计之和会超过墙钟）
+[03:26:46] 
+[client] 下一步：把整个产物目录交回总机，总机跑 `tagger merge --roots <目录> --shard-dir <分发包目录>` 对账合并。
+[offline] 离线打标完成，可联网后补传
+[history] 自动识别本地历史产物
+[history] 本地历史产物识别完成
+执行诊断
+高级：实际执行的命令

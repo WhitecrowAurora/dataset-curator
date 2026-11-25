@@ -1,0 +1,104 @@
+[
+  {
+    "id": "4",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 337.0
+  },
+  {
+    "id": "26",
+    "hair_area": 0.0774688720703125,
+    "hair_mean_probability": 0.6574208736419678,
+    "ms": 34.1
+  },
+  {
+    "id": "41",
+    "hair_area": 0.0406036376953125,
+    "hair_mean_probability": 0.722273588180542,
+    "ms": 14.9
+  },
+  {
+    "id": "42",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 14.5
+  },
+  {
+    "id": "45",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 14.3
+  },
+  {
+    "id": "58",
+    "hair_area": 0.61468505859375,
+    "hair_mean_probability": 0.5675827860832214,
+    "ms": 15.4
+  },
+  {
+    "id": "61",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 15.8
+  },
+  {
+    "id": "95",
+    "hair_area": 0.001556396484375,
+    "hair_mean_probability": 0.43979761004447937,
+    "ms": 14.8
+  },
+  {
+    "id": "101",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 14.1
+  },
+  {
+    "id": "102",
+    "hair_area": 0.0,
+    "hair_mean_probability": null,
+    "ms": 15.5
+  },
+  {
+    "id": "103",
+    "hair_area": 0.0946807861328125,
+    "hair_mean_probability": 0.7194806337356567,
+    "ms": 14.9
+  },
+  {
+    "id": "107",
+    "hair_area": 0.0757904052734375,
+    "hair_mean_probability": 0.6973897814750671,
+    "ms": 14.1
+  },
+  {
+    "id": "portrait",
+    "hair_area": 0.1643218994140625,
+    "hair_mean_probability": 0.666153073310852,
+    "ms": 14.8
+  },
+  {
+    "id": "hutao",
+    "hair_area": 0.3364105224609375,
+    "hair_mean_probability": 0.5969092845916748,
+    "ms": 15.8
+  },
+  {
+    "id": "mostima",
+    "hair_area": 0.075897216796875,
+    "hair_mean_probability": 0.46475327014923096,
+    "ms": 14.5
+  },
+  {
+    "id": "101-head",
+    "hair_area": 0.09136962890625,
+    "hair_mean_probability": 0.5784832835197449,
+    "ms": 14.8
+  },
+  {
+    "id": "107-head",
+    "hair_area": 0.4534149169921875,
+    "hair_mean_probability": 0.7174785733222961,
+    "ms": 16.1
+  }
+]

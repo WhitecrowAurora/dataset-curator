@@ -1,0 +1,14 @@
+{
+  "comparison_inputs": 126,
+  "source_sha256_matches_previous_reports": true,
+  "identical_input_sha256_both_models": true,
+  "all_inputs_decoded_rgb": true,
+  "requests": 260,
+  "request_errors": 0,
+  "valid_json_objects": 260,
+  "truncations": 0,
+  "cached_prompt_tokens": 0,
+  "reasoning_channel_issues": 0,
+  "old_no_hair_false_accepts_qwen_null": 18,
+  "old_nonhuman_false_accepts_qwen_color": 8
+}

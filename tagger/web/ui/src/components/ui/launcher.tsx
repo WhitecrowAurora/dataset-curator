@@ -1,11 +1,11 @@
 // 搬自 lulynx-trainer/backend/launcher/web/src/components/ui/launcher.tsx
-// 裁剪：去掉 ConnectionTestPanel（依赖镜像检测 API 与 i18n），其余原样。
+// 按打标工作台整理公共面板与控件。
 import { ChevronRight, CircleHelp } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { ProgressBar } from './ProgressBar'
 import { FieldNotice } from './FieldNotice'
-import { cardHover, cardTap } from '../../lib/motion'
+import { cardHover, cardTap, controlTransition } from '../../lib/motion'
 import { cn as cx } from '../../lib/cn'
 
 export type StatusTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
@@ -27,79 +27,13 @@ const iconToneClass: Record<StatusTone, string> = {
   danger: 'text-lx-danger',
 }
 
-/** tone → CSS 变量色，给 SVG stroke / 水印染色用。 */
-const toneCssVar: Record<StatusTone, string> = {
-  neutral: 'var(--lx-text-muted)',
-  accent: 'var(--lx-accent)',
-  success: 'var(--lx-success)',
-  warning: 'var(--lx-warning)',
-  danger: 'var(--lx-danger)',
-}
-
-/**
- * 静态同心圆环装饰：圆心偏右外，overflow 裁半弧。
- */
-function DecorRings({ color = 'var(--lx-accent)' }: { color?: string }) {
-  return (
-    <svg
-      className="pointer-events-none absolute top-1/2 -right-16 h-40 w-40 -translate-y-1/2"
-      viewBox="0 0 160 160"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle cx="80" cy="80" r="34" stroke={color} strokeWidth="1" opacity="0.14" />
-      <circle cx="80" cy="80" r="54" stroke={color} strokeWidth="1" opacity="0.09" />
-      <circle cx="80" cy="80" r="74" stroke={color} strokeWidth="1" opacity="0.05" />
-    </svg>
-  )
-}
-
-/**
- * 可点 KPI 卡的右侧导航示意：默认右下角大水印，hover 换成三环 + 箭头。
- */
-function MetricNavAffordance({ icon, tone = 'accent' }: { icon: ReactNode; tone?: StatusTone }) {
-  const color = toneCssVar[tone] ?? toneCssVar.accent
-  return (
-    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
-      <div
-        className={cx(
-          'absolute right-4 top-1/2 -translate-y-1/2',
-          'opacity-[0.06] transition-opacity duration-200 ease-out',
-          'group-hover:opacity-0 group-focus-within:opacity-0',
-          iconToneClass[tone],
-        )}
-      >
-        <div className="[&>svg]:h-[5rem] [&>svg]:w-[5rem] [&>svg]:stroke-[1.2]">{icon}</div>
-      </div>
-
-      <svg
-        className={cx(
-          'absolute top-1/2 -right-16 h-40 w-40 -translate-y-1/2',
-          'opacity-0 transition-opacity duration-300 ease-out',
-          'group-hover:opacity-100 group-focus-within:opacity-100',
-        )}
-        viewBox="0 0 160 160"
-        fill="none"
-        aria-hidden="true"
-      >
-        <circle cx="80" cy="80" r="34" stroke={color} strokeWidth="1.15" opacity="0.42" />
-        <circle cx="80" cy="80" r="54" stroke={color} strokeWidth="1.05" opacity="0.28" />
-        <circle cx="80" cy="80" r="74" stroke={color} strokeWidth="1" opacity="0.16" />
-      </svg>
-
-      <div
-        className={cx(
-          'absolute top-1/2 right-4 flex h-8 w-8 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-white',
-          'opacity-0 scale-90 transition-[opacity,transform] duration-300 ease-out',
-          'group-hover:opacity-100 group-hover:scale-100',
-          'group-focus-within:opacity-100 group-focus-within:scale-100',
-        )}
-      >
-        <span className="absolute inset-0 rounded-full" style={{ backgroundColor: color }} />
-        <ChevronRight size={16} strokeWidth={2.25} className="relative z-[1]" />
-      </div>
-    </div>
-  )
+/** 可点击统计卡的方向提示；只读卡不显示导航装饰。 */
+function MetricNavAffordance() {
+  return <ChevronRight
+    size={17}
+    aria-hidden="true"
+    className="absolute right-4 top-1/2 -translate-y-1/2 text-lx-dim transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-lx group-focus-visible:text-lx"
+  />
 }
 
 export function PageHeader({
@@ -237,7 +171,7 @@ export function SettingRow({
 }) {
   return (
     <div
-      className={`grid gap-3 border-b border-lx py-3.5 last:border-b-0 ${
+      className={`lx-setting-row grid gap-3 border-b py-3.5 last:border-b-0 ${
         wide
           ? 'md:grid-cols-1'
           : 'md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)] md:items-center'
@@ -370,19 +304,19 @@ export function MiniMetricCard({
   tone?: StatusTone
   /** stack: 竖排（窄网格用，默认）；row: 横排（宽单列用，标签左·读数右） */
   layout?: 'stack' | 'row'
-  /** 有 onClick 时 row 卡变为可点：右下角水印 + 悬停三环箭头 */
+  /** 有 onClick 时 row 卡变为可点，并显示方向提示。 */
   onClick?: () => void
 }) {
   if (layout === 'row') {
     const interactive = typeof onClick === 'function'
     const body = (
       <>
-        {interactive ? <MetricNavAffordance icon={icon} tone={tone} /> : <DecorRings />}
-        <div className="relative z-10 flex min-w-0 items-center gap-2 pr-[30%]">
+        {interactive && <MetricNavAffordance />}
+        <div className="relative z-10 flex min-w-0 items-center gap-2 pr-5">
           <span className={cx('shrink-0', iconToneClass[tone])}>{icon}</span>
           <span className="min-w-0 truncate text-[12.5px] font-medium text-lx-secondary">{label}</span>
         </div>
-        <div className="relative z-10 mt-2.5 flex min-w-0 items-baseline gap-2 pr-[30%]">
+        <div className="relative z-10 mt-2.5 flex min-w-0 items-baseline gap-2 pr-5">
           <span
             className="shrink-0 font-display text-[28px] font-semibold tabular-nums tracking-tight leading-none text-lx"
             title={value}
@@ -399,8 +333,8 @@ export function MiniMetricCard({
     )
 
     const shellClass = cx(
-      'lx-sheet group relative min-w-0 overflow-hidden px-[18px] py-4 text-left transition-colors duration-200 hover:border-lx-hover md:px-6',
-      interactive && 'w-full cursor-pointer',
+      'lx-sheet group relative min-w-0 overflow-hidden px-[18px] py-4 text-left transition-colors duration-200 md:px-6',
+      interactive && 'w-full cursor-pointer hover:border-lx-hover',
     )
 
     if (interactive) {
@@ -411,7 +345,7 @@ export function MiniMetricCard({
           className={shellClass}
           whileHover={cardHover}
           whileTap={cardTap}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          transition={controlTransition}
         >
           {body}
         </motion.button>
@@ -419,14 +353,7 @@ export function MiniMetricCard({
     }
 
     return (
-      <motion.div
-        className={shellClass}
-        whileHover={cardHover}
-        whileTap={cardTap}
-        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-      >
-        {body}
-      </motion.div>
+      <div className={shellClass}>{body}</div>
     )
   }
 
@@ -467,7 +394,8 @@ export function ActionTile({
       disabled={disabled}
       onClick={onClick}
       className="group rounded-lx-sm border border-lx bg-lx-surface px-4 py-3.5 text-left transition-colors hover:border-lx-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-lx"
-      whileTap={cardTap}
+      whileTap={disabled ? undefined : cardTap}
+      transition={controlTransition}
     >
       <div className="flex items-center gap-2 text-[13px] font-semibold text-lx">
         <span className="shrink-0 text-lx-muted transition-colors group-hover:text-lx-accent">{icon}</span>

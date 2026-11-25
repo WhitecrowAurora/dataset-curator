@@ -1,0 +1,6 @@
+{
+  "status": 500,
+  "error": "TypeError: 'bool' object is not iterable",
+  "traceback": "Traceback (most recent call last):\n  File \"H:\\lulynx-trainer\\backend\\smoke\\tagger-benchmark-http500-20261126\\reproduce.py\", line 17, in <module>\n    try:available(center)\n        ^^^^^^^^^^^^^^^^^\n  File \"H:\\tagger\\tagger\\web\\benchmark\\catalog.py\", line 17, in available\n    gguf = list(item.get('gguf_ready') or [])\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: 'bool' object is not iterable\n",
+  "uses_real_torii_files": true
+}

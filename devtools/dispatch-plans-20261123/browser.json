@@ -1,0 +1,15 @@
+{
+  "actual_admin_http": true,
+  "actual_client_http": true,
+  "zip_download": true,
+  "html_download": true,
+  "automatic_pending_notification": true,
+  "global_notification": true,
+  "import_zip": true,
+  "online_apply": true,
+  "offline_apply": true,
+  "reload_preserved": true,
+  "offline_panel_loaded": true,
+  "no_auto_start": true,
+  "page_errors": []
+}

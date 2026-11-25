@@ -1,0 +1,41 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                          decode_tokens         0.00%       0.000us         0.00%       0.000us       0.000us     309.521ms       106.46%     309.521ms      12.897ms            24  
+                                                _vector         0.00%       0.000us         0.00%       0.000us       0.000us     199.794ms        68.72%     199.794ms      33.433us          5976  
+_Z42fmha_cutlassF_f16_aligned_32x128_gmem_sm80N22PyT...         0.00%       0.000us         0.00%       0.000us       0.000us      21.748ms         7.48%      21.748ms     113.271us           192  
+                                          sample_tokens         0.00%       0.000us         0.00%       0.000us       0.000us      12.111ms         4.17%      12.111ms     504.620us            24  
+_ZN2at6native27unrolled_elementwise_kernelIZZZNS0_23...         0.00%       0.000us         0.00%       0.000us       0.000us      11.443ms         3.94%      11.443ms       1.892us          6048  
+_ZN2at6native34_scatter_gather_elementwise_kernelILi...         0.00%       0.000us         0.00%       0.000us       0.000us       8.532ms         2.93%       8.532ms       2.962us          2880  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us       4.581ms         1.58%       4.581ms       1.818us          2520  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us       4.386ms         1.51%       4.386ms       0.983us          4464  
+_ZN2at6native18elementwise_kernelILi128ELi2EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us       3.458ms         1.19%       3.458ms       1.191us          2904  
+            fused_recurrent_gated_delta_rule_fwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us       3.403ms         1.17%       3.403ms       5.909us           576  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZNS...         0.00%       0.000us         0.00%       0.000us       0.000us       2.937ms         1.01%       2.937ms       0.934us          3144  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us       2.860ms         0.98%       2.860ms       1.135us          2520  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZNS...         0.00%       0.000us         0.00%       0.000us       0.000us       2.341ms         0.81%       2.341ms       0.929us          2520  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us       2.107ms         0.72%       2.107ms       0.986us          2136  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us       2.077ms         0.71%       2.077ms       1.353us          1536  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us       1.959ms         0.67%       1.959ms       1.020us          1920  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us       1.941ms         0.67%       1.941ms       1.444us          1344  
+                                         aten::_softmax         0.11%     374.000us         0.25%     819.700us      34.154us       1.934ms         0.67%       1.934ms      80.575us            24  
+_ZN2at6native43_GLOBAL__N__bcfaaeff_10_SoftMax_cu_0a...         0.00%       0.000us         0.00%       0.000us       0.000us       1.934ms         0.67%       1.934ms      80.575us            24  
+                                              memcpy128         0.00%       0.000us         0.00%       0.000us       0.000us       1.557ms         0.54%       1.557ms       2.704us           576  
+_ZN2at6native27unrolled_elementwise_kernelINS0_13Bin...         0.00%       0.000us         0.00%       0.000us       0.000us       1.286ms         0.44%       1.286ms       2.232us           576  
+_ZN2at6native40_GLOBAL__N__27eda9f4_8_Shape_cu_85d9f...         0.00%       0.000us         0.00%       0.000us       0.000us       1.108ms         0.38%       1.108ms       1.443us           768  
+                                             aten::sort         0.50%       1.646ms         1.82%       6.051ms     252.133us       1.098ms         0.38%       1.140ms      47.503us            24  
+_ZN2at6native34_scatter_gather_elementwise_kernelILi...         0.00%       0.000us         0.00%       0.000us       0.000us     956.172us         0.33%     956.172us       2.490us           384  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     880.764us         0.30%     880.764us       1.147us           768  
+_ZN14at_cuda_detail3cub6detail10radix_sort29DeviceRa...         0.00%       0.000us         0.00%       0.000us       0.000us     816.506us         0.28%     816.506us       8.505us            96  
+                                                _update         0.00%       0.000us         0.00%       0.000us       0.000us     764.675us         0.26%     764.675us       1.328us           576  
+_ZN2at6native27unrolled_elementwise_kernelINS0_15CUD...         0.00%       0.000us         0.00%       0.000us       0.000us     759.800us         0.26%     759.800us       1.319us           576  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     716.836us         0.25%     716.836us       1.245us           576  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     698.714us         0.24%     698.714us       1.213us           576  
+                                             _silu_gate         0.00%       0.000us         0.00%       0.000us       0.000us     690.977us         0.24%     690.977us       0.900us           768  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     654.622us         0.23%     654.622us       1.136us           576  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZZZ...         0.00%       0.000us         0.00%       0.000us       0.000us     604.027us         0.21%     604.027us       1.049us           576  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us     470.651us         0.16%     470.651us       1.226us           384  
+_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22g...         0.00%       0.000us         0.00%       0.000us       0.000us     388.857us         0.13%     388.857us       2.025us           192  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 332.328ms
+Self CUDA time total: 290.752ms

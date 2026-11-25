@@ -34,7 +34,7 @@ transformers>=4.46,<6
 timm==1.0.30
 # 权重加载器，transformers 与 timm 都要
 safetensors==0.8.0
-# cl-tagger-v2 后端（onnx 计算图，不需要 torch，但和它们是同一批任务）
+# cl-tagger-v2、MobileNet / CAFormer 发色模型（CPU ONNX）
 onnxruntime>=1.20
 
 # ---- 质量打分 / 输入源 ----

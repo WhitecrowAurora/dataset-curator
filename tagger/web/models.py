@@ -381,10 +381,12 @@ def catalog() -> dict[str, Any]:
     ]
     p = overlay_path()
     from . import downloads as dl
+    from . import review_models
 
     return {
         "vlm": vlm,
         "tag": tag,
+        "review": review_models.catalog(),
         "base_vlm": base_vlm,
         "base_tag": base_tag,
         "overlay": str(p),
@@ -514,8 +516,10 @@ def _write(path: Path, doc: dict[str, Any]) -> None:
 def _entry(kind: str, key: str) -> dict[str, Any]:
     """在 catalog 里找一条。找不到就抛——前端传错 key 时要说清楚，别静默无操作。"""
     data = catalog()
-    bucket = data["vlm"] if kind == "vlm" else data["tag"]
-    name = "key" if kind == "vlm" else "backend"
+    if kind not in ("vlm", "tag", "review"):
+        raise ValueError(f"未知的模型类型：{kind}")
+    bucket = data[kind]
+    name = "backend" if kind == "tag" else "key"
     for item in bucket:
         if str(item.get(name)) == key:
             return item
@@ -535,6 +539,9 @@ def start_download(kind: str, key: str,
     """
     from . import downloads as dl
 
+    if kind == "review":
+        from .review_models import start_download as start_review_download
+        return start_review_download(key, proxy=proxy_url(), token=token)
     item = _entry(kind, key)
     dest = Path(item["local_abs"])
     from ..nl_api import resolve_hf_token

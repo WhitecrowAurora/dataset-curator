@@ -231,7 +231,7 @@ if [ "$SKIP_TAG" -eq 1 ]; then
     note "[3.5/5] 跳过打标运行时（--skip-tag）"
 elif [ ! -f "$TAGREQ" ]; then
     note "      没找到 $TAGREQ，跳过打标运行时（打标会失败）"
-elif "$PY" -c 'import torch, transformers, timm' >/dev/null 2>&1; then
+elif "$PY" -c 'import torch, torchvision, transformers, timm, safetensors, onnxruntime' >/dev/null 2>&1; then
     note "[3.5/5] 打标运行时已就绪"
 else
     note "[3.5/5] 安装打标运行时（约 2.5 GB，仅首次）"
@@ -256,7 +256,9 @@ else
         esac
     fi
 
-    if [ "$OFFLINE" -eq 1 ] && [ -d "$WHEELS" ]; then
+    if "$PY" -c 'import torch, torchvision' >/dev/null 2>&1; then
+        note "      复用已就绪的 torch / torchvision，只补其余依赖"
+    elif [ "$OFFLINE" -eq 1 ] && [ -d "$WHEELS" ]; then
         note "      torch 来源: 本地 wheel（$WHEELS）"
         "$PY" -m pip install --disable-pip-version-check -q \
             --no-index --find-links "$WHEELS" -r "$TORCHEQ" \
@@ -326,7 +328,10 @@ echo "   ./tagger.sh --help"
 echo "   $PY -m pytest"
 echo
 echo " 打标运行时（torch/transformers/timm/onnxruntime/datasets）默认已装；跳过过就重跑 ./install.sh"
-echo " llama.cpp（NL 引擎）默认已装；跳过过就重跑 ./install.sh 或："
+echo " 发色和媒体分类器使用上述 ONNX Runtime；Torii 默认使用 llama.cpp。"
+echo " Torii native 实验引擎的依赖可在 WebUI 的专用推理依赖组安装。"
+echo " Torii native CUDA 加速可在依赖管理按需安装（先装专用推理组，PyTorch >=2.7）。"
+echo " llama.cpp（NL / Torii 引擎）默认已装；跳过过就重跑 ./install.sh 或："
 echo "   $PY -m tagger.cli llama install"
 echo " 模型权重是另一件事：打开界面「模型管理」下载对应条目（默认破限版，几 GB）"
 echo "   # vLLM 只跑 Linux（本机有 NVIDIA 卡时）："

@@ -12,51 +12,28 @@
   }
   var names = { disabled: "未启用", pending: "待核验", queued: "排队中", running: "核验中", ready: "已核验", failed: "核验失败" };
   window.FoxSourceCatalog = {
-    actions: function(parent, selected, post, refresh, message, writable) {
+    actions: function(parent, selected, post, refresh, message, writable, owner) {
+      owner = owner || parent;
       var busy = false, buttons = [];
       function update() { buttons.forEach(function (button) { button.disabled = busy || !selected.size || !writable(); }); }
       [["sync", "核验选中"], ["cancel", "取消核验"]].forEach(function(v){
         var b=node("button",v[1]);b.type="button";b.className="fp-btn fp-btn--sm";buttons.push(b);
         b.onclick=async function(){
-          if(busy||parent.dataset.busy==='1'||!selected.size||!writable())return;
-          busy=true;parent.dataset.busy='1';update();message.textContent='提交中…';
+          if(busy||owner.dataset.busy==='1'||!selected.size||!writable())return;
+          busy=true;owner.dataset.busy='1';update();message.textContent='提交中…';
           try{var grouped={};selected.forEach(function(p){(grouped[p.repo]||(grouped[p.repo]=[])).push(p.id);});for(var repo of Object.keys(grouped))await post("/api/source-catalog",{action:v[0],repo:repo,packages:grouped[repo]});await refresh();message.textContent='已提交';}
           catch(e){message.textContent=e.message;}
-          finally{busy=false;parent.dataset.busy='0';update();}
+          finally{busy=false;owner.dataset.busy='0';update();}
         };parent.append(b);
       });
       parent.addEventListener('change',update);update();
     },
     status: function (source) { return "源清单：" + (names[source && source.state] || "未启用") + (source && source.images ? " · " + source.images + " 张" : "") + (source && source.error ? " · " + source.error : ""); },
     detail: function(parent, p, writable, refresh) {
-      var box=node('details'),content=node('div'),message=node('p'),offset=0;
-      box.append(node('summary','分片详情'),message,content);parent.append(box);
-      async function load(append) {
-        try {
-          var r=await fetch('/api/source-catalog?repo='+encodeURIComponent(p.repo)+'&package='+encodeURIComponent(p.id)+'&offset='+offset),data=await r.json();
-          if(!r.ok||data.ok===false)throw Error(data.error||'读取失败');
-          if(!append)content.replaceChildren();
-          message.textContent=window.FoxSourceCatalog.status(data.source)+(data.waiting_reason?' · '+data.waiting_reason:'');
-          if(!append) {
-            content.append(node('p',window.FoxScheduling?window.FoxScheduling.counts(data.report):''));
-            var retryButton=node('button','重试核验');retryButton.type='button';retryButton.className='fp-btn fp-btn--sm';retryButton.disabled=!writable()||data.source.state==='disabled';
-            retryButton.onclick=async function(){retryButton.disabled=true;try{await request({action:'retry',repo:p.repo,packages:[p.id]});offset=0;await load();}catch(e){message.textContent=e.message;}finally{retryButton.disabled=!writable();}};content.append(retryButton);
-          }
-          data.issues.forEach(function(issue){var labels={failed:'失败',missing:'缺失',foreign:'来源不符'};content.append(node('p',issue.image_id+' · '+issue.part.toUpperCase()+' · '+(labels[issue.status]||issue.status)+(issue.reason?' · '+issue.reason:'')));});
-          data.conflicts.forEach(function(conflict){
-            var row=node('details'),select=node('select'),choose=node('button','采用结果'),redo=node('button','重做');
-            row.append(node('summary',conflict.image_id+' · '+conflict.part.toUpperCase()+' · '+({pending:'冲突',resolved:'已处理',redone:'待重做'}[conflict.state]||conflict.state)));
-            conflict.variants.forEach(function(value,index){var option=node('option','结果 '+(index+1));option.value=index;select.append(option);row.append(node('pre',JSON.stringify(value,null,2)));});
-            select.setAttribute('aria-label','冲突结果');choose.type=redo.type='button';choose.className=redo.className='fp-btn fp-btn--sm';
-            choose.disabled=redo.disabled=!writable()||conflict.state!=='pending'||data.busy_parts.includes(conflict.part);choose.disabled=choose.disabled||conflict.variants.length<2;
-            async function resolve(resolution){choose.disabled=redo.disabled=true;try{await request({action:'resolve',repo:p.repo,package:p.id,image_id:conflict.image_id,part:conflict.part,resolution:resolution,variant:Number(select.value)});offset=0;await load();await refresh();}catch(e){message.textContent=e.message;choose.disabled=redo.disabled=!writable()||conflict.state!=='pending'||data.busy_parts.includes(conflict.part);choose.disabled=choose.disabled||conflict.variants.length<2;}}
-            choose.onclick=function(){resolve('choose');};redo.onclick=function(){resolve('redo');};row.append(select,choose,redo);content.append(row);
-          });
-          var next=Math.max(data.issue_total,data.conflict_total)>offset+100?offset+100:null;
-          if(next!==null){var more=node('button','更多');more.type='button';more.onclick=function(){more.remove();offset=next;load(true);};content.append(more);}
-        }catch(e){message.textContent=e.message;}
-      }
-      box.addEventListener('toggle',function(){if(box.open){offset=0;load();}});
+      var download=node('a','下载当前核验结果（含补注入）');
+      download.href='/api/source-catalog?format=jsonl&repo='+encodeURIComponent(p.repo)+'&package='+encodeURIComponent(p.id);
+      download.className='fp-btn fp-btn--sm';parent.append(download);
+      window.FoxSourceConflicts.detail(parent, p, writable, refresh);
     },
     mount: function (parent, repos, writable) {
       var box = node("fieldset"); box.append(node("legend", "清单核验")); parent.append(box);

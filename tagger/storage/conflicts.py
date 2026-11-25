@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .database import connect
+from .review_feedback import ensure_feedback
 
 
 class Decisions(Mapping):
@@ -15,6 +16,7 @@ class Decisions(Mapping):
         with self.connection() as db:
             db.execute("CREATE TABLE IF NOT EXISTS decisions(key TEXT PRIMARY KEY,pick TEXT,strategy TEXT,at REAL)")
             db.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT)")
+            ensure_feedback(db)
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM meta WHERE key='imported'").fetchone():
                 old = state / "decisions.json"
@@ -86,6 +88,11 @@ class ConflictItems(Sequence):
     def __len__(self):
         with _Connection(self.path) as db:
             return db.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+
+    def find(self, key):
+        with _Connection(self.path) as db:
+            row = db.execute("SELECT value FROM items WHERE key=?", (key,)).fetchone()
+        return self._decode(row[0]) if row else None
 
     def __iter__(self):
         with _Connection(self.path) as db:

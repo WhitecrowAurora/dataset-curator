@@ -1,0 +1,18 @@
+{
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-current-progress-fix.zip",
+    "bytes": 77097673,
+    "sha256": "c66d656d19b01fa048ba8bb0ce02bbd3dacbb65f6d2e09c4fa3dca8da9e24576",
+    "crc_ok": true,
+    "current_files_matched": 515,
+    "private_settings_excluded": true
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-current-progress-patch.zip",
+    "bytes": 63268157,
+    "sha256": "a4c959db49566f16cbef7385b6602036fa3297908a51b630ecb345b7d2d86f87",
+    "crc_ok": true,
+    "current_files_matched": 515,
+    "private_settings_excluded": true
+  }
+}

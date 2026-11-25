@@ -383,6 +383,13 @@ def save_decisions(decisions: dict[str, dict],
         db.executemany("INSERT INTO decisions VALUES(?,?,?,?)", (
             (k, v.get("pick", ""), v.get("strategy", "manual"), v.get("at", 0))
             for k, v in decisions.items()))
+        from .storage.review_feedback import append_feedback
+        for subject, image_key, kind in db.execute(
+                "SELECT subject,image_key,kind FROM feedback_events GROUP BY subject"):
+            append_feedback(db, subject=subject, image_key=image_key, kind=kind,
+                            action="import", value={"origin": "import"})
+    from .review_learning.service import schedule
+    schedule(dir_of(state_dir))
     return store.path
 
 
@@ -390,12 +397,24 @@ def decide(image_id: str, kind: str, pick: str, *, strategy: str = "manual",
            state_dir: str | Path | None = None) -> dict:
     """批准某一条：把 (id,kind) → 选中内容的哈希 记下来。"""
     decisions = load_decisions(state_dir)
+    snapshot = load_index(state_dir) if strategy == "manual" else None
+    key = f"{image_id}|{kind}"
+    item = (snapshot.items.find(key) if hasattr(snapshot.items, "find") else
+            next((item for item in snapshot.items if item.key == key), None)) if snapshot else None
     with decisions.connection() as db:
-        key = f"{image_id}|{kind}"
+        previous = db.execute("SELECT pick,strategy,at FROM decisions WHERE key=?", (key,)).fetchone()
         if not pick:
             db.execute("DELETE FROM decisions WHERE key=?", (key,))
         else:
             db.execute("INSERT OR REPLACE INTO decisions VALUES(?,?,?,?)", (key, pick, strategy, time.time()))
+        from .storage.review_feedback import append_feedback
+        append_feedback(db, subject=f"conflict:{key}", image_key=f"image_id:{image_id}", kind=kind,
+                            action=("confirm" if pick else "undo") if strategy == "manual" else "auto", value={
+                                "origin": strategy, "pick": pick, "previous": list(previous) if previous else None,
+                                "roots": snapshot.roots if snapshot else [],
+                                "candidates": [{**asdict(c), "digest": c.digest} for c in item.candidates] if item else []})
+    from .review_learning.service import schedule
+    schedule(dir_of(state_dir))
     return decisions.get(key, {})
 
 
@@ -427,9 +446,14 @@ def auto_decide(result: ScanResult, strategy: str, *,
                 skipped += 1
                 continue
             db.execute("INSERT OR REPLACE INTO decisions VALUES(?,?,?,?)", (item.key, pick, strategy, time.time()))
+            from .storage.review_feedback import append_feedback
+            append_feedback(db, subject=f"conflict:{item.key}", image_key=f"image_id:{item.image_id}", kind=item.kind,
+                            action="auto", value={"origin": strategy, "pick": pick})
             item.decided = pick
             applied += 1
     result.apply_decisions(picks_for_merge(state_dir))
+    from .review_learning.service import schedule
+    schedule(dir_of(state_dir))
     return {"applied": applied, "skipped": skipped}
 
 

@@ -36,6 +36,9 @@ def receive(c, dispatch, body):
         if (not lease or lease["user_id"] != user or lease["device_id"] != device_id
                 or lease["kind"] not in ("active","offline") or lease["status"] != "open"):
             raise dispatch.LeaseError("当前身份没有这个开放的 active 租约")
+        from scheduling.lifetime import expired
+        if expired(lease):
+            raise dispatch.LeaseError('租约已过期，请重新领取后上报明细')
         if lease["kind"]=="offline":
             from assignments.offline import authenticate
             authenticate(c,dispatch,lease,body.get("secret"))

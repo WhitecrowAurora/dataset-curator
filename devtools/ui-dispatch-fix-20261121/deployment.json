@@ -1,0 +1,34 @@
+{
+  "fox-label/dispatch.py": {
+    "before": "b025c1d4446b0304b86953a9daa76dcb70020e22ca22c03f7a73bb99ad77c3d5",
+    "after": "d2b53777a31660b06c5094573e8c7ab1d3a84c601fd85c305f0edf711ba07d02"
+  },
+  "fox-label/worker.py": {
+    "before": "c9558a4093017aba616ad78a5814779f138ff499f028dcd0a5bc5733def28afa",
+    "after": "f69e63c15f1a5b5c8702d231ea2d0d279b50586e9e4ec835e5ee13a6fa016e9b"
+  },
+  "fox-label/worker-sources.json": {
+    "before": "407947b2d2ac74b03c37139819adab8e958faf3354065c9e687a38e27d58a322",
+    "after": "8f5150baa64dbff5f608126dc4f32d45d156d667ca74c7889e7d6a0dbe2138df"
+  },
+  "fox-label/scheduling/reservations.py": {
+    "before": "58013d7678aee83bc876290009aa09e51b430c578cc86d4b350a7f9a05b7c340",
+    "after": "3680fa2146e273f3744f74a45396cfa13b9fe4b5e8b1b3b639936a465161e4dc"
+  },
+  "fox-label/scheduling/packages.py": {
+    "before": "2c4f914182db0f3b6c8f776db6406dccf716f5b4cb6af1e17df5a04b1b22f61f",
+    "after": "9a69f1289a480884967fe819b4efdc49962da9b240ba7a48c5bfa80c17d6be00"
+  },
+  "fox-label/assignments/offline.py": {
+    "before": "4d70e3ff775f8440633bb7186e55f4cdd05e6db5b7908a0f035390a83b4150ca",
+    "after": "f9a899d0e727c356ba175854996197f5d349c2f8bf21bf1c5dff3286960b3b2b"
+  },
+  "fox-label/assignments/annotation.py": {
+    "before": null,
+    "after": "52c66878853b7b6d4d11a61e563245b0290142bc989d4908ca8825bcb32a7206"
+  },
+  "fox-panel/web/workspace.js": {
+    "before": "ede80bb8dd47629afc4f4ec04f38e2865459b364962b07f93163da57ea5a1e91",
+    "after": "d6fcb135013077006fd3ad27796dfa5aeeadf06af0a0759bd406aba938ba804f"
+  }
+}

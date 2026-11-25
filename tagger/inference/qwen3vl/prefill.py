@@ -41,7 +41,7 @@ class PrefillJob:
         self.offsets = torch.tensor(self.prompt_sizes, device=engine.device) + deltas.to(engine.device)
         self.history = [inputs["input_ids"][i, cpu_valid[i]].tolist() for i in range(len(requests))]
         if ids.shape[1] + max(r.sampling.max_tokens for r in requests) - 1 > engine.context_capacity:
-            raise ValueError("Prompt and requested caption exceed the configured context capacity")
+            raise ValueError(f"Prompt and requested caption exceed the configured context capacity: prompt={ids.shape[1]}, output={max(r.sampling.max_tokens for r in requests)}, capacity={engine.context_capacity}. Increase max_model_len in the model service settings.")
         self.cache = (cache_factory(ids.shape[1]) if cache_factory else KVCache(
             engine.decoder.config, len(requests), ids.shape[1] if prompt_only else engine.context_capacity,
             device=engine.device, dtype=engine.dtype))

@@ -6,7 +6,11 @@ from . import leases
 
 def enqueue(c, dispatch, body, actor=None, on_event=None):
     from assignments.store import identity, selection
+    from assignments import annotation
     items = selection(body)
+    annotation_options = annotation.options(body["annotation"]) if "annotation" in body else None
+    if actor is None and annotation_options is not None:
+        raise ValueError("标注选项由派单面板设置")
     with dispatch._Tx(c):
         if actor is None:
             devices = [identity(c, dispatch, body)]
@@ -66,15 +70,18 @@ def enqueue(c, dispatch, body, actor=None, on_event=None):
                 if old:
                     already += 1
                 else:
-                    c.execute('INSERT INTO part_assignments VALUES(?,?,?,\'device\',?,?,?)',
+                    c.execute('INSERT INTO part_assignments(repo,pkg,part,target_type,target_id,actor,updated_at) VALUES(?,?,?,\'device\',?,?,?)',
                               (repo,pkg,part,d['device_id'],actor or 'client',time.time()))
                     reserved += 1
                     if on_event:
                         on_event(c,repo,pkg,d['user_id'],d['device_id'])
                 loads[d['device_id']] += 1
+                if annotation_options is not None:
+                    annotation.save(c, package, part, annotation_options)
                 if actor is None:
                     c.execute('UPDATE devices SET queue_only=1 WHERE device_id=?', (d['device_id'],))
-                results.append(dict(repo=repo,id=pkg,part=part,device_id=d['device_id']))
+                results.append(dict(repo=repo,id=pkg,part=part,device_id=d['device_id'],
+                                    annotation=annotation.for_package(c, package, [part])))
             if not assigned:
                 raise dispatch.LeaseError('没有可接收分项的选中设备：' + pkg)
     return dict(ok=True, assigned=results, reserved=reserved, already_reserved=already)

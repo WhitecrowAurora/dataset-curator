@@ -1,0 +1,452 @@
+{
+  "settings": {
+    "model": "torii",
+    "port": 8002,
+    "format": "json",
+    "temperature": 0.5,
+    "seed": 20261119,
+    "max_tokens": 2048,
+    "system_prompt": "You are image captioning expert. Describe user's picture according to requested format and instructions.",
+    "user_prompt": "# Captioning format:\nUse json-style caption for given image with following structure:\n{\"character\" : \"Description for character or object. Name (if defined), main details, features, position, pose, etc.\",\n/or in case of multiple\n\"character_1\" : \"Description for first\"\n\"character_2\" : \"Description for second \",\n\"character_N\"...\n/or if there are no characters\n\"main content\" : \"long and detailed description of main content of image that might be the main focus if characters are missing\",\n/\n\"background\" : \"Detailed descritpion of background and it's content\",\n\"image_effects\" : \"If there are some visual effects like fisheye distortion, chromatic aberration, glitches, messy drawing or anything else - write about it. If it's just a general anime art - omit this field.\"\n\"texts\" : \"Speech bubbles, bars, marks, signs etc. with texts if present, else None\",\n\"atmosphere\" : \"...\",\n}\nIn special cases you can add extra keys.\n\n# Characters on picture:\nAvoid to guess names for characters.\n"
+  },
+  "records": [
+    {
+      "key": "portrait",
+      "input_sha256": "3062364e2e7d770eb7090db40f93308e84a6c3ca1f810778233bf10a2096e312",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character_1\": \"The image features a young woman with shoulder-length, pale blonde hair styled in a bob with bangs that partially obscure her forehead.  Her eyes are a striking yellow-gold, and her expression is serious, almost melancholic. She has fair skin with a subtle blush on her cheeks. She's holding a single, vibrant red carnation to her lips, her fingers delicately grasping the stem. She's wearing a dark, possibly black, dress with a high neckline and puffy, Juliet sleeves. The dress appears to be somewhat sheer or translucent at the sleeves.  A black ribbon or choker is visible around her neck. Her overall appearance is elegant and somewhat gothic.\",\n  \"background\": \"The background is a dark, muted teal or blue-green, with a slightly textured appearance suggesting depth. There are blurry, out-of-focus spots of light that look like bokeh, adding to the atmospheric effect. Two large, iridescent blue butterflies are visible, one on each side of the woman's head, adding to the ethereal feel. The background has a slightly grainy or textured effect, as if it were a painted canvas or a slightly distressed photograph.\",\n  \"image_effects\": \"The image has a soft, slightly painterly quality. The colors are somewhat desaturated, lending a melancholic and dreamy atmosphere. There's a subtle blurring effect, particularly in the background, which adds to the depth and mood.\",\n  \"texts\": \"None\",\n  \"atmosphere\": \"The overall atmosphere is one of quiet contemplation and subtle sadness. The color palette, the woman's expression, and the presence of the butterflies and the flower all contribute to a feeling of wistful longing or gentle melancholy. The soft lighting and painterly style further enhance this mood.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025282,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 379,
+          "prompt_tokens": 1332,
+          "total_tokens": 1711,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-A19V5RqCcqACcUnZIOQkKX4VywzPycfx",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1332,
+          "prompt_ms": 511.771,
+          "prompt_per_token_ms": 0.3842124624624625,
+          "prompt_per_second": 2602.7266101439905,
+          "predicted_n": 379,
+          "predicted_ms": 3364.878,
+          "predicted_per_token_ms": 8.901793650793651,
+          "predicted_per_second": 112.3369108776009
+        }
+      },
+      "parsed": {
+        "character_1": "The image features a young woman with shoulder-length, pale blonde hair styled in a bob with bangs that partially obscure her forehead.  Her eyes are a striking yellow-gold, and her expression is serious, almost melancholic. She has fair skin with a subtle blush on her cheeks. She's holding a single, vibrant red carnation to her lips, her fingers delicately grasping the stem. She's wearing a dark, possibly black, dress with a high neckline and puffy, Juliet sleeves. The dress appears to be somewhat sheer or translucent at the sleeves.  A black ribbon or choker is visible around her neck. Her overall appearance is elegant and somewhat gothic.",
+        "background": "The background is a dark, muted teal or blue-green, with a slightly textured appearance suggesting depth. There are blurry, out-of-focus spots of light that look like bokeh, adding to the atmospheric effect. Two large, iridescent blue butterflies are visible, one on each side of the woman's head, adding to the ethereal feel. The background has a slightly grainy or textured effect, as if it were a painted canvas or a slightly distressed photograph.",
+        "image_effects": "The image has a soft, slightly painterly quality. The colors are somewhat desaturated, lending a melancholic and dreamy atmosphere. There's a subtle blurring effect, particularly in the background, which adds to the depth and mood.",
+        "texts": "None",
+        "atmosphere": "The overall atmosphere is one of quiet contemplation and subtle sadness. The color palette, the woman's expression, and the presence of the butterflies and the flower all contribute to a feeling of wistful longing or gentle melancholy. The soft lighting and painterly style further enhance this mood."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 3969.0,
+      "gpu_after": {
+        "total_used_mib": 6408,
+        "utilization_percent": 94
+      }
+    },
+    {
+      "key": "hutao",
+      "input_sha256": "a2a25fdc477352d3747e19b48ecfc742624b2f24f7702139eb8581397c4d743c",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character\": \"The image features a girl with long, flowing brown hair adorned with red and orange flower ornaments. Her hair is styled with an ahoge and tied in a two-side-up fashion. She has red eyes with flower-shaped pupils and a playful expression, sticking her tongue out slightly. She is wearing a blue jacket over a white shirt and a plaid skirt. Her nails are painted black, and she is holding a small, white ghost-like creature with a smiling face. She also carries a black backpack decorated with various pins and a charm.\",\n  \"background\": \"The background shows a paved walkway with a wrought iron gate and some greenery. The setting appears to be outdoors, possibly near a school or a garden.\",\n  \"texts\": null,\n  \"atmosphere\": \"The atmosphere is playful and whimsical, with a touch of mystery due to the ghost-like creature. The bright colors and the girl's cheerful expression create a lively and engaging scene.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025284,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 206,
+          "prompt_tokens": 1344,
+          "total_tokens": 1550,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-0jmzDHg0IKNr1jnXEpXGYGIRO9BkhPsj",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1344,
+          "prompt_ms": 351.108,
+          "prompt_per_token_ms": 0.26124107142857145,
+          "prompt_per_second": 3827.8820192077656,
+          "predicted_n": 206,
+          "predicted_ms": 1829.995,
+          "predicted_per_token_ms": 8.92680487804878,
+          "predicted_per_second": 112.02216399498359
+        }
+      },
+      "parsed": {
+        "character": "The image features a girl with long, flowing brown hair adorned with red and orange flower ornaments. Her hair is styled with an ahoge and tied in a two-side-up fashion. She has red eyes with flower-shaped pupils and a playful expression, sticking her tongue out slightly. She is wearing a blue jacket over a white shirt and a plaid skirt. Her nails are painted black, and she is holding a small, white ghost-like creature with a smiling face. She also carries a black backpack decorated with various pins and a charm.",
+        "background": "The background shows a paved walkway with a wrought iron gate and some greenery. The setting appears to be outdoors, possibly near a school or a garden.",
+        "texts": null,
+        "atmosphere": "The atmosphere is playful and whimsical, with a touch of mystery due to the ghost-like creature. The bright colors and the girl's cheerful expression create a lively and engaging scene."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 2282.0,
+      "gpu_after": {
+        "total_used_mib": 6399,
+        "utilization_percent": 93
+      }
+    },
+    {
+      "key": "mostima",
+      "input_sha256": "739585da86f155c4406bfd27b8b406cdb5d30a85dc611389b1a8824bf8dd18c7",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character_1\": \"A girl with vibrant red hair styled in a short, slightly messy bob with fox-like ears. Her eyes are a striking crimson, and her expression is serious, almost stoic. She's wearing a dark gray jacket over a collared shirt and a red necktie. Black fingerless gloves cover her hands, and she's holding a disposable coffee cup in her right hand.  A faint, almost ethereal, pinkish-white smoke or vapor trails from the cup, suggesting a warm beverage. Her skin tone is light, and her overall appearance is sharp and stylish.\",\n  \"character_2\": \"This girl has long, flowing blue hair with lighter, almost blonde highlights near her face. She possesses pointed, wolf-like ears and a halo above her head. Her eyes are a captivating teal, and her expression is a sly, almost mischievous smile.  She's wearing a dark gray, slightly oversized jacket with fur trim around the collar, a light gray shirt underneath, and black gloves. She also holds a disposable coffee cup, emitting the same pinkish vapor as the first girl. Her skin tone is light, and her overall style is edgy yet playful.\",\n  \"character_3\": \"The third girl has long, wavy pink hair and a halo above her head.  Her eyes are a soft, light pink, and her expression is calm and serene. She's wearing a dark gray jacket over a light gray collared shirt and is holding a disposable coffee cup in both hands, similar to the other two. Her skin tone is light, and her overall appearance is more gentle and demure compared to the other two.\",\n  \"background\": \"The background is a stylized night sky, a deep teal with scattered stars. Behind the girls, there's a lattice-like structure, possibly a fence or scaffolding, with glowing, star-like lights at the intersections. The lights have a radiant, almost magical quality, adding to the fantastical feel of the scene. The overall background is dark and mysterious, contrasting with the bright colors of the characters.\",\n  \"image_effects\": \"The art style is a blend of sharp lines and softer shading, creating a dynamic and visually interesting piece. The vapor coming from the coffee cups adds a sense of movement and warmth to the scene. The overall color palette is rich and saturated, with a strong contrast between the cool tones of the background and the warm tones of the characters.\",\n  \"texts\": \"None\",\n  \"atmosphere\": \"The overall atmosphere is one of casual coolness and subtle mystery. The girls' expressions and poses suggest a sense of camaraderie, while the background hints at a slightly otherworldly or magical setting. The coffee cups add a touch of everyday normalcy to the fantastical scene, creating a balance between the mundane and the extraordinary.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025290,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 590,
+          "prompt_tokens": 1331,
+          "total_tokens": 1921,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-gdoHmgQlIPvKsidP1m7KxuI4tO1YUhh0",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1331,
+          "prompt_ms": 351.112,
+          "prompt_per_token_ms": 0.2637956423741548,
+          "prompt_per_second": 3790.813187814714,
+          "predicted_n": 590,
+          "predicted_ms": 5274.753,
+          "predicted_per_token_ms": 8.955438030560272,
+          "predicted_per_second": 111.66399639945226
+        }
+      },
+      "parsed": {
+        "character_1": "A girl with vibrant red hair styled in a short, slightly messy bob with fox-like ears. Her eyes are a striking crimson, and her expression is serious, almost stoic. She's wearing a dark gray jacket over a collared shirt and a red necktie. Black fingerless gloves cover her hands, and she's holding a disposable coffee cup in her right hand.  A faint, almost ethereal, pinkish-white smoke or vapor trails from the cup, suggesting a warm beverage. Her skin tone is light, and her overall appearance is sharp and stylish.",
+        "character_2": "This girl has long, flowing blue hair with lighter, almost blonde highlights near her face. She possesses pointed, wolf-like ears and a halo above her head. Her eyes are a captivating teal, and her expression is a sly, almost mischievous smile.  She's wearing a dark gray, slightly oversized jacket with fur trim around the collar, a light gray shirt underneath, and black gloves. She also holds a disposable coffee cup, emitting the same pinkish vapor as the first girl. Her skin tone is light, and her overall style is edgy yet playful.",
+        "character_3": "The third girl has long, wavy pink hair and a halo above her head.  Her eyes are a soft, light pink, and her expression is calm and serene. She's wearing a dark gray jacket over a light gray collared shirt and is holding a disposable coffee cup in both hands, similar to the other two. Her skin tone is light, and her overall appearance is more gentle and demure compared to the other two.",
+        "background": "The background is a stylized night sky, a deep teal with scattered stars. Behind the girls, there's a lattice-like structure, possibly a fence or scaffolding, with glowing, star-like lights at the intersections. The lights have a radiant, almost magical quality, adding to the fantastical feel of the scene. The overall background is dark and mysterious, contrasting with the bright colors of the characters.",
+        "image_effects": "The art style is a blend of sharp lines and softer shading, creating a dynamic and visually interesting piece. The vapor coming from the coffee cups adds a sense of movement and warmth to the scene. The overall color palette is rich and saturated, with a strong contrast between the cool tones of the background and the warm tones of the characters.",
+        "texts": "None",
+        "atmosphere": "The overall atmosphere is one of casual coolness and subtle mystery. The girls' expressions and poses suggest a sense of camaraderie, while the background hints at a slightly otherworldly or magical setting. The coffee cups add a touch of everyday normalcy to the fantastical scene, creating a balance between the mundane and the extraordinary."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 5735.0,
+      "gpu_after": {
+        "total_used_mib": 6400,
+        "utilization_percent": 92
+      }
+    },
+    {
+      "key": "mostima-head",
+      "input_sha256": "3af7a1d3b7732a8c10d19310641912b37ba9c88a8cb18b0e6d6b338b0c3d7817",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character_1\": \"A young woman with vibrant teal eyes and shoulder-length hair that's a mix of deep blue and blonde streaks. Her bangs are swept to the side, partially obscuring her forehead. She has a pair of small, dark horns protruding from her hairline, adding a touch of the fantastical to her appearance.  She's wearing a dark-colored, possibly black, jacket or coat with a fluffy, light beige or cream-colored collar that looks like fur trim.  Underneath, a hint of a lighter colored garment is visible.  She sports small, turquoise earrings and a small, noticeable stud in her left ear. Her expression is a playful smirk, and her lips are slightly parted. She's looking directly at the viewer, creating a direct and engaging gaze.  Her skin tone is a light tan.\",\n  \"character_2\": \"Partially visible in the upper left corner is another character, only a section of red hair and a portion of what appears to be a dark garment are visible.  It's too unclear to fully describe this character.\",\n  \"background\": \"The background is a simple, dark teal or blue-green, almost resembling a night sky. There are a few small, faint white dots scattered across the background, possibly suggesting stars or a similar celestial effect. There are also some thin, light-colored lines that seem to be swirling or trailing, adding a dynamic element to the otherwise simple background.\",\n  \"image_effects\": \"The image has a slightly textured or grainy effect, giving it a somewhat painterly or sketch-like quality. The colors are rich and slightly desaturated, contributing to a moody atmosphere.\",\n  \"texts\": \"None\",\n  \"atmosphere\": \"The overall atmosphere is one of playful intrigue and subtle mystery. The character's direct gaze and smirk create a sense of engagement with the viewer, while the dark background and fantastical elements like the horns add to the enigmatic feel. The slightly muted colors and textured style enhance the mysterious and slightly melancholic mood.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025294,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 425,
+          "prompt_tokens": 1358,
+          "total_tokens": 1783,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-aXwSVYWwBUFLWqG7BmdgMCdcwYgfoD3y",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1358,
+          "prompt_ms": 378.21,
+          "prompt_per_token_ms": 0.27850515463917525,
+          "prompt_per_second": 3590.5978160281325,
+          "predicted_n": 425,
+          "predicted_ms": 3758.051,
+          "predicted_per_token_ms": 8.863327830188679,
+          "predicted_per_second": 112.82444011536832
+        }
+      },
+      "parsed": {
+        "character_1": "A young woman with vibrant teal eyes and shoulder-length hair that's a mix of deep blue and blonde streaks. Her bangs are swept to the side, partially obscuring her forehead. She has a pair of small, dark horns protruding from her hairline, adding a touch of the fantastical to her appearance.  She's wearing a dark-colored, possibly black, jacket or coat with a fluffy, light beige or cream-colored collar that looks like fur trim.  Underneath, a hint of a lighter colored garment is visible.  She sports small, turquoise earrings and a small, noticeable stud in her left ear. Her expression is a playful smirk, and her lips are slightly parted. She's looking directly at the viewer, creating a direct and engaging gaze.  Her skin tone is a light tan.",
+        "character_2": "Partially visible in the upper left corner is another character, only a section of red hair and a portion of what appears to be a dark garment are visible.  It's too unclear to fully describe this character.",
+        "background": "The background is a simple, dark teal or blue-green, almost resembling a night sky. There are a few small, faint white dots scattered across the background, possibly suggesting stars or a similar celestial effect. There are also some thin, light-colored lines that seem to be swirling or trailing, adding a dynamic element to the otherwise simple background.",
+        "image_effects": "The image has a slightly textured or grainy effect, giving it a somewhat painterly or sketch-like quality. The colors are rich and slightly desaturated, contributing to a moody atmosphere.",
+        "texts": "None",
+        "atmosphere": "The overall atmosphere is one of playful intrigue and subtle mystery. The character's direct gaze and smirk create a sense of engagement with the viewer, while the dark background and fantastical elements like the horns add to the enigmatic feel. The slightly muted colors and textured style enhance the mysterious and slightly melancholic mood."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 4203.0,
+      "gpu_after": {
+        "total_used_mib": 6403,
+        "utilization_percent": 91
+      }
+    },
+    {
+      "key": "101",
+      "input_sha256": "5550a8c5b484ef28d7bd2a699235d27952f0dda443cc8827f4c8f54a90d038d3",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character_1\": \"A girl with long, light blue hair styled in a ponytail, wearing a dark blue beret, a dark blue jacket with patches, a white shirt, dark blue pants, black fingerless gloves, and a black choker. She's holding an AR-15 style assault rifle with a scope, aiming it slightly to her left. Her expression is serious and focused. She has striking yellow eyes.\",\n  \"character_2\": \"A girl with long, light brown hair, wearing a dark blue jacket, a white shirt, a dark pleated miniskirt, and black fingerless gloves. She's holding an AK-47 style assault rifle, aiming it to her right. Her expression is also serious and focused. She has brown eyes.\",\n  \"character_3\": \"A girl with shoulder-length brown hair tied in a ponytail, wearing a dark blue jacket, a dark skirt, and black stockings. She's holding an AR-15 style assault rifle, aiming it to her left. Her expression is serious, but less intense than the other two. \",\n  \"character_4\": \"A figure in a dark hooded cloak, partially obscured, holding what appears to be a rifle, is visible in the background. \",\n  \"background\": \"The background is a post-apocalyptic cityscape.  Buildings are destroyed or crumbling, with debris scattered on the ground.  There are neon signs, some of which are partially damaged, and a distant city skyline under an overcast sky. The overall color palette is dark and gritty, with shades of gray, brown, and black dominating.\",\n  \"image_effects\": \"The image has a slightly desaturated color palette, giving it a gritty and realistic feel. The lighting is somewhat dramatic, with a focus on the characters.\",\n  \"texts\": \"None\",\n  \"atmosphere\": \"The overall atmosphere is tense and action-oriented. The scene suggests a military operation or a post-apocalyptic conflict. The characters' serious expressions and weaponry contribute to the feeling of danger and urgency.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025298,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 434,
+          "prompt_tokens": 1302,
+          "total_tokens": 1736,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-jCKovRE9BbqjicjcjE4jpOcVfU2GNAiq",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1302,
+          "prompt_ms": 325.556,
+          "prompt_per_token_ms": 0.25004301075268814,
+          "prompt_per_second": 3999.3119463318144,
+          "predicted_n": 434,
+          "predicted_ms": 3884.129,
+          "predicted_per_token_ms": 8.970274826789838,
+          "predicted_per_second": 111.47930462659713
+        }
+      },
+      "parsed": {
+        "character_1": "A girl with long, light blue hair styled in a ponytail, wearing a dark blue beret, a dark blue jacket with patches, a white shirt, dark blue pants, black fingerless gloves, and a black choker. She's holding an AR-15 style assault rifle with a scope, aiming it slightly to her left. Her expression is serious and focused. She has striking yellow eyes.",
+        "character_2": "A girl with long, light brown hair, wearing a dark blue jacket, a white shirt, a dark pleated miniskirt, and black fingerless gloves. She's holding an AK-47 style assault rifle, aiming it to her right. Her expression is also serious and focused. She has brown eyes.",
+        "character_3": "A girl with shoulder-length brown hair tied in a ponytail, wearing a dark blue jacket, a dark skirt, and black stockings. She's holding an AR-15 style assault rifle, aiming it to her left. Her expression is serious, but less intense than the other two. ",
+        "character_4": "A figure in a dark hooded cloak, partially obscured, holding what appears to be a rifle, is visible in the background. ",
+        "background": "The background is a post-apocalyptic cityscape.  Buildings are destroyed or crumbling, with debris scattered on the ground.  There are neon signs, some of which are partially damaged, and a distant city skyline under an overcast sky. The overall color palette is dark and gritty, with shades of gray, brown, and black dominating.",
+        "image_effects": "The image has a slightly desaturated color palette, giving it a gritty and realistic feel. The lighting is somewhat dramatic, with a focus on the characters.",
+        "texts": "None",
+        "atmosphere": "The overall atmosphere is tense and action-oriented. The scene suggests a military operation or a post-apocalyptic conflict. The characters' serious expressions and weaponry contribute to the feeling of danger and urgency."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 4328.0,
+      "gpu_after": {
+        "total_used_mib": 6399,
+        "utilization_percent": 95
+      }
+    },
+    {
+      "key": "201",
+      "input_sha256": "c3db4231a4e379ea918088d61b3d8d9e67752a7e05c51f0b0ff1dc85769ed68f",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character\": \"The image features a girl with long, flowing blue hair and striking yellow eyes. She is wearing a black beret adorned with a subtle emblem. Her expression is serious and focused, with a slight frown. She is dressed in a black jacket over a white shirt, and a black choker around her neck adds to her edgy appearance. She is holding an assault rifle, specifically an H&K HK416, which is partially visible in the image.\",\n  \"background\": \"The background is blurred, suggesting an urban setting with indistinct buildings and structures, possibly indicating a cityscape. This blurred effect emphasizes the character in the foreground.\",\n  \"image_effects\": \"The image has a slight blur effect, particularly in the background, which draws attention to the character.\",\n  \"texts\": \"None\",\n  \"atmosphere\": \"The overall atmosphere is tense and focused, with a sense of readiness for action. The character's serious demeanor and the presence of the weapon contribute to a sense of alertness and determination.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025301,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 223,
+          "prompt_tokens": 1351,
+          "total_tokens": 1574,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-LJhtcKe0havofzipg1MRtxxxC6i2aZiq",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1351,
+          "prompt_ms": 361.118,
+          "prompt_per_token_ms": 0.26729681717246484,
+          "prompt_per_second": 3741.159399420688,
+          "predicted_n": 223,
+          "predicted_ms": 1975.657,
+          "predicted_per_token_ms": 8.899355855855855,
+          "predicted_per_second": 112.36768325675966
+        }
+      },
+      "parsed": {
+        "character": "The image features a girl with long, flowing blue hair and striking yellow eyes. She is wearing a black beret adorned with a subtle emblem. Her expression is serious and focused, with a slight frown. She is dressed in a black jacket over a white shirt, and a black choker around her neck adds to her edgy appearance. She is holding an assault rifle, specifically an H&K HK416, which is partially visible in the image.",
+        "background": "The background is blurred, suggesting an urban setting with indistinct buildings and structures, possibly indicating a cityscape. This blurred effect emphasizes the character in the foreground.",
+        "image_effects": "The image has a slight blur effect, particularly in the background, which draws attention to the character.",
+        "texts": "None",
+        "atmosphere": "The overall atmosphere is tense and focused, with a sense of readiness for action. The character's serious demeanor and the presence of the weapon contribute to a sense of alertness and determination."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 2391.0,
+      "gpu_after": {
+        "total_used_mib": 6392,
+        "utilization_percent": 93
+      }
+    },
+    {
+      "key": "107",
+      "input_sha256": "f587af89e65ad3014c827f504de7284da1c1ec0f166c0f1789a5bfb8f6141e0c",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n    \"character_1\": \"A young woman with medium-length grey hair stands in a field. Her hair is slightly tousled, giving a natural and relaxed appearance. She has a calm and thoughtful expression, with her gaze directed to the side. Her lips are closed, and her skin tone is fair. She is wearing a collared shirt with vertical black and white stripes, which adds a classic and simple touch to her look. The shirt has long sleeves and fits comfortably.\",\n    \"background\": \"The background is a blurry depiction of a grassy field, emphasizing the natural setting. The greenery stretches out behind her, slightly blurred to create a depth of field effect, making the character the focal point of the image.\",\n    \"image_effects\": \"The image has a slight blur effect, particularly in the background, enhancing the focus on the character.\",\n    \"texts\": null,\n    \"atmosphere\": \"The atmosphere is serene and introspective, with a sense of calmness and connection to nature.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025303,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 213,
+          "prompt_tokens": 1302,
+          "total_tokens": 1515,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-UMQrq0Uuun4jAG15UF8SJSCmDwq8K9Sk",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1302,
+          "prompt_ms": 344.493,
+          "prompt_per_token_ms": 0.26458755760368663,
+          "prompt_per_second": 3779.4672170406943,
+          "predicted_n": 213,
+          "predicted_ms": 2009.081,
+          "predicted_per_token_ms": 9.47679716981132,
+          "predicted_per_second": 105.52088243331156
+        }
+      },
+      "parsed": {
+        "character_1": "A young woman with medium-length grey hair stands in a field. Her hair is slightly tousled, giving a natural and relaxed appearance. She has a calm and thoughtful expression, with her gaze directed to the side. Her lips are closed, and her skin tone is fair. She is wearing a collared shirt with vertical black and white stripes, which adds a classic and simple touch to her look. The shirt has long sleeves and fits comfortably.",
+        "background": "The background is a blurry depiction of a grassy field, emphasizing the natural setting. The greenery stretches out behind her, slightly blurred to create a depth of field effect, making the character the focal point of the image.",
+        "image_effects": "The image has a slight blur effect, particularly in the background, enhancing the focus on the character.",
+        "texts": null,
+        "atmosphere": "The atmosphere is serene and introspective, with a sense of calmness and connection to nature."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 2453.0,
+      "gpu_after": {
+        "total_used_mib": 6421,
+        "utilization_percent": 91
+      }
+    },
+    {
+      "key": "202",
+      "input_sha256": "b6c9ae5f2b03a927ca03b36229a93118dbef3c2d3c2d4074bd4b8d15c5fe57d4",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"character_1\": \"A young woman with shoulder-length, wavy silver hair. Her hair is styled in a way that it falls loosely around her shoulders and slightly obscures her neck. She has fair skin, dark eyes, and a somewhat serious expression. Her lips are full and slightly parted. She's wearing a horizontally striped shirt with black and white stripes. The shirt appears to be made of a lightweight material. Her pose is a profile view, facing to the left of the frame, with her gaze directed slightly upward and away from the camera. Her neck is visible, and her collarbones are subtly visible. \",\n  \"background\": \"The background is a blurred out-of-focus image of a green grassy field, suggesting an outdoor setting. The grass appears to be tall and somewhat unkempt. The background is softly lit, with no harsh shadows.\",\n  \"image_effects\": \"The image has a slightly soft focus, giving it a dreamy or ethereal quality. The colors are muted and natural, with no obvious artificial enhancements or distortions.\",\n  \"texts\": \"None\",\n  \"atmosphere\": \"The overall atmosphere is calm and contemplative. The woman's expression and pose suggest a pensive or thoughtful mood, while the soft focus and natural setting contribute to a serene and peaceful ambiance. The image has a realistic style, with attention to detail in the woman's features and hair.\"\n}"
+            }
+          }
+        ],
+        "created": 1795025307,
+        "model": "ToriiGate-0.5",
+        "system_fingerprint": "b12188-095668452",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 295,
+          "prompt_tokens": 1351,
+          "total_tokens": 1646,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "id": "chatcmpl-M4v95GZFvbzOnUiBS1JTkwf0gq3huqUu",
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 1351,
+          "prompt_ms": 374.363,
+          "prompt_per_token_ms": 0.27710066617320506,
+          "prompt_per_second": 3608.7968095137608,
+          "predicted_n": 295,
+          "predicted_ms": 2706.262,
+          "predicted_per_token_ms": 9.204972789115647,
+          "predicted_per_second": 108.6369316791944
+        }
+      },
+      "parsed": {
+        "character_1": "A young woman with shoulder-length, wavy silver hair. Her hair is styled in a way that it falls loosely around her shoulders and slightly obscures her neck. She has fair skin, dark eyes, and a somewhat serious expression. Her lips are full and slightly parted. She's wearing a horizontally striped shirt with black and white stripes. The shirt appears to be made of a lightweight material. Her pose is a profile view, facing to the left of the frame, with her gaze directed slightly upward and away from the camera. Her neck is visible, and her collarbones are subtly visible. ",
+        "background": "The background is a blurred out-of-focus image of a green grassy field, suggesting an outdoor setting. The grass appears to be tall and somewhat unkempt. The background is softly lit, with no harsh shadows.",
+        "image_effects": "The image has a slightly soft focus, giving it a dreamy or ethereal quality. The colors are muted and natural, with no obvious artificial enhancements or distortions.",
+        "texts": "None",
+        "atmosphere": "The overall atmosphere is calm and contemplative. The woman's expression and pose suggest a pensive or thoughtful mood, while the soft focus and natural setting contribute to a serene and peaceful ambiance. The image has a realistic style, with attention to detail in the woman's features and hair."
+      },
+      "json_object_valid": true,
+      "finish_reason": "stop",
+      "elapsed_ms": 3156.0,
+      "gpu_after": {
+        "total_used_mib": 6416,
+        "utilization_percent": 94
+      }
+    }
+  ],
+  "elapsed_seconds": 29.11
+}

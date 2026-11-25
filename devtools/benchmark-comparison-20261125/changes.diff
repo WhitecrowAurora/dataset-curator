@@ -1,0 +1,740 @@
+--- before/tagger/web/benchmark/catalog.py
++++ tagger/web/benchmark/catalog.py
+@@ -65,12 +65,13 @@
+ 
+ def validate(request, center):
+     catalog = available(center)
+-    item = next((item for item in catalog['models'] if item['key'] == request.model), None)
+-    if not item or not any(v['engine'] == request.engine and request.precision in v['precisions'] for v in item['variants']):
+-        raise ValueError('所选模型/精度尚未完整准备或引擎不可用，请刷新清单或到模型管理检查')
++    for index, selected in enumerate(request.configurations, 1):
++        item = next((item for item in catalog['models'] if item['key'] == selected.model), None)
++        if not item or not any(v['engine'] == selected.engine and selected.precision in v['precisions'] for v in item['variants']):
++            raise ValueError(f'配置 {index} 的模型/精度尚未完整准备或引擎不可用，请刷新清单或到模型管理检查')
+     if request.device.startswith('cuda:') and request.device not in {d['value'] for d in catalog['devices']}:
+         raise ValueError('所选显卡当前不可用')
+-    if request.device == 'cpu' and request.engine == 'vllm':
++    if request.device == 'cpu' and any(c.engine == 'vllm' for c in request.configurations):
+         raise ValueError('vLLM 不支持 CPU 测试')
+     from .samples import source_path
+     source_path(center, request.source)
+--- before/tagger/web/benchmark/contracts.py
++++ tagger/web/benchmark/contracts.py
+@@ -1,22 +1,43 @@
+ """并发比较的独立请求，不修改用户的正式打标配置。"""
+ from typing import Annotated, Literal
+ 
+-from pydantic import BaseModel, ConfigDict, Field, field_validator
++from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+ 
+ Level = Annotated[int, Field(strict=True, ge=1, le=256)]
++
++
++class BenchmarkConfig(BaseModel):
++    model_config = ConfigDict(extra='forbid')
++
++    model: str = Field(min_length=1, max_length=256)
++    engine: Literal['native', 'llamacpp', 'vllm']
++    precision: str = Field(min_length=1, max_length=16)
+ 
+ 
+ class BenchmarkRequest(BaseModel):
+     model_config = ConfigDict(extra='forbid')
+ 
+-    model: str = Field(min_length=1, max_length=256)
+-    engine: Literal['native', 'llamacpp', 'vllm']
+-    precision: str = Field(min_length=1, max_length=16)
++    configurations: list[BenchmarkConfig] = Field(min_length=1, max_length=4)
+     device: str = 'auto'
+     source: str = Field(default='', max_length=4096)
+     output_dir: str = Field(default='', max_length=4096)
+     levels: list[Level] = Field(default_factory=lambda: [1, 2, 4, 6, 8], min_length=1, max_length=32)
+     sample_count: int = Field(default=24, ge=4, le=1024)
++
++    @model_validator(mode='before')
++    @classmethod
++    def single_engine_request(cls, value):
++        if isinstance(value, dict) and 'configurations' not in value:
++            value = dict(value)
++            value['configurations'] = [{key: value.pop(key) for key in ('model', 'engine', 'precision') if key in value}]
++        return value
++
++    @field_validator('configurations')
++    @classmethod
++    def distinct_configurations(cls, values):
++        if len({(v.model, v.engine, v.precision) for v in values}) != len(values):
++            raise ValueError('对比配置重复，请选择不同模型、引擎或精度')
++        return values
+ 
+     @field_validator('levels')
+     @classmethod
+--- before/tagger/web/benchmark/runner.py
++++ tagger/web/benchmark/runner.py
+@@ -5,13 +5,13 @@
+ from ..center_runtime.probe import _execute
+ 
+ 
+-def execution_config(center, request, root):
++def execution_config(center, request, root, selected):
+     from ..center_runtime.config import ExecutionConfig
+-    selected = ExecutionConfig(mode='nl', tag_backend='none', inference_source='local',
+-        nl_model=request.model, nl_engine=request.engine, nl_precision=request.precision,
++    execution = ExecutionConfig(mode='nl', tag_backend='none', inference_source='local',
++        nl_model=selected.model, nl_engine=selected.engine, nl_precision=selected.precision,
+         nl_device=request.device, concurrency=request.levels[0], auto_download=False,
+         auto_quantize=False, stop_service=True).model_dump()
+-    return {**center.config(), **selected, 'out_dir': str(root), 'tag_url': 'http://127.0.0.1:8000',
++    return {**center.config(), **execution, 'out_dir': str(root), 'tag_url': 'http://127.0.0.1:8000',
+             'auto_upload': False, 'extra_args': '', 'cmd_template': ''}
+ 
+ 
+@@ -34,21 +34,25 @@
+     from ..multi_gpu import read_metrics
+     from ...hardware import visible_gpus
+ 
+-    base = execution_config(center, request, root)
++    series = [dict(id=f'config-{i}', **selected.model_dump()) for i, selected in enumerate(request.configurations)]
++    bases = [execution_config(center, request, root, selected) for selected in request.configurations]
++    update(series=series)
+     gpus = visible_gpus()
+     index = int(request.device[5:]) if request.device.startswith('cuda:') else 0
+     physical = gpus[index].index if request.device != 'cpu' and index < len(gpus) else None
+     rows = []
+-    for level in request.levels:
++    for index, level in ((i, level) for i in range(len(series)) for level in request.levels):
+         if cancel.is_set():
+             raise Cancelled('已停止并发测试')
+-        row = dict(requested=level, status='preparing', successful=0, failed=0)
++        selected = series[index]
++        label = f'{index + 1}/{len(series)} · {selected["model"]} · {selected["engine"]} · {selected["precision"].upper()}'
++        row = dict(series_id=selected['id'], requested=level, status='preparing', successful=0, failed=0)
+         rows.append(row)
+-        update(rows=rows, current=level, phase='preparing', message=f'准备并发 {level}')
++        update(rows=rows, current=level, current_series=selected['id'], phase='preparing', message=f'{label} · 准备并发 {level}', progress={})
+         try:
+             inference.stop(True)
+             started = time.monotonic()
+-            cfg = inference.prepare({**base, 'concurrency': level}, '', cancel)
++            cfg = inference.prepare({**bases[index], 'concurrency': level}, '', cancel)
+             row['prepare_s'] = round(time.monotonic() - started, 2)
+             row['actual'] = cfg['concurrency']
+             if row['actual'] != level:
+@@ -56,14 +60,14 @@
+             if count < row['actual']:
+                 row.update(status='skipped', warning=f'只有 {count} 张样本，无法覆盖实际 {row["actual"]} 并发；请增加样本')
+                 continue
+-            measured = next((r for r in rows[:-1] if r.get('actual') == row['actual'] and r['status'] == 'completed'), None)
++            measured = next((r for r in rows[:-1] if r['series_id'] == selected['id'] and r.get('actual') == row['actual'] and r['status'] == 'completed'), None)
+             if measured:
+                 row.update(status='skipped', warning=f'实际并发 {row["actual"]} 已测量，跳过重复档位')
+                 continue
+-            output = root / f'concurrency-{level}'
+-            warm_dir = root / f'concurrency-{level}-warmup'
++            output = root / selected['id'] / f'concurrency-{level}'
++            warm_dir = root / selected['id'] / f'concurrency-{level}-warmup'
+             row['status'] = 'warming'
+-            update(rows=rows, phase='warming', message=f'预热并发 {level}（实际 {row["actual"]}）', progress={})
++            update(rows=rows, phase='warming', message=f'{label} · 预热并发 {level}（实际 {row["actual"]}）', progress={})
+             started = time.monotonic()
+             warm = _execute(cfg, sample, warm_dir, center, cancel,
+                             lambda p: update(progress=p))
+@@ -71,7 +75,7 @@
+             if not complete(warm, count):
+                 raise ValueError(failure(warm_dir, '预热', warm))
+             row['status'] = 'measuring'
+-            update(rows=rows, phase='measuring', message=f'测量并发 {level}（实际 {row["actual"]}）', progress={})
++            update(rows=rows, phase='measuring', message=f'{label} · 测量并发 {level}（实际 {row["actual"]}）', progress={})
+             last = 0.0
+             def observe(progress):
+                 nonlocal last
+@@ -98,10 +102,13 @@
+             row.update(status='failed', error=center.credentials.redact(str(exc)))
+         finally:
+             inference.stop(True)
+-            update(rows=rows)
++            successes = [r for r in rows if r['series_id'] == selected['id'] and r['status'] == 'completed']
++            if successes:
++                peak = max(r['rate_per_s'] for r in successes)
++                selected.update(peak_rate_per_s=peak,
++                    recommended=min(r['actual'] for r in successes if r['rate_per_s'] >= peak * .9))
++            update(rows=rows, series=series)
+     successes = [r for r in rows if r['status'] == 'completed']
+-    if successes:
+-        peak = max(r['rate_per_s'] for r in successes)
+-        recommended = min(r['actual'] for r in successes if r['rate_per_s'] >= peak * .9)
+-        update(recommended=recommended)
++    if successes and len(series) == 1:
++        update(recommended=series[0]['recommended'])
+     return len(successes)
+--- before/tagger/web/benchmark/service.py
++++ tagger/web/benchmark/service.py
+@@ -109,7 +109,9 @@
+                 if 'rows' in values and 'progress' not in values:
+                     self.save()
+             successes = runner.run(self.center, inference, request, root, root / 'sample.zip', count, self.cancel, update)
+-            self.update(status='completed' if successes else 'failed', message='测试完成' if successes else '没有成功档位，请查看各档错误')
++            failed = sum(row['status'] == 'failed' for row in self.snapshot()['rows'])
++            message = f'测试完成 · {failed} 个档位失败，请展开明细' if failed else '测试完成'
++            self.update(status='completed' if successes else 'failed', message=message if successes else '没有成功档位，请查看各档错误')
+         except Cancelled:
+             self.update(status='canceled', message='已停止，已完成档位保留')
+         except Exception as exc:
+--- before/tagger/web/ui/src/components/benchmark/benchmark.css
++++ tagger/web/ui/src/components/benchmark/benchmark.css
+@@ -0,0 +1,102 @@
++.bn-page { max-width: 1320px; margin: 0 auto; padding: 30px 32px; display: grid; gap: 18px; }
++.bn-page button:disabled { opacity: .45; cursor: not-allowed; }
++.bn-page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 3px 0 8px; }
++.bn-eyebrow { color: var(--lx-text-dim); font: 10px var(--lx-font-mono); letter-spacing: .17em; margin-bottom: 10px; }
++.bn-page h1 { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 25px; font-weight: 650; letter-spacing: -.035em; }
++.bn-page h1 > svg { color: var(--lx-accent); }
++.bn-page h1 > span { border-left: 1px solid var(--lx-border); padding-left: 14px; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--lx-text-muted); }
++.bn-page-head p { margin-top: 8px; color: var(--lx-text-muted); font-size: 12px; }
++.bn-configs { display: flex; flex-wrap: wrap; gap: 12px; }
++.bn-config { flex: 1 1 300px; min-width: 0; padding: 16px 20px 20px; background: var(--lx-surface); border: 1px solid var(--lx-border); border-top: 2px solid; border-radius: 10px; }
++.bn-config-title { display: flex; align-items: center; gap: 10px; min-height: 27px; margin-bottom: 14px; font-size: 12px; }
++.bn-letter { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; font: 13px var(--lx-font-mono); background: var(--lx-surface-raised); border-radius: 6px; }
++.bn-field { display: flex; min-width: 0; flex-direction: column; gap: 8px; font-size: 12px; }
++.bn-field > span { color: var(--lx-text-muted); font-size: 11px; }
++.bn-page .lx-select, .bn-page .lx-input { width: 100%; min-width: 0; }
++.bn-pair { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-top: 13px; }
++.bn-add { flex: 0 1 124px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1px dashed var(--lx-border-hover); border-radius: 10px; padding: 18px 10px; font-size: 12px; color: var(--lx-text-muted); transition: background .15s; }
++.bn-add:hover { background: var(--lx-surface); color: var(--lx-text); }
++.bn-add small { font-size: 9px; color: var(--lx-text-dim); }
++.bn-controls { background: var(--lx-surface); border: 1px solid var(--lx-border); border-radius: 10px; padding: 18px 20px 0; }
++.bn-run-row { display: flex; align-items: end; gap: 15px; flex-wrap: wrap; }
++.bn-levels { flex: 1 1 240px; }
++.bn-presets { display: flex; gap: 10px; align-items: center; min-height: 38px; }
++.bn-presets button { font-size: 11px; color: var(--lx-text-muted); border-bottom: 1px dotted var(--lx-border-hover); padding: 3px 0; }
++.bn-run { min-height: 39px; justify-content: center; padding-left: 22px; padding-right: 22px; }
++.bn-plan { display: flex; flex-wrap: wrap; gap: 18px; margin: 13px 0 16px; color: var(--lx-text-dim); font-size: 10px; }
++.bn-settings { border-top: 1px solid var(--lx-border); }
++.bn-settings > summary { display: flex; align-items: center; gap: 8px; padding: 13px 0; font-size: 11px; cursor: pointer; list-style: none; }
++.bn-settings > summary > span { margin-left: auto; color: var(--lx-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%; }
++.bn-settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 6px 0 10px; }
++.bn-input-action { display: flex; gap: 8px; min-width: 0; }
++.bn-input-action input { flex: 1; }
++.bn-settings .bn-footnote { padding: 0 0 15px; }
++.bn-alert { border: 1px solid var(--lx-danger-border); border-radius: 8px; background: var(--lx-danger-subtle); color: var(--lx-danger-text); padding: 13px; font-size: 12px; overflow-wrap: anywhere; }
++.bn-chart { min-width: 0; border: 1px solid var(--lx-border); background: var(--lx-surface); border-radius: 12px; padding: 23px 24px 14px; }
++.bn-chart-head { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
++.bn-chart-head h2 { display: flex; align-items: center; gap: 9px; font-size: 16px; font-weight: 600; }
++.bn-chart-note { color: var(--lx-text-dim); font-size: 10px; }
++.bn-legend { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 22px 0 15px; }
++.bn-legend button { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; color: var(--lx-text-secondary); text-align: left; }
++.bn-legend button > span:last-child { overflow-wrap: anywhere; }
++.bn-legend .is-hidden { opacity: .35; }
++.bn-line-key { width: 19px; height: 3px; flex-shrink: 0; border-radius: 4px; }
++.bn-plot { position: relative; min-width: 0; }
++.bn-grid { stroke: var(--lx-border); stroke-width: 1; stroke-dasharray: 3 5; }
++.bn-grid-vertical { opacity: .45; }
++.bn-tick { fill: var(--lx-text-dim); font: 10px var(--lx-font-mono); }
++.bn-axis-title { fill: var(--lx-text-muted); font-size: 10px; }
++.bn-plot circle { cursor: pointer; outline: none; }
++.bn-plot circle:focus { stroke-width: 4; }
++.bn-chart-empty { position: absolute; inset: 35px 28px 45px 52px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; text-align: center; pointer-events: none; background: color-mix(in srgb, var(--lx-surface) 78%, transparent); color: var(--lx-text-muted); }
++.bn-chart-empty strong { font-size: 14px; font-weight: 500; }
++.bn-chart-empty span { max-width: 280px; font-size: 11px; line-height: 1.8; color: var(--lx-text-dim); }
++.bn-tooltip { position: absolute; right: 20px; top: 12px; display: grid; gap: 7px; max-width: min(320px, 90%); padding: 12px 15px; pointer-events: none; border: 1px solid var(--lx-border-hover); background: var(--lx-surface-raised); box-shadow: 0 5px 20px #0002; border-radius: 8px; font-size: 10px; overflow-wrap: anywhere; }
++.bn-tooltip strong { font: 22px var(--lx-font-mono); }
++.bn-tooltip small { font: 10px var(--lx-font-sans); color: var(--lx-text-muted); }
++.bn-tooltip-series { display: grid; gap: 5px; padding-top: 7px; border-top: 1px solid var(--lx-border); }
++.bn-chart-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--lx-border); margin-top: 14px; padding-top: 12px; font-size: 10px; color: var(--lx-text-dim); }
++.bn-summaries { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
++.bn-summary { min-width: 0; border: 1px solid var(--lx-border); border-radius: 10px; padding: 16px 20px; background: var(--lx-surface); }
++.bn-summary-title { display: flex; gap: 10px; align-items: center; }
++.bn-summary-title > div { min-width: 0; }
++.bn-summary-title strong { font-size: 12px; overflow-wrap: anywhere; }
++.bn-summary-title small { display: block; font-size: 10px; color: var(--lx-text-muted); margin-top: 4px; }
++.bn-summary-metrics { display: flex; justify-content: space-between; gap: 12px; margin-top: 21px; }
++.bn-summary-metrics > div { display: grid; gap: 8px; }
++.bn-summary-metrics span { font-size: 10px; color: var(--lx-text-dim); }
++.bn-summary-metrics strong { font: 23px var(--lx-font-mono); }
++.bn-summary-metrics small { display: inline-block; margin-left: 5px; font: 9px var(--lx-font-sans); color: var(--lx-text-dim); }
++.bn-progress { font-size: 11px; color: var(--lx-text-muted); }
++.bn-progress > div:first-child { display: flex; align-items: center; gap: 9px; }
++.bn-progress > div > span:nth-child(2) { overflow-wrap: anywhere; flex: 1; }
++.bn-progress small { flex-shrink: 0; font: 10px var(--lx-font-mono); }
++.bn-live, .bn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--lx-accent); flex-shrink: 0; }
++.bn-live { box-shadow: 0 0 0 4px var(--lx-accent-subtle); }
++.bn-progress-track { height: 2px; margin-top: 12px; background: var(--lx-border); }
++.bn-progress-track > span { display: block; height: 100%; background: var(--lx-accent); }
++.bn-details { border: 1px solid var(--lx-border); border-radius: 10px; background: var(--lx-surface); min-width: 0; }
++.bn-details > summary { padding: 16px 20px; cursor: pointer; font-size: 12px; }
++.bn-details > summary span { margin-left: 12px; font-size: 10px; color: var(--lx-text-dim); }
++.bn-table-wrap { overflow: auto; }
++.bn-table { width: 100%; font-size: 11px; text-align: left; border-collapse: collapse; }
++.bn-table th { color: var(--lx-text-dim); font-weight: 400; white-space: nowrap; }
++.bn-table th, .bn-table td { padding: 12px 15px; border-top: 1px solid var(--lx-border); }
++.bn-table td { font-variant-numeric: tabular-nums; white-space: nowrap; }
++.bn-row-note { max-width: 340px; margin-top: 5px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; color: var(--lx-text-muted); }
++.bn-footnote { color: var(--lx-text-dim); font-size: 10px; line-height: 1.8; }
++.bn-details > .bn-footnote { padding: 14px 20px; border-top: 1px solid var(--lx-border); }
++@media (max-width: 900px) { .bn-page { padding: 22px 18px; } .bn-config { flex-basis: 240px; } .bn-add { flex-basis: 100%; flex-direction: row; padding: 10px; } .bn-chart-note { display: none; } }
++@media (max-width: 540px) { .bn-page { padding: 18px 12px; gap: 14px; } .bn-page h1 { font-size: 22px; } .bn-page h1 > span { display: none; } .bn-page-head > button { font-size: 10px; padding: 8px; } .bn-config, .bn-controls { padding-left: 14px; padding-right: 14px; } .bn-chart { padding: 18px 12px 12px; } .bn-settings-grid { grid-template-columns: 1fr; } .bn-run-row { gap: 10px; } .bn-run { margin-left: auto; } .bn-summaries { grid-template-columns: 1fr; } .bn-summary { padding: 15px; } .bn-settings > summary > span { max-width: 50%; } .bn-progress small { font-size: 9px; } }
++@media (max-width: 540px) {
++  .bn-page { padding: 6px 0; }
++  body:has(.bn-page) .lx-sidebar { width: 44px; }
++  body:has(.bn-page) .lx-sidebar > div:first-child { padding: 0; justify-content: center; }
++  body:has(.bn-page) .lx-sidebar > div:first-child > div,
++  body:has(.bn-page) .lx-sidebar > div:not(:first-child) { display: none; }
++  body:has(.bn-page) .lx-sidebar nav { padding-left: 4px; padding-right: 4px; }
++  body:has(.bn-page) .lx-sidebar nav > div { height: 8px; margin: 0; padding: 0; }
++  body:has(.bn-page) .lx-sidebar nav > div > span { display: none; }
++  body:has(.bn-page) .lx-sidebar nav button { justify-content: center; gap: 0; padding: 9px; }
++  body:has(.bn-page) .lx-sidebar nav button > span:last-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
++}
+--- before/tagger/web/ui/src/components/benchmark/BenchmarkChart.tsx
++++ tagger/web/ui/src/components/benchmark/BenchmarkChart.tsx
+@@ -0,0 +1,86 @@
++import { useEffect, useRef, useState } from 'react'
++import { Activity, TrendingUp } from 'lucide-react'
++import { resultSeries, SERIES_COLORS, type BenchmarkRow, type BenchmarkState } from '../../lib/benchmark'
++import { ENGINE_LABELS } from '../../lib/nlEngines'
++
++function axis(max: number, count = 5) {
++  const rough = Math.max(max, 1) / count
++  const scale = 10 ** Math.floor(Math.log10(rough))
++  const step = ([1, 2, 5, 10].find(n => n * scale >= rough) ?? 10) * scale
++  return { step, max: Math.ceil(Math.max(max, 1) / step) * step }
++}
++
++export function BenchmarkChart({ state }: { state: BenchmarkState | null }) {
++  const container = useRef<HTMLDivElement>(null)
++  const [width, setWidth] = useState(900)
++  const [hidden, setHidden] = useState<string[]>([])
++  const [hover, setHover] = useState<{ index: number; row: BenchmarkRow } | null>(null)
++  const series = resultSeries(state)
++  const rows = state?.rows ?? []
++  useEffect(() => {
++    const observer = new ResizeObserver(entries => setWidth(entries[0].contentRect.width))
++    if (container.current) observer.observe(container.current)
++    return () => observer.disconnect()
++  }, [])
++  useEffect(() => { setHidden([]); setHover(null) }, [state?.report_path])
++  const height = width < 500 ? 290 : 330
++  const margin = { left: 52, right: 24, top: 34, bottom: 45 }
++  const complete = rows.filter(r => r.status === 'completed' && r.rate_per_s !== undefined && r.actual !== undefined)
++  const maxX = Math.max(2, ...(state?.request?.levels ?? [1, 2, 4, 6, 8]), ...complete.map(r => r.actual!))
++  const yAxis = axis(Math.max(1, ...complete.map(r => r.rate_per_s! * 60)))
++  const xAxis = axis(maxX, width < 500 ? 4 : 8)
++  const x = (value: number) => margin.left + value / xAxis.max * Math.max(1, width - margin.left - margin.right)
++  const y = (value: number) => height - margin.bottom - value / yAxis.max * (height - margin.top - margin.bottom)
++  const hovered = hover ? complete.filter(r => r.actual === hover.row.actual && !hidden.includes(r.series_id ?? 'config-0')) : []
++  const legend = (i: number) => {
++    const s = series[i]
++    return `${s.model} · ${ENGINE_LABELS[s.engine] ?? s.engine} · ${s.precision.toUpperCase()}`
++  }
++  return <section className="bn-chart" aria-label="速度对比">
++    <header className="bn-chart-head"><div><div className="bn-eyebrow">THROUGHPUT / CONCURRENCY</div><h2><TrendingUp size={19} />并发与速度</h2></div>
++      <span className="bn-chart-note">同批图片 · 独立预热 · 依次运行</span>
++    </header>
++    <div className="bn-legend">{series.map((s, i) => <button key={s.id} aria-pressed={!hidden.includes(s.id)} aria-label={`显示曲线 ${String.fromCharCode(65 + i)}`} className={hidden.includes(s.id) ? 'is-hidden' : ''}
++      onClick={() => { setHidden(v => v.includes(s.id) ? v.filter(id => id !== s.id) : [...v, s.id]); setHover(null) }}>
++      <span className="bn-line-key" style={{ background: SERIES_COLORS[i] }} /><span>{legend(i)}</span>
++    </button>)}</div>
++    <div ref={container} className="bn-plot">
++      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} role="group" aria-label="并发速度折线图">
++        <text x={margin.left} y={16} className="bn-axis-title">速度 · 张/分钟</text>
++        {Array.from({ length: Math.round(yAxis.max / yAxis.step) + 1 }, (_, i) => i * yAxis.step).map(tick => <g key={tick}>
++          <line x1={margin.left} x2={width - margin.right} y1={y(tick)} y2={y(tick)} className="bn-grid" />
++          <text x={margin.left - 12} y={y(tick) + 4} textAnchor="end" className="bn-tick">{Number(tick.toFixed(2))}</text>
++        </g>)}
++        {Array.from({ length: Math.round(xAxis.max / xAxis.step) + 1 }, (_, i) => i * xAxis.step).filter(Number.isInteger).map(tick => <g key={tick}>
++          <line x1={x(tick)} x2={x(tick)} y1={margin.top} y2={height - margin.bottom} className="bn-grid bn-grid-vertical" />
++          <text x={x(tick)} y={height - margin.bottom + 21} textAnchor="middle" className="bn-tick">{tick}</text>
++        </g>)}
++        <text x={width - margin.right} y={height - 3} textAnchor="end" className="bn-axis-title">实际并发数</text>
++        {series.map((s, i) => {
++          if (hidden.includes(s.id)) return null
++          const points = rows.filter(r => (r.series_id ?? 'config-0') === s.id)
++          const segments: BenchmarkRow[][] = []
++          let segment: BenchmarkRow[] = []
++          for (const row of points) {
++            if (row.status === 'completed' && row.actual !== undefined && row.rate_per_s !== undefined) segment.push(row)
++            else if (row.status !== 'skipped') { if (segment.length) segments.push(segment); segment = [] }
++          }
++          if (segment.length) segments.push(segment)
++          return <g key={s.id} style={{ color: SERIES_COLORS[i] }}>
++            {segments.map((points, n) => <polyline key={n} points={[...points].sort((a, b) => a.actual! - b.actual!).map(r => `${x(r.actual!)},${y(r.rate_per_s! * 60)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />)}
++            {segments.flat().map(r => <circle key={r.requested} cx={x(r.actual!)} cy={y(r.rate_per_s! * 60)} r={hover?.row === r ? 6 : 4.5} fill="var(--lx-surface)" stroke="currentColor" strokeWidth={2.5}
++              tabIndex={0} role="button" aria-label={`${legend(i)}，实际并发 ${r.actual}，${(r.rate_per_s! * 60).toFixed(1)} 张/分钟`}
++              onMouseEnter={() => setHover({ index: i, row: r })} onMouseLeave={() => setHover(null)} onFocus={() => setHover({ index: i, row: r })} onBlur={() => setHover(null)}
++              onClick={() => setHover({ index: i, row: r })} />)}
++          </g>
++        })}
++      </svg>
++      {!complete.length && <div className="bn-chart-empty"><Activity size={24} /><strong>{state?.running ? '正在准备第一组结果' : '让性能曲线给出答案'}</strong><span>选择配置后开始测试，每完成一档便生成一个实测点。</span></div>}
++      {hover && hovered.length > 0 && <div className="bn-tooltip" role="status"><span>实际并发 {hover.row.actual}</span>{hovered.map(row => {
++        const i = Math.max(0, series.findIndex(s => s.id === (row.series_id ?? 'config-0')))
++        return <div className="bn-tooltip-series" key={row.series_id ?? 'config-0'}><span style={{ color: SERIES_COLORS[i] }}>{legend(i)}</span><strong>{(row.rate_per_s! * 60).toFixed(1)} <small>张/分钟</small></strong><span>请求 {row.requested}{row.peak_vram_mb !== undefined ? ` · 显存 ${(row.peak_vram_mb / 1024).toFixed(2)} GB` : ''}</span></div>
++      })}</div>}
++    </div>
++    <footer className="bn-chart-footer">{state?.sample_count ? `${state.sample_count} 张固定样本` : '固定样本集'}<span>悬停查看数据 · 点击图例切换曲线 · 失败点不连线</span></footer>
++  </section>
++}
+--- before/tagger/web/ui/src/components/benchmark/BenchmarkConfigs.tsx
++++ tagger/web/ui/src/components/benchmark/BenchmarkConfigs.tsx
+@@ -0,0 +1,34 @@
++import { Plus, X } from 'lucide-react'
++import { nextConfig, readyConfig, SERIES_COLORS, type BenchmarkConfig, type BenchmarkOptions } from '../../lib/benchmark'
++import { ENGINE_LABELS } from '../../lib/nlEngines'
++
++export function BenchmarkConfigs({ options, values, locked, onChange }: {
++  options: BenchmarkOptions | null; values: BenchmarkConfig[]; locked: boolean; onChange: (v: BenchmarkConfig[]) => void
++}) {
++  const change = (index: number, patch: Partial<BenchmarkConfig>) => onChange(values.map((v, i) => i === index ? readyConfig(options, { ...v, ...patch }) : v))
++  return <div className="bn-configs">
++    {values.map((value, i) => {
++      const model = options?.models.find(m => m.key === value.model)
++      const variant = model?.variants.find(v => v.engine === value.engine)
++      const letter = String.fromCharCode(65 + i)
++      return <section key={i} className="bn-config" style={{ borderTopColor: SERIES_COLORS[i] }} aria-label={`配置 ${letter}`}>
++        <div className="bn-config-title"><span className="bn-letter" style={{ color: SERIES_COLORS[i] }}>{letter}</span><strong>对比配置</strong>
++          {values.length > 1 && <button className="lx-btn-ghost-icon ml-auto" aria-label={`移除配置 ${letter}`} disabled={locked} onClick={() => onChange(values.filter((_, n) => n !== i))}><X size={14} /></button>}
++        </div>
++        <label className="bn-field"><span>本地模型</span><select className="lx-select" aria-label={`模型 ${letter}`} disabled={locked} value={value.model} onChange={e => change(i, { model: e.target.value })}>
++          {!options?.models.length && <option value="">暂无可测试模型</option>}
++          {options?.models.map(m => <option key={m.key} value={m.key}>{m.title}</option>)}
++        </select></label>
++        <div className="bn-pair">
++          <label className="bn-field"><span>推理引擎</span><select className="lx-select" aria-label={`引擎 ${letter}`} disabled={locked} value={value.engine} onChange={e => change(i, { engine: e.target.value })}>
++            {model?.variants.map(v => <option key={v.engine} value={v.engine}>{ENGINE_LABELS[v.engine] ?? v.engine}</option>)}
++          </select></label>
++          <label className="bn-field"><span>已有精度</span><select className="lx-select" aria-label={`精度 ${letter}`} disabled={locked} value={value.precision} onChange={e => change(i, { precision: e.target.value })}>
++            {variant?.precisions.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
++          </select></label>
++        </div>
++      </section>
++    })}
++    {values.length < 4 && <button className="bn-add" disabled={locked || !options?.models.length} onClick={() => onChange([...values, nextConfig(options, values)])}><Plus size={19} /><span>添加对比</span><small>模型 / 引擎 / 精度</small></button>}
++  </div>
++}
+--- before/tagger/web/ui/src/components/benchmark/BenchmarkResults.tsx
++++ tagger/web/ui/src/components/benchmark/BenchmarkResults.tsx
+@@ -1,5 +1,7 @@
+-import type { BenchmarkState } from '../../lib/benchmark'
+-import { SectionPanel, StatusChip } from '../ui/launcher'
++import { resultSeries, SERIES_COLORS, type BenchmarkState } from '../../lib/benchmark'
++import { ENGINE_LABELS } from '../../lib/nlEngines'
++import { StatusChip } from '../ui/launcher'
++import { BenchmarkChart } from './BenchmarkChart'
+ 
+ const status: Record<string, string> = {
+   preparing: '准备模型', warming: '预热', measuring: '测速', completed: '完成',
+@@ -9,36 +11,27 @@
+ 
+ export function BenchmarkResults({ state }: { state: BenchmarkState | null }) {
+   const rows = state?.rows ?? []
+-  const peak = Math.max(0, ...rows.map(r => r.rate_per_s ?? 0))
+-  return <SectionPanel title="测试结果" description="速度为预热后每分钟完成图片数；显存为测试期间采样到的整张显卡占用峰值。">
+-    {state?.request && <p className="mb-3 break-words text-xs text-lx-muted">
+-      {state.request.model} · {state.request.engine} · {state.request.precision.toUpperCase()} · {state.sample_count ?? '—'} 张固定样本
+-    </p>}
+-    {state?.recommended !== undefined && <p className="mb-3 text-sm text-lx-success">
+-      建议并发 {state.recommended}：达到本轮最高速度 90% 的最小成功档位。
+-    </p>}
+-    {!rows.length ? <p className="py-6 text-sm text-lx-muted">选择模型与样本后开始测试，结果会逐档显示。</p> : <div className="space-y-3">
+-      {rows.map(row => <article key={row.requested} className="rounded-lx border border-lx p-3">
+-        <div className="flex flex-wrap items-center justify-between gap-2">
+-          <div className="flex flex-wrap items-center gap-2 text-sm">
+-            <strong>并发 {row.requested}</strong>
+-            {row.actual !== undefined && <span className="text-xs text-lx-muted">实际 {row.actual}</span>}
+-            <StatusChip tone={row.status === 'completed' ? 'success' : row.status === 'failed' ? 'danger' : 'neutral'}>{status[row.status] ?? row.status}</StatusChip>
+-          </div>
+-          <strong className="font-mono text-lx-accent">{row.rate_per_s === undefined ? '—' : `${(row.rate_per_s * 60).toFixed(1)} 张/分钟`}</strong>
+-        </div>
+-        {row.rate_per_s !== undefined && <div className="my-3 h-2 overflow-hidden rounded-full bg-lx-panel" role="meter" aria-label={`并发 ${row.requested} 速度`} aria-valuemin={0} aria-valuemax={peak * 60} aria-valuenow={row.rate_per_s * 60}>
+-          <div className="h-full rounded-full bg-lx-accent" style={{ width: `${peak ? row.rate_per_s / peak * 100 : 0}%` }} />
+-        </div>}
+-        <p className="mt-2 text-xs leading-6 text-lx-muted">
+-          测速 {seconds(row.elapsed_s)} · 准备 {seconds(row.prepare_s)} · 预热 {seconds(row.warmup_s)}
+-          {' · '}显存 {row.peak_vram_mb === undefined ? '—' : `${(row.peak_vram_mb / 1024).toFixed(2)} GB`}
+-          {' · '}成功 {row.successful} / 失败 {row.failed}
+-        </p>
+-        {row.warning && <p className="mt-1 text-xs text-lx-warning">{row.warning}</p>}
+-        {row.error && <p className="mt-1 whitespace-pre-wrap break-all text-xs text-lx-danger">{row.error}</p>}
+-      </article>)}
+-    </div>}
+-    {state?.report_path && <p className="mt-4 break-all text-xs text-lx-dim">报告：{state.report_path}</p>}
+-  </SectionPanel>
++  const series = resultSeries(state)
++  return <>
++    <BenchmarkChart state={state} />
++    {series.length > 0 && <div className="bn-summaries">{series.map((s, i) => {
++      const done = rows.filter(r => (r.series_id ?? 'config-0') === s.id && r.status === 'completed')
++      const peak = Math.max(0, ...done.map(r => r.rate_per_s ?? 0))
++      return <section key={s.id} className="bn-summary">
++        <div className="bn-summary-title"><span className="bn-letter" style={{ color: SERIES_COLORS[i] }}>{String.fromCharCode(65 + i)}</span><div><strong>{s.model}</strong><small>{ENGINE_LABELS[s.engine] ?? s.engine} · {s.precision.toUpperCase()}</small></div></div>
++        <div className="bn-summary-metrics"><div><span>最高速度</span><strong style={{ color: SERIES_COLORS[i] }}>{done.length ? (peak * 60).toFixed(1) : '—'}<small>张/分钟</small></strong></div><div><span>建议并发</span><strong>{s.recommended ?? '—'}</strong></div><div><span>成功档位</span><strong>{done.length}<small>/ {state?.request?.levels.length ?? 0}</small></strong></div></div>
++      </section>
++    })}</div>}
++    {rows.length > 0 && <details className="bn-details"><summary>测试明细<span>{rows.length} 条记录</span></summary>
++      <div className="bn-table-wrap"><table className="bn-table"><thead><tr><th>配置</th><th>请求 / 实际</th><th>速度 · 张/分钟</th><th>采样峰值显存</th><th>测速 / 预热 / 准备</th><th>成功 / 失败</th><th>状态与说明</th></tr></thead><tbody>
++        {rows.map(row => { const i = Math.max(0, series.findIndex(s => s.id === (row.series_id ?? 'config-0'))); return <tr key={`${row.series_id}-${row.requested}`}>
++          <td><span style={{ color: SERIES_COLORS[i] }}>{String.fromCharCode(65 + i)}</span></td><td>{row.requested} / {row.actual ?? '—'}</td><td>{row.rate_per_s === undefined ? '—' : (row.rate_per_s * 60).toFixed(1)}</td>
++          <td>{row.peak_vram_mb === undefined ? '—' : `${(row.peak_vram_mb / 1024).toFixed(2)} GB`}</td><td>{seconds(row.elapsed_s)} / {seconds(row.warmup_s)} / {seconds(row.prepare_s)}</td><td>{row.successful} / {row.failed}</td>
++          <td><StatusChip tone={row.status === 'completed' ? 'success' : row.status === 'failed' ? 'danger' : 'neutral'}>{status[row.status] ?? row.status}</StatusChip>{(row.error || row.warning) && <p className="bn-row-note">{row.error || row.warning}</p>}</td>
++        </tr> })}
++      </tbody></table></div>
++      <p className="bn-footnote">建议为各配置达到自身最高速度 90% 的最小成功并发。显存为采样到的整张显卡占用峰值；不同模型或精度的速度对比不代表输出质量相同。</p>
++    </details>}
++    {state?.report_path && <p className="bn-footnote break-all">报告：{state.report_path}</p>}
++  </>
+ }
+--- before/tagger/web/ui/src/pages/Benchmark.tsx
++++ tagger/web/ui/src/pages/Benchmark.tsx
+@@ -1,17 +1,16 @@
+ import { useEffect, useRef, useState } from 'react'
+-import { FolderOpen, Gauge, Play, RefreshCw, Square } from 'lucide-react'
+-import { benchmark, parseLevels, type BenchmarkOptions, type BenchmarkState } from '../lib/benchmark'
+-import { ENGINE_LABELS } from '../lib/nlEngines'
++import { FolderOpen, Gauge, Play, RefreshCw, SlidersHorizontal, Square } from 'lucide-react'
++import { benchmark, configurations, nextConfig, readyConfig, type BenchmarkConfig, type BenchmarkOptions, type BenchmarkState } from '../lib/benchmark'
++import { parseLevels } from '../lib/benchmark'
+ import { useFolderPicker } from '../components/FolderPicker'
+-import { PageHeader, SectionPanel, SettingRow, StatusChip } from '../components/ui/launcher'
++import { BenchmarkConfigs } from '../components/benchmark/BenchmarkConfigs'
+ import { BenchmarkResults } from '../components/benchmark/BenchmarkResults'
++import '../components/benchmark/benchmark.css'
+ 
+ export function Benchmark() {
+   const [options, setOptions] = useState<BenchmarkOptions | null>(null)
+   const [state, setState] = useState<BenchmarkState | null>(null)
+-  const [model, setModel] = useState('')
+-  const [engine, setEngine] = useState('')
+-  const [precision, setPrecision] = useState('')
++  const [configs, setConfigs] = useState<BenchmarkConfig[]>([])
+   const [device, setDevice] = useState('auto')
+   const [source, setSource] = useState('')
+   const [output, setOutput] = useState('')
+@@ -20,12 +19,12 @@
+   const [error, setError] = useState('')
+   const [pollError, setPollError] = useState('')
+   const [busy, setBusy] = useState(false)
++  const [loaded, setLoaded] = useState(false)
++  const [settingsOpen, setSettingsOpen] = useState(false)
+   const seeded = useRef(false)
+   const folder = useFolderPicker()
+-  const selected = options?.models.find(item => item.key === model)
+-  const variants = selected?.variants ?? []
+-  const precisions = variants.find(v => v.engine === engine)?.precisions ?? []
+-  const locked = busy || Boolean(state?.running)
++  const locked = busy || !loaded || Boolean(state?.running)
++  const usesVllm = configs.some(c => c.engine === 'vllm')
+   const refresh = async () => {
+     setBusy(true)
+     try { setOptions(await benchmark.options()); setError('') }
+@@ -33,6 +32,7 @@
+     finally { setBusy(false) }
+   }
+   useEffect(() => { void refresh() }, [])
++  useEffect(() => { if (options && !options.recent_source) setSettingsOpen(true) }, [options])
+   useEffect(() => {
+     let alive = true
+     let timer = 0
+@@ -40,11 +40,11 @@
+       try {
+         const next = await benchmark.status()
+         if (!alive) return
+-        setState(next); setPollError('')
++        setState(next); setPollError(''); setLoaded(true)
+         if (!seeded.current) {
+           seeded.current = true
+           if (next.request) {
+-            setModel(next.request.model); setEngine(next.request.engine); setPrecision(next.request.precision)
++            setConfigs(configurations(next.request))
+             setDevice(next.request.device); setSource(next.request.source); setLevels(next.request.levels.join(', ')); setCount(next.request.sample_count)
+             setOutput(next.request.output_dir ?? '')
+           }
+@@ -56,94 +56,57 @@
+     return () => { alive = false; window.clearTimeout(timer) }
+   }, [])
+   useEffect(() => {
+-    if (options && !options.models.some(item => item.key === model)) setModel(options.models[0]?.key ?? '')
+-  }, [options, model])
+-  useEffect(() => {
+-    if (selected && !variants.some(v => v.engine === engine)) setEngine(variants[0]?.engine ?? '')
+-  }, [selected, engine])
+-  useEffect(() => {
+-    if (selected && !precisions.includes(precision)) setPrecision(precisions[0] ?? '')
+-  }, [selected, engine, precision])
+-  useEffect(() => { if (engine === 'vllm' && device === 'cpu') setDevice('auto') }, [engine, device])
++    if (!options || !loaded || state?.running) return
++    setConfigs(current => {
++      if (current.length) return current.map(c => readyConfig(options, c))
++      const first = readyConfig(options)
++      const second = nextConfig(options, [first])
++      return first.model && JSON.stringify(first) !== JSON.stringify(second) ? [first, second] : [first]
++    })
++  }, [options, loaded, state?.running])
++  useEffect(() => { if (usesVllm && device === 'cpu') setDevice('auto') }, [usesVllm, device])
+   const act = async (stop = false) => {
+     setBusy(true); setError('')
+     try {
+       if (!stop && (!Number.isInteger(count) || count < 4 || count > 1024)) throw new Error('样本数量请选择 4～1024')
+-      setState(stop ? await benchmark.stop() : await benchmark.start({ model, engine, precision, device, source, output_dir: output, levels: parseLevels(levels), sample_count: count }))
++      setState(stop ? await benchmark.stop() : await benchmark.start({ configurations: configs, device, source, output_dir: output, levels: parseLevels(levels), sample_count: count }))
+     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+     finally { setBusy(false) }
+   }
+   let requested: number[] = []
+   let levelError = ''
+   try { requested = parseLevels(levels) } catch (e) { levelError = (e as Error).message }
+-  return <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
+-    <PageHeader title="并发测试" description="选好本地模型，自动比较各档并发速度。" icon={<Gauge size={20} />}
+-      actions={<button className="lx-btn-ghost" disabled={locked} onClick={refresh}><RefreshCw size={14} />刷新模型</button>} />
+-    {(error || pollError || state?.error) && <div role="alert" className="break-words rounded-lx border border-lx p-3 text-sm text-lx-danger">{error || pollError || state?.error}</div>}
+-    <SectionPanel title="测试配置" description="只显示已下载的权重与已有精度；每档自动准备、预热，再用相同样本测速。">
+-      <SettingRow label="模型">
+-        <select className="lx-select" aria-label="测试模型" disabled={locked} value={model} onChange={e => setModel(e.target.value)}>
+-          {!options?.models.length && <option value="">暂无可测试模型</option>}
+-          {options?.models.map(item => <option key={item.key} value={item.key}>{item.title}</option>)}
+-        </select>
+-      </SettingRow>
+-      {!options?.models.length && options && <p className="mb-3 text-xs text-lx-warning">请在模型管理准备权重，并在依赖检测中检查推理引擎。</p>}
+-      <SettingRow label="推理引擎">
+-        <select className="lx-select" aria-label="测试引擎" disabled={locked} value={engine} onChange={e => setEngine(e.target.value)}>
+-          {variants.map(v => <option key={v.engine} value={v.engine}>{ENGINE_LABELS[v.engine] ?? v.engine}</option>)}
+-        </select>
+-      </SettingRow>
+-      <SettingRow label="已有精度">
+-        <select className="lx-select" aria-label="测试精度" disabled={locked} value={precision} onChange={e => setPrecision(e.target.value)}>
+-          {precisions.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
+-        </select>
+-      </SettingRow>
+-      <SettingRow label="测试设备">
+-        <select className="lx-select" aria-label="测试设备" disabled={locked} value={device} onChange={e => setDevice(e.target.value)}>
+-          <option value="auto">自动</option>
+-          {engine !== 'vllm' && <option value="cpu">CPU</option>}
+-          {options?.devices.map(d => <option key={d.value} value={d.value}>{d.value} · {d.name} · {d.vram_gb} GB</option>)}
+-        </select>
+-      </SettingRow>
+-      <SettingRow label="测试档位" help="用逗号或空格分隔，重复值自动合并，按从小到大测试。" notice={levelError}>
+-        <div className="space-y-2">
+-          <input className="lx-input font-mono" aria-label="测试档位" disabled={locked} value={levels} onChange={e => setLevels(e.target.value)} />
+-          <div className="flex flex-wrap gap-2">
+-            <button className="lx-btn-ghost text-xs" disabled={locked} onClick={() => setLevels('1, 2, 4, 6, 8')}>默认档位</button>
+-            <button className="lx-btn-ghost text-xs" disabled={locked} onClick={() => setLevels('1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24')}>扩展到 24</button>
+-          </div>
++  const duplicates = new Set(configs.map(c => JSON.stringify(c))).size !== configs.length
++  const invalid = !configs.length || configs.some(c => !c.model || !c.precision) || duplicates || Boolean(levelError) || (!source && !options?.recent_source)
++  const done = state?.rows.filter(r => ['completed', 'failed', 'skipped', 'canceled'].includes(r.status)).length ?? 0
++  const total = state?.request ? configurations(state.request).length * state.request.levels.length : 0
++  return <div className="bn-page">
++    <header className="bn-page-head"><div><div className="bn-eyebrow">LULYNX / BENCHMARK</div><h1><Gauge size={25} />并发测试<span>模型与引擎对比</span></h1><p>同一批图片，让每种配置的速度一目了然。</p></div>
++      <button className="lx-btn-ghost" disabled={locked} onClick={refresh}><RefreshCw size={14} />刷新模型</button>
++    </header>
++    {(error || pollError || state?.error) && <div role="alert" className="bn-alert">{error || pollError || state?.error}</div>}
++    <BenchmarkConfigs options={options} values={configs} locked={locked} onChange={setConfigs} />
++    {(!options?.models.length && options) && <p className="text-sm text-lx-warning">请在模型管理准备权重，并在依赖检测中检查推理引擎。</p>}
++    {duplicates && <p role="alert" className="text-sm text-lx-warning">对比配置重复，请选择不同模型、引擎或精度。</p>}
++    <section className="bn-controls">
++      <div className="bn-run-row"><label className="bn-field bn-levels"><span>并发档位</span><input className="lx-input font-mono" aria-label="测试档位" disabled={locked} value={levels} onChange={e => setLevels(e.target.value)} /></label>
++        <div className="bn-presets"><button disabled={locked} onClick={() => setLevels('1, 2, 4, 6, 8')}>默认档位</button><button disabled={locked} onClick={() => setLevels('1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24')}>扩展到 24</button></div>
++        {state?.running ? <button className="lx-btn-ghost bn-run" disabled={busy} onClick={() => act(true)}><Square size={15} />停止测试</button>
++          : <button className="lx-btn-primary bn-run" disabled={locked || invalid} onClick={() => act()}><Play size={15} />{configs.length > 1 ? '开始对比' : '开始测试'}</button>}
++      </div>
++      {levelError && <p className="bn-footnote text-lx-warning">{levelError}</p>}
++      <div className="bn-plan"><span>{configs.length} 组配置 × {requested.length} 档并发</span><span>每组共用 {Math.max(count || 0, ...requested)} 张样本</span><span>自动切换引擎</span></div>
++      <details className="bn-settings" open={settingsOpen} onToggle={e => setSettingsOpen(e.currentTarget.open)}><summary><SlidersHorizontal size={14} />样本与测试设置<span>{source || options?.recent_source || '请选择样本目录'}</span></summary>
++        <div className="bn-settings-grid">
++          <label className="bn-field"><span>样本目录或分片</span><div className="bn-input-action"><input className="lx-input" aria-label="样本路径" placeholder="留空使用最近下载分片" value={source} disabled={locked} onChange={e => setSource(e.target.value)} /><button className="lx-btn-ghost" disabled={locked} aria-label="浏览样本" onClick={() => folder.pick(source, setSource, ['parquet'])}><FolderOpen size={15} /></button></div></label>
++          <label className="bn-field"><span>测试结果目录</span><div className="bn-input-action"><input className="lx-input" aria-label="测试结果目录" placeholder="默认测试目录" value={output} disabled={locked} onChange={e => setOutput(e.target.value)} /><button className="lx-btn-ghost" disabled={locked} aria-label="浏览结果目录" onClick={() => folder.pick(output, setOutput)}><FolderOpen size={15} /></button></div></label>
++          <label className="bn-field"><span>测试设备</span><select className="lx-select" aria-label="测试设备" disabled={locked} value={device} onChange={e => setDevice(e.target.value)}><option value="auto">自动</option>{!usesVllm && <option value="cpu">CPU</option>}{options?.devices.map(d => <option key={d.value} value={d.value}>{d.value} · {d.name} · {d.vram_gb} GB</option>)}</select></label>
++          <label className="bn-field"><span>样本数量</span><input type="number" className="lx-input" aria-label="样本数量" min={4} max={1024} value={count} disabled={locked} onChange={e => setCount(Number(e.target.value))} /></label>
+         </div>
+-      </SettingRow>
+-      <SettingRow label="样本目录或分片" help="留空使用最近已下载分片；支持图片目录、TAR、ZIP 和 Parquet。">
+-        <div className="space-y-2">
+-          <div className="flex min-w-0 gap-2">
+-            <input className="lx-input min-w-0 flex-1" aria-label="样本路径" placeholder="最近已下载分片" value={source} disabled={locked} onChange={e => setSource(e.target.value)} />
+-            <button className="lx-btn-ghost shrink-0" disabled={locked} aria-label="浏览样本" onClick={() => folder.pick(source, setSource, ['parquet'])}><FolderOpen size={15} /></button>
+-          </div>
+-          {!source && <p className="break-all text-xs text-lx-dim">{options?.recent_source || '尚无可用的最近分片，请选择样本目录。'}</p>}
+-        </div>
+-      </SettingRow>
+-      <SettingRow label="样本数量" help="同一批图片用于每档预热与测速；若少于最大并发，自动提高采样数量。">
+-        <input type="number" className="lx-input" aria-label="样本数量" min={4} max={1024} value={count} disabled={locked} onChange={e => setCount(Number(e.target.value))} />
+-      </SettingRow>
+-      <SettingRow label="测试结果目录" help="留空使用应用的测试目录；样本副本、输出与报告保存在此。">
+-        <div className="flex min-w-0 gap-2">
+-          <input className="lx-input min-w-0 flex-1" aria-label="测试结果目录" placeholder="默认测试目录" value={output} disabled={locked} onChange={e => setOutput(e.target.value)} />
+-          <button className="lx-btn-ghost shrink-0" disabled={locked} aria-label="浏览结果目录" onClick={() => folder.pick(output, setOutput)}><FolderOpen size={15} /></button>
+-        </div>
+-      </SettingRow>
+-      <div className="mt-4 flex flex-wrap items-center gap-3">
+-        {state?.running
+-          ? <button className="lx-btn-ghost" disabled={busy} onClick={() => act(true)}><Square size={14} />停止测试</button>
+-          : <button className="lx-btn-primary" disabled={locked || !model || !precision || Boolean(levelError) || (!source && !options?.recent_source)} onClick={() => act()}><Play size={14} />开始测试</button>}
+-        <span className="text-xs text-lx-muted">{requested.length} 个档位 · 计划 {Math.max(count || 0, ...requested)} 张样本</span>
+-      </div>
+-      <p className="mt-3 text-xs text-lx-dim">测试输出单独保存，保留现有打标配置。请先结束打标并退出托管，停止已启动的模型服务。</p>
+-    </SectionPanel>
+-    {state?.message && <div className="flex flex-wrap items-center gap-3 text-sm">
+-      <StatusChip tone={state.running ? 'accent' : 'neutral'}>{state.message}</StatusChip>
+-      {state.running && state.progress?.done !== undefined && <span className="text-lx-muted">{state.progress.done} / {state.sample_count ?? state.progress.total} 张</span>}
+-    </div>}
++        <p className="bn-footnote">支持图片目录、TAR、ZIP 和 Parquet。采样数至少覆盖最高并发；所有配置复用相同图片。测试前请结束打标、退出托管并停止已有模型服务。</p>
++      </details>
++    </section>
++    {state?.message && <div className="bn-progress"><div><span className={state.running ? 'bn-live' : 'bn-dot'} /><span>{state.message}</span><small>{done} / {total} 档{state.running && state.progress?.done !== undefined ? ` · ${state.progress.done} / ${state.sample_count} 张` : ''}</small></div>{state.running && <div className="bn-progress-track"><span style={{ width: `${total ? done / total * 100 : 0}%` }} /></div>}</div>}
+     <BenchmarkResults state={state} />
+     {folder.dialog}
+   </div>
+--- before/tagger/web/ui/src/lib/benchmark.ts
++++ tagger/web/ui/src/lib/benchmark.ts
+@@ -1,7 +1,8 @@
+ import { json } from './api'
+ 
++export type BenchmarkConfig = { model: string; engine: string; precision: string }
+ export type BenchmarkRequest = {
+-  model: string; engine: string; precision: string; device: string;
++  configurations: BenchmarkConfig[]; device: string;
+   source: string; output_dir: string; levels: number[]; sample_count: number
+ }
+ export type BenchmarkOptions = {
+@@ -10,7 +11,7 @@
+   recent_source: string
+ }
+ export type BenchmarkRow = {
+-  requested: number; actual?: number; status: string; successful: number; failed: number
++  series_id?: string; requested: number; actual?: number; status: string; successful: number; failed: number
+   rate_per_s?: number; peak_vram_mb?: number; elapsed_s?: number; prepare_s?: number; warmup_s?: number
+   warning?: string; error?: string; log_path?: string
+ }
+@@ -18,6 +19,34 @@
+   running: boolean; status: string; phase?: string; message: string; error?: string
+   request?: BenchmarkRequest; sample_count?: number; recommended?: number; current?: number
+   rows: BenchmarkRow[]; report_path?: string; progress?: { done?: number; total?: number }
++  series?: BenchmarkSeries[]
++}
++export type BenchmarkSeries = BenchmarkConfig & { id: string; recommended?: number; peak_rate_per_s?: number }
++export const SERIES_COLORS = ['var(--lx-accent)', '#36a9a1', '#9c87df', '#d9a342']
++
++export function configurations(request?: BenchmarkRequest): BenchmarkConfig[] {
++  if (!request) return []
++  if (request.configurations) return request.configurations
++  const old = request as BenchmarkRequest & BenchmarkConfig
++  return old.model ? [{ model: old.model, engine: old.engine, precision: old.precision }] : []
++}
++
++export function resultSeries(state: BenchmarkState | null): BenchmarkSeries[] {
++  return state?.series ?? configurations(state?.request).map((c, i) => ({ ...c, id: `config-${i}`, recommended: state?.recommended }))
++}
++
++export function readyConfig(options: BenchmarkOptions | null, value?: Partial<BenchmarkConfig>): BenchmarkConfig {
++  const model = options?.models.find(m => m.key === value?.model) ?? options?.models[0]
++  const variant = model?.variants.find(v => v.engine === value?.engine) ?? model?.variants[0]
++  return { model: model?.key ?? '', engine: variant?.engine ?? '',
++    precision: variant?.precisions.includes(value?.precision ?? '') ? value!.precision! : variant?.precisions[0] ?? '' }
++}
++
++export function nextConfig(options: BenchmarkOptions | null, selected: BenchmarkConfig[]): BenchmarkConfig {
++  const all = options?.models.flatMap(m => m.variants.flatMap(v => v.precisions.map(p => ({ model: m.key, engine: v.engine, precision: p })))) ?? []
++  const available = all.filter(c => !selected.some(s => s.model === c.model && s.engine === c.engine && s.precision === c.precision))
++  return available.find(c => c.model === selected[0]?.model && c.engine !== selected[0]?.engine && c.precision === selected[0]?.precision)
++    ?? available.find(c => c.model !== selected[0]?.model) ?? available[0] ?? readyConfig(options)
+ }
+ 
+ async function request<T>(path = '', body?: unknown): Promise<T> {

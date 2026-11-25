@@ -1,0 +1,120 @@
+--- previous/tagger/runtime/python_dev.py
++++ release/tagger/runtime/python_dev.py
+@@ -0,0 +1,56 @@
++"""补齐便携 Python 的编译头文件与导入库，使用随包的官方文件。"""
++from __future__ import annotations
++
++import hashlib
++import os
++import struct
++import sys
++import zipfile
++from pathlib import Path
++
++from ..storage.atomic import write_bytes
++
++ROOT = Path(__file__).resolve().parents[2]
++BUNDLES = {(3, 12): ('python-3.12.9-dev-amd64.zip', '44012b94a23186c7637f5fb4267195e95baff9d640f0fd93a9ba92bc08b32d3b')}
++
++
++def missing(prefix=None):
++    base = Path(prefix or sys.base_prefix)
++    if os.name != 'nt':
++        return []
++    library = f'python{sys.version_info.major}{sys.version_info.minor}.lib'
++    return [str(base / name) for name in ('Include/Python.h', 'Include/pyconfig.h', 'libs/' + library)
++            if not (base / name).is_file()]
++
++
++def ensure(prefix=None):
++    """已完整的安装不改动；缺失时只补文件，不覆盖解释器或依赖。"""
++    base = Path(prefix or sys.base_prefix).resolve()
++    needed = missing(base)
++    if not needed:
++        return []
++    bundle = BUNDLES.get(tuple(sys.version_info[:2]))
++    if not bundle or struct.calcsize('P') != 8:
++        raise RuntimeError('native 缺少 Python 开发文件：' + ', '.join(needed) + '。请安装与此 Python 版本和架构一致的 Include 与 libs。')
++    archive = ROOT / 'env' / 'initialization' / bundle[0]
++    if not archive.is_file():
++        raise RuntimeError('native 缺少 Python.h 或 Python 开发库。请完整解压新版程序（保留 env/initialization），再启动或重跑 install.bat。')
++    if hashlib.sha256(archive.read_bytes()).hexdigest() != bundle[1]:
++        raise RuntimeError('Python 开发文件包不完整，请重新解压新版 env/initialization/' + bundle[0])
++    installed = []
++    with zipfile.ZipFile(archive) as source:
++        for member in source.infolist():
++            if member.is_dir():
++                continue
++            target = (base / member.filename).resolve()
++            if target.parts[:len(base.parts)] != base.parts or member.filename.split('/')[0] not in ('Include', 'libs'):
++                raise RuntimeError('Python 开发文件包路径不正确')
++            if target.exists():
++                continue
++            target.parent.mkdir(parents=True, exist_ok=True)
++            write_bytes(target, source.read(member))
++            installed.append(member.filename)
++    remaining = missing(base)
++    if remaining:
++        raise RuntimeError('Python 开发文件补齐失败：' + ', '.join(remaining))
++    return installed
+--- previous/tagger/inference/qwen3vl/runtime.py
++++ release/tagger/inference/qwen3vl/runtime.py
+@@ -16,6 +16,9 @@
+ 
+ 
+ def check_environment():
++    from ...runtime.python_dev import ensure as ensure_python_dev
++    if importlib.util.find_spec('triton') is not None:
++        ensure_python_dev()
+     missing = [name for name in ("torch", "torchvision", "transformers", "safetensors", "gguf", "fastapi", "uvicorn")
+                if importlib.util.find_spec(name) is None]
+     if missing:
+--- previous/tagger/web/deps.py
++++ release/tagger/web/deps.py
+@@ -1063,6 +1063,14 @@
+         # import 就炸的壳，还会把钉死的 torch 换掉。要跑请去 WSL2 那边单独装。
+         todo = [it for it in items
+                 if it.supported and describe(it)["status"] == "missing"]
++        repaired = False
++        if extra in ('native-nl', 'torii-accel'):
++            from ..runtime.python_dev import ensure as ensure_python_dev
++            installed = ensure_python_dev()
++            if installed:
++                with self._lock:
++                    self._pending_note = f'已补齐便携 Python 开发文件（{len(installed)} 个文件）'
++                repaired = True
+         if not todo:
+             bad = [it for it in items if not it.supported]
+             if bad:
+@@ -1070,6 +1078,8 @@
+                 names = " / ".join(it.name for it in bad)
+                 raise ValueError(
+                     f"{names} 只支持 {only}，当前系统（{sys.platform}）装了也跑不起来")
++            if repaired:
++                return self._start_many(f'install-{extra}', [])
+             raise ValueError(f"{extra} 声明的依赖都装着了，不用装")
+         return self._start_many(f"install-{extra}", todo)
+ 
+--- previous/devtools/setup_embedded_env.ps1
++++ release/devtools/setup_embedded_env.ps1
+@@ -466,6 +466,9 @@
+ }
+ 
+ # ---------------------------------------------------------------- 7. 自检
++Write-Host "[env] 补齐便携 Python 开发文件（native 编译使用）"
++$devCode = Invoke-Native $py @('-c', "from tagger.runtime.python_dev import ensure; files=ensure(); print('  Python dev: OK; added', len(files), 'files')")
++if ($devCode -ne 0) { Write-Warning "  Python 开发文件补齐失败，请保留新版 env\initialization 后重跑 install.bat；native 启动需要这些文件。" }
+ Write-Host "[env] 自检:"
+ $probe = "import sys, httpx, yaml, PIL, pyarrow; print('  python', sys.version.split()[0]); print('  httpx', httpx.__version__); print('  pyarrow', pyarrow.__version__); print('  pillow', PIL.__version__)"
+ $null = Invoke-Native $py @('-c', $probe)
+--- previous/tagger/web/ui/dist/index.html
++++ release/tagger/web/ui/dist/index.html
+@@ -23,7 +23,7 @@
+         }
+       })()
+     </script>
+-    <script type="module" crossorigin src="/assets/index-B-Cuw8Cj.js"></script>
++    <script type="module" crossorigin src="/assets/index-Dx1LAHHR.js"></script>
+     <link rel="stylesheet" crossorigin href="/assets/index-DoWL9yaj.css">
+   </head>
+   <body>

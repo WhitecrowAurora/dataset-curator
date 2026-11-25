@@ -511,8 +511,11 @@ def is_artifact(path: Path) -> bool:
     manifest.jsonl / 数据集自己的 *.parquet，它们没有 image_id 字段，误收进来
     只会变成"读到一半报错"或者"一堆读不了的文件"。
     """
-    return path.name.startswith(ARTIFACT_PREFIX) and path.suffix in (
-        ARTIFACT_SUFFIX, JSONL_SUFFIX)
+    from .center_runtime.snapshot import NAME, superseded
+    from .verification.local import is_delivery
+    return not is_delivery(path) and not superseded(path) and (
+        path.name == NAME or (path.name.startswith(ARTIFACT_PREFIX) and path.suffix in (
+            ARTIFACT_SUFFIX, JSONL_SUFFIX)))
 
 
 def iter_parquet_artifacts(path: str | Path) -> Iterator[dict]:
@@ -553,7 +556,11 @@ def iter_jsonl_artifacts(path: str | Path) -> Iterator[dict]:
 def iter_artifact_rows(path: str | Path) -> Iterator[dict]:
     """按后缀分派到对应的读取器。两种分片的行结构逐字段一致。"""
     p = Path(path)
-    if p.suffix == JSONL_SUFFIX:
+    from .center_runtime.snapshot import NAME
+    if p.name == NAME:
+        from .verification.history import read_rows
+        yield from read_rows([p])
+    elif p.suffix == JSONL_SUFFIX:
         yield from iter_jsonl_artifacts(p)
     else:
         yield from iter_parquet_artifacts(p)
@@ -638,6 +645,8 @@ def load_done_ids(out_dir: str | Path, *, fmt: str = "all") -> set[str]:
 
     if fmt in ("all", "jsonl"):
         for path in sorted(root.glob(f"{ARTIFACT_PREFIX}*{JSONL_SUFFIX}")):
+            if not is_artifact(path):
+                continue
             with path.open("rb") as fh:
                 for line in fh:
                     if not line.strip():
@@ -650,6 +659,10 @@ def load_done_ids(out_dir: str | Path, *, fmt: str = "all") -> set[str]:
                         continue
                     if _row_done(obj):
                         done.add(str(obj["image_id"]))
+        from .center_runtime.snapshot import NAME
+        snapshot = root / NAME
+        if snapshot.is_file():
+            done.update(str(row['image_id']) for row in iter_artifact_rows(snapshot) if _row_done(row))
     return done
 
 

@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    "default 0 auto displays 2",
+    "slider 1..256",
+    "number synchronized",
+    "reload persistence",
+    "out of range normalized",
+    "auto restored",
+    "disabled"
+  ],
+  "errors": []
+}

@@ -1,0 +1,114 @@
+{
+  "ok": true,
+  "errors": [],
+  "sections": [
+    {
+      "name": "工作区",
+      "rendered": true
+    },
+    {
+      "name": "包列表",
+      "rendered": true
+    },
+    {
+      "name": "注册设备表",
+      "rendered": true
+    },
+    {
+      "name": "异常体检",
+      "rendered": true
+    },
+    {
+      "name": "审计",
+      "rendered": true
+    }
+  ],
+  "responses": [
+    {
+      "path": "/api/managed/devices?summary=throughput",
+      "status": 200
+    },
+    {
+      "path": "/api/scheduling?summary=automation",
+      "status": 200
+    },
+    {
+      "path": "/api/meta",
+      "status": 200
+    },
+    {
+      "path": "/api/notifications?limit=20",
+      "status": 200
+    },
+    {
+      "path": "/api/overdue",
+      "status": 200
+    },
+    {
+      "path": "/api/summary",
+      "status": 200
+    },
+    {
+      "path": "/api/managed/devices?summary=throughput",
+      "status": 200
+    },
+    {
+      "path": "/api/scheduling?summary=automation",
+      "status": 200
+    },
+    {
+      "path": "/api/workspaces",
+      "status": 200
+    },
+    {
+      "path": "/api/packages?sort=updated&order=desc&page=1&size=50",
+      "status": 200
+    },
+    {
+      "path": "/api/summary",
+      "status": 200
+    },
+    {
+      "path": "/api/managed/devices",
+      "status": 200
+    },
+    {
+      "path": "/api/workspaces",
+      "status": 200
+    },
+    {
+      "path": "/api/scheduling",
+      "status": 200
+    },
+    {
+      "path": "/api/history",
+      "status": 200
+    },
+    {
+      "path": "/api/scheduling?summary=automation",
+      "status": 200
+    },
+    {
+      "path": "/api/managed/devices?summary=throughput",
+      "status": 200
+    },
+    {
+      "path": "/api/managed/devices",
+      "status": 200
+    },
+    {
+      "path": "/api/history",
+      "status": 200
+    },
+    {
+      "path": "/api/anomalies",
+      "status": 200
+    },
+    {
+      "path": "/api/audit",
+      "status": 200
+    }
+  ],
+  "loaded_repositories": true,
+  "ai_access": true
+}

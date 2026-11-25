@@ -19,5 +19,6 @@ def handle(handler, dispatch, method, writable):
     except dispatch.AuthError as exc:
         handler._json(401, {"error": str(exc)})
     except (ManagedError, ValueError) as exc:
-        handler._json(getattr(exc, "status", 400), {"error": str(exc)})
+        handler._json(getattr(exc, "status", 400), {"error": str(exc),
+                      **({'report': exc.report} if getattr(exc, 'report', None) else {})})
     return True

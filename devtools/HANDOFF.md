@@ -3480,3 +3480,63 @@ query_gpus() 列的是 nvidia-smi 的**物理序**，CUDA 认的是环境变量�
 **`I:\ComfyUI-aki-v1.6\python\python.exe` 不存在**——别再写这个路径。
 请求 hf-mirror 前必须清空 `HTTPS_PROXY/HTTP_PROXY`；Range 读取要校验 `content-range` 起始偏移，
 否则 CDN 返回长度正确但起点偏移的字节段，pyarrow 会报 `Parquet magic bytes not found in footer`。
+
+## 43. 发色级联、自适应RAM缓存和Torii描述接入（2026-11-19）
+
+本阶段已接入，正式验收见 `devtools/hair-workflow-integration-20261119/README.md` 与同目录JSON/截图。新任务可开启发色复核和按数据类型生成描述；「冲突与决策」包含缓存与模型设置、前三颜色概率/示意、人工回写撤销、角色裁框及合并。
+
+流程：标签阶段 → 可选普通描述（明确anime Torii，其余Qwen） → PixAI/MobileNet/CAFormer/按来源VLM发色复核 → 人工决定。GPU测试串行，应用内共享执行队列协调服务启动。RAM按实时可用量保留空闲模型，16/32/96GiB模拟压力已通过；GGUF仅系统文件缓存，不等于VLM已加载CPU常驻。
+
+真实两图批量、续做不重复追加、人工回写/撤销、真实动漫与真人复核、浏览器裁框及手机布局通过。银灰白仍不能由专用分类器细分，light不能自动改写具体颜色。混合数据普通caption未逐图路由、caption与独立复核未复用；百万级PNG存储与HF两阶段重读成本未验收。
+
+Torii继续用llama.cpp。下一阶段才做Qwen3.5-4B架构的native适配/优化，先保持相同提示词和数值/输出质量再比较性能；不能直接复用Qwen3-VL decoder，不预先保证提速。
+
+临时测试及依赖已按计划归档 `.delete/hair-workflow-tests-20261119/backend/smoke/hair-workflow`；保留devtools结果。没有commit/push/reset/stash操作。模型默认路径不写死E盘，使用本机Torii时请设置 `E:\dev_model\ToriiGate-0.5` 或其中具体GGUF，Qwen目录多个量化档时选择明确权重。
+
+## 44. 发色质量/流程验收与模型依赖管理（2026-11-19）
+
+完整报告：`devtools/hair-quality-acceptance-20261119/README.md`，含真实任务、回放、服务恢复、浏览器、模型下载及检查证据。用户的“无感”指尽量减少推理中的新增手动步骤，必要冲突人工审核保留；不能按人工待办数量多直接判失败。
+
+纠正§43历史证据：前阶段名为portrait的样本实际上是动漫，不能作为真人验收。本轮真实CPU完整执行动漫hutao/mostima与photo类26/107/4共5图，26/107是真人，4为鱼类非真人；默认质检、标签/描述/发色、续做逐字节一致均通过。Qwen确认鱼无人物头发后skipped；银灰照片分歧进入review。真实主托管Qwen服务停止并按原端口/模型/精度/设备/槽位恢复，恢复后HTTP推理成功。CPU时延不外推GPU性能。
+
+已修本轮确认的外部ResourceGuard线程复启、低置信支持误接受、Torii解析、旧模型进程复用、任务结束恢复服务、续做关联/原图hash变化、历史分片误回写、人工与批结算竞态、单项失败/重试/停止结算及UI默认恢复/刷新/阶段显示。203项后端通过，最后生命周期补验120项通过，两者重叠不相加；125条历史响应回放与8个accepted视觉核对是有限样本，不能报全库准确率。普通描述仍有细节猜测，银灰白、多人人工判断必要。
+
+原模型管理增加「发色与动漫复核」独立组件：MobileNetV3、CAFormer各自固定revision ONNX/meta下载到models/hair-color，Torii固定社区GGUF Q6_K+FP16 mmproj下载到models/nl/torii-gate-0.5，提供进度、取消、打开位置与一键保存Torii精确路径。现有E盘设置保留；不会把专用发色模型伪装成通用tag后端。下载器revision在清单/单文件/分段一致，复核包按完整文件清单/字节数判定，不作每次hash扫描。
+
+install.bat委托的PowerShell安装自检与install.sh均纳入ONNX Runtime；Linux补ONNX时复用可用torch。requirements-tag已含ONNX，pyproject hair extra及Web依赖管理显示7个共享必需包，Torii复用独立llama-server，无需llama-cpp-python。模型/依赖101项通过，下载完整性补验2项通过（有重叠），6项模型浏览器检查通过。HuggingFace固定revision清单与真实meta下载已验证；大权重未重复下载，安装未重建用户环境。最终构建index-BSNF_hje.js / index-CEvozeTg.css通过。
+
+本轮临时测试/状态/日志归档 `.delete/hair-quality-tests-20261119/backend/smoke/hair-quality`，结果保留devtools。GPU仍串行，本輪验收使用CPU，不停止其他窗口服务。应用内锁不等于跨窗口GPU仲裁；RAM缓存仍是GGUF可回收文件页而非初始化CPU VLM常驻。Torii native、百万级存储与混合普通描述逐图路由仍待后续。没有commit/push/reset/stash操作。
+
+## 45. 混合批次逐图分流与 Torii native 实验评估（2026-11-19）
+
+报告 `devtools/media-native-20261119/README.md`。§43/44 的混合普通描述未路由现已接入：明确媒体字段优先，未知用 deepghs/anime_real_cls/mobilenetv3_v1.4_dist CPU ONNX（固定 rev 097a6c1e9e62866a435810c883a45a7cb2c7077d，OpenRAIL，模型管理第4卡），分数≥0.8判anime/photo，其余Qwen。媒体结果按图像SHA/revision缓存，描述Torii/Qwen分组串行，空组/续做不加载VLM，保持原limit与流式遍历，未知发色复核亦用同一路由。
+
+126旧图真实CPU分类15 anime/103 photo/8 unknown，去首图冷初始化平均70ms/图（解码+ONNX+SQLite，非人工真值准确率）。混合5图fixture实任务limit=0/3、续做通过；真实hutao/107两图均unknown，PixAI标签→自动Torii/Qwen描述→发色复核→回写完成，无failed，棕发accepted、银灰review；续做0推理且JSONL字节不变，见mixed-cpu.json。155项相关检查通过、1旧eager启动检查deselected；本轮最后修复定向21项通过，两者重叠不相加。WebUI4项操作检查及截图查看通过；tsc/vite、PS AST、bash-n通过。
+
+Torii native新增独立qwen35模块，复用Q6_K/FP16mmproj、官方Qwen3.5 24 linear+8 full架构；逆转GGUF norm/A/head导出变换，小量官方A/dt/conv参数核对误差0，完整参数/量化数值一致未验收。native为反量化CPU FP32/CUDA FP16，无packed量化/offload优化；默认llama.cpp未改变。设置面板实验引擎、native-nl依赖组（transformers5.14.1）、首次官方metadata下载、现有worker生命周期已接入，未下载10GB原始权重。
+
+同一key=2/相同官方prompt/template/8CPUthreads/64image tokens/greedy测试：prompt均281tokens，native完整JSON172token正常stop，加载88.88s/prefill9.27s/生成233.32s/约0.77token/s；llama181token，加载2.95s/prefill4.30s/生成37.05s/5.50token/s/RSS4.60GiB。native托管RSS约20.37GiB，明显慢且占内存，不推荐默认切换，输出细节有差异，不能称数值精确一致或银灰白识别通过。
+
+native真实ReviewRuntime HTTP/version/models/非法模型400、交替两图3request、返回原图输出一致、同PID复用、stop无残留通过。修复嵌入式Python项目导入、共享版本接口名字遮蔽、延迟服务启动后的runtime_sha更新；旧Qwen stop契约保留。历史慢生成来自手写loop重复history，已换官方generate，不作性能结论；初次mixed测试HF类型注解失败来自fixture替换httpx.Client为函数，已修fixture为子类。
+
+GPU被其他程序占用，本轮CPU测试串行，CUDA速度/FP16质量/显存和GatedDeltaNet优化未验收。百万级PNG/cache与HF分组两遍重读/再次下载成本尚未验收；不能把70ms当所有输入的总额外成本。应用锁不是跨窗口GPU仲裁，RAM仍是文件页缓存。后续native优化优先支持的线性注意力内核与packed矩阵，然后GPU空闲时质量/性能对比。
+
+临时测试归档`.delete/media-native-tests-20261119/backend/smoke/media-native`，报告与日志保留devtools。未commit/push/reset/stash，未改其他窗口服务。不要把另一个repo的MOSS/Qwen3.5测试或旧ToriiGPU结果混作本次native验收。
+
+## 46. Torii native GPU 优化与验收（2026-11-19）
+
+报告 `devtools/torii-optimization-20261119/README.md`。§45 CUDA 待验部分现完成本机4070 Ti SUPER的定向验收：GPU直接反量化加载约79.75→21–23s；五个实际Q6_K矩阵FP16逐元素与旧CPU反量化一致。官方FLA 0.6.0 chunk/recurrent在Torii实例内接入，原norm/卷积及CPU FP32保留；不猴补共享环境。生产默认仍llama.cpp，native实验选择保持。
+
+native按启动时空闲显存选择dense FP16或原GGUF packed矩阵，复用既有Triton/Gluon与lossless repack；本机dense约9.73GiB、packed4.36GiB，正式分辨率峰值10.16/4.79GiB。选择估算含3GiB余量及最大矩阵临时空间，但不是显存预留/跨窗口仲裁，不能宣称所有机器无OOM。GPU测试串行，未停止用户其他任务。
+
+生产1MP预算八请求（6个独立输入+两次原图重复）torch164.17s/2046tokens、FLA133.45s/1974tokens；扣除输出长短按ms/token折算平均减少约16%，packed171.91s仍更慢，显存足够不强制使用。FLA首用有JIT冷等待；native仍明显慢于llama.cpp，CPU未加速。本轮没有降低像素/提示/人工复核以换速度。
+
+24次主对照完整JSON正常stop，6输入的发色候选/多人多色等审核字段一致；5个逐token相同、胡桃普通措辞变化且仍有猜名/细节幻觉。旧mostima-head在主批指向原图，不能作裁图证据；已独立按真实裁框补测blue头部与202浅色，共8次生成，torch/FLA在dense和packed均逐token相同，浅色silver+grey仍歧义。没有全库人工真值，不报准确率提升或银灰白已解决。
+
+ReviewRuntime真实HTTP、version/models/非法模型400、同PID复用、交替两图/回图一致、完整JSON及stop释放通过，低显存自动选择用本卡模拟8GiB空闲触发（不是真8GiB硬件验收）。修复native子进程GBK读PyTorch模板异常（PYTHONUTF8）；0.2版本/version返回实际精度/设备/内核/库版本用于原runtime_sha缓存指纹；历史续做仍复用旧产物，重算用强制重打。
+
+Web依赖管理和pyproject新增torii-accel可选组，固定FLA/fla-core0.6.0；Windows triton-windows、Linux triton，平台包置灰不误装；单包安装保留extra版本/平台。install.bat委托PS和install.sh说明按需安装，默认不强装FLA。测试在trainer python-flashattention torch2.13/cu132/transformers5.14.1，FLA隔离临时安装，未改共享环境或项目env/python；项目现transformers5.22.2不能混作本轮验收，使用native应按5.14.1依赖要求安装。
+
+22项定向回归通过（复跑不相加）、WebUI5项检查/errors[]、tsc/vite、PS/bash/Python语法通过；dist index-DbSKEiYf.js/index-CEvozeTg.css。内置浏览器连接sandboxPolicy错误后既有Edge headless禁GPU完成验收。归一化顺序实验未能消除措辞差异且更慢，已移除生产实现，仅保留证据。
+
+临时测试和FLA隔离依赖归档`.delete/torii-optimization-tests-20261119/backend/smoke/torii-opt`，报告保留devtools；未commit/push/reset/stash。Linux/其他GPU/CPU加速/全库质量、百万级存储及HF两遍重读成本仍未验收。

@@ -1,13 +1,23 @@
 """复用管理员鉴权和写通道的清单配置接口。"""
+import json
+import hashlib
 from . import store as catalogs
 
 
-def read(store, repo=None, package=None, offset=0):
+def read(store, repo=None, package=None, offset=0, conflict_state='all', export=False):
     c = store.conn()
     try:
         if repo and package:
+            if export:
+                from delivery.reconciliation import snapshot
+                item=c.execute('SELECT sha256 FROM packages WHERE repo=? AND id=?',(repo,package)).fetchone()
+                if not item: raise ValueError('分片不存在')
+                result=snapshot(c,repo,package,item[0])
+                if (result.get('report') or {}).get('conflict_count') or (result.get('report') or {}).get('conflicts'):
+                    raise ValueError('请先处理此分片的内容冲突，再下载当前核验结果')
+                return result
             from delivery.details import view
-            return view(c, repo, package, offset)
+            return view(c, repo, package, offset, conflict_state)
         return catalogs.view(c)
     finally:
         c.close()
@@ -25,6 +35,12 @@ def write(store, dispatch, body, actor):
         raise ValueError('分片列表格式不正确')
     if len(set(packages)) != len(packages):
         raise ValueError('不能重复选择分片')
+    if action in ('configure_artist', 'reinject_artist', 'detect_artist'):
+        from annotation.routes import write as artist_write
+        return artist_write(store, dispatch, body, actor)
+    if action in ('export_results', 'revoke_export'):
+        from result_exports.service import create, revoke
+        return create(store,body,actor) if action=='export_results' else revoke(store,body.get('id'))
     if action == 'configure' and not isinstance(body.get('config'), dict):
         raise ValueError('清单配置必须是 JSON 对象')
     with store._write_lock:
@@ -41,6 +57,28 @@ def write(store, dispatch, body, actor):
                     result = resolve(c, dispatch, body, actor)
                     store.event(c, 'artifact_resolution', repo, body.get('package'), actor,
                                 str(body.get('image_id')) + ':' + str(body.get('part')) + ':' + str(body.get('resolution')) + ':' + str(body.get('variant')))
+                    return result
+                if action == 'resolve_batch':
+                    from delivery.resolution_batch import resolve
+                    request_id = body.get('request_id')
+                    if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
+                        raise ValueError('批量操作缺少有效请求 ID')
+                    fingerprint = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                    previous = c.execute("SELECT detail FROM events WHERE kind='artifact_resolution_batch' AND repo=? AND pkg=? AND actor=?"
+                                         " AND json_extract(detail,'$.request_id')=? ORDER BY seq DESC LIMIT 1",
+                                         (repo, body.get('package'), actor, request_id)).fetchone()
+                    if previous:
+                        batch = json.loads(previous['detail'])
+                        if batch.get('fingerprint') != fingerprint:
+                            raise ValueError('同一请求 ID 不能用于不同批量操作')
+                        from delivery.details import view
+                        result = view(c, repo, body.get('package'))
+                        result['batch'] = batch
+                        return result
+                    result = resolve(c, dispatch, body, actor)
+                    result['batch'].update(request_id=request_id, fingerprint=fingerprint)
+                    store.event(c, 'artifact_resolution_batch', repo, body.get('package'), actor,
+                                json.dumps(result['batch'], ensure_ascii=False))
                     return result
                 if action == "cancel":
                     for package in body.get('packages') or []:
@@ -61,7 +99,6 @@ def write(store, dispatch, body, actor):
                         c.execute("INSERT OR IGNORE INTO source_requests SELECT a.repo,a.pkg,a.source_sha256 FROM package_artifacts a"
                                   " JOIN packages p ON p.repo=a.repo AND p.id=a.pkg AND p.sha256=a.source_sha256 WHERE a.repo=?", (repo,))
                         from delivery.reconciliation import merge
-                        import json
                         rows = c.execute("SELECT a.* FROM package_artifacts a JOIN packages p ON p.repo=a.repo AND p.id=a.pkg"
                                          " AND p.sha256=a.source_sha256 WHERE a.repo=?", (repo,)).fetchall()
                         for row in rows:

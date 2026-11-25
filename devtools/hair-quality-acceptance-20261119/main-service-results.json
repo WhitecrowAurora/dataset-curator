@@ -1,0 +1,50 @@
+{
+  "device": "CPU only",
+  "checks": [
+    "原托管Qwen服务实际停止并恢复",
+    "模型精度设备槽位与端口保持原配置",
+    "恢复后实际HTTP推理成功"
+  ],
+  "before": {
+    "pid": 29940,
+    "port": 62979,
+    "overrides": {
+      "engine": "llamacpp",
+      "model": "qwen3vl-8b-abliterated",
+      "tier": null,
+      "precision": "q6",
+      "served_name": "tagger",
+      "max_model_len": null,
+      "max_num_seqs": null,
+      "max_num_batched_tokens": null,
+      "gpu_mem": null,
+      "local_media_root": null,
+      "slots": 1,
+      "device_index": null,
+      "model_path": null,
+      "device": "cpu"
+    }
+  },
+  "after": {
+    "pid": 45200,
+    "port": 62979,
+    "overrides": {
+      "engine": "llamacpp",
+      "model": "qwen3vl-8b-abliterated",
+      "tier": null,
+      "precision": "q6",
+      "served_name": "tagger",
+      "max_model_len": null,
+      "max_num_seqs": null,
+      "max_num_batched_tokens": null,
+      "gpu_mem": null,
+      "local_media_root": null,
+      "slots": 1,
+      "device_index": null,
+      "model_path": null,
+      "device": "cpu"
+    },
+    "reply": "OK."
+  },
+  "closed": true
+}

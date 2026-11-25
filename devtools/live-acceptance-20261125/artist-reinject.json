@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "changed_tag": 2,
+  "changed_nl": 2,
+  "repeat_unchanged": true,
+  "prefix_conflict_requires_review": true,
+  "force_replaces_wrong_prefix": true,
+  "training_tokens": [
+    133,
+    201
+  ],
+  "original_files_backed_up": true,
+  "basis": "Actual repository artist table, existing model outputs reassigned to two sample IDs in isolated test files; no new model inference"
+}

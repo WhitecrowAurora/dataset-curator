@@ -1,0 +1,1 @@
+{"ok": true, "services": ["active", "active"], "label_health": true, "panel_status": 200, "mcp_auth_status": 401, "mcp_version": "1.2.0", "operate_tools": 16, "read_tools": 7, "torii_concurrency_256_accepted": true, "invalid_quantization_rejected": true, "source_hashes_matched": 11, "open_leases": 8}

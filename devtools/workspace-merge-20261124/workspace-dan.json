@@ -1,0 +1,29 @@
+{
+  "ws_id": "dan",
+  "name": "dan",
+  "repos": [
+    "MatchaCuratio/Anime-2024Dru768-8M"
+  ],
+  "note": null,
+  "created_at": "2026-11-21T18:49:51+0800",
+  "allow_manual_claim": 1,
+  "allocation_mode": "auto",
+  "preassignment_template": {},
+  "preassignment_last": {},
+  "auto_assign_at": null,
+  "users": [
+    "lulu"
+  ],
+  "devices": [],
+  "repo_devices": {},
+  "repo_users": {},
+  "legacy_repository_overlaps": [
+    {
+      "workspace_id": "Dru768",
+      "name": "Dru768_仅nl打标",
+      "repos": [
+        "MatchaCuratio/Anime-2024Dru768-8M"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,452 @@
+{
+  "method": "看图后人工撰写重点例注释；不是模型输出、自动解析结果或完整像素/发色真值集",
+  "accuracy_claim": false,
+  "notes": {
+    "portrait": {
+      "group": "动漫",
+      "visible": "浅金色肖像，光照与灰棕阴影明显",
+      "torii_hair": "blonde",
+      "qwen_hair": "blonde",
+      "assessment": "两者均识别金色；Torii 关闭猜名后仍输出角色名",
+      "tags": [
+        "动漫",
+        "浅色",
+        "猜名"
+      ]
+    },
+    "hutao": {
+      "group": "动漫",
+      "visible": "棕色动漫长发，局部暖光",
+      "torii_hair": "brown",
+      "qwen_hair": "brown",
+      "assessment": "两者均识别棕色；Torii 识别角色名，但不能证明红棕分界普遍可靠",
+      "tags": [
+        "动漫",
+        "红棕",
+        "猜名"
+      ]
+    },
+    "mostima": {
+      "group": "动漫",
+      "visible": "三角色：红、蓝、粉发，金色高光与发饰",
+      "torii_hair": "red / blue / pink（分别描述）",
+      "qwen_hair": "blonde；多人/多色",
+      "assessment": "Torii 的分角色描述更实用；Qwen 理由提到红蓝粉，但 color 最终给 blonde。Torii 对动作与角色身份仍有错误描述",
+      "tags": [
+        "动漫",
+        "多人",
+        "分角色"
+      ]
+    },
+    "mostima-head": {
+      "group": "裁图",
+      "visible": "蓝紫发角色，金色高光；左侧残留另一角色红发",
+      "torii_hair": "deep blue + blonde streaks",
+      "qwen_hair": "blue；多人/多色",
+      "assessment": "两种 Torii 格式都描述蓝色与金色挑染；精简格式只写一人，普通 JSON 提到裁框残留角色。无法把金色高光可靠地与染色区分",
+      "tags": [
+        "动漫",
+        "多人",
+        "高光",
+        "裁图"
+      ]
+    },
+    "58": {
+      "group": "动漫",
+      "visible": "绿色头发动漫角色，蓝色特效背景",
+      "torii_hair": "green",
+      "qwen_hair": "green",
+      "assessment": "两者一致识别绿发",
+      "tags": [
+        "动漫",
+        "特效"
+      ]
+    },
+    "61": {
+      "group": "动漫",
+      "visible": "六个背向角色，头发有粉、深色、绿、黄、红",
+      "torii_hair": "pink / dark blue / black / green / blonde / red",
+      "qwen_hair": "pink；多人",
+      "assessment": "Torii 分别描述六人；深蓝与黑的小区域不作精确真值验收",
+      "tags": [
+        "动漫",
+        "多人",
+        "分角色"
+      ]
+    },
+    "95": {
+      "group": "动漫",
+      "visible": "多人战斗插画，头发与衣物武器重叠",
+      "torii_hair": "dark / blonde / red / brown / orange 等",
+      "qwen_hair": "black；多人",
+      "assessment": "Torii 可按人物列属性，但 dark 未给具体色；人数与遮挡细节未作为人工真值验收",
+      "tags": [
+        "动漫",
+        "多人",
+        "分角色"
+      ]
+    },
+    "101": {
+      "group": "动漫",
+      "visible": "三名动漫角色：中央蓝发，两侧棕发",
+      "torii_hair": "light blue / brown / brown",
+      "qwen_hair": "blue；多人",
+      "assessment": "Torii 精简格式正确拆出三个角色；普通 JSON 多描述一个背景持枪人。Qwen 理由也识别三种对应，但契约只有单色",
+      "tags": [
+        "动漫",
+        "多人",
+        "分角色"
+      ]
+    },
+    "102": {
+      "group": "动漫",
+      "visible": "七个动漫人物与红色小龙，发色各异",
+      "torii_hair": "dark blue / blonde / dark purple / brown / blonde / aqua / green",
+      "qwen_hair": "blonde；多人",
+      "assessment": "分角色描述有价值；只含一个 aqua 小区域，不足以建立蓝青相近色准确率",
+      "tags": [
+        "动漫",
+        "多人",
+        "蓝青",
+        "分角色"
+      ]
+    },
+    "103": {
+      "group": "角色",
+      "visible": "黑发 3D 游戏角色肖像",
+      "torii_hair": "black",
+      "qwen_hair": "black",
+      "assessment": "两者一致识别黑发",
+      "tags": [
+        "角色"
+      ]
+    },
+    "106": {
+      "group": "灰度",
+      "visible": "黑白石墨人像画，无法确定原始实际发色",
+      "torii_hair": "没有猜具体发色；明确 monochrome / graphite",
+      "qwen_hair": "blonde",
+      "assessment": "Torii 描述保留黑白属性较合理；Qwen 仍猜金色。但 Torii 没有输出可直接接入的 uncertain 标记",
+      "tags": [
+        "灰度",
+        "不确定"
+      ]
+    },
+    "107": {
+      "group": "浅色",
+      "visible": "银灰发照片原图",
+      "torii_hair": "white",
+      "qwen_hair": "silver",
+      "assessment": "Torii 精简格式给白色，普通 JSON 给 grey，出现格式分歧；银灰分界仍应人工处理",
+      "tags": [
+        "浅色",
+        "不稳定"
+      ]
+    },
+    "202": {
+      "group": "裁图",
+      "visible": "#107 的银灰发手工头部裁图",
+      "torii_hair": "grey",
+      "qwen_hair": "silver",
+      "assessment": "Torii 精简格式给 grey，普通 JSON 给 silver，与原图精简格式 white 不一致；浅色细分类不稳定",
+      "tags": [
+        "浅色",
+        "裁图",
+        "不稳定"
+      ]
+    },
+    "201": {
+      "group": "裁图",
+      "visible": "#101 中央角色的蓝发头部裁图",
+      "torii_hair": "blue",
+      "qwen_hair": "blue",
+      "assessment": "两套 Torii 格式与 Qwen 均给蓝色。只能验证本例，未建立蓝青边界准确率",
+      "tags": [
+        "动漫",
+        "蓝青",
+        "裁图"
+      ]
+    },
+    "115": {
+      "group": "多人",
+      "visible": "五名真实人物合照",
+      "torii_hair": "四人写 black，第五人戴帽子、未写头发颜色",
+      "qwen_hair": "black；多人",
+      "assessment": "Torii 区分五人，但一人仅描述 facial hair，不能当头发颜色。Qwen 明确多人",
+      "tags": [
+        "多人",
+        "漏色"
+      ]
+    },
+    "4": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "12": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "24": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "35": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "44": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "45": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "48": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "50": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "51": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "65": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "68": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "72": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "73": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "77": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "84": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "86": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "87": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "91": {
+      "group": "无头发",
+      "visible": "上轮已看图确认：没有可见人类头发",
+      "assessment": "本轮 Qwen 返回 null；Torii 描述对应物体、环境或腿部，未给人类发色。#72 提到蟹壳细毛，应按对象类型排除",
+      "tags": [
+        "无头发",
+        "旧误接受"
+      ]
+    },
+    "16": {
+      "group": "非人类对象",
+      "visible": "大卫石像",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "42": {
+      "group": "非人类对象",
+      "visible": "绿色针织玩偶",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "46": {
+      "group": "非人类对象",
+      "visible": "长颈鹿",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "69": {
+      "group": "非人类对象",
+      "visible": "两只金刚鹦鹉",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "70": {
+      "group": "非人类对象",
+      "visible": "黑狗",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "71": {
+      "group": "非人类对象",
+      "visible": "猫",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "76": {
+      "group": "非人类对象",
+      "visible": "山羊",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    },
+    "79": {
+      "group": "非人类对象",
+      "visible": "黑天鹅",
+      "assessment": "Qwen 仍给具体人类发色；Torii 明确描述对象类型。雕像有 sculpted hair、长颈鹿有 mane，不能仅搜索 hair/颜色就接受",
+      "tags": [
+        "非人类对象",
+        "旧误接受"
+      ]
+    }
+  },
+  "previous_no_human_hair_false_accepts": [
+    4,
+    12,
+    24,
+    35,
+    44,
+    45,
+    48,
+    50,
+    51,
+    65,
+    68,
+    72,
+    73,
+    77,
+    84,
+    86,
+    87,
+    91
+  ],
+  "previous_nonhuman_false_accepts": [
+    16,
+    42,
+    46,
+    69,
+    70,
+    71,
+    76,
+    79
+  ],
+  "limits": [
+    "无全量人工发色真值；不能据此报告相近发色准确率",
+    "群像按角色描述需要另建角色对应真值",
+    "浅色 grey/silver 可有边界歧义，white/grey/silver 的格式与裁图变化需保留人工",
+    "关闭猜名不保证输出没有名字"
+  ]
+}

@@ -8,8 +8,8 @@ from .input_pipeline import InputPipeline
 
 
 class ContinuousScheduler(BatchScheduler):
-    def __init__(self, engine, batch_size):
-        super().__init__(engine, batch_size)
+    def __init__(self, engine, batch_size, *, batch_window_s=0.01):
+        super().__init__(engine, batch_size, batch_window_s=batch_window_s)
         self.inputs = InputPipeline(engine)
 
     async def submit(self, request):
@@ -89,7 +89,7 @@ class ContinuousScheduler(BatchScheduler):
                         pending.append(item)
                         # Only wait for aggregation when idle; active decoding
                         # never waits ten milliseconds to fill a free slot.
-                        deadline = asyncio.get_running_loop().time() + 0.01
+                        deadline = asyncio.get_running_loop().time() + self.batch_window_s
                         while len(pending) < len(session.available):
                             remaining = deadline - asyncio.get_running_loop().time()
                             if remaining <= 0:

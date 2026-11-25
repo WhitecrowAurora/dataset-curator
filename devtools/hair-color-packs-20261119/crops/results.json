@@ -1,0 +1,373 @@
+{
+  "repo": "jasperai/monet",
+  "revision": "a718d526ddcd9bd13681784d1fd02a2082d4e615",
+  "qwen_weights": "qwen3vl-8b-abliterated-Q6_K.gguf",
+  "qwen_port": 8001,
+  "audit": "Qwen run independently on ALL images; original cascade still preserves early exit",
+  "records": [
+    {
+      "index": 201,
+      "file": "201_crop.png",
+      "source": "z-image",
+      "shard": "v1.2.0/synthetic/z-image/0-0/000000.tar",
+      "member": "013_df736bd240db7816.jpg",
+      "data_offset": 3916117504,
+      "bytes": 131139,
+      "sha256": "c3db4231a4e379ea918088d61b3d8d9e67752a7e05c51f0b0ff1dc85769ed68f",
+      "dimensions": [
+        265,
+        340
+      ],
+      "window": 0,
+      "caption_selected_as_anime": true,
+      "crop": [
+        300,
+        210,
+        565,
+        550
+      ],
+      "parent_index": 101,
+      "pixai": {
+        "color": "blue",
+        "probability": 0.69921875,
+        "scores": {
+          "black": 0.00136566162109375,
+          "blonde": 0.0010986328125,
+          "brown": 0.0023193359375,
+          "blue": 0.69921875,
+          "pink": 0.000553131103515625,
+          "white": 0.00124359130859375,
+          "grey": 0.00010251998901367188,
+          "purple": 0.006103515625,
+          "red": 0.000553131103515625,
+          "green": 5.817413330078125e-05,
+          "orange": 7.963180541992188e-05,
+          "aqua": 0.0078125
+        },
+        "source": "inference",
+        "ambiguous": false
+      },
+      "people_scores": {
+        "1girl": 0.255859375,
+        "1boy": 0.018310546875,
+        "multicolored_hair": 0.000881195068359375,
+        "multicolored hair": 0,
+        "2girls": 0.0140380859375,
+        "3girls": 0.004058837890625,
+        "4girls": 0.0023193359375,
+        "5girls": 0.00014019012451171875,
+        "6+girls": 0.0002613067626953125,
+        "2boys": 0.0037078857421875,
+        "3boys": 0.0017547607421875,
+        "4boys": 0.00057220458984375,
+        "5boys": 7.009506225585938e-05,
+        "6+boys": 0.000148773193359375
+      },
+      "pixai_ms": 353.51,
+      "classifiers": {
+        "mobilenetv3_v0_dist": {
+          "aqua": 0.006609915755689144,
+          "blue": 0.992763340473175,
+          "green": 9.297374344896525e-05,
+          "brown": 0.00010972624295391142,
+          "orange": 1.8816897863871418e-05,
+          "pink": 5.9468420658959076e-05,
+          "purple": 0.00010316017869627103,
+          "red": 0.0001005040539894253,
+          "light": 7.000893674558029e-05,
+          "black": 7.206000736914575e-05
+        },
+        "caformer_s36_v0": {
+          "aqua": 0.001184052787721157,
+          "blue": 0.9983456134796143,
+          "green": 6.973929703235626e-05,
+          "brown": 0.0001015148009173572,
+          "orange": 2.551406214479357e-05,
+          "pink": 5.3491017752094194e-05,
+          "purple": 4.169740350334905e-05,
+          "red": 3.0527280614478514e-05,
+          "light": 5.868751759408042e-05,
+          "black": 8.908953168429434e-05
+        }
+      },
+      "classifier_ms": {
+        "mobilenetv3_v0_dist": 164.86,
+        "caformer_s36_v0": 1547.75
+      },
+      "qwen_independent_audit": {
+        "color": "blue",
+        "multi_color": false,
+        "multiple_people": false,
+        "reason": "The character has uniformly blue hair, with no visible multi-color strands or multiple people in focus.",
+        "raw": "{\n  \"color\": \"blue\",\n  \"multi_color\": false,\n  \"multiple_people\": false,\n  \"reason\": \"The character has uniformly blue hair, with no visible multi-color strands or multiple people in focus.\"\n}"
+      },
+      "qwen_ms": 1978.32,
+      "qwen_used_in_cascade": false,
+      "stage": "mobilenetv3_v0_dist",
+      "result": {
+        "status": "accepted",
+        "selected": [
+          "blue"
+        ],
+        "reason": "MobileNet 与 PixAI 一致",
+        "observations": [
+          {
+            "model": "pixai",
+            "color": "blue",
+            "probability": 0.69921875,
+            "scores": {
+              "black": 0.00136566162109375,
+              "blonde": 0.0010986328125,
+              "brown": 0.0023193359375,
+              "blue": 0.69921875,
+              "pink": 0.000553131103515625,
+              "white": 0.00124359130859375,
+              "grey": 0.00010251998901367188,
+              "purple": 0.006103515625,
+              "red": 0.000553131103515625,
+              "green": 5.817413330078125e-05,
+              "orange": 7.963180541992188e-05,
+              "aqua": 0.0078125
+            },
+            "source": "inference",
+            "ambiguous": false
+          },
+          {
+            "model": "mobilenetv3_v0_dist",
+            "color": "blue",
+            "probability": 0.992763340473175,
+            "scores": {
+              "aqua": 0.006609915755689144,
+              "blue": 0.992763340473175,
+              "green": 9.297374344896525e-05,
+              "brown": 0.00010972624295391142,
+              "orange": 1.8816897863871418e-05,
+              "pink": 5.9468420658959076e-05,
+              "purple": 0.00010316017869627103,
+              "red": 0.0001005040539894253,
+              "light": 7.000893674558029e-05,
+              "black": 7.206000736914575e-05
+            }
+          }
+        ],
+        "candidates": [
+          {
+            "color": "blue",
+            "label": "蓝色",
+            "probability": 0.992763340473175,
+            "swatch": "#537fc7"
+          },
+          {
+            "color": "aqua",
+            "label": "青色",
+            "probability": 0.006609915755689144,
+            "swatch": "#70d7cf"
+          },
+          {
+            "color": "brown",
+            "label": "棕色",
+            "probability": 0.00010972624295391142,
+            "swatch": "#8b634b"
+          }
+        ],
+        "elapsed_ms": 518.37
+      }
+    },
+    {
+      "index": 202,
+      "file": "202_crop.png",
+      "source": "z-image",
+      "shard": "v1.2.0/synthetic/z-image/0-0/000000.tar",
+      "member": "015_5286976755118034.jpg",
+      "data_offset": 4589576192,
+      "bytes": 276761,
+      "sha256": "b6c9ae5f2b03a927ca03b36229a93118dbef3c2d3c2d4074bd4b8d15c5fe57d4",
+      "dimensions": [
+        420,
+        545
+      ],
+      "window": 1,
+      "caption_selected_as_anime": false,
+      "crop": [
+        470,
+        110,
+        890,
+        655
+      ],
+      "parent_index": 107,
+      "pixai": {
+        "color": "grey",
+        "probability": 0.80859375,
+        "scores": {
+          "black": 0.0021820068359375,
+          "blonde": 0.000804901123046875,
+          "brown": 0.00159454345703125,
+          "blue": 0.00020313262939453125,
+          "pink": 0.00021648406982421875,
+          "white": 0.21484375,
+          "grey": 0.80859375,
+          "purple": 0.0003566741943359375,
+          "red": 6.628036499023438e-05,
+          "green": 0.000553131103515625,
+          "orange": 6.628036499023438e-05,
+          "aqua": 0.000148773193359375
+        },
+        "source": "inference",
+        "ambiguous": true
+      },
+      "people_scores": {
+        "1girl": 0.5625,
+        "1boy": 0.59765625,
+        "multicolored_hair": 0.000644683837890625,
+        "multicolored hair": 0,
+        "2girls": 7.009506225585938e-05,
+        "3girls": 0.00019073486328125,
+        "4girls": 9.5367431640625e-06,
+        "5girls": 1.2993812561035156e-05,
+        "6+girls": 0.0001087188720703125,
+        "2boys": 0.0002307891845703125,
+        "3boys": 1.0788440704345703e-05,
+        "4boys": 4.798173904418945e-06,
+        "5boys": 1.150369644165039e-05,
+        "6+boys": 1.2218952178955078e-05
+      },
+      "pixai_ms": 353.51,
+      "classifiers": {
+        "mobilenetv3_v0_dist": {
+          "aqua": 0.00015756937500555068,
+          "blue": 0.0002071166964014992,
+          "green": 0.00037009583320468664,
+          "brown": 0.00022654616623185575,
+          "orange": 7.192454359028488e-05,
+          "pink": 3.445777838351205e-05,
+          "purple": 0.0007975143380463123,
+          "red": 0.000556322222109884,
+          "light": 0.9972962737083435,
+          "black": 0.00028222103719599545
+        },
+        "caformer_s36_v0": {
+          "aqua": 4.5323911763262004e-05,
+          "blue": 5.775562021881342e-05,
+          "green": 0.0001081057489500381,
+          "brown": 9.041864541359246e-05,
+          "orange": 5.27054799022153e-05,
+          "pink": 2.985688297485467e-05,
+          "purple": 0.00015788643213454634,
+          "red": 0.0002147758932551369,
+          "light": 0.9991866946220398,
+          "black": 5.6377371947746724e-05
+        }
+      },
+      "classifier_ms": {
+        "mobilenetv3_v0_dist": 12.65,
+        "caformer_s36_v0": 216.05
+      },
+      "qwen_independent_audit": {
+        "color": "silver",
+        "multi_color": false,
+        "multiple_people": false,
+        "reason": "Hair is uniformly silver with no other colors visible.",
+        "raw": "{\n  \"color\": \"silver\",\n  \"multi_color\": false,\n  \"multiple_people\": false,\n  \"reason\": \"Hair is uniformly silver with no other colors visible.\"\n}"
+      },
+      "qwen_ms": 1471.95,
+      "qwen_used_in_cascade": true,
+      "stage": "manual",
+      "result": {
+        "status": "review",
+        "selected": [],
+        "reason": "多人、双色或发色不明确，请人工确认",
+        "observations": [
+          {
+            "model": "pixai",
+            "color": "grey",
+            "probability": 0.80859375,
+            "scores": {
+              "black": 0.0021820068359375,
+              "blonde": 0.000804901123046875,
+              "brown": 0.00159454345703125,
+              "blue": 0.00020313262939453125,
+              "pink": 0.00021648406982421875,
+              "white": 0.21484375,
+              "grey": 0.80859375,
+              "purple": 0.0003566741943359375,
+              "red": 6.628036499023438e-05,
+              "green": 0.000553131103515625,
+              "orange": 6.628036499023438e-05,
+              "aqua": 0.000148773193359375
+            },
+            "source": "inference",
+            "ambiguous": true
+          },
+          {
+            "model": "mobilenetv3_v0_dist",
+            "color": "light",
+            "probability": 0.9972962737083435,
+            "scores": {
+              "aqua": 0.00015756937500555068,
+              "blue": 0.0002071166964014992,
+              "green": 0.00037009583320468664,
+              "brown": 0.00022654616623185575,
+              "orange": 7.192454359028488e-05,
+              "pink": 3.445777838351205e-05,
+              "purple": 0.0007975143380463123,
+              "red": 0.000556322222109884,
+              "light": 0.9972962737083435,
+              "black": 0.00028222103719599545
+            }
+          },
+          {
+            "model": "caformer_s36_v0",
+            "color": "light",
+            "probability": 0.9991866946220398,
+            "scores": {
+              "aqua": 4.5323911763262004e-05,
+              "blue": 5.775562021881342e-05,
+              "green": 0.0001081057489500381,
+              "brown": 9.041864541359246e-05,
+              "orange": 5.27054799022153e-05,
+              "pink": 2.985688297485467e-05,
+              "purple": 0.00015788643213454634,
+              "red": 0.0002147758932551369,
+              "light": 0.9991866946220398,
+              "black": 5.6377371947746724e-05
+            }
+          },
+          {
+            "model": "qwen3vl",
+            "color": "silver",
+            "multi_color": false,
+            "multiple_people": false,
+            "reason": "Hair is uniformly silver with no other colors visible.",
+            "raw": "{\n  \"color\": \"silver\",\n  \"multi_color\": false,\n  \"multiple_people\": false,\n  \"reason\": \"Hair is uniformly silver with no other colors visible.\"\n}"
+          }
+        ],
+        "candidates": [
+          {
+            "color": "light",
+            "label": "浅色组",
+            "probability": 0.9991866946220398,
+            "swatch": "#e3e1d8"
+          },
+          {
+            "color": "red",
+            "label": "红色",
+            "probability": 0.0002147758932551369,
+            "swatch": "#b95c62"
+          },
+          {
+            "color": "purple",
+            "label": "紫色",
+            "probability": 0.00015788643213454634,
+            "swatch": "#9b7bb6"
+          }
+        ],
+        "elapsed_ms": 2054.16
+      }
+    }
+  ],
+  "summary": {
+    "mobilenetv3_v0_dist": 1,
+    "manual": 1
+  },
+  "qwen_audit_seconds": 3.46
+}

@@ -1,0 +1,12 @@
+{
+  "file": "tagger-20261121-native-center-fix.zip",
+  "size": 76504562,
+  "sha256": "bea689acfaadfb85433ad8e56c9bb16f4d47776f8a76fbdf347b6803fd6240ff",
+  "verified": [
+    "tagger/web/center_runtime/inference.py",
+    "tagger/inference/qwen3vl/decode_graph.py",
+    "tagger/inference/qwen3vl/runtime.py",
+    "tagger/inference/qwen35/batching.py",
+    "tagger/inference/qwen35/runtime.py"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "package": "H:\\tagger\\dist\\tagger-20261122-scheduling-followup.zip",
+  "bytes": 76528296,
+  "sha256": "9404122b0747177af7d9273c013d262ac2ac7b486d32f2993d98ff8db521fa88",
+  "source_and_ui_match": true,
+  "worker_match": true,
+  "machine_data_excluded": true,
+  "credentials_excluded": true,
+  "tests": {
+    "tests": 143,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  }
+}

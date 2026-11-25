@@ -1,0 +1,14 @@
+--- server/fox-label/dispatch.py
++++ candidate/fox-label/dispatch.py
+@@ -1294,7 +1294,10 @@
+         from managed.parallel import next_package,required
+         package=next_package(c,__import__(__name__),device)
+         configuration=json.loads(session['config'])
+-        if any(configuration.get(key)!=value for key,value in required(c,device,package).items()):
++        from managed.parallel import permissions
++        caps = json.loads(session['capabilities'])
++        if 'configure' in caps.get('actions', []) and any(configuration.get(key)!=value
++                and permissions(caps).get(key, False) for key,value in required(c,device,package).items()):
+             return None
+     active = _row(c, "SELECT * FROM leases WHERE device_id=? AND kind='active' AND status='open'",
+                   (device["device_id"],))

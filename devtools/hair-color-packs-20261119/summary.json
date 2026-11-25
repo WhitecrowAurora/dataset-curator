@@ -1,0 +1,102 @@
+{
+  "unique_originals": 120,
+  "crops": 2,
+  "stages": {
+    "manual": 69,
+    "mobilenetv3_v0_dist": 35,
+    "qwen3vl": 7,
+    "caformer_s36_v0": 9
+  },
+  "groups": {
+    "mixed": {
+      "count": 96,
+      "stages": {
+        "manual": 55,
+        "mobilenetv3_v0_dist": 27,
+        "qwen3vl": 7,
+        "caformer_s36_v0": 7
+      },
+      "qwen_cascade_calls": 62,
+      "qwen_audit_seconds": 174.65,
+      "pixai_load_seconds": 10.09,
+      "classification_seconds": 61.58
+    },
+    "people": {
+      "count": 24,
+      "stages": {
+        "manual": 14,
+        "mobilenetv3_v0_dist": 8,
+        "caformer_s36_v0": 2
+      },
+      "qwen_cascade_calls": 14,
+      "qwen_audit_seconds": 43.39,
+      "pixai_load_seconds": 9.64,
+      "classification_seconds": 25.11
+    },
+    "crops": {
+      "count": 2,
+      "stages": {
+        "mobilenetv3_v0_dist": 1,
+        "manual": 1
+      },
+      "qwen_cascade_calls": 1,
+      "qwen_audit_seconds": 3.46,
+      "pixai_load_seconds": 9.47,
+      "classification_seconds": 12.35
+    }
+  },
+  "per_source": {
+    "z-image": {
+      "manual": 29,
+      "mobilenetv3_v0_dist": 6,
+      "qwen3vl": 2,
+      "caformer_s36_v0": 3
+    },
+    "flux-schnell": {
+      "manual": 20,
+      "mobilenetv3_v0_dist": 14,
+      "qwen3vl": 3,
+      "caformer_s36_v0": 3
+    },
+    "flux-klein": {
+      "caformer_s36_v0": 3,
+      "manual": 20,
+      "qwen3vl": 2,
+      "mobilenetv3_v0_dist": 15
+    }
+  },
+  "qwen_errors": 0,
+  "qwen_ms_median": 1781.8,
+  "sampling_download_bytes": 352321536,
+  "visual_confirmed_no_hair_accepted": [
+    4,
+    12,
+    24,
+    35,
+    44,
+    45,
+    48,
+    50,
+    51,
+    65,
+    68,
+    72,
+    73,
+    77,
+    84,
+    86,
+    87,
+    91
+  ],
+  "visual_confirmed_nonhuman_accepted": [
+    16,
+    42,
+    46,
+    69,
+    70,
+    71,
+    76,
+    79
+  ],
+  "notes": "非人工全量真值评测；Qwen 是独立审计模型，不视作真值。模型审计全跑，实际级联仍提前结束。"
+}

@@ -1,0 +1,22 @@
+{
+  "original_repo": "Minthy/ToriiGate-0.5",
+  "original_revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae",
+  "gguf_repo": "DraconicDragon/ToriiGate-0.5-GGUF",
+  "gguf_revision": "8bebf1fbf883b6d8f93ff3e8d157c615fe6b608c",
+  "files": [
+    {
+      "filename": "ToriiGate-0.5-Q6_K.gguf",
+      "path": "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-Q6_K.gguf",
+      "bytes": 3985524576,
+      "sha256": "2452c180427a127fe536e03c00cf5249f38c1378ae4d17a29e1a9f2371b5a852",
+      "download_verify_seconds": 365.42
+    },
+    {
+      "filename": "ToriiGate-0.5-fp16.mmproj.gguf",
+      "path": "E:\\dev_model\\ToriiGate-0.5\\ToriiGate-0.5-fp16.mmproj.gguf",
+      "bytes": 672423360,
+      "sha256": "e0470d4bff4e932ecf3c7bf3b937d51301722c5d17c43f7ad9dfc73b65808b9c",
+      "download_verify_seconds": 39.88
+    }
+  ]
+}

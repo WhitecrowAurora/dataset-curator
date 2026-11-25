@@ -337,7 +337,9 @@ def start_server(
                           max_num_seqs=spec["batch_size"], slots=spec["batch_size"], max_num_batched_tokens=0)
         cmd = native_command(spec, port)
         slots_used = spec["batch_size"]
-        child_env = dict(os.environ)
+        from .runtime.kernel_cache import environment as kernel_environment
+        child_env = kernel_environment()
+        child_env['PYTHONIOENCODING'] = 'utf-8'
         if spec["device"] == "cpu":
             child_env["CUDA_VISIBLE_DEVICES"] = "-1"
         elif device_index is not None:

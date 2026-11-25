@@ -156,7 +156,6 @@ export function Manifests() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="打标清单"
-        description="汇总机上已上传的标注分片，以及合成整份还差什么"
         actions={
           <button
             type="button"

@@ -1,0 +1,11 @@
+{
+  "real_manifest_excerpt": true,
+  "real_sidecar_rows": 10009,
+  "old_src_shard_ignored": true,
+  "actual_package": "shard-000017.tar",
+  "image_id": "4214020",
+  "real_tar_member_via_range": true,
+  "thumbnail": true,
+  "direct_tar_offset": true,
+  "network_calls_mocked_after_acquisition": true
+}

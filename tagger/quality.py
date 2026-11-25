@@ -44,18 +44,14 @@ class QualityPolicy:
     # "token 在预算内但字符数不够"会被字符线判成过短，白丢合格样本。
     min_chars: int = 140
     max_chars: int = 1200
-    # caption 作为**单条纯文本**送进 text encoder 时的 token 上限（infra 硬截断）。
-    # 与上面 max_chars / nl_max_tokens 都不是一回事：
-    #   max_chars           = caption 字符数（我们自己的口径）
-    #   nl_max_tokens       = 整个回复 tag+caption（LLM 口径）
-    #   caption_token_limit = caption 单独一条（text encoder 口径，512 封顶）
-    # 实测当前产出最大 299，离 512 还有余量；这条只是"哪天模型写飞了"的兜底。
+    # 兼容旧配置；最终硬上限由 text_encoding 的训练模板与真实 tokenizer 执行。
     caption_token_limit: int = 512
     min_tag_coverage: float = 0.60
     max_repeat_ratio: float = 0.35
     repeat_ngram: int = 4
 
-    # NL 长度预算（token 口径）。0 表示不检查。
+    # NL 回复长度提示（生成模型 token 口径），上限是软目标，不因超过它扣分。
+    # 最终训练文本在产物层按训练 tokenizer 的硬上限裁剪。0 表示不检查。
     # 用 token 而不是字符：中英混排时字符数的等效 token 浮动很大，
     # 32/256 这种区间只有按 token 量才对得上。
     nl_min_tokens: int = 32
@@ -416,7 +412,7 @@ class QualityGate:
                     faithful = min(faithful, 2.5)
                     signals["clip_low"] = True
 
-        # 完整度：token 预算优先，字符数兜底
+        # 完整度：过短仍扣分；超出长度软目标仅留提示，硬上限由产物层处理。
         # 只要 tag 不产 NL 的模式下，caption 为空是预期的，不扣分
         if not stripped and has_tag:
             # tag-only 模式：没有 NL 是设计如此，不按长度扣分
@@ -425,18 +421,15 @@ class QualityGate:
             completeness = 2.0
             reasons.append(f"NL 过短 ({tokens} < {p.nl_min_tokens} token)")
             signals["nl_too_short"] = True
-        elif p.nl_max_tokens and tokens and tokens > p.nl_max_tokens:
-            completeness = 2.5
-            reasons.append(f"NL 过长 ({tokens} > {p.nl_max_tokens} token)")
-            signals["nl_too_long"] = True
         elif chars < min_chars:
             completeness = max(1.0, 1.0 + 4.0 * chars / max(min_chars, 1) * 0.6)
             reasons.append(f"caption 过短 ({chars} < {min_chars})")
-        elif chars > max_chars:
-            completeness = 2.5
-            reasons.append(f"caption 过长 ({chars} > {max_chars})")
         else:
             completeness = 5.0
+        if p.nl_max_tokens and tokens and tokens > p.nl_max_tokens:
+            signals["nl_over_target"] = True
+        if chars > max_chars:
+            signals["chars_over_target"] = True
 
         # 流畅度：重复惩罚
         if rr <= p.max_repeat_ratio:

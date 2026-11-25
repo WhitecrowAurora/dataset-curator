@@ -1,0 +1,212 @@
+{
+  "width": 768,
+  "scroll": 784,
+  "overflow": [
+    {
+      "tag": "TABLE",
+      "id": "",
+      "className": "fp-table",
+      "text": "进行中的租约\n\t类型\t包\t用户\t设备\t已持有时长\t进度\t心跳\t操作\n\t\n处理中\n\tshard-000000.tar\tmember\tdevice-a\t12 秒\t\n",
+      "rect": {
+        "x": 38,
+        "y": 1288,
+        "width": 746.390625,
+        "height": 136,
+        "top": 1288,
+        "right": 784.390625,
+        "bottom": 1424,
+        "left": 38
+      }
+    },
+    {
+      "tag": "THEAD",
+      "id": "",
+      "className": "",
+      "text": "\t类型\t包\t用户\t设备\t已持有时长\t进度\t心跳\t操作\n",
+      "rect": {
+        "x": 38,
+        "y": 1288,
+        "width": 746.390625,
+        "height": 39,
+        "top": 1288,
+        "right": 784.390625,
+        "bottom": 1327,
+        "left": 38
+      }
+    },
+    {
+      "tag": "TR",
+      "id": "",
+      "className": "",
+      "text": "\t类型\t包\t用户\t设备\t已持有时长\t进度\t心跳\t操作",
+      "rect": {
+        "x": 38,
+        "y": 1288,
+        "width": 746.390625,
+        "height": 39,
+        "top": 1288,
+        "right": 784.390625,
+        "bottom": 1327,
+        "left": 38
+      }
+    },
+    {
+      "tag": "TH",
+      "id": "",
+      "className": "fp-align-right",
+      "text": "操作",
+      "rect": {
+        "x": 714.390625,
+        "y": 1288,
+        "width": 70,
+        "height": 39,
+        "top": 1288,
+        "right": 784.390625,
+        "bottom": 1327,
+        "left": 714.390625
+      }
+    },
+    {
+      "tag": "TBODY",
+      "id": "",
+      "className": "",
+      "text": "\t\n处理中\n\tshard-000000.tar\tmember\tdevice-a\t12 秒\t\n-\n\t-\t\n释放\n\n\t\n预锁\n\tshard-000001.tar\tm",
+      "rect": {
+        "x": 38,
+        "y": 1327,
+        "width": 746.390625,
+        "height": 97,
+        "top": 1327,
+        "right": 784.390625,
+        "bottom": 1424,
+        "left": 38
+      }
+    },
+    {
+      "tag": "TR",
+      "id": "",
+      "className": "",
+      "text": "\t\n处理中\n\tshard-000000.tar\tmember\tdevice-a\t12 秒\t\n-\n\t-\t\n释放",
+      "rect": {
+        "x": 38,
+        "y": 1327,
+        "width": 746.390625,
+        "height": 49,
+        "top": 1327,
+        "right": 784.390625,
+        "bottom": 1376,
+        "left": 38
+      }
+    },
+    {
+      "tag": "TD",
+      "id": "",
+      "className": "fp-align-right fp-cell-actions",
+      "text": "释放",
+      "rect": {
+        "x": 714.390625,
+        "y": 1327,
+        "width": 70,
+        "height": 49,
+        "top": 1327,
+        "right": 784.390625,
+        "bottom": 1376,
+        "left": 714.390625
+      }
+    },
+    {
+      "tag": "BUTTON",
+      "id": "",
+      "className": "fp-btn fp-btn--sm fp-rowact fp-write-action fp-btn--danger",
+      "text": "释放",
+      "rect": {
+        "x": 726.390625,
+        "y": 1335,
+        "width": 46,
+        "height": 32,
+        "top": 1335,
+        "right": 772.390625,
+        "bottom": 1367,
+        "left": 726.390625
+      }
+    },
+    {
+      "tag": "TR",
+      "id": "",
+      "className": "",
+      "text": "\t\n预锁\n\tshard-000001.tar\tmember\tdevice-a\t12 秒\t\n-\n\t-\t\n释放",
+      "rect": {
+        "x": 38,
+        "y": 1376,
+        "width": 746.390625,
+        "height": 48,
+        "top": 1376,
+        "right": 784.390625,
+        "bottom": 1424,
+        "left": 38
+      }
+    },
+    {
+      "tag": "TD",
+      "id": "",
+      "className": "fp-align-right fp-cell-actions",
+      "text": "释放",
+      "rect": {
+        "x": 714.390625,
+        "y": 1376,
+        "width": 70,
+        "height": 48,
+        "top": 1376,
+        "right": 784.390625,
+        "bottom": 1424,
+        "left": 714.390625
+      }
+    },
+    {
+      "tag": "BUTTON",
+      "id": "",
+      "className": "fp-btn fp-btn--sm fp-rowact fp-write-action fp-btn--danger",
+      "text": "释放",
+      "rect": {
+        "x": 726.390625,
+        "y": 1384,
+        "width": 46,
+        "height": 32,
+        "top": 1384,
+        "right": 772.390625,
+        "bottom": 1416,
+        "left": 726.390625
+      }
+    }
+  ],
+  "headerVar": "92px",
+  "rootVar": "92px",
+  "mobile": false,
+  "control": {
+    "x": 574,
+    "y": 8,
+    "width": 174,
+    "height": 32,
+    "top": 8,
+    "right": 748,
+    "bottom": 40,
+    "left": 574
+  },
+  "header": {
+    "x": 0,
+    "y": 0,
+    "width": 768,
+    "height": 92,
+    "top": 0,
+    "right": 768,
+    "bottom": 92,
+    "left": 0
+  },
+  "cssDebug": {
+    "parent": "lease-wrap",
+    "padding": "12px",
+    "css": [
+      "@media (min-width: 768px) and (max-width: 899px) {\n  #lease-wrap .fp-table th, #lease-wrap .fp-table td { padding-inline: 8px; }\n}"
+    ]
+  }
+}

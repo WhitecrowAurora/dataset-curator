@@ -51,6 +51,7 @@ _CLEAR_COOKIE = "fp_sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
 SESSION_HOURS = 12
 CACHE_TTL = 2.0            # 上游结果缓存，防止刷新风暴
 UPSTREAM_TIMEOUT = 6.0
+SUMMARY_TIMEOUT = 15.0    # 统计查询允许等待一次数据库短暂繁忙；其他读接口保持原超时。
 ARTIFACT_DOWNLOAD_TIMEOUT = 60.0
 ARTIFACT_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024
 ARTIFACT_DOWNLOAD_CHUNK = 64 * 1024
@@ -311,7 +312,7 @@ class Upstream:
             self._key_at = now
             return self._key
 
-    def get(self, path: str, cache: bool = True) -> dict:
+    def get(self, path: str, cache: bool = True, *, timeout: float = UPSTREAM_TIMEOUT) -> dict:
         now = time.time()
         with self._lock:
             generation = self._cache_generation
@@ -321,10 +322,12 @@ class Upstream:
                     return json.loads(hit[1])
         req = urllib.request.Request(self.base + path,
                                      headers={"Authorization": f"Bearer {self.key()}"})
+        started = time.monotonic()
         try:
-            with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 raw = r.read()
         except urllib.error.HTTPError as e:
+            self._read_note(path, started, f"http={e.code}")
             # 保留状态码与响应体：上层要靠它区分"包不存在"和"上游炸了"
             try:
                 detail = e.read()[:4096]
@@ -333,19 +336,29 @@ class Upstream:
             raise UpstreamError(f"上游返回 {e.code}", code=e.code,
                                 body=detail) from e
         except (urllib.error.URLError, socket.timeout, ConnectionError) as e:
+            reason = getattr(e, 'reason', e)
+            self._read_note(path, started, type(reason).__name__)
             raise UpstreamError(f"上游不可达：{e}") from e
+        if time.monotonic() - started >= UPSTREAM_TIMEOUT:
+            self._read_note(path, started, "slow")
         if cache:
             with self._lock:
                 if generation == self._cache_generation:
-                    self._cache[path] = (now, raw)
+                    self._cache[path] = (time.time(), raw)
         try:
             return json.loads(raw)
         except ValueError as e:
+            self._read_note(path, started, "invalid_json")
             # 上游返回了 HTML 错误页之类：当上游故障处理，别让面板 500
             raise UpstreamError(f"上游返回的不是合法 JSON（{len(raw)} 字节）") from e
 
     def summary(self) -> dict:
-        return self.get("/packages?limit=1")
+        return self.get("/packages?limit=1", timeout=SUMMARY_TIMEOUT)
+
+    @staticmethod
+    def _read_note(path: str, started: float, reason: str) -> None:
+        print(f"[upstream] GET {path.split('?', 1)[0]} {reason} "
+              f"elapsed={time.monotonic() - started:.3f}s", file=sys.stderr, flush=True)
 
     def repos(self) -> dict:
         return self.get("/repos")
@@ -2264,6 +2277,9 @@ class PanelHandler(BaseHTTPRequestHandler):
         # 404，而不是把未登录访客重定向到登录页（SPEC §1.2）。
         if path == "/admin" or path.startswith("/admin/"):
             return self._json(404, {"error": "not found"})
+        if path == '/mcp':
+            from ai_access.routes import mcp
+            return mcp(self,'GET')
         # 静态资源在登录校验之前：登录页自己也要 CSS
         if path == "/static/app.css":
             return self._static("app.css", CSS, "text/css; charset=utf-8")
@@ -2271,12 +2287,19 @@ class PanelHandler(BaseHTTPRequestHandler):
             return self._static("allocation.css", "", "text/css; charset=utf-8")
         if path == "/static/app.js":
             return self._static("app.js", JS, "application/javascript; charset=utf-8")
-        if path in ("/static/managed.js", "/static/managed.css", "/static/selection.js", "/static/selection.css", "/static/users.js"):
+        if path in ("/static/managed.js", "/static/managed-tuning.js", "/static/managed.css", "/static/selection.js", "/static/selection.css", "/static/users.js"):
             content_type = "application/javascript" if path.endswith(".js") else "text/css"
             return self._static(path.rsplit("/", 1)[1], "", content_type + "; charset=utf-8")
         if path == "/static/delivery.js":
             return self._static("delivery.js", "", "application/javascript; charset=utf-8")
-        if path in ("/static/skips.js", "/static/workspace.js", "/static/scheduling.js", "/static/source-catalog.js", "/static/allocation.js", "/static/pending-actions.js"):
+        if path == '/static/result-exports.js':
+            return self._static('result-exports.js','','application/javascript; charset=utf-8')
+        if path in ('/static/ai-access.js', '/static/ai-access.css', '/static/offline-jobs.js', '/static/offline-workorders.js', '/static/offline-workorders.css', '/static/workspace-sections.js', '/static/workspace-sections.css'):
+            return self._static(path.rsplit('/',1)[1], '', 'application/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
+        if path.startswith('/share/results/'):
+            from result_downloads import stream
+            return stream(self,self.path,public=True)
+        if path in ("/static/skips.js", "/static/execution-form.js", "/static/dispatch-template.js", "/static/dispatch-assistant.js", "/static/workspace.js", "/static/offline-imports.js", "/static/scheduling.js", "/static/source-catalog.js", "/static/artist.js", "/static/dispatch-plans.js", "/static/throughput.js", "/static/automation.js", "/static/source-conflicts.js", "/static/allocation.js", "/static/pending-actions.js"):
             return self._static(path.rsplit("/",1)[1], "", "application/javascript; charset=utf-8")
         if path == "/login":
             if self._cookie_user():
@@ -2303,6 +2326,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             return self._static("index.html", PAGE, "text/html; charset=utf-8", {
                 "{{VERSION}}": VERSION, "{{UPSTREAM}}": esc_upstream,
                 "__VER__": VERSION, "__UPSTREAM__": esc_upstream}, cache="no-store")
+        if path == '/offline-workorders':
+            return self._static('offline-workorders.html', '', 'text/html; charset=utf-8', cache='no-store')
+        if path == '/ai-access':
+            return self._static('ai-access.html', '', 'text/html; charset=utf-8', cache='no-store')
 
         if path.startswith("/api/"):
             return self._api(path)
@@ -2318,6 +2345,12 @@ class PanelHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:                      # noqa: N802
         self._refresh_cfg()
         path = urllib.parse.urlparse(self.path).path
+        if path == '/mcp':
+            from ai_access.routes import mcp
+            return mcp(self,'POST')
+        if path == '/api/ai-access':
+            from ai_access.routes import management
+            return management(self,'POST')
         if path == "/admin" or path.startswith("/admin/"):
             return self._json(404, {"error": "not found"})
         if path == "/login":
@@ -2325,7 +2358,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         if path == "/logout":
             return self._redirect("/login", {"Set-Cookie": [
                 _CLEAR_COOKIE, f"{CSRF_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax"]})
-        if path in ("/api/delivery/settings", "/api/delivery/repos", "/api/managed/commands", "/api/history/check", "/api/workspace-dispatch", "/api/offline-export", "/api/offline-cancel", "/api/scheduling", "/api/source-catalog"):
+        if path in ("/api/delivery/settings", "/api/delivery/repos", "/api/managed/commands", "/api/history/check", "/api/workspace-dispatch", "/api/offline-export", "/api/offline-cancel", "/api/offline-delete", "/api/offline-import", "/api/offline-import-upload", "/api/scheduling", "/api/source-catalog"):
             return self._write_post(path)
         if path == "/api/write/preview" or path in WRITE_PATH_ACTION:
             return self._write_post(path)
@@ -2344,6 +2377,9 @@ class PanelHandler(BaseHTTPRequestHandler):
         self._method_guard()
 
     def _method_guard(self) -> None:
+        if urllib.parse.urlparse(self.path).path=='/mcp':
+            from ai_access.routes import mcp
+            return mcp(self,self.command)
         path = urllib.parse.urlparse(self.path).path
         if path.startswith("/api/write/") or path == "/api/notifications":
             allow = "GET" if path in ("/api/write/history", "/api/write/export",
@@ -2445,15 +2481,34 @@ class PanelHandler(BaseHTTPRequestHandler):
 
     def _api(self, path: str) -> None:
         q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if path=='/api/ai-access':
+            from ai_access.routes import management
+            return management(self,'GET')
+        if path=='/api/ai-access/bridge':
+            raw=(WEB_DIR/'center-mcp.zip').read_bytes()
+            return self._send(200,raw,'application/zip',{'Content-Disposition':'attachment; filename="lulynx-center-mcp.zip"'})
         # 写路径只有 POST：GET 打写端点 → 405（前端不会这么用，但脚本可能）
         if path == "/api/write/preview" or path in WRITE_PATH_ACTION:
             return self._json(405, {"error": "方法不允许"}, {"Allow": "POST"})
         try:
+            if path == '/api/dispatch-plan':
+                from dispatch_exports import download
+                return download(self, q)
+            if path == '/api/result-exports':
+                return self._json(200,self.up.get('/admin/v1/result-exports',cache=False))
+            if path.startswith('/api/result-exports/'):
+                from result_downloads import stream
+                return stream(self,self.path)
             if path == "/api/source-catalog":
-                query = urllib.parse.urlencode({k: (q.get(k) or [''])[0] for k in ('repo', 'package', 'offset')})
-                return self._json(200, self.up.get("/admin/v1/source-catalog?" + query, cache=False))
+                query = urllib.parse.urlencode({k: (q.get(k) or [''])[0] for k in ('repo', 'package', 'offset', 'conflict_state','format')})
+                result=self.up.get("/admin/v1/source-catalog?" + query, cache=False)
+                if (q.get('format') or [''])[0]=='jsonl':
+                    raw=''.join(json.dumps(row,ensure_ascii=False)+'\n' for row in result.get('rows',[])).encode('utf-8')
+                    return self._send(200,raw,'application/x-ndjson; charset=utf-8',{'Content-Disposition':'attachment; filename="artifacts-current.jsonl"','Cache-Control':'no-store'})
+                return self._json(200, result)
             if path == "/api/scheduling":
-                return self._json(200, self.up.get("/admin/v1/scheduling", cache=False))
+                query = urllib.parse.urlencode({'summary': (q.get('summary') or [''])[0]})
+                return self._json(200, self.up.get("/admin/v1/scheduling?" + query, cache=False))
             if path == "/api/skips":
                 repo, package = self._artifact_query(q)
                 query = urllib.parse.urlencode({"repo": repo, "package": package,
@@ -2466,7 +2521,8 @@ class PanelHandler(BaseHTTPRequestHandler):
                 query=urllib.parse.urlencode({"id":(q.get("id") or [""])[0],"ws_id":(q.get("ws_id") or [""])[0],"offset":(q.get("offset") or ["0"])[0]})
                 return self._json(200,self.up.get("/admin/v1/"+path[len("/api/"):]+"?"+query,cache=False))
             if path == "/api/managed/devices":
-                query = urllib.parse.urlencode({"device_id": (q.get("device_id") or [""])[0]})
+                query = urllib.parse.urlencode({"device_id": (q.get("device_id") or [""])[0],
+                                              "summary": (q.get("summary") or [""])[0]})
                 return self._json(200, self.up.get("/admin/v1/managed/devices?" + query, cache=False))
             if path == "/api/history":
                 return self._json(200, self.up.get("/admin/v1/history", cache=False))
@@ -2901,7 +2957,8 @@ class PanelHandler(BaseHTTPRequestHandler):
         if not write_enabled(self.cfg):
             return self._write_fail(403, "面板处于只读模式", "readonly")
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if ctype != "application/json":
+        upload = path == '/api/offline-import-upload'
+        if ctype != ('application/octet-stream' if upload else 'application/json'):
             return self._write_fail(415, "Content-Type 必须是 application/json",
                                     "unsupported_media_type")
         cookie_csrf = self._csrf_token() or ""
@@ -2911,6 +2968,12 @@ class PanelHandler(BaseHTTPRequestHandler):
             return self._write_fail(403, "CSRF 校验失败", "csrf_failed")
         if not self._fetch_site_ok() or not self._origin_ok():
             return self._write_fail(403, "来源不被信任", "origin_rejected")
+        if upload:
+            if PREVIEW_LIMIT.take(f"{actor}|{self._ip()}") > 0:
+                self.close_connection = True
+                return self._json(429, {'ok': False, 'error': '操作过于频繁，请稍后再试'})
+            from offline_uploads import upload as receive_upload
+            return receive_upload(self)
         try:
             body_bytes = self._body(WRITE_MAX_BODY)
         except ValueError:
@@ -2931,12 +2994,14 @@ class PanelHandler(BaseHTTPRequestHandler):
             return self._json(429, {"ok": False, "error": "操作过于频繁，请稍后再试",
                                     "code": "rate_limited", "retry_after": secs},
                               {"Retry-After": str(secs)})
-        if path in ("/api/managed/commands", "/api/history/check", "/api/workspace-dispatch", "/api/offline-export", "/api/offline-cancel", "/api/scheduling", "/api/source-catalog"):
+        if path in ("/api/managed/commands", "/api/history/check", "/api/workspace-dispatch", "/api/offline-export", "/api/offline-cancel", "/api/offline-delete", "/api/offline-import", "/api/scheduling", "/api/source-catalog"):
             try:
                 status, raw, headers = self.up.post(
-                    "/admin/v1/" + path[len("/api/"):], data, self._write_headers())
+                    "/admin/v1/" + path[len("/api/"):], data, self._write_headers(),
+                    timeout=WRITE_SLOW_TIMEOUT if path in ('/api/offline-import', '/api/offline-export') or path == '/api/source-catalog' and data.get('action') in ('resolve_batch','configure_artist','reinject_artist','detect_artist') else WRITE_UPSTREAM_TIMEOUT)
             except UpstreamError:
                 return self._json(503, {"error": "托管服务暂时不可用，请稍后重试"})
+            if path == '/api/offline-import' and status == 200:self.up.invalidate()
             return self._pass_through(status, raw, headers)
         if preview:
             return self._write_preview(data)

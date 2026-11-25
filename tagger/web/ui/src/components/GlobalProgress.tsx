@@ -349,6 +349,9 @@ function PlanMenu() {
 /** 把一条 Activity 翻成"进度条宽度 + 数字串"。 */
 function describe(item: Activity): { pct: number; parts: string[]; hint: string } {
   const { done, total, progress, rate, eta_s } = item
+  if (item.kind === 'tag' && item.phase === 'hair') {
+    return { pct: 0, parts: [stageLabel(item)], hint: [item.detail, stageLabel(item)].filter(Boolean).join(' · ') }
+  }
 
   let pct: number
   if (progress !== null && progress !== undefined) {
@@ -375,7 +378,7 @@ function stageLabel(item: Activity): string {
   if (item.status === 'paused') return '已暂停'
   if (item.kind === 'check') return item.phase === 'read' ? '读入中' : '核对中'
   if (item.kind === 'merge') return item.phase === 'read' ? '读入中' : '写出中'
-  if (item.kind === 'tag') return item.phase === 'pack' ? '封包中' : '打标中'
+  if (item.kind === 'tag') return item.phase === 'pack' ? '封包中' : item.phase === 'hair' ? '发色复核中' : item.phase === 'nl' ? '生成描述中' : '打标中'
   return '进行中'
 }
 

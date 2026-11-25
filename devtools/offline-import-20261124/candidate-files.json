@@ -1,0 +1,18 @@
+{
+  "fox-label/server.py": "1861193384e2882d38c18c96de811626d8ff28c91d55beaa9f42a81156013f86",
+  "fox-label/delivery/reconciliation.py": "a62eb1d07f3c25b51c13629471668bc059f4dcd81aa6b501f034988e558f866a",
+  "fox-label/delivery/routes.py": "2ee8e189d394fc1d8071918ad2956baebd242e5b6381f72241cb9ecfa7e55738",
+  "fox-label/delivery/service.py": "10a38e5dcb5c252ad3f3e19838a44943651535cc950209b300010f6f57ac8dae",
+  "fox-panel/panel.py": "7156e7dc5098eac8ac8d58e7c9e47bfaf5dd5aa05a43c9d75a4b92db55e943f6",
+  "fox-panel/offline_uploads.py": "274554c4b987ff2c170fb8df78bc1eb362fb545bc67797a218582b134f090f0b",
+  "fox-panel/web/index.html": "303caaf4af8eb81127a6782d3b782e11d28b42bd5383305d62fc86ee8e3b1588",
+  "fox-panel/web/workspace.js": "b6ee6f427076f5530c351c8624e8a64331e1a0d00cc54679abe41f6f207a916d",
+  "fox-panel/web/offline-imports.js": "205c6eadec4c46069b87982cbfdb635b61057813fa28f5734f1868ee4de25baf",
+  "fox-panel/web/offline-workorders.js": "19b7b6f7a6ebb2ba012ab498d9c0a944c00d1441cf5488f9f229850ff9bc148c",
+  "fox-panel/web/offline-workorders.html": "6449e3f67741a86ca8b9975f46829a8bc08918f1f71f26db9603ca96e6b11462",
+  "fox-panel/web/offline-workorders.css": "0e4ecbd680f686bee9012616577bee9a60eb7328fd5c5d85ef46850fac7e9c4c",
+  "fox-label/offline_imports/archive.py": "4bd78dce9a8b8322ad4eb5540552cfa4f7dc58aa2146ab93c117f1527f9f17f1",
+  "fox-label/offline_imports/routes.py": "df82dd7b409a5aa101ed62ad71d990c3f026f425071de5a3766333151fc56cf1",
+  "fox-label/offline_imports/service.py": "61e04d808e16f5a2f42b93931d5cc8da36c66ae5c701ce6e6e9e831f9c6f31e1",
+  "fox-label/offline_imports/__init__.py": "48fcc05b6ac3fdf988244f42f0566987d867cb64d95736a227b63ce79846ce7b"
+}

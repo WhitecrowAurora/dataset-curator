@@ -347,14 +347,22 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
         emit("failed", item, reason)
 
     def pending_items():
+        def attach_existing(item):
+            hair = getattr(backend, "hair_batch", None)
+            payload = read_artifact(out_dir, item)
+            if hair is not None and isinstance(payload, dict):
+                hair.capture_existing(item, payload,
+                    (read_bytes or (lambda it: it.read_bytes()))(item), artifact_path(out_dir, item))
         for item in items:
             if not force and _done_ok(out_dir, item, fingerprint):
+                attach_existing(item)
                 stats.skipped += 1
                 emit("skipped", item, None)
                 continue
             status = work.claim(item.image_id, force=force)
             if status != "claimed":
                 if status == "done":
+                    attach_existing(item)
                     stats.skipped += 1
                     emit("skipped", item, None)
                 else:
@@ -363,6 +371,7 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
                 continue
             if not force and _done_ok(out_dir, item, fingerprint):
                 work.release(item.image_id)
+                attach_existing(item)
                 stats.skipped += 1
                 emit("skipped", item, None)
                 continue
@@ -373,6 +382,11 @@ def _tag_items(backend, items, *, out_dir, force, on_progress, should_stop,
             raise RuntimeError(f"图片领取已失效：{item.image_id}")
         payload = _payload(item, pred, backend, precision=precision,
                            fingerprint=fingerprint)
+        hair = getattr(backend, "hair_batch", None)
+        if hair is not None:
+            payload["_hair_scores"] = pred.hair_scores
+            hair.capture((read_bytes or (lambda it: it.read_bytes()))(item), payload,
+                         item.image_id, item.name, artifact_path=str(artifact_path(out_dir, item)))
         for attempt in range(max(0, max_retries) + 1):
             try:
                 _write_json(artifact_path(out_dir, item), payload)

@@ -1,0 +1,82 @@
+{
+  "status": "starting",
+  "error": "",
+  "engine": "native",
+  "port": 8000,
+  "url": "http://127.0.0.1:8000",
+  "pid": null,
+  "started": 1795547448.979498,
+  "ready_at": 0.0,
+  "profile": "",
+  "log_path": "H:\\tagger\\run\\logs\\native-8000-20261125-031048-52936-979498100.log",
+  "log_tail": [
+    "[web] \u542f\u52a8\u5f15\u64ce native\uff1b\u6a21\u578b qwen3vl-8b-abliterated\uff1b\u7aef\u53e3 8000"
+  ],
+  "fingerprint": {
+    "model_id": "m",
+    "model_path": "p",
+    "model_revision": "r",
+    "engine": "llamacpp",
+    "precision": "q4",
+    "max_pixels": 0,
+    "bucket_spec": "",
+    "max_model_len": 4096,
+    "max_num_seqs": 1,
+    "slots": 1,
+    "max_num_batched_tokens": 0,
+    "gpu_memory_utilization": 0.8,
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "max_tokens": 512,
+    "vllm_version": "b12188",
+    "python": "3.12.9",
+    "device": "gpu",
+    "gpu_layers": null,
+    "kv_type": "q8_0",
+    "local_media_root": ""
+  },
+  "fingerprint_path": "run\\fingerprint.json",
+  "local_ok": true,
+  "local_reason": "",
+  "overrides": {
+    "engine": "native",
+    "model": "qwen3vl-8b-abliterated",
+    "tier": null,
+    "precision": "q6",
+    "served_name": "tagger",
+    "max_model_len": 8192,
+    "max_num_seqs": null,
+    "max_num_batched_tokens": null,
+    "gpu_mem": null,
+    "local_media_root": null,
+    "slots": 2,
+    "device_index": null,
+    "model_path": null,
+    "device": "cuda:0"
+  },
+  "plan": {
+    "ok": true,
+    "tier": "low-16g",
+    "model": "qwen3vl-8b-abliterated",
+    "model_path": "H:\\tagger\\models\\nl\\qwen3vl-8b-abliterated",
+    "precision": "q6",
+    "max_pixels": 589824,
+    "max_model_len": 8192,
+    "max_num_seqs": 2,
+    "max_num_batched_tokens": 0,
+    "gpu_memory_utilization": null,
+    "vram_gb": 16.0,
+    "device": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "warnings": [
+      "\u6a21\u578b revision \u672a\u9501\u5b9a\uff08null\uff09\u3002\u6362\u7248\u672c\u4f1a\u8ba9\u6570\u636e\u96c6\u51fa\u73b0\u4ee3\u9645\u5dee\u5f02\uff0c\u6b63\u5f0f\u8dd1\u5168\u91cf\u524d\u5fc5\u987b pin \u5230 commit hash\u3002"
+    ],
+    "summary": "tier          : low-16g\ndevice        : NVIDIA GeForce RTX 4070 Ti SUPER (16.0 GiB)\nmodel         : prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX\nmodel_id      : qwen3vl-8b-abliterated@unpinned/q6\nprecision     : q6\nmax_pixels    : 589824\nmax_model_len : 8192\nmax_num_seqs  : 2\nslots         : 2\nbuckets       :\n  1x1        768\u00d7768     589824 px    576 tok  100.0%\n  4x3        864\u00d7640     552960 px    540 tok   93.8%\n  3x2        928\u00d7608     564224 px    551 tok   95.7%\n  16x9      1024\u00d7576     589824 px    576 tok  100.0%\n  9x16       576\u00d71024    589824 px    576 tok  100.0%\nwarnings      :\n  - \u6a21\u578b revision \u672a\u9501\u5b9a\uff08null\uff09\u3002\u6362\u7248\u672c\u4f1a\u8ba9\u6570\u636e\u96c6\u51fa\u73b0\u4ee3\u9645\u5dee\u5f02\uff0c\u6b63\u5f0f\u8dd1\u5168\u91cf\u524d\u5fc5\u987b pin \u5230 commit hash\u3002",
+    "quantization": null,
+    "weight_quantized": true,
+    "weights": {
+      "ok": true,
+      "gguf": "qwen3vl-8b-abliterated-Q6_K.gguf",
+      "mmproj": "mmproj-qwen3vl-8b-abliterated-F16.gguf"
+    }
+  }
+}

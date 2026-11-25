@@ -9,7 +9,7 @@ v3：**服务端派**。客户端只说"我是谁、我在干什么、干到哪�
 三条硬规则
 ----------
 1. 每设备最多 1 个 active + 1 个 prelock（同时只处理一片）。
-2. 离线经过宽限释放预锁；执行任务保留，由设备申报或管理员回收。
+2. 在线租约成功回报续期 48 小时；离线派单独立处理。
 3. 提交/完成必须带 lease_id，超时被回收后的旧设备提交一律拒绝（栅栏）。
 
 设计约定
@@ -28,6 +28,8 @@ from diagnostics import store as execution_results
 from assignments import store as package_queue
 from assignments import offline as offline_tasks
 from scheduling import leases as part_leases, policies as scheduling_policies, selection as scheduling_selection
+from scheduling import lifetime as lease_lifetime
+from scheduling import control as dispatch_control
 from scheduling.transitions import atomic as _atomic_policy, reconcile as _reconcile_policy
 import secrets
 import sqlite3
@@ -272,8 +274,7 @@ class LeaseError(Exception):
 def params() -> dict:
     """全部可调参数。
 
-    申报制（SPEC-declare）：prelock_ttl / active_ttl / stall_warn / stall_kill
-    已随自动回收一起拆除；fail_cooldown 是派工策略（失败冷却），保留。
+    在线租约统一成功上报后 48 小时过期；fail_cooldown 保留失败冷却。
     """
     def envf(name: str, default: str) -> float:
         try:
@@ -287,11 +288,9 @@ def params() -> dict:
         "quota_pct": envf("FOXLABEL_V3_QUOTA_PCT", "0.1"),
         "fast_eta_h": envf("FOXLABEL_V3_FAST_ETA_H", "12"),
         "fail_cooldown": envf("FOXLABEL_V3_FAIL_COOLDOWN", "3600"),
-        # 保险丝：租约 30 天寿命上限，正常申报永不触及（SPEC-declare §4）。
-        # 触达只可能来自时钟回拨/手工改库/真正遗忘 30 天；不自动回收，只提示。
+        # 离线派单保留原哨兵值，不依赖在线续期。
         "lease_max_h": envf("FOXLABEL_V3_LEASE_MAX_H", "720"),
-        # 48h 逾期提示阈值（SPEC-declare §3）：领取后超该时长未申报完成即逾期。
-        # 测试可设小值（如 0.001 ≈ 3.6s）模拟，无需 mock 时钟。
+        # 离线任务领取时长展示阈值；在线任务以 expires_at 为准。
         "declare_hours": envf("FOXLABEL_DECLARE_HOURS", "48"),
     }
 
@@ -363,7 +362,11 @@ def ensure_schema(c: sqlite3.Connection) -> None:
     _add_columns(c, "devices", (("queue_only", "INTEGER NOT NULL DEFAULT 0"),))
     _add_columns(c, "workspaces", (("allow_manual_claim", "INTEGER NOT NULL DEFAULT 1"),))
     package_queue.ensure_schema(c)
+    from assignments.annotation import ensure_schema as annotation_schema
+    annotation_schema(c, __import__(__name__))
     offline_tasks.ensure_schema(c)
+    from assignments.plans import ensure_schema as ensure_plans
+    ensure_plans(c)
     execution_results.ensure_schema(c)
     scheduling_policies.ensure_schema(c, __import__(__name__))
     part_leases.ensure_schema(c, __import__(__name__))
@@ -393,15 +396,14 @@ def _rows(c: sqlite3.Connection, sql: str, args=()) -> list[dict]:
 def _lease_view(c: sqlite3.Connection, lease: dict, p: dict | None = None) -> dict:
     """给客户端看的租约视图：带上下载所需的元数据。
 
-    申报制（SPEC-declare §8）：`expires_in` 保留字段但恒为 None（无 TTL）；
-    新增 `held_seconds`（已持秒数）、`overdue` / `overdue_seconds`（48h 逾期）。
+    在线任务返回真实截止时间；离线派单继续由设备申报或管理员回收。
     """
     pkg = _row(c, "SELECT p.*, r.repo_type FROM packages p JOIN repos r ON r.repo=p.repo"
                   " WHERE p.repo=? AND p.id=?", (lease["repo"], lease["pkg"])) or {}
     now = time.time()
     held = max(0.0, now - lease["issued_at"])
     declare_h = (p or params())["declare_hours"]
-    overdue_s = held - declare_h * 3600
+    overdue_s = now - lease['expires_at'] if lease['kind'] in lease_lifetime.ONLINE_KINDS else held - declare_h * 3600
     return {
         "lease_id": lease["lease_id"],
         "kind": lease["kind"],
@@ -415,11 +417,13 @@ def _lease_view(c: sqlite3.Connection, lease: dict, p: dict | None = None) -> di
         "parts": parts_of(pkg) if pkg else {"tag": "", "nl": ""},
         "missing_parts": [k for k in (missing_parts(pkg) if pkg else PARTS) if k in part_leases.parts(lease)],
         "assigned_parts": part_leases.parts(lease),
+        "annotation": json.loads(lease.get("annotation_json") or "{}"),
         "resume_supported": True,
         "source_verification_supported": True,
         "attempt": lease["attempt"],
-        # 兼容期保留字段：申报制无 TTL，恒为 None（SPEC-declare §1/§8）
-        "expires_in": None,
+        "expires_in": round(max(0, lease['expires_at'] - now), 1) if lease['kind'] in lease_lifetime.ONLINE_KINDS else None,
+        "expires_at": lease['expires_at'] if lease['kind'] in lease_lifetime.ONLINE_KINDS else None,
+        "renewal_seconds": lease_lifetime.SECONDS if lease['kind'] in lease_lifetime.ONLINE_KINDS else None,
         "held_seconds": round(held, 1),
         "overdue": overdue_s > 0,
         "overdue_seconds": round(max(0.0, overdue_s), 1),
@@ -697,6 +701,8 @@ def ws_create(c: sqlite3.Connection, ws_id, name: str = "", repos=None,
     """新建工作区。同名再建一次是**更新仓库列表**（方便脚本重跑）。"""
     ws_id = _ws_id(ws_id)
     repo_list = _ws_repos(c, repos)
+    from scheduling.repository_ownership import validate as validate_repo_owner
+    validate_repo_owner(c,ws_id,repo_list)
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     row = _row(c, "SELECT ws_id FROM workspaces WHERE ws_id=?", (ws_id,))
     if row is None:
@@ -708,8 +714,10 @@ def ws_create(c: sqlite3.Connection, ws_id, name: str = "", repos=None,
                   (str(name or ws_id), json.dumps(repo_list), note or None, ws_id))
     if repo_list:
         c.execute('DELETE FROM repo_devices WHERE ws_id=? AND repo NOT IN (' + ','.join('?' for _ in repo_list) + ')', [ws_id, *repo_list])
+        c.execute('DELETE FROM repo_users WHERE ws_id=? AND repo NOT IN (' + ','.join('?' for _ in repo_list) + ')', [ws_id, *repo_list])
     else:
         c.execute('DELETE FROM repo_devices WHERE ws_id=?', (ws_id,))
+        c.execute('DELETE FROM repo_users WHERE ws_id=?', (ws_id,))
     if allow_manual_claim is not None:
         if type(allow_manual_claim) is not bool:
             raise AuthError("是否允许手动领取必须是布尔值")
@@ -736,6 +744,12 @@ def ws_get(c: sqlite3.Connection, ws_id) -> dict:
                                 " ORDER BY device_id", (ws_id,))]
     from scheduling.allocation import members
     row['repo_devices'] = members(c, ws_id)
+    from scheduling.allocation import user_members
+    row['repo_users'] = user_members(c, ws_id)
+    row['preassignment_template'] = json.loads(row.get('preassignment_template') or '{}')
+    row['preassignment_last'] = json.loads(row.get('preassignment_last') or '{}')
+    from scheduling.repository_ownership import overlaps
+    row['legacy_repository_overlaps'] = overlaps(c,ws_id,row['repos'])
     return row
 
 
@@ -808,6 +822,7 @@ def ws_remove(c: sqlite3.Connection, ws_id) -> str:
     c.execute('UPDATE user_groups SET workspace_id=NULL WHERE workspace_id=?', (ws_id,))
     c.execute("DELETE FROM workspaces WHERE ws_id=?", (ws_id,))
     c.execute('DELETE FROM repo_devices WHERE ws_id=?', (ws_id,))
+    c.execute('DELETE FROM repo_users WHERE ws_id=?', (ws_id,))
     _reconcile_policy(c, __import__(__name__))
     return f"已删除 {ws_id}，同时解绑 {u} 个账号、{d} 台设备"
 
@@ -1097,6 +1112,7 @@ def _upsert_device(c: sqlite3.Connection, user_id: str, device_id: str, client_v
         hw_sets = ["gpu_name=?", "gpu_vram_mb=?", "mode=?", "hw_report_at=?"]
         hw_args = [hw.get("gpu_name"), hw.get("gpu_vram_mb"), hw.get("mode"), now]
     if row is None:
+        c.execute('DELETE FROM managed_policy WHERE device_id=?', (device_id,))
         c.execute("INSERT INTO devices(device_id,user_id,first_seen,last_seen,client_ver,"
                   "local_pkgs,gpu_name,gpu_vram_mb,mode,hw_report_at,parts)"
                   " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -1135,22 +1151,15 @@ def _upsert_device(c: sqlite3.Connection, user_id: str, device_id: str, client_v
     return _row(c, "SELECT * FROM devices WHERE device_id=?", (device_id,)), rebound_from
 
 
-# ---------------------------------------------------------------- 逾期计算（申报制）
-# 执行租约由设备申报或管理员回收；未开工预锁按离线宽限释放。
+# ---------------------------------------------------------------- 在线租约逾期计算
 
 
 def overdue_leases(c: sqlite3.Connection, p: dict | None = None, now: float | None = None) -> list[dict]:
-    """逾期未申报清单（服务端实时计算，SPEC-declare §3.1）。
-
-    口径：status='open' 且 kind='active' 且 held = now - issued_at
-    > declare_hours（FOXLABEL_DECLARE_HOURS，默认 48h）。按包维度取该包
-    当前 open 租约的 issued_at；无 open 租约即不逾期。
-    """
+    """尚未被后台回收的到期在线租约；持续正常上报不会标成逾期。"""
     p = p or params()
     now = time.time() if now is None else now
-    cutoff = now - p["declare_hours"] * 3600
-    rows = _rows(c, "SELECT * FROM leases WHERE status='open' AND kind='active' AND issued_at<?"
-                    " ORDER BY issued_at", (cutoff,))
+    rows = _rows(c, "SELECT * FROM leases WHERE status='open' AND kind IN ('active','prelock') AND expires_at<=?"
+                    " ORDER BY expires_at", (now,))
     out = []
     for l in rows:
         held = max(0.0, now - l["issued_at"])
@@ -1163,8 +1172,7 @@ def overdue_leases(c: sqlite3.Connection, p: dict | None = None, now: float | No
             "user_id": l["user_id"],
             "claim_at": l["issued_at"],
             "held_seconds": round(held, 1),
-            "overdue_seconds": round(held - p["declare_hours"] * 3600, 1),
-            # 保险丝越界（≥30 天）：红色特殊提示，不自动回收（SPEC-declare §4）
+            "overdue_seconds": round(now - l['expires_at'], 1),
             "fuse_exceeded": held >= max_age,
         })
     return out
@@ -1193,22 +1201,18 @@ def _free_count(c: sqlite3.Connection) -> int:
 
 
 def _pick_package(c: sqlite3.Connection, device: dict, p: dict | None = None,
-                  exclude: set | None = None) -> dict | None:
-    return scheduling_selection.pick(c, __import__(__name__), device, p, exclude)
+                  exclude: set | None = None, allow_tuning=False) -> dict | None:
+    return scheduling_selection.pick(c, __import__(__name__), device, p, exclude,allow_tuning)
 
 
 def _open_lease(c: sqlite3.Connection, device_id: str, pkg: dict, kind: str,
                 attempt: int) -> dict:
-    """开租约。申报制：无 TTL。
-
-    expires_at 列保留（schema 不动，避免迁移），写入保险丝地平线
-    issued_at + lease_max_h 作为惰性哨兵值——无任何代码路径读取它做判定
-    （SPEC-declare §0.2 要求写 NULL，但 schema 声明 NOT NULL，取不迁移的
-    兼容写法；语义一致：租约不因该值关闭）。
-    """
+    """开租约；在线任务默认 48 小时，离线任务保留独立申报语义。"""
     now = time.time()
     parts = pkg.get("dispatch_parts")
     if kind != 'offline':
+        if not dispatch_control.running(c):
+            raise LeaseError('管理员已暂停自动派单，等待管理员启动后领取')
         from scheduling.allocation import allowed
         target_device = _row(c, 'SELECT * FROM devices WHERE device_id=?', (device_id,))
         if not target_device or not allowed(c, __import__(__name__), target_device, pkg['repo']):
@@ -1221,13 +1225,16 @@ def _open_lease(c: sqlite3.Connection, device_id: str, pkg: dict, kind: str,
     if not parts or set(parts) & unavailable:
         raise LeaseError("该分项正在执行或检查中")
     lease_id = f"L{secrets.token_hex(6)}"
-    fuse_horizon = now + params()["lease_max_h"] * 3600
+    from assignments.annotation import for_package as annotation_for_package
+    annotation = annotation_for_package(c, pkg, parts)
+    fuse_horizon = now + (lease_lifetime.SECONDS if kind in lease_lifetime.ONLINE_KINDS
+                          else params()["lease_max_h"] * 3600)
     try:
         c.execute("INSERT INTO leases(lease_id,repo,pkg,user_id,device_id,kind,attempt,status,"
-                  "issued_at,expires_at,last_beat_at,last_progress_at,parts_json)"
-                  " VALUES(?,?,?,?,?,?,?,'open',?,?,?,?,?)",
+                  "issued_at,expires_at,last_beat_at,last_progress_at,parts_json,annotation_json)"
+                  " VALUES(?,?,?,?,?,?,?,'open',?,?,?,?,?,?)",
                   (lease_id, pkg["repo"], pkg["id"], _device_user(c, device_id), device_id,
-                   kind, attempt, now, fuse_horizon, now, now, json.dumps(parts)))
+                   kind, attempt, now, fuse_horizon, now, now, json.dumps(parts), json.dumps(annotation)))
     except sqlite3.IntegrityError:
         # AFTER INSERT 的分项唯一冲突不能遗留没有占用的父租约。
         c.execute('DELETE FROM leases WHERE lease_id=?', (lease_id,))
@@ -1275,6 +1282,23 @@ def _issue(c: sqlite3.Connection, device: dict, p: dict, kind: str, on_open=None
 def assign(c: sqlite3.Connection, device: dict, p: dict, on_open=None) -> dict:
     """保证这台设备有 active；在配额允许时再给一个 prelock。"""
     part_leases.release_offline(c)
+    from managed.limits import can_claim
+    if not can_claim(c,device['device_id']):
+        return None
+    if not dispatch_control.running(c):
+        return _row(c, "SELECT * FROM leases WHERE device_id=? AND kind='active' AND status='open'",
+                    (device['device_id'],))
+    from managed.store import current as managed_current
+    session=managed_current(c,device['device_id'])
+    if session and not session['released'] and not c.execute("SELECT 1 FROM leases WHERE device_id=? AND kind='active' AND status='open'",(device['device_id'],)).fetchone():
+        from managed.parallel import next_package,required
+        package=next_package(c,__import__(__name__),device)
+        configuration=json.loads(session['config'])
+        from managed.parallel import permissions
+        caps = json.loads(session['capabilities'])
+        if 'configure' in caps.get('actions', []) and any(configuration.get(key)!=value
+                and permissions(caps).get(key, False) for key,value in required(c,device,package).items()):
+            return None
     active = _row(c, "SELECT * FROM leases WHERE device_id=? AND kind='active' AND status='open'",
                   (device["device_id"],))
     if active is None:
@@ -1285,10 +1309,7 @@ def assign(c: sqlite3.Connection, device: dict, p: dict, on_open=None) -> dict:
             c.execute("UPDATE leases SET status='released',closed_reason='policy_changed' WHERE lease_id=?", (pre['lease_id'],))
             pre = None
         if pre is not None:
-            # 申报制：prelock→active 只改 kind，不重设 TTL（SPEC-declare §1.1）。
-            # expires_at 哨兵同步延到保险丝地平线，保持惰性语义一致。
-            c.execute("UPDATE leases SET kind='active', expires_at=? WHERE lease_id=?",
-                      (time.time() + p["lease_max_h"] * 3600, pre["lease_id"]))
+            c.execute("UPDATE leases SET kind='active' WHERE lease_id=?", (pre['lease_id'],))
             c.execute("UPDATE packages SET status='claimed', owner=?, claimed_at=?, updated_at=?"
                       " WHERE repo=? AND id=? AND status IN ('available','claimed')",
                       (device["user_id"], time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -1308,7 +1329,8 @@ def assign(c: sqlite3.Connection, device: dict, p: dict, on_open=None) -> dict:
         "SELECT COUNT(*) n FROM packages").fetchone()["n"] * p["quota_pct"]))
     pre = _row(c, "SELECT * FROM leases WHERE device_id=? AND kind='prelock' AND status='open'",
                (device["device_id"],))
-    if pre is None and free > threshold and active is not None:
+    from managed.limits import can_prefetch
+    if pre is None and free > threshold and active is not None and can_prefetch(c,device['device_id']):
         _issue(c, device, p, "prelock", on_open)
     return active
 
@@ -1383,12 +1405,18 @@ def _handshake_impl(c: sqlite3.Connection, p: dict, body: dict, on_open=None,
             on_event(c, "v3_device_rebind", user_id, device_id,
                      f"device={device_id}; from={rebound_from}; to={user_id}")
         on_event(c, "v3_handshake", user_id, device_id)
-    # 执行租约保持申报制，离线宽限仅处理未开工预锁。
+    # 握手成功续期有效在线租约；已到期租约由分配前清理回收。
     if "register_only" in body and type(body["register_only"]) is not bool:
         raise AuthError("register_only 必须为布尔值")
+    if not body.get('register_only'):
+        from scheduling.onboarding import join
+        join(c, __import__(__name__), device)
     active = None if body.get("register_only") else assign(c, device, p, on_open=on_open)
+    lease_lifetime.renew(c, device_id)
     open_leases = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'",
                         (device_id,))
+    open_leases = dispatch_control.offered(c, open_leases)
+    policy = _row(c, 'SELECT desired,pause_reason FROM managed_policy WHERE device_id=?', (device_id,))
     return {
         "user_id": user_id,
         "device_id": device_id,
@@ -1406,12 +1434,14 @@ def _handshake_impl(c: sqlite3.Connection, p: dict, body: dict, on_open=None,
         # 客户端拿它显示"我只做哪几个仓库"，null 与空数组要分开显示——
         # 前者是"没限制"，后者是"配了工作区但里面没有仓库"，后者必然没活干。
         "workspace": workspace_view(c, device),
+        "automation": policy,
+        "dispatch": dispatch_control.state(c),
     }
 
 
 def _heartbeat_impl(c: sqlite3.Connection, p: dict, body: dict, on_open=None,
               on_event=None) -> dict:
-    """更新设备存活并确认分项租约；离线只释放预锁，执行任务无 TTL。"""
+    """确认开放在线租约，并从本次成功上报重新计时 48 小时。"""
     if not isinstance(body, dict):
         raise AuthError("请求体必须是 JSON 对象")
     user_id = _sid(body.get("user_id"), "user_id")
@@ -1426,8 +1456,9 @@ def _heartbeat_impl(c: sqlite3.Connection, p: dict, body: dict, on_open=None,
         items = []
     if not isinstance(items, list):
         raise AuthError("leases 必须是数组")
-    part_leases.release_offline(c)
-    c.execute("UPDATE devices SET last_seen=? WHERE device_id=?", (time.time(), device_id))
+    now = time.time()
+    lease_lifetime.expire(c, now)
+    c.execute("UPDATE devices SET last_seen=? WHERE device_id=?", (now, device_id))
     renew, rejected = [], []
     for item in items:
         if not isinstance(item, dict):
@@ -1438,11 +1469,15 @@ def _heartbeat_impl(c: sqlite3.Connection, p: dict, body: dict, on_open=None,
         lease = _row(c, "SELECT status,device_id FROM leases WHERE lease_id=?", (lease_id,))
         if lease is not None and lease["status"] == "open" and lease["device_id"] == device_id:
             renew.append(lease_id)
-            c.execute("UPDATE leases SET last_beat_at=? WHERE lease_id=?", (time.time(), lease_id))
+            if isinstance(item.get('progress'), dict):
+                from managed.progress import update
+                update(c, __import__(__name__), device, lease_id, item['progress'])
         else:
             rejected.append(lease_id)
+    lease_lifetime.renew(c, device_id, now, renew)
     open_leases = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'",
                         (device_id,))
+    open_leases = dispatch_control.offered(c, open_leases)
     return {
         "renew": renew,
         "rejected": rejected,
@@ -1450,6 +1485,7 @@ def _heartbeat_impl(c: sqlite3.Connection, p: dict, body: dict, on_open=None,
         "leases": [_lease_view(c, l, p) for l in open_leases],
         "actions": [] if open_leases else ["idle"],
         "lease_id": next((l["lease_id"] for l in open_leases if l["kind"] == "active"), None),
+        "dispatch": dispatch_control.state(c),
     }
 
 
@@ -1475,11 +1511,20 @@ def _finish_impl(c: sqlite3.Connection, p: dict, body: dict, ok: bool, on_open=N
             raise AuthError("离线任务用户不匹配")
     if ok and lease['status'] in ('done', 'submitted'):
         current = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'", (device_id,))
+        current = dispatch_control.offered(c, current)
         return {'ok': True, 'replay': True, 'verification_pending': lease['status'] == 'submitted',
                 'leases': [_lease_view(c, l, p) for l in current],
                 'lease_id': next((l['lease_id'] for l in current if l['kind'] == 'active'), None)}
-    if lease["status"] != "open":
+    if ok and lease['status'] == 'local_done' and body.get('local_complete') is True:
+        current = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'", (device_id,))
+        current = dispatch_control.offered(c, current)
+        return {'ok': True, 'replay': True, 'local_complete': True,
+                'leases': [_lease_view(c,l,p) for l in current],
+                'lease_id': next((l['lease_id'] for l in current if l['kind']=='active'),None)}
+    if lease["status"] != "open" and not (ok and lease['status']=='local_done'):
         raise LeaseError(f"租约已 {lease['status']}（租约已关闭：可能已被管理员释放或已申报），拒绝处理")
+    if lease_lifetime.expired(lease):
+        raise LeaseError('租约已连续 48 小时未上报而过期，请重新领取后续做')
 
     now = time.time()
     # 申报制（SPEC-declare §8.1，契约只增）：finish 请求可带最终 progress——
@@ -1494,14 +1539,26 @@ def _finish_impl(c: sqlite3.Connection, p: dict, body: dict, ok: bool, on_open=N
         parts = {part: "done" for part in part_leases.parts(lease)}
     if set(parts) - set(part_leases.parts(lease)):
         raise LeaseError("不能提交未分配的分项")
+    if body.get('local_complete') is True and ok:
+        if any(parts.get(part) != 'done' for part in part_leases.parts(lease)):
+            raise LeaseError('本地完成必须包含所有获派分项')
+        from scheduling.pending_results import register
+        register(c,__import__(__name__),lease,body)
+        execution_results.record(c,lease_id,body,ok)
+        active=assign(c,device,p,on_open=on_open)
+        current=_rows(c,"SELECT * FROM leases WHERE device_id=? AND status='open'",(device_id,))
+        current = dispatch_control.offered(c, current)
+        return {'ok':True,'local_complete':True,'leases':[_lease_view(c,l,p) for l in current],
+                'lease_id':active['lease_id'] if active else None}
     proof = c.execute('SELECT report_json FROM package_artifacts a JOIN packages p'
                       ' ON a.repo=p.repo AND a.pkg=p.id AND a.source_sha256=p.sha256'
                       ' WHERE a.repo=? AND a.pkg=?', (lease['repo'], lease['pkg'])).fetchone()
-    verified = set(json.loads(proof['report_json'])['complete_parts']) if proof else None
+    report = json.loads(proof['report_json']) if proof else None
+    verified = set(report['complete_parts']) if report else None
     from source_catalog.store import config as source_config
     if ok and source_config(c, lease['repo'])['enabled'] and not proof:
         raise LeaseError('此仓库需要上传逐图产物后才能登记完成')
-    pending = bool(proof and json.loads(proof['report_json']).get('source_verification', {}).get('state') in ('pending', 'failed'))
+    pending = bool(report and report.get('source_verification', {}).get('state') in ('pending', 'failed'))
     if ok and not pending and verified is not None and any(v == 'done' and k not in verified for k, v in parts.items()):
         raise LeaseError('逐图验收仍有失败、漏项或冲突，不能登记分项完成')
     if ok and lease["kind"] == "prelock":
@@ -1510,13 +1567,19 @@ def _finish_impl(c: sqlite3.Connection, p: dict, body: dict, ok: bool, on_open=N
         raise LeaseError("预锁尚未开工，不能直接完成；请先完成当前 active 租约")
 
     execution_results.record(c, lease_id, body, ok)
-    if pending and lease['kind'] in ('active', 'offline'):
+    if ok:
+        from managed.limits import completed
+        from scheduling.pending_results import clear
+        completed(c,lease)
+        clear(c,lease_id)
+    if ok and pending and lease['kind'] in ('active', 'offline'):
         from source_catalog.revalidation import defer
         package = _row(c, 'SELECT * FROM packages WHERE repo=? AND id=?', (lease['repo'], lease['pkg']))
         defer(c, lease, package, body)
         part_leases.refresh(c, lease['repo'], lease['pkg'])
         active = assign(c, device, p, on_open=on_open) if lease['kind'] != 'offline' else None
         current = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'", (device_id,))
+        current = dispatch_control.offered(c, current)
         return {'ok': True, 'verification_pending': True, 'leases': [_lease_view(c, l, p) for l in current],
                 'lease_id': active['lease_id'] if active else None}
     if ok:
@@ -1591,7 +1654,7 @@ def _finish_impl(c: sqlite3.Connection, p: dict, body: dict, ok: bool, on_open=N
     open_leases = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'",
                         (device_id,))
     return {"ok": True,
-            "leases": [_lease_view(c, l, p) for l in open_leases],
+            "leases": [_lease_view(c, l, p) for l in dispatch_control.offered(c, open_leases)],
             "lease_id": active["lease_id"] if active else None}
 
 
@@ -1641,13 +1704,11 @@ def _release_device_impl(c: sqlite3.Connection, device_id: str, reason: str = "r
                          on_event=None) -> dict:
     """运维用：把这台设备手上的 open 租约全部作废，包退回公共池。"""
     leases = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'", (device_id,))
+    from scheduling.release import close
+    close(c, leases, reason, 'admin')
+    from managed.automation import intent
+    intent(c, device_id, 'stop', reason=reason)
     for lease in leases:
-        c.execute("UPDATE leases SET status='released', closed_reason=? WHERE lease_id=?",
-                  (reason[:60], lease["lease_id"]))
-        if lease["kind"] in ("active", "offline"):
-            c.execute("UPDATE packages SET status='available', owner=NULL, claimed_at=NULL,"
-                      " downloaded_at=NULL, updated_at=? WHERE repo=? AND id=?",
-                      (time.strftime("%Y-%m-%dT%H:%M:%S%z"), lease["repo"], lease["pkg"]))
         if on_event:
             on_event(c, "v3_release_device", lease["user_id"], device_id)
     c.execute("UPDATE devices SET status='offline' WHERE device_id=?", (device_id,))
@@ -1682,14 +1743,26 @@ def _release_lease_impl(c: sqlite3.Connection, body: dict, on_event=None) -> dic
         raise AuthError("请求体必须是 JSON 对象")
     device_id = _sid(body.get("device_id"), "device_id")
     lease_id = _sid(body.get("lease_id"), "lease_id")
+    user_id = _sid(body.get('user_id'), 'user_id')
     device = _row(c, "SELECT * FROM devices WHERE device_id=?", (device_id,))
     if device is None:
         raise AuthError("设备未登记")
     lease = _row(c, "SELECT * FROM leases WHERE lease_id=?", (lease_id,))
     if lease is None or lease["device_id"] != device_id:
         raise LeaseError("租约不存在或不属于这台设备")
-    if lease["status"] != "open":
-        raise LeaseError(f"租约已 {lease['status']}，无需归还")
+    if device['user_id'] != user_id or lease['user_id'] != user_id:
+        raise AuthError('租约与当前用户不匹配')
+    _require_device(c, user_id, device_id, body.get('secret'))
+    if body.get('expected_kind') and lease['kind'] != body['expected_kind']:
+        raise LeaseError('预取分片已转为当前任务，请刷新后使用停止并释放')
+    if lease['status'] != 'open':
+        left = _rows(c, "SELECT * FROM leases WHERE device_id=? AND status='open'", (device_id,))
+        return {'ok': True, 'replay': True, 'released': lease_id, 'leases': [_lease_view(c, l) for l in left]}
+    if body.get('reason') == 'user_release':
+        part_leases.release_targets(c, lease)
+    if lease['kind'] == 'active' and body.get('reason') == 'user_release':
+        from managed.automation import intent
+        intent(c, device_id, 'stop', reason='user_release')
     if lease["kind"] == "offline":
         offline_tasks.authenticate(c,__import__(__name__),lease,body.get("secret"))
     c.execute("UPDATE leases SET status='released', closed_reason=? WHERE lease_id=?",
@@ -1709,13 +1782,7 @@ def _release_lease_impl(c: sqlite3.Connection, body: dict, on_event=None) -> dic
 
 
 def _ping_impl(c: sqlite3.Connection, body: dict) -> dict:
-    """idle ping（SPEC-link §2.2）：仅更新 last_seen，不写 events、不改 status。
-
-    语义收窄（SPEC-declare §7.2）：不再是"续约保活"，仅是"我在（可能带进度）"
-    的面板三态展示信号 + 进度 EWMA 宿主（新增可选 progress 字段，契约只增）。
-    只认 device 身份；body 里除 progress 外的写入性字段都被忽略。
-    鉴权与 heartbeat 一致：认设备（_require_device），secret 在 unique 口径下只做查重。
-    """
+    """成功 ping 更新在线状态、进度并续期有效在线租约，不重新分配任务。"""
     if not isinstance(body, dict):
         raise AuthError("请求体必须是 JSON 对象")
     user_id = _sid(body.get("user_id"), "user_id")
@@ -1724,6 +1791,8 @@ def _ping_impl(c: sqlite3.Connection, body: dict) -> dict:
     if secret is not None and (not isinstance(secret, str) or len(secret) > MAX_SECRET):
         raise AuthError("secret 类型或长度非法")
     device = _require_device(c, user_id, device_id, secret)
+    lease_lifetime.expire(c)
+    lease_lifetime.renew(c, device_id)
     c.execute("UPDATE devices SET last_seen=? WHERE device_id=?", (time.time(), device_id))
     # 进度 EWMA 迁移（SPEC-declare §7.3）：heartbeat 空操作化后，idle ping 新增
     # 可选 progress 字段承接速率/分档更新（契约只增）；旧客户端不带该字段 →
@@ -1787,9 +1856,10 @@ def status(c: sqlite3.Connection, body: dict, p: dict | None = None) -> dict:
         "device_id": device_id,
         "tier": device["tier"],
         "speed": device["speed"],
-        "status": device["status"],
+        "status": derived_status(device.get("last_seen"), now),
         "last_seen": device["last_seen"],
         "last_seen_ago": round(now - (device["last_seen"] or now), 1),
+        "renewal_seconds": lease_lifetime.SECONDS,
         "leases": [_lease_view(c, l, p) for l in leases],
         # 池子余量（SPEC-parts §7，只增）：本机 Web 的「调度中心」顶部要显示
         # "总剩余 / 缺 NL / 缺 TAG"，它本来就在拉 status，顺带带回去，不另开请求。
@@ -1797,6 +1867,7 @@ def status(c: sqlite3.Connection, body: dict, p: dict | None = None) -> dict:
         # 工作区（2026-11-13，只增）：worker.py show 要能回答"我为什么没活干"。
         # handshake 已经带这份，status 是只读入口，同样不能缺。
         "workspace": workspace_view(c, device),
+        "dispatch": dispatch_control.state(c),
     }
 
 
@@ -2003,8 +2074,8 @@ def record_overdue_notices(c: sqlite3.Connection, p: dict | None = None,
     p = p or params()
     now = time.time() if now is None else now
     today = _local_date(now)
-    open_keys = {(r["repo"], r["pkg"]) for r in
-                 c.execute("SELECT repo,pkg FROM leases WHERE status='open'")}
+    overdue = overdue_leases(c, p, now)
+    open_keys = {(r['repo'], r['pkg']) for r in overdue}
     # resolve 回填：有提醒记录但已无 open 租约 → 标记已解决（不物理删除）
     resolved = 0
     for row in _rows(c, "SELECT id, repo, pkg FROM notifications"
@@ -2013,7 +2084,6 @@ def record_overdue_notices(c: sqlite3.Connection, p: dict | None = None,
             c.execute("UPDATE notifications SET resolved_at=?, resolved_by='auto'"
                       " WHERE id=? AND resolved_at IS NULL", (now, row["id"]))
             resolved += 1
-    overdue = overdue_leases(c, p, now)
     new_notices = 0
     for item in overdue:
         key = f"overdue:{item['repo']}/{item['pkg']}:{today}"

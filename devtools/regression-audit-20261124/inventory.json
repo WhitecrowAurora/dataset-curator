@@ -1,0 +1,401 @@
+{
+  "services": {
+    "lulynx-label.service": "active",
+    "lulynx-panel.service": "active"
+  },
+  "free_gib": 4.93,
+  "workspaces": [
+    {
+      "ws_id": "Dru768",
+      "name": "Dru768_仅nl打标",
+      "repos": "[\"MatchaCuratio/Anime-2024Dru768-8M\"]",
+      "note": null,
+      "created_at": "2026-11-16T15:54:25+0800",
+      "allow_manual_claim": 1,
+      "allocation_mode": "auto",
+      "preassignment_template": "{}",
+      "preassignment_last": "{}",
+      "auto_assign_at": "2026-11-21T18:49:51+0800"
+    },
+    {
+      "ws_id": "Fox768Test",
+      "name": "Fox768Test",
+      "repos": "[\"MatchaCuratio/Anime-Fox768-400k\"]",
+      "note": null,
+      "created_at": "2026-11-17T09:09:55+0800",
+      "allow_manual_claim": 1,
+      "allocation_mode": "auto",
+      "preassignment_template": "{}",
+      "preassignment_last": "{}",
+      "auto_assign_at": null
+    }
+  ],
+  "duplicate_open_parts": 0,
+  "offline_jobs": [
+    {
+      "id": "O89db903a9a93fc9f",
+      "user_id": "龙腾",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "O4822d63b8d4cbaa4",
+      "user_id": "楚心钟陌",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "O130d86e32f5b91aa",
+      "user_id": "楚心钟陌",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "O8f5ac5a6c8868402",
+      "user_id": "楚心钟陌",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "Oe7e711b6781a02ea",
+      "user_id": "楚心钟陌",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "Oa65d74765dfc4276",
+      "user_id": "楚心钟陌",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "Oe77453389f448fd5",
+      "user_id": "Draco_Echo",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "O58871d6bd72319a6",
+      "user_id": "lbsn",
+      "status": "canceled",
+      "deleted_at": null
+    },
+    {
+      "id": "Oe9f7943a13fd96cb",
+      "user_id": "Draco_Echo",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Ocf26eec78eea49a8",
+      "user_id": "juluoyes",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Ob60ec1688b167523",
+      "user_id": "Dr_Relax",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "O557e7a58bb4ee178",
+      "user_id": "楚心钟陌",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Oade35d77047181ca",
+      "user_id": "空白老大",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "O36545c67a6a60fe7",
+      "user_id": "零",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "O4c663ca65fb8a3d8",
+      "user_id": "N叔",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "O94b70d974609bf40",
+      "user_id": "lbsn",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Oeb726bcbf8499307",
+      "user_id": "lbsn",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Oa6941fed7b3b3ab2",
+      "user_id": "梦斋",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "O032595a3454ef0a1",
+      "user_id": "lbsn",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Oc7482dbac8dcac02",
+      "user_id": "lbsn",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Of31aa2277b693dc6",
+      "user_id": "lbsn",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "O3cebbee92f8bf76f",
+      "user_id": "N叔",
+      "status": "ready",
+      "deleted_at": null
+    },
+    {
+      "id": "Oc24838fc89c0c18c",
+      "user_id": "N叔",
+      "status": "ready",
+      "deleted_at": null
+    }
+  ],
+  "package_status": [
+    {
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "status": "available",
+      "tag_status": "",
+      "nl_status": "",
+      "count": 216
+    },
+    {
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "status": "available",
+      "tag_status": "",
+      "nl_status": "done",
+      "count": 4
+    },
+    {
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "status": "claimed",
+      "tag_status": "",
+      "nl_status": "",
+      "count": 623
+    },
+    {
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "status": "completed",
+      "tag_status": "done",
+      "nl_status": "done",
+      "count": 1
+    },
+    {
+      "repo": "MatchaCuratio/Anime-Fox768-400k",
+      "status": "available",
+      "tag_status": "",
+      "nl_status": "",
+      "count": 29
+    },
+    {
+      "repo": "MatchaCuratio/Anime-Fox768-400k",
+      "status": "completed",
+      "tag_status": "done",
+      "nl_status": "done",
+      "count": 1
+    }
+  ],
+  "dangling_workspace": {
+    "users": [],
+    "devices": [],
+    "user_groups": []
+  },
+  "latest_devices": [
+    {
+      "device_id": "39aa423e03a9",
+      "user_id": "juluoyes",
+      "workspace_id": "Dru768",
+      "status": "online",
+      "last_seen": 1795519852.0133238,
+      "parts": "nl"
+    },
+    {
+      "device_id": "714115626688",
+      "user_id": "梦斋",
+      "workspace_id": "Dru768",
+      "status": "online",
+      "last_seen": 1795519849.6636615,
+      "parts": "nl"
+    },
+    {
+      "device_id": "0371df252e3b",
+      "user_id": "N叔",
+      "workspace_id": null,
+      "status": "online",
+      "last_seen": 1795519849.4181254,
+      "parts": "nl"
+    },
+    {
+      "device_id": "d2f902ed88f9",
+      "user_id": "lulu",
+      "workspace_id": null,
+      "status": "online",
+      "last_seen": 1795507309.2777402,
+      "parts": "both"
+    },
+    {
+      "device_id": "8afe1fd19aa2",
+      "user_id": "龙腾",
+      "workspace_id": "Dru768",
+      "status": "online",
+      "last_seen": 1795488357.7334373,
+      "parts": "nl"
+    },
+    {
+      "device_id": "dd7fbcbe3ff2",
+      "user_id": "空白老大",
+      "workspace_id": null,
+      "status": "online",
+      "last_seen": 1795483140.7608113,
+      "parts": "nl"
+    },
+    {
+      "device_id": "3df14b5ef739",
+      "user_id": "零",
+      "workspace_id": "Dru768",
+      "status": "online",
+      "last_seen": 1795452700.8746943,
+      "parts": "nl"
+    },
+    {
+      "device_id": "a42d56053f17",
+      "user_id": "楚心钟陌",
+      "workspace_id": null,
+      "status": "online",
+      "last_seen": 1795442090.3501234,
+      "parts": "both"
+    },
+    {
+      "device_id": "bc9d0fc8a659",
+      "user_id": "Dr_Relax",
+      "workspace_id": "Dru768",
+      "status": "online",
+      "last_seen": 1795420403.0207772,
+      "parts": "nl"
+    },
+    {
+      "device_id": "9f609acff33f",
+      "user_id": "Draco_Echo",
+      "workspace_id": "Dru768",
+      "status": "online",
+      "last_seen": 1795320315.9013124,
+      "parts": "nl"
+    },
+    {
+      "device_id": "89a0fe41cb04",
+      "user_id": "00kMoe",
+      "workspace_id": null,
+      "status": "online",
+      "last_seen": 1795261090.9925373,
+      "parts": "nl"
+    }
+  ],
+  "managed_pauses": [
+    {
+      "device_id": "714115626688",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "39aa423e03a9",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "89a0fe41cb04",
+      "desired": "paused",
+      "pause_reason": "failure",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "9f609acff33f",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "0371df252e3b",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "bc9d0fc8a659",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "3df14b5ef739",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "dd7fbcbe3ff2",
+      "desired": "paused",
+      "pause_reason": "manual",
+      "changed_at": 0.0,
+      "changed_by": ""
+    },
+    {
+      "device_id": "d2f902ed88f9",
+      "desired": "paused",
+      "pause_reason": "failure",
+      "changed_at": 0.0,
+      "changed_by": ""
+    }
+  ],
+  "online_open_leases": [
+    {
+      "lease_id": "L6cdea3620417",
+      "user_id": "龙腾",
+      "device_id": "8afe1fd19aa2",
+      "repo": "MatchaCuratio/Anime-2024Dru768-8M",
+      "pkg": "shard-000019.tar",
+      "kind": "active",
+      "status": "open",
+      "expires_at": 1795661151.933607,
+      "last_beat_at": 1795488351.933607
+    }
+  ],
+  "pending_local_results": 0,
+  "plans": [
+    {
+      "id": "P658ff5e2a65ceaeb10b0db23",
+      "workspace_id": "Dru768",
+      "tasks": 41
+    }
+  ],
+  "lulynx-label.service_errors": [],
+  "lulynx-panel.service_errors": []
+}

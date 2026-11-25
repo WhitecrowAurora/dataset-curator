@@ -11,10 +11,26 @@ def dispatch(store, dispatcher, body, actor):
     with store._write_lock:
         c=store.conn()
         try:
-            result=enqueue(c,dispatcher,body,actor,
+            if body.get('action') in ('save_preassignment_template', 'clear_preassignment_template'):
+                from .templates import save
+                result = save(c, dispatcher, body)
+                store.event(c, 'preassignment_template', None, None, actor, 'workspace=' + body['ws_id'])
+                return result
+            if body.get('action') == 'cancel_preassignment':
+                from .preassignment import cancel
+                result = cancel(c, dispatcher, body)
+            elif 'users' in body:
+                from .preassignment import assign
+                result = assign(c, dispatcher, body, actor)
+            else:
+                result=enqueue(c,dispatcher,body,actor,
                            on_event=lambda conn,repo,pkg,user,did: store.event(
                                conn,"workspace_dispatch",repo,pkg,actor,f"user={user};device={did}"))
+            if 'users' in body or body.get('action') == 'cancel_preassignment':
+                store.event(c, 'user_preassignment', None, None, actor, 'assigned=' + str(len(result.get('assigned', []))))
         finally:c.close()
+    if 'users' in body or body.get('action') == 'cancel_preassignment':
+        return result
     result["starts"]=[]
     if not body.get("start"):return result
     for did in sorted({item["device_id"] for item in result["assigned"]}):

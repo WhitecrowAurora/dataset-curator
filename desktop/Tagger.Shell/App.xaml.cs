@@ -23,10 +23,10 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        MessageBox.Show(
-            $"界面线程出错了：\n\n{e.Exception.Message}\n\n详情写进了 %LOCALAPPDATA%\\Tagger\\shell.log",
-            "Tagger", MessageBoxButton.OK, MessageBoxImage.Error);
         AppLog.Write(e.Exception);
+        MessageBox.Show(
+            $"界面线程出错了：\n\n{e.Exception.Message}\n\n日志：{AppLog.LogPath}",
+            "Tagger", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }
 }

@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "duty": 0.2,
+      "last": {
+        "busy_s": 7.0,
+        "slept_s": 28.0,
+        "duty": 0.2,
+        "auto_duty": 1.0,
+        "temp_c": 0.0
+      },
+      "actual_duty": 0.2
+    },
+    {
+      "duty": 0.5,
+      "last": {
+        "busy_s": 7.0,
+        "slept_s": 7.0,
+        "duty": 0.5,
+        "auto_duty": 1.0,
+        "temp_c": 0.0
+      },
+      "actual_duty": 0.5
+    },
+    {
+      "duty": 0.7,
+      "last": {
+        "busy_s": 7.0,
+        "slept_s": 3.0,
+        "duty": 0.7,
+        "auto_duty": 1.0,
+        "temp_c": 0.0
+      },
+      "actual_duty": 0.7
+    },
+    {
+      "duty": 0.9,
+      "last": {
+        "busy_s": 7.0,
+        "slept_s": 0.778,
+        "duty": 0.9,
+        "auto_duty": 1.0,
+        "temp_c": 0.0
+      },
+      "actual_duty": 0.9
+    },
+    {
+      "duty": 1.0,
+      "last": {
+        "busy_s": 7.0,
+        "slept_s": 0.0,
+        "duty": 1.0,
+        "auto_duty": 1.0,
+        "temp_c": 0.0
+      },
+      "actual_duty": 1.0
+    }
+  ],
+  "oversleep_cap_dynamic_temperature": "passed",
+  "real_clock": [
+    {
+      "busy_s": 0.015,
+      "slept_s": 0.015,
+      "duty": 0.5,
+      "auto_duty": 1.0,
+      "temp_c": 0.0
+    },
+    {
+      "busy_s": 0.031,
+      "slept_s": 0.031,
+      "duty": 0.5,
+      "auto_duty": 1.0,
+      "temp_c": 0.0
+    },
+    {
+      "busy_s": 0.015,
+      "slept_s": 0.015,
+      "duty": 0.5,
+      "auto_duty": 1.0,
+      "temp_c": 0.0
+    },
+    {
+      "busy_s": 0.015,
+      "slept_s": 0.015,
+      "duty": 0.5,
+      "auto_duty": 1.0,
+      "temp_c": 0.0
+    }
+  ],
+  "concurrent_lanes": {
+    "lanes": 3,
+    "rounds": 12,
+    "status": "passed"
+  },
+  "steady_serial_example": {
+    "old_actual_duty": 0.5714285714285714,
+    "fixed_actual_duty": 0.7,
+    "theoretical_throughput_gain": 0.2250000000000001
+  }
+}

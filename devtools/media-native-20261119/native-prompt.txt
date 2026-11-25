@@ -1,0 +1,23 @@
+<|im_start|>system
+You are image captioning expert. Describe user's picture according to requested format and instructions.<|im_end|>
+<|im_start|>user
+<|vision_start|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|image_pad|><|vision_end|># Captioning format:
+
+Use json-style caption for given image with following structure:
+{"General" : "Here you need to come up with general/common information about picture, overall composition. Stick to shorter phrases and tags instead of long purple prose. Avoid bullets and markdown, write in plain text.",
+"character_1 (put here the name if any)" : "Description of first character."
+"character_2 (if present" : "Description for second ",
+"character_N"
+...
+"image_effects" : "Mention here effects on image if there are any distinct."
+"texts" : "Speech bubbles, bars, marks, signs etc. with texts if present, else None",
+"watermarks" : "If present",
+}
+Prefere shorter description and tags.
+
+# Characters on picture:
+Avoid to guess names for characters.<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>

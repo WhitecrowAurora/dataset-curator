@@ -1,0 +1,28 @@
+{
+  "production_copy": true,
+  "existing_online": 3,
+  "migration_grants_48h": true,
+  "last_success_history_preserved": true,
+  "migration_once": true,
+  "status_readonly": true,
+  "automatic_expiry": true,
+  "protected": {
+    "artifact_conflicts": {
+      "count": 12948,
+      "sha256": "283802c1a020a718840646717a5feb292fd6540c706b0b311e5649dd75caa56c"
+    },
+    "package_artifacts": {
+      "count": 11,
+      "sha256": "dad4f18c910c7bd9fe525aa8f773b2a4b6fc3f1564cada629120dffd15334691"
+    },
+    "skip_items": {
+      "count": 8,
+      "sha256": "8e4b5914b60ff3b2fa608035fe58170cd59db7e925b734bf873fec2966d281c4"
+    },
+    "history_checks": {
+      "count": 8,
+      "sha256": "8bbc9f55c7e369bef9d9782a7c08bd092a26d208d065bccfc1f15aa8ccdf33e5"
+    }
+  },
+  "sqlite_check": "ok"
+}

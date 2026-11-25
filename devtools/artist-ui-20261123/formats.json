@@ -1,0 +1,11 @@
+{
+  "tag": "@wlop, 1girl, solo",
+  "nl_en": "In the style of @wlop, a girl outdoors",
+  "nl_zh": "使用 @wlop 的风格，一位少女站在户外",
+  "real_client_methods": true,
+  "reinject_matches": true,
+  "server_implementation_matches": true,
+  "independent_switches": true,
+  "idempotent": true,
+  "template_selftests": 54
+}

@@ -1,0 +1,29 @@
+{
+  "production_unchanged": true,
+  "services": [
+    "active",
+    "active"
+  ],
+  "completed": [
+    "shard-000002.tar",
+    "shard-000003.tar",
+    "shard-000004.tar"
+  ],
+  "open_test_leases": [],
+  "offline_deleted_but_package_complete": true,
+  "same_resume_lease_completed": true,
+  "health": [
+    {
+      "port": 31831,
+      "path": "/health",
+      "status": 200,
+      "redirected": false
+    },
+    {
+      "port": 31832,
+      "path": "/api/meta",
+      "status": 200,
+      "redirected": false
+    }
+  ]
+}

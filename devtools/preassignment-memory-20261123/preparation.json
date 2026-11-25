@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"backup\": \"/tagger/.delete/preassignment-memory-20261123\", \"baseline\": {\"fox-label/server.py\": \"2d70ca228fa5727b471a345f9d7e15f48ee18133e691ee6f4ae516390bc75cf8\", \"fox-label/dispatch.py\": \"85e6067996918afac753e4847e642b58512d901bb2f6b80b79d0965c07b9646e\", \"fox-label/scheduling/policies.py\": \"81043876a2a4021ed5e496679841aeb35ccc313ae7cfee59c05798e2e727b378\", \"fox-label/assignments/templates.py\": \"a3cc91e94952cf33c552a0473ef663f9a76a4ab0e9593373481cb849458e50a7\", \"fox-label/assignments/preassignment.py\": \"5253c7c9492d58d483987606fa783229bb1027fcb5bc5b5b173c13bc16469ab2\", \"fox-panel/web/dispatch-assistant.js\": \"f25a28107e1ac57fd3908751589e8f342a29c5d613d908a31b088776044219f3\", \"fox-panel/web/dispatch-template.js\": \"baecc1814e96818375f567fef17c9465c1da15f6fae73cb0e0d3c2aceebaa692\", \"fox-panel/web/workspace.js\": \"26f8c0e9900a5bc999480dbeaf2a70c58c9525928024951c8fd63826832c118a\"}}\n",
+  "stderr": ""
+}

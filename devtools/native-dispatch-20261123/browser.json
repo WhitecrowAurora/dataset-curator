@@ -1,0 +1,12 @@
+{
+  "real_http": true,
+  "native_offline_export": true,
+  "nl_parts_only": true,
+  "engine_precisions": true,
+  "conditional_fields": true,
+  "desktop_mobile": true,
+  "dispatch_plan_export": true,
+  "client_nl_tag_both_modes": true,
+  "package_mode_overrides_config": true,
+  "page_errors": []
+}

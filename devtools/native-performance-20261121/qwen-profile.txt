@@ -1,0 +1,58 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                               _grouped         0.00%       0.000us         0.00%       0.000us       0.000us      73.159ms        48.66%      73.159ms     101.610us           720  
+                                                _linear         0.00%       0.000us         0.00%       0.000us       0.000us      45.912ms        30.53%      45.912ms      62.894us           730  
+                                                _values         0.00%       0.000us         0.00%       0.000us       0.000us      13.192ms         8.77%      13.192ms      36.643us           360  
+                                                _scores         0.00%       0.000us         0.00%       0.000us       0.000us      10.553ms         7.02%      10.553ms      29.314us           360  
+                                                 _write         0.00%       0.000us         0.00%       0.000us       0.000us     955.757us         0.64%     955.757us       2.655us           360  
+                                         _probabilities         0.00%       0.000us         0.00%       0.000us       0.000us     689.409us         0.46%     689.409us       1.915us           360  
+                                          _residual_rms         0.00%       0.000us         0.00%       0.000us       0.000us     594.266us         0.40%     594.266us       1.651us           360  
+                                                    _qk         0.00%       0.000us         0.00%       0.000us       0.000us     538.338us         0.36%     538.338us       1.495us           360  
+                                                   _rms         0.00%       0.000us         0.00%       0.000us       0.000us     532.543us         0.35%     532.543us       1.439us           370  
+_ZN2at6native43_GLOBAL__N__bcfaaeff_10_SoftMax_cu_0a...         0.00%       0.000us         0.00%       0.000us       0.000us     481.661us         0.32%     481.661us      48.166us            10  
+                                             _silu_gate         0.00%       0.000us         0.00%       0.000us       0.000us     454.911us         0.30%     454.911us       1.264us           360  
+_ZN14at_cuda_detail3cub6detail10radix_sort29DeviceRa...         0.00%       0.000us         0.00%       0.000us       0.000us     431.134us         0.29%     431.134us      10.778us            40  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us     407.388us         0.27%     407.388us       1.132us           360  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us     266.595us         0.18%     266.595us       3.332us            80  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us     234.399us         0.16%     234.399us       5.860us            40  
+_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOp...         0.00%       0.000us         0.00%       0.000us       0.000us     150.525us         0.10%     150.525us       3.763us            40  
+_ZN14at_cuda_detail3cub6detail4scan16DeviceScanKerne...         0.00%       0.000us         0.00%       0.000us       0.000us     115.519us         0.08%     115.519us       2.888us            40  
+_ZN2at6native65_GLOBAL__N__eb954f7a_32_DistributionE...         0.00%       0.000us         0.00%       0.000us       0.000us     111.008us         0.07%     111.008us       2.775us            40  
+_ZN2at6native29vectorized_elementwise_kernelILi4ENS0...         0.00%       0.000us         0.00%       0.000us       0.000us      92.893us         0.06%      92.893us       2.322us            40  
+                                       Memset (Unknown)         0.00%       0.000us         0.00%       0.000us       0.000us      92.100us         0.06%      92.100us       0.485us           190  
+                                            aten::copy_         0.33%     543.700us        88.66%     147.074ms       2.451ms      92.034us         0.06%      94.530us       1.576us            60  
+_ZN2at6native29vectorized_elementwise_kernelILi4EZNS...         0.00%       0.000us         0.00%       0.000us       0.000us      90.941us         0.06%      90.941us       1.137us            80  
+_ZN14at_cuda_detail3cub6detail10radix_sort29DeviceRa...         0.00%       0.000us         0.00%       0.000us       0.000us      87.392us         0.06%      87.392us       8.739us            10  
+_ZN2at6native25_assert_async_cuda_kernelIbEEvPKT_NS0...         0.00%       0.000us         0.00%       0.000us       0.000us      72.316us         0.05%      72.316us       0.904us            80  
+                                               _prepare         0.00%       0.000us         0.00%       0.000us       0.000us      71.809us         0.05%      71.809us       3.590us            20  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 165.889ms
+Self CUDA time total: 150.360ms
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                  cudaStreamSynchronize        84.63%     140.395ms        84.63%     140.395ms       3.510ms       0.000us         0.00%       0.000us       0.000us            40  
+                                        cudaGraphLaunch         7.43%      12.331ms         7.43%      12.331ms     205.515us      13.344us         0.01%      13.344us       0.222us            60  
+                                        cudaMemcpyAsync         3.13%       5.189ms         3.13%       5.189ms     103.782us       0.000us         0.00%       0.000us       0.000us            50  
+                                       cuLaunchKernelEx         1.18%       1.954ms         1.18%       1.954ms      97.705us       2.655us         0.00%       2.655us       0.133us            20  
+                                       cudaLaunchKernel         0.83%       1.378ms         0.83%       1.378ms      15.316us       0.000us         0.00%       0.000us       0.000us            90  
+                                Activity Buffer Request         0.54%     901.200us         0.54%     901.200us     901.200us       2.496us         0.00%       2.496us       2.496us             1  
+                                            aten::empty         0.35%     585.300us         0.35%     585.300us      14.632us       0.000us         0.00%       0.000us       0.000us            40  
+                                         aten::_to_copy         0.34%     564.500us        87.83%     145.693ms       4.856ms       0.000us         0.00%      24.707us       0.824us            30  
+                                            aten::copy_         0.33%     543.700us        88.66%     147.074ms       2.451ms      92.034us         0.06%      94.530us       1.576us            60  
+                                        aten::unsqueeze         0.30%     503.700us         0.32%     533.200us      13.330us       0.000us         0.00%       0.000us       0.000us            40  
+                                               aten::to         0.29%     476.600us        88.11%     146.169ms       3.654ms       0.000us         0.00%      24.707us       0.618us            40  
+                                            aten::fill_         0.28%     460.000us         1.01%       1.677ms      20.961us      70.465us         0.05%      70.465us       0.881us            80  
+                                    aten::empty_strided         0.13%     209.800us         0.13%     209.800us       6.993us       0.000us         0.00%       0.000us       0.000us            30  
+                                              aten::cat         0.12%     191.200us         0.21%     352.700us      35.270us      14.944us         0.01%      14.944us       1.494us            10  
+                                            aten::stack         0.05%      88.000us         0.59%     973.900us      97.390us       0.000us         0.00%      14.944us       1.494us            10  
+                                  cudaStreamIsCapturing         0.03%      44.800us         0.03%      44.800us       1.120us       0.000us         0.00%       0.000us       0.000us            40  
+                                       aten::as_strided         0.02%      29.500us         0.02%      29.500us       0.738us       0.000us         0.00%       0.000us       0.000us            40  
+                                  cudaDeviceSynchronize         0.01%      22.800us         0.01%      22.800us      11.400us       0.000us         0.00%       0.000us       0.000us             2  
+                                       aten::lift_fresh         0.01%      10.600us         0.01%      10.600us       0.353us       0.000us         0.00%       0.000us       0.000us            30  
+                                     aten::resolve_conj         0.00%       4.800us         0.00%       4.800us       0.480us       0.000us         0.00%       0.000us       0.000us            10  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 165.889ms
+Self CUDA time total: 150.360ms

@@ -1,0 +1,274 @@
+[
+  {
+    "batch": 1,
+    "bias": false,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 1,
+    "bias": false,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 1,
+    "bias": false,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 1,
+    "bias": false,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 0.01260737875005701,
+    "new_ms": 0.0013586985437493576
+  },
+  {
+    "batch": 1,
+    "bias": true,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 1,
+    "bias": true,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 1,
+    "bias": true,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 1,
+    "bias": true,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 0.01445837717487979,
+    "new_ms": 0.014216169804513812
+  },
+  {
+    "batch": 8,
+    "bias": false,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 8,
+    "bias": false,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 8,
+    "bias": false,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 8,
+    "bias": false,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 0.04890089798572486,
+    "new_ms": 0.0025055427673144844
+  },
+  {
+    "batch": 8,
+    "bias": true,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 8,
+    "bias": true,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 8,
+    "bias": true,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 8,
+    "bias": true,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 0.05233322490345348,
+    "new_ms": 0.053281809359180685
+  },
+  {
+    "batch": 32,
+    "bias": false,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 32,
+    "bias": false,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 32,
+    "bias": false,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 32,
+    "bias": false,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 0.18288374828691242,
+    "new_ms": 0.00680580339460377
+  },
+  {
+    "batch": 32,
+    "bias": true,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 32,
+    "bias": true,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 32,
+    "bias": true,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 32,
+    "bias": true,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 0.18674510609019887,
+    "new_ms": 0.18523397478677822
+  },
+  {
+    "batch": 256,
+    "bias": false,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 256,
+    "bias": false,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 256,
+    "bias": false,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 256,
+    "bias": false,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 1.4889340885349962,
+    "new_ms": 0.04478709706645498
+  },
+  {
+    "batch": 256,
+    "bias": true,
+    "step": 0,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 256,
+    "bias": true,
+    "step": 1,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 256,
+    "bias": true,
+    "step": 2,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true
+  },
+  {
+    "batch": 256,
+    "bias": true,
+    "step": 3,
+    "max_error": 0.0,
+    "rmse": 0.0,
+    "state_exact": true,
+    "old_ms": 1.5030115596583633,
+    "new_ms": 1.4972862958908082
+  }
+]

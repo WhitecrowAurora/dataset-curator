@@ -1,0 +1,119 @@
+{
+  "ok": true,
+  "page_errors": [],
+  "offline_stop": true,
+  "layouts": [
+    {
+      "width": 1440,
+      "scroll": 1440,
+      "control": {
+        "x": 631.34375,
+        "y": 11.5,
+        "width": 174,
+        "height": 32,
+        "top": 11.5,
+        "right": 805.34375,
+        "bottom": 43.5,
+        "left": 631.34375
+      },
+      "header": {
+        "x": 224,
+        "y": 0,
+        "width": 1216,
+        "height": 56,
+        "top": 0,
+        "right": 1440,
+        "bottom": 56,
+        "left": 224
+      }
+    },
+    {
+      "width": 1024,
+      "scroll": 1119,
+      "control": {
+        "x": 215.34375,
+        "y": 11.5,
+        "width": 174,
+        "height": 32,
+        "top": 11.5,
+        "right": 389.34375,
+        "bottom": 43.5,
+        "left": 215.34375
+      },
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 56,
+        "top": 0,
+        "right": 1024,
+        "bottom": 56,
+        "left": 0
+      }
+    },
+    {
+      "width": 768,
+      "scroll": 1107,
+      "control": {
+        "x": 36,
+        "y": 11.5,
+        "width": 174,
+        "height": 32,
+        "top": 11.5,
+        "right": 210,
+        "bottom": 43.5,
+        "left": 36
+      },
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 768,
+        "height": 56,
+        "top": 0,
+        "right": 768,
+        "bottom": 56,
+        "left": 0
+      }
+    },
+    {
+      "width": 390,
+      "scroll": 448,
+      "control": {
+        "x": 20,
+        "y": -28,
+        "width": 44,
+        "height": 156,
+        "top": -28,
+        "right": 64,
+        "bottom": 128,
+        "left": 20
+      },
+      "header": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 108,
+        "top": 0,
+        "right": 390,
+        "bottom": 108,
+        "left": 0
+      }
+    }
+  ],
+  "download": {
+    "repo": "Qwen/Qwen3.5-0.8B",
+    "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "sha256": {
+      "tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "tokenizer_config.json": "49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c",
+      "chat_template.jinja": "273d8e0e683b885071fb17e08d71e5f2a5ddfb5309756181681de4f5a1822d80"
+    }
+  },
+  "actual_built_ui": true,
+  "actual_panel_http": true,
+  "dispatch_pause_start_reload": true,
+  "fresh_official_download": true,
+  "text_count": true,
+  "hard_limit": true,
+  "saved_config_preserved": true
+}

@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"config\": {\"enabled\": true, \"directory\": \"artist\", \"revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"artist_inject\": true, \"artist_inject_tags\": true}, \"table\": {\"rows\": 8678, \"matched\": 8495, \"sha256\": \"3a6135b892c7d13c659d743768948d69f2943148733a30e67996f9cdab33aaf8\"}}\n\n{\"config\": {\"enabled\": true, \"directory\": \"artist\", \"revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"artist_inject\": true, \"artist_inject_tags\": true}, \"task_annotation\": {\"artist_table\": \"hf://datasets/MatchaCuratio/Anime-2024Dru768-8M/artist?revision=bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"artist_inject\": true, \"artist_inject_tags\": true}, \"table_rows\": 8678, \"table_matched\": 8495, \"pending\": 8614, \"production_artist_backups\": 0, \"public_static\": true}\n",
+  "stderr": ""
+}

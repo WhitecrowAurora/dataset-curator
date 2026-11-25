@@ -1,0 +1,37 @@
+{
+  "repo": "Minthy/ToriiGate-0.5",
+  "revision": "7d6b237af26e69f6ee9b381fe7beb3340cecabae",
+  "path": "E:\\dev_model\\ToriiGate-0.5\\native-metadata",
+  "files": [
+    {
+      "file": "config.json",
+      "size": 3161,
+      "sha256": "ddc63e1c717afa86c865bb5e01313d89d72bb53b97ad4a8a03ba8510c0621670"
+    },
+    {
+      "file": "preprocessor_config.json",
+      "size": 390,
+      "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"
+    },
+    {
+      "file": "video_preprocessor_config.json",
+      "size": 386,
+      "sha256": "d039cd7d88b3502a99edd455496b75b44ecf7dd3b3669748bafac37e6cecc085"
+    },
+    {
+      "file": "tokenizer_config.json",
+      "size": 16713,
+      "sha256": "3891e840d7dc5fca0af33d3a25083a735e36fe06214e3f707024820cb6b9f89c"
+    },
+    {
+      "file": "tokenizer.json",
+      "size": 12807196,
+      "sha256": "fe000e3ed39ed12b8d2481d527d44f93c65d37e87645d2dcc80d1bf9d50d2927"
+    },
+    {
+      "file": "chat_template.jinja",
+      "size": 4756,
+      "sha256": "e3b489732886f4f143b043cce0aaeb4dff5279347704d6e323fec9e1b2f53c9e"
+    }
+  ]
+}

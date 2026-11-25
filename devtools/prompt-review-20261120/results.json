@@ -1,0 +1,123 @@
+[
+  {
+    "model": "qwen",
+    "case": "after_dense",
+    "caption": "A stylized cartoon figure with a brown bob haircut, a red sleeveless top, and blue pants stands centered on a green ground against a light blue background. Eight white speech bubbles with black text surround the figure, each pointing toward it. The text in the bubbles repeats the phrase \"There is still a lot to discuss. Let us talk about it tomorrow.\" alongside different messages such as \"Meet me near the old bridge,\" \"Remember to bring your notebook,\" \"I have already packed the map,\" \"Did you remember the red ticket?,\" \"The blue parcel arrives at noon,\" \"We can walk along the river,\" \"Please wait beside the station,\" and \"The small cafe closes at sunset.\" The art style is flat vector illustration with bold black outlines and solid color fills, lacking shading or texture.",
+    "raw": "<CAPTION>\nA stylized cartoon figure with a brown bob haircut, a red sleeveless top, and blue pants stands centered on a green ground against a light blue background. Eight white speech bubbles with black text surround the figure, each pointing toward it. The text in the bubbles repeats the phrase \"There is still a lot to discuss. Let us talk about it tomorrow.\" alongside different messages such as \"Meet me near the old bridge,\" \"Remember to bring your notebook,\" \"I have already packed the map,\" \"Did you remember the red ticket?,\" \"The blue parcel arrives at noon,\" \"We can walk along the river,\" \"Please wait beside the station,\" and \"The small cafe closes at sunset.\" The art style is flat vector illustration with bold black outlines and solid color fills, lacking shading or texture.\n</CAPTION>",
+    "prompt_tokens": 1631,
+    "output_tokens": 171,
+    "elapsed": 4.73,
+    "input_sha256": "41147419df65cce5e4d01c0480e5224c17e35911e092c6f6685793b3431d74ce",
+    "copied_dialogue": [
+      "old bridge",
+      "blue parcel",
+      "notebook",
+      "river",
+      "packed the map",
+      "beside the station",
+      "red ticket",
+      "cafe",
+      "discuss",
+      "tomorrow"
+    ],
+    "placeholders": false
+  },
+  {
+    "model": "qwen",
+    "case": "short_sign",
+    "caption": "A rectangular white sign with a thin black border is centered against a solid light gray background. The sign displays two lines of text: the top line reads \"KEEP OUT\" in bold red uppercase letters, and the bottom line reads \"DO NOT ENTER\" in bold black uppercase letters. The text is horizontally centered on the sign, with the red text positioned above the black text. The sign's surface appears smooth and flat, with no visible texture or material details beyond its color and border. The composition is simple and direct, with no other objects or visual elements present in the frame.",
+    "raw": "<CAPTION>\nA rectangular white sign with a thin black border is centered against a solid light gray background. The sign displays two lines of text: the top line reads \"KEEP OUT\" in bold red uppercase letters, and the bottom line reads \"DO NOT ENTER\" in bold black uppercase letters. The text is horizontally centered on the sign, with the red text positioned above the black text. The sign's surface appears smooth and flat, with no visible texture or material details beyond its color and border. The composition is simple and direct, with no other objects or visual elements present in the frame.\n</CAPTION>",
+    "prompt_tokens": 1675,
+    "output_tokens": 125,
+    "elapsed": 3.49,
+    "input_sha256": "3460026c2372b435e0fc1147263b97e2990b63220edcd0416941d827be383358",
+    "copied_dialogue": [],
+    "placeholders": false
+  },
+  {
+    "model": "qwen",
+    "case": "no_text",
+    "caption": "A stylized, minimalist illustration depicts a human-like figure standing on a flat green ground plane under a pale blue sky. The figure has a circular head with short brown hair, two small black dots for eyes, and a simple curved line for a smile. The body is composed of a red sleeveless top, light beige arms, and dark blue pants, all rendered with thick black outlines and solid flat colors. In the upper right corner, a single yellow circle represents the sun. The composition is centered, with the figure occupying the middle of the frame and the sun positioned off-center in the sky. The lighting is even and flat, suggesting a bright daytime scene without shadows or gradients. The overall style is a digital vector drawing with clean lines and solid color fills, lacking texture or shading.",
+    "raw": "<CAPTION>\nA stylized, minimalist illustration depicts a human-like figure standing on a flat green ground plane under a pale blue sky. The figure has a circular head with short brown hair, two small black dots for eyes, and a simple curved line for a smile. The body is composed of a red sleeveless top, light beige arms, and dark blue pants, all rendered with thick black outlines and solid flat colors. In the upper right corner, a single yellow circle represents the sun. The composition is centered, with the figure occupying the middle of the frame and the sun positioned off-center in the sky. The lighting is even and flat, suggesting a bright daytime scene without shadows or gradients. The overall style is a digital vector drawing with clean lines and solid color fills, lacking texture or shading.\n</CAPTION>",
+    "prompt_tokens": 1631,
+    "output_tokens": 167,
+    "elapsed": 4.35,
+    "input_sha256": "a98b96de5e8bc96cb4fe4ca46a726f20491f7daa679a277548f4503a2b825dfa",
+    "copied_dialogue": [],
+    "placeholders": false
+  },
+  {
+    "model": "qwen",
+    "case": "after_dense_zh",
+    "caption": "一个卡通风格的简笔画人物站在绿色地面上，背景为浅蓝色，人物周围分布着多个对话气泡，每个气泡内都包含相同结构的文本，内容涉及不同场景安排与明日讨论的约定。",
+    "raw": "<CAPTION>\n一个卡通风格的简笔画人物站在绿色地面上，背景为浅蓝色，人物周围分布着多个对话气泡，每个气泡内都包含相同结构的文本，内容涉及不同场景安排与明日讨论的约定。\n</CAPTION>",
+    "prompt_tokens": 1696,
+    "output_tokens": 58,
+    "elapsed": 1.63,
+    "input_sha256": "41147419df65cce5e4d01c0480e5224c17e35911e092c6f6685793b3431d74ce",
+    "copied_dialogue": [],
+    "placeholders": false
+  },
+  {
+    "model": "qwen",
+    "case": "retry_dense",
+    "caption": "A stylized cartoon figure with a brown bob haircut, a red sleeveless top, and blue pants stands centered against a plain light blue background with a green ground plane. The figure has a simple smiling face with black dot eyes and no visible hands or feet. Surrounding the figure are multiple white speech bubbles with black text, arranged in two vertical columns on either side. Each bubble contains identical repeated text: “There is still a lot to discuss. Let us talk about it tomorrow.” The speech bubbles vary in content, including phrases like “Meet me near the old bridge,” “Remember to bring your notebook,” “I have already packed the map,” “Did you remember the red ticket?,” “The blue parcel arrives at noon,” “We can walk along the river,” “Please wait beside the station,” and “The small cafe closes at sunset.” The overall art style is flat vector illustration with bold outlines and solid colors.",
+    "raw": "<CAPTION>\nA stylized cartoon figure with a brown bob haircut, a red sleeveless top, and blue pants stands centered against a plain light blue background with a green ground plane. The figure has a simple smiling face with black dot eyes and no visible hands or feet. Surrounding the figure are multiple white speech bubbles with black text, arranged in two vertical columns on either side. Each bubble contains identical repeated text: “There is still a lot to discuss. Let us talk about it tomorrow.” The speech bubbles vary in content, including phrases like “Meet me near the old bridge,” “Remember to bring your notebook,” “I have already packed the map,” “Did you remember the red ticket?,” “The blue parcel arrives at noon,” “We can walk along the river,” “Please wait beside the station,” and “The small cafe closes at sunset.” The overall art style is flat vector illustration with bold outlines and solid colors.\n</CAPTION>",
+    "prompt_tokens": 1583,
+    "output_tokens": 195,
+    "elapsed": 3.53,
+    "input_sha256": "41147419df65cce5e4d01c0480e5224c17e35911e092c6f6685793b3431d74ce",
+    "copied_dialogue": [
+      "old bridge",
+      "blue parcel",
+      "notebook",
+      "river",
+      "packed the map",
+      "beside the station",
+      "red ticket",
+      "cafe",
+      "discuss",
+      "tomorrow"
+    ],
+    "placeholders": false
+  },
+  {
+    "model": "torii",
+    "case": "after_dense",
+    "caption": "A single stylized boy stands centered against a simple background with a light blue sky and green ground. The image is a parody of the 'The Matrix' scene with multiple speech bubbles surrounding him, repeating a phrase about discussing something later. The art style is minimalistic with flat colors and clean lines, emphasizing the meme-like nature of the scene. A boy with a round head and simple facial features: two small black dot eyes and a curved line smile. He has short brown bowl-cut hair. He wears a sleeveless red shirt and blue pants. His arms hang straight down at his sides. He stands upright and faces forward, embodying a calm and neutral demeanor. Eight speech bubbles surround the boy, each containing the repeated phrase: 'There is still a lot to discuss. Let us talk about it tomorrow.'",
+    "raw": "<CAPTION>A single stylized boy stands centered against a simple background with a light blue sky and green ground. The image is a parody of the 'The Matrix' scene with multiple speech bubbles surrounding him, repeating a phrase about discussing something later. The art style is minimalistic with flat colors and clean lines, emphasizing the meme-like nature of the scene. A boy with a round head and simple facial features: two small black dot eyes and a curved line smile. He has short brown bowl-cut hair. He wears a sleeveless red shirt and blue pants. His arms hang straight down at his sides. He stands upright and faces forward, embodying a calm and neutral demeanor. Eight speech bubbles surround the boy, each containing the repeated phrase: 'There is still a lot to discuss. Let us talk about it tomorrow.'</CAPTION>",
+    "prompt_tokens": 1660,
+    "output_tokens": 180,
+    "elapsed": 2.24,
+    "input_sha256": "41147419df65cce5e4d01c0480e5224c17e35911e092c6f6685793b3431d74ce",
+    "copied_dialogue": [
+      "discuss",
+      "tomorrow"
+    ],
+    "placeholders": false
+  },
+  {
+    "model": "torii",
+    "case": "short_sign",
+    "caption": "A simple rectangular sign with a white background and a thin black border is centered against a plain light gray background. The sign features bold text in two lines, with the top line in red and the bottom line in black, creating a clear and straightforward warning. The top line of text reads 'KEEP OUT' in uppercase red letters, while the bottom line reads 'DO NOT ENTER' in uppercase black letters. The image includes a small artist signature 'kuro_suto_sukii' discreetly placed, indicating the creator.",
+    "raw": "<CAPTION>A simple rectangular sign with a white background and a thin black border is centered against a plain light gray background. The sign features bold text in two lines, with the top line in red and the bottom line in black, creating a clear and straightforward warning. The top line of text reads 'KEEP OUT' in uppercase red letters, while the bottom line reads 'DO NOT ENTER' in uppercase black letters. The image includes a small artist signature 'kuro_suto_sukii' discreetly placed, indicating the creator.</CAPTION>",
+    "prompt_tokens": 1704,
+    "output_tokens": 121,
+    "elapsed": 1.69,
+    "input_sha256": "3460026c2372b435e0fc1147263b97e2990b63220edcd0416941d827be383358",
+    "copied_dialogue": [],
+    "placeholders": false
+  },
+  {
+    "model": "torii",
+    "case": "no_text",
+    "caption": "A single character stands centered on a flat green field under a pale blue sky with a bright yellow sun in the upper right corner. The scene is rendered in a minimalist, flat-color style with no shading or texture, creating a simple and clean cartoonish aesthetic. The character faces forward with arms relaxed at their sides, conveying a calm and neutral mood. A boy with a large round head and smooth brown bowl-cut hair. His face is minimalistic, featuring small solid black dot eyes and a simple curved line for a closed-mouth smile. He wears a sleeveless red shirt with a square neckline and dark blue pants. His arms hang straight down at his sides, and his posture is upright and relaxed. The character is drawn in a flat-color style with no shading or highlights, emphasizing a clean and simple look.",
+    "raw": "<CAPTION>A single character stands centered on a flat green field under a pale blue sky with a bright yellow sun in the upper right corner. The scene is rendered in a minimalist, flat-color style with no shading or texture, creating a simple and clean cartoonish aesthetic. The character faces forward with arms relaxed at their sides, conveying a calm and neutral mood. A boy with a large round head and smooth brown bowl-cut hair. His face is minimalistic, featuring small solid black dot eyes and a simple curved line for a closed-mouth smile. He wears a sleeveless red shirt with a square neckline and dark blue pants. His arms hang straight down at his sides, and his posture is upright and relaxed. The character is drawn in a flat-color style with no shading or highlights, emphasizing a clean and simple look.</CAPTION>",
+    "prompt_tokens": 1660,
+    "output_tokens": 174,
+    "elapsed": 3.88,
+    "input_sha256": "a98b96de5e8bc96cb4fe4ca46a726f20491f7daa679a277548f4503a2b825dfa",
+    "copied_dialogue": [],
+    "placeholders": false
+  }
+]

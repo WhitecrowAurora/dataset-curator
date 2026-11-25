@@ -30,9 +30,37 @@ CREATE INDEX IF NOT EXISTS idx_managed_commands ON managed_commands(session_id,s
 
 def ensure_schema(c):
     c.executescript(SCHEMA)
+    from .recovery import SCHEMA as recovery_schema
+    c.executescript(recovery_schema)
+    from .limits import SCHEMA as limits_schema
+    from scheduling.pending_results import SCHEMA as pending_schema
+    c.executescript(limits_schema + pending_schema)
     c.execute("CREATE TABLE IF NOT EXISTS managed_policy (device_id TEXT PRIMARY KEY,desired TEXT NOT NULL)")
     if 'automation_error' not in {r['name'] for r in c.execute('PRAGMA table_info(managed_sessions)')}:
         c.execute("ALTER TABLE managed_sessions ADD COLUMN automation_error TEXT NOT NULL DEFAULT ''")
+    for field in ('pause_reason',):
+        if field not in {r['name'] for r in c.execute('PRAGMA table_info(managed_policy)')}:
+            c.execute(f"ALTER TABLE managed_policy ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
+            # 旧失败暂停可在新会话恢复；显式管理员暂停仍保留。
+            c.execute("UPDATE managed_policy SET pause_reason=CASE WHEN EXISTS ("
+                      " SELECT 1 FROM managed_commands c JOIN managed_sessions s USING(session_id)"
+                      " WHERE s.device_id=managed_policy.device_id AND c.action='start'"
+                      " AND c.status IN ('failed','canceled') AND c.created_at=("
+                      " SELECT MAX(c2.created_at) FROM managed_commands c2 JOIN managed_sessions s2 USING(session_id)"
+                      " WHERE s2.device_id=managed_policy.device_id AND c2.action IN ('start','stop')))"
+                      " THEN 'failure' ELSE 'manual' END WHERE desired='paused'")
+            c.execute("UPDATE managed_policy SET desired='running',pause_reason='' WHERE pause_reason='failure' AND EXISTS ("
+                      " SELECT 1 FROM managed_commands c JOIN managed_sessions s USING(session_id)"
+                      " WHERE s.device_id=managed_policy.device_id AND c.action='start' AND c.status='failed'"
+                      " AND c.error='设备已在执行，请先停止' AND c.created_at=("
+                      " SELECT MAX(c2.created_at) FROM managed_commands c2 JOIN managed_sessions s2 USING(session_id)"
+                      " WHERE s2.device_id=managed_policy.device_id AND c2.action IN ('start','stop')))")
+
+
+    fields = {r['name'] for r in c.execute('PRAGMA table_info(managed_policy)')}
+    for field, definition in [('changed_at', 'REAL NOT NULL DEFAULT 0'), ('changed_by', "TEXT NOT NULL DEFAULT ''")]:
+        if field not in fields:
+            c.execute(f'ALTER TABLE managed_policy ADD COLUMN {field} {definition}')
 
 
 @contextmanager
@@ -69,6 +97,10 @@ def retire(c, session, now):
 def poll(store, dispatch, body):
     session, seq, state, caps, results = report(body)
     cfg = config(body.get("config", {}))
+    from .recovery import request, apply
+    requested, request_id = request(body)
+    if requested and (body.get('released', False) or state.get('history_only')):
+        raise ManagedError('退出或历史核对不能请求开始接单')
     user = identifier(body.get("user_id"), "user_id")
     device_id = identifier(body.get("device_id"), "device_id")
     secret = body.get("secret")
@@ -109,7 +141,9 @@ def poll(store, dispatch, body):
                 c.execute("INSERT INTO managed_devices VALUES(?,?) ON CONFLICT(device_id)"
                           " DO UPDATE SET session_id=excluded.session_id", (device_id, session))
                 if state.get('history_only') is not True:
-                    c.execute("INSERT OR IGNORE INTO managed_policy VALUES(?,'running')", (device_id,))
+                    c.execute("INSERT INTO managed_policy(device_id,desired,pause_reason) VALUES(?,'running','')"
+                              " ON CONFLICT(device_id) DO UPDATE SET desired='running',pause_reason=''"
+                              " WHERE managed_policy.pause_reason='failure'", (device_id,))
                     c.execute('UPDATE devices SET queue_only=0 WHERE device_id=?', (device_id,))
         for result in results:
             if (not isinstance(result, dict) or not isinstance(result.get("id"), str)
@@ -128,11 +162,15 @@ def poll(store, dispatch, body):
                     c.execute("UPDATE history_checks SET status=?,updated_at=? WHERE check_id=? AND status='pending'",
                               (result["status"], now, cmd["id"]))
                 if cmd["action"] == "start" and result["status"] in ("failed", "canceled"):
-                    automation.intent(c, device_id, "stop")
+                    if result.get('error') != '设备已在执行，请先停止':
+                        later = c.execute("SELECT 1 FROM managed_commands WHERE session_id=? AND seq>? AND action IN ('start','stop')", (session, cmd['seq'])).fetchone()
+                        if not later:
+                            automation.intent(c, device_id, "stop", reason="failure")
         c.execute("UPDATE managed_sessions SET last_seen=?,last_seq=?,state=?,config=?,capabilities=?"
                   " WHERE session_id=?", (now, seq, dump(state), dump(cfg), dump(caps), session))
-        if old and json.loads(old['config']) != cfg:
-            raise ManagedError('托管执行配置已锁定，请先退出托管', 409)
+        if old:
+            from .tuning import confirmed
+            confirmed(c, session, seq, json.loads(old['config']), cfg)
         if "inventory" in body:
             from history.store import inventory
             inventory(c, device_id, body["inventory"], now)
@@ -154,11 +192,41 @@ def poll(store, dispatch, body):
                 from scheduling.transitions import reconcile
                 reconcile(c, dispatch)
             c.execute("UPDATE devices SET last_seen=? WHERE device_id=?", (now, device_id))
+            from scheduling.lifetime import renew
+            renew(c, device_id, now)
             c.execute("UPDATE users SET last_seen=? WHERE user_id=?", (now, user))
             device = dict(c.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone())
-            automation.arrange(c, dispatch, session, device, state, cfg, caps, now)
+            from .limits import configure as configure_limit, view as limit_view
+            configure_limit(c,device_id,state.get('execution_limit'))
+            if requested:
+                applied = apply(c, store, session, device_id, requested, request_id, seq, now, user)
+                if applied and state.get('status') == 'failed':
+                    state = {**state, 'status': 'managed_idle'}
+                response['intent_applied'] = requested
+                response['intent_id'] = request_id
+            from scheduling.onboarding import join
+            from scheduling.control import state as dispatch_state, running as dispatch_running, cancel_starts
+            if not dispatch_running(c):
+                cancel_starts(c, now)
+            from .stopping import reconcile as reconcile_stop
+            reconcile_stop(c, session, device_id, state, now)
+            policy = c.execute('SELECT * FROM managed_policy WHERE device_id=?', (device_id,)).fetchone()
+            workspace = (join(c, dispatch, device) if policy and policy['desired'] == 'running'
+                         else dispatch.workspace_of(c, device))
+            response['waiting_reason'] = automation.arrange(c, dispatch, session, device, state, cfg, caps, now)
+            policy = c.execute('SELECT * FROM managed_policy WHERE device_id=?', (device_id,)).fetchone()
+            from .parallel import sources, current_package
+            from scheduling.pending_results import view as pending_view
+            current_session=current(c,device_id)
+            response['automation'] = {**(dict(policy) if policy else {}),
+                'dispatch': dispatch_state(c),
+                'limit': limit_view(c, device_id),
+                'pending_results': pending_view(c,device_id),
+                'parallel': sources(c,current_session,device,current_package(c,device_id)),
+                'workspace': {'ws_id': workspace['ws_id'], 'name': workspace['name']} if workspace else None}
             response["commands"] = [{"id": r["id"], "seq": r["seq"], "session_id": session,
-                                     "action": r["action"], "config": json.loads(r["config"])}
+                                     "action": r["action"], "config": json.loads(r["config"]),
+                                     "canceled": r['status'] == 'canceled'}
                 for r in c.execute("SELECT * FROM managed_commands WHERE session_id=? AND seq>?"
                                    " ORDER BY seq LIMIT 16", (session, seq))]
         if not body.get('released', False):
@@ -190,13 +258,31 @@ def view(store, device_id=None):
             item = {k: row[k] for k in ("device_id", "user_id", "session_id", "last_seen", "last_seq")}
             item.update(online=online, released=bool(row["released"]), enabled=enabled,
                         last_seen_ago=round(now - row["last_seen"], 1))
-            policy = c.execute("SELECT desired FROM managed_policy WHERE device_id=?", (row['device_id'],)).fetchone()
-            item.update(desired=policy['desired'] if policy else 'paused', automation_error=row['automation_error'])
+            policy = c.execute("SELECT * FROM managed_policy WHERE device_id=?", (row['device_id'],)).fetchone()
+            item.update(**(dict(policy) if policy else {'desired': 'paused'}), automation_error=row['automation_error'])
             item.update({k: json.loads(row[k]) for k in ("state", "config", "capabilities")})
+            item['leases'] = [{"lease_id": lease['lease_id'], "repo": lease['repo'], "package": lease['pkg'],
+                               "kind": lease['kind'], "beat_ago_s": round(now - (lease['last_beat_at'] or lease['issued_at']), 1),
+                               "progress": json.loads(lease['progress_json'] or '{}')}
+                              for lease in c.execute("SELECT * FROM leases WHERE device_id=? AND status='open'", (row['device_id'],))]
+            from .progress import current as current_progress
+            item['state']['progress'] = current_progress(item['state'], item['leases'])
+            item['completed_packages'] = c.execute("SELECT COUNT(*) FROM leases WHERE device_id=? AND status IN ('done','submitted')", (row['device_id'],)).fetchone()[0]
+            from .limits import view as limit_view
+            from scheduling.pending_results import view as pending_view
+            item['execution_limit'] = limit_view(c,row['device_id'])
+            item['pending_results'] = pending_view(c,row['device_id'])
+            from .parallel import sources, current_package
+            import dispatch
+            device=dict(c.execute('SELECT * FROM devices WHERE device_id=?',(row['device_id'],)).fetchone())
+            item['parallel'] = sources(c,row,device,current_package(c,row['device_id']))
+            item['waiting_reason'] = automation.reason(c, row['session_id'], dict(c.execute('SELECT * FROM devices WHERE device_id=?', (row['device_id'],)).fetchone()), item['state'])
             item["commands"] = [command_view(r) for r in c.execute(
                 "SELECT * FROM managed_commands WHERE session_id=? ORDER BY seq DESC LIMIT 64", (row["session_id"],))]
             devices.append(item)
-        return {"ok": True, "protocol_version": 1, "online_seconds": ONLINE_SECONDS, "devices": devices}
+        from scheduling.control import state as dispatch_state
+        return {"ok": True, "protocol_version": 1, "online_seconds": ONLINE_SECONDS,
+                "devices": devices, "dispatch": dispatch_state(c)}
     finally:
         c.close()
 
@@ -208,19 +294,25 @@ def enqueue(store, body, actor):
     session = identifier(body.get("session_id"), "session_id")
     command_id = identifier(body.get("id"), "id")
     action, changes = body.get("action"), body.get("config", {})
-    if action not in ("start", "stop", "check") or not isinstance(changes, dict):
+    force = body.get('force_continue', False)
+    if type(force) is not bool or force and action != 'start':
+        raise ManagedError('强制继续只能用于开始指令')
+    if action not in ("start", "stop", "check", "configure", "probe") or not isinstance(changes, dict):
         raise ManagedError("本机配置已锁定，仅支持开始、停止和历史检查")
     if action in ("start", "stop") and changes:
         raise ManagedError("本机配置已锁定，启停指令不能修改执行环境")
     if action == "check":
-        if set(changes) != {"check_id", "candidate_id", "repo", "package", "size", "sha256"}:
+        required = {"check_id", "candidate_id", "repo", "package", "size", "sha256"}
+        if not required <= set(changes) or set(changes)-required-{'annotation','reinject'}:
             raise ManagedError("历史检查指令格式不正确")
+        if changes.get('reinject','') not in ('','missing','force') or ('reinject' in changes and not changes.get('annotation')):
+            raise ManagedError('画师补注入指令缺少有效画师表配置')
     if action == "stop" and changes:
         raise ManagedError("停止指令不能包含配置")
     now = time.time()
     with transaction(store) as c:
         active = current(c, device_id)
-        if not active or active["session_id"] != session or active["released"]:
+        if not active or active["session_id"] != session or active["released"] and action != 'stop':
             raise ManagedError("设备已经退出或更换托管会话，请刷新", 409)
         replay = c.execute("SELECT * FROM managed_commands WHERE id=?", (command_id,)).fetchone()
         if replay:
@@ -231,22 +323,44 @@ def enqueue(store, body, actor):
                         " WHERE d.device_id=? AND d.user_id=?", (device_id, active["user_id"])).fetchone()
         if not dev or dev["status"] in ("archived", "blocked") or dev["user_status"] != "active":
             raise ManagedError("设备或用户已停用", 403)
-        if now - active["last_seen"] > ONLINE_SECONDS:
+        offline = bool(active['released'] or now - active['last_seen'] > ONLINE_SECONDS)
+        if offline and action != 'stop':
             raise ManagedError("设备已离线，等待重新上报后再操作", 409)
+        if action == 'start':
+            from scheduling.control import running
+            if not running(c) and not c.execute("SELECT 1 FROM leases WHERE device_id=?"
+                                                " AND kind='active' AND status='open'", (device_id,)).fetchone():
+                raise ManagedError('管理员已暂停自动派单，请先启动自动派单', 409)
+        if action == 'stop':
+            from .stopping import cancel_starts
+            cancel_starts(c, session, now)
+        if force and 'force_continue' not in json.loads(active['capabilities']).get('actions', []):
+            raise ManagedError('此客户端尚不支持强制继续，请升级客户端；也可先使用开始打标', 409)
         pending = c.execute("SELECT * FROM managed_commands WHERE session_id=? AND status IN ('queued','accepted')"
                             " ORDER BY seq", (session,)).fetchall()
-        if len(pending) >= 64:
+        if len(pending) >= 64 and action != 'stop':
             raise ManagedError("待处理指令过多，请等待设备执行", 409)
+        if action in ('configure', 'probe'):
+            from .tuning import validate
+            validate(action, changes, json.loads(active['config']), json.loads(active['capabilities']))
+            if pending:
+                raise ManagedError("已有待执行指令，请等待确认后再调整", 409)
         if action == "start":
             config({}, json.loads(active["config"]), json.loads(active["capabilities"]))
+            if force:
+                from .recovery import apply
+                apply(c, store, session, device_id, 'force_start', command_id, active['last_seq'], now, actor)
         seq = active["next_seq"]
         c.execute("INSERT INTO managed_commands(id,session_id,seq,action,config,actor,created_at,updated_at)"
                   " VALUES(?,?,?,?,?,?,?,?)", (command_id, session, seq, action, dump(changes), actor, now, now))
         c.execute("UPDATE managed_sessions SET next_seq=next_seq+1 WHERE session_id=?", (session,))
         if action in ('start','stop'):
-            automation.intent(c, device_id, action)
+            if action == 'start':
+                from .limits import restart
+                restart(c, device_id)
+            automation.intent(c, device_id, action, reason=f'admin:{actor}')
             c.execute("UPDATE managed_sessions SET automation_error='' WHERE session_id=?", (session,))
         store.event(c, "managed_command", None, None, actor,
                     f"device={device_id}; session={session}; seq={seq}; action={action}; id={command_id}")
         row = c.execute("SELECT * FROM managed_commands WHERE id=?", (command_id,)).fetchone()
-        return {"ok": True, "command": command_view(row)}
+        return {"ok": True, "command": command_view(row), "pending_reconnect": offline}

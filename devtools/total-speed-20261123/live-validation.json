@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"admin_api\": true, \"integrity\": true, \"result\": {\"ok\": true, \"rate_per_s\": 0.0, \"tag_rate_per_s\": 0.0, \"nl_rate_per_s\": 0.0, \"active_devices\": 0, \"reporting_devices\": 0, \"unreported_devices\": 0, \"stale_devices\": 0, \"sampled_at\": 1795421807.2225833, \"progress_timeout_s\": 120, \"basis\": \"\\u6700\\u8fd1\\u4e0a\\u62a5\\u7684\\u5206\\u7247\\u5185\\u5e73\\u5747\\u6709\\u6548\\u901f\\u5ea6\\uff1b\\u603b\\u901f\\u5ea6\\u6309\\u56fe\\u7247\\u7ed3\\u7b97\\uff0c\\u4e0d\\u91cd\\u590d\\u7d2f\\u52a0 TAG \\u4e0e NL\"}}\n",
+  "stderr": ""
+}

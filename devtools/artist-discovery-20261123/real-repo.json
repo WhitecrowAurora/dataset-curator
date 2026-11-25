@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"real_hf\": true, \"configuration_unchanged\": true, \"result\": {\"ok\": true, \"repo\": \"MatchaCuratio/Anime-2024Dru768-8M\", \"revision\": \"bfb2dce5c795b9797604e376c02dd7bec1b9904c\", \"total_packages\": 844, \"candidates\": [{\"directory\": \"artist\", \"files\": 844, \"matched\": 844, \"missing\": 0, \"missing_samples\": [], \"ambiguous\": 0, \"sample_package\": \"shard-000000.tar\", \"sample_path\": \"artist/shard-000000.artist.parquet\", \"validated\": true, \"error\": \"\", \"sample_rows\": 9472, \"sample_with_artist\": 9195}], \"root_files\": 0, \"message\": \"\\u6309\\u5206\\u7247\\u6587\\u4ef6\\u540d\\u5339\\u914d\\uff1b\\u6bcf\\u4e2a\\u76ee\\u5f55\\u6821\\u9a8c\\u4e00\\u4efd\\u6837\\u672c\\uff0c\\u5176\\u4f59\\u5206\\u8868\\u5728\\u9886\\u53d6\\u65f6\\u6821\\u9a8c\"}}\n",
+  "stderr": ""
+}

@@ -92,7 +92,8 @@ def linear(x, packed, out, rows, width, *, kind="Q6_K_REPACKED"):
 
     m = x.numel() // width
     ada = torch.cuda.get_device_capability(x.device) == (8, 9)
-    if kind in ("Q4_K_REPACKED", "Q5_K_REPACKED", "Q6_K_REPACKED") and m in (4, 8) and ada:
+    if ada and ((kind == "Q6_K_REPACKED" and 4 <= m <= 16)
+                or (kind in ("Q4_K_REPACKED", "Q5_K_REPACKED") and m in (4, 8))):
         from .q6_pipeline import linear as staged_linear
 
         return staged_linear(x, packed, out, rows, width, kind=kind)
@@ -113,7 +114,8 @@ def linear_group(x, matrices, outputs):
     m, width = x.numel() // x.shape[-1], x.shape[-1]
     kind = matrices[0].kernel_kind
     ada = torch.cuda.get_device_capability(x.device) == (8, 9)
-    if kind in ("Q4_K_REPACKED", "Q5_K_REPACKED", "Q6_K_REPACKED") and m in (4, 8) and ada:
+    if ada and ((kind == "Q6_K_REPACKED" and 4 <= m <= 16)
+                or (kind in ("Q4_K_REPACKED", "Q5_K_REPACKED") and m in (4, 8))):
         from .q6_pipeline import linear_group as staged_group
 
         return staged_group(x, matrices, outputs)

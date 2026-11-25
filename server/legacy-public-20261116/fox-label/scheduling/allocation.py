@@ -6,6 +6,8 @@ def ensure_schema(c, dispatch):
     dispatch._add_columns(c, 'workspaces', (("allocation_mode", "TEXT NOT NULL DEFAULT 'auto'"),))
     c.execute('CREATE TABLE IF NOT EXISTS repo_devices (ws_id TEXT NOT NULL,repo TEXT NOT NULL,'
               'device_id TEXT NOT NULL,PRIMARY KEY(ws_id,repo,device_id))')
+    c.execute('CREATE TABLE IF NOT EXISTS repo_users (ws_id TEXT NOT NULL,repo TEXT NOT NULL,'
+              'user_id TEXT NOT NULL,PRIMARY KEY(ws_id,repo,user_id))')
 
 
 def members(c, ws_id):
@@ -15,12 +17,20 @@ def members(c, ws_id):
     return result
 
 
+def user_members(c, ws_id):
+    result = {}
+    for row in c.execute('SELECT repo,user_id FROM repo_users WHERE ws_id=? ORDER BY repo,user_id', (ws_id,)):
+        result.setdefault(row['repo'], []).append(row['user_id'])
+    return result
+
+
 def forget(c, *, device_id=None, user_id=None):
     if device_id is not None:
         c.execute('DELETE FROM repo_devices WHERE device_id=?', (device_id,))
         from .identities import retire_device
         retire_device(c, device_id)
     if user_id is not None:
+        c.execute('DELETE FROM repo_users WHERE user_id=?', (user_id,))
         from .identities import retire_device
         for row in c.execute('SELECT device_id FROM devices WHERE user_id=?', (user_id,)).fetchall():
             retire_device(c, row['device_id'])
@@ -36,6 +46,8 @@ def permissions(c, device, ws):
         manual.update(json.loads(row['repos']))
     assigned = {r['repo'] for r in c.execute('SELECT repo FROM repo_devices WHERE ws_id=? AND device_id=?',
                                             (ws['ws_id'] if ws else '', device['device_id']))}
+    assigned.update(r['repo'] for r in c.execute('SELECT repo FROM repo_users WHERE ws_id=? AND user_id=?',
+                                                (ws['ws_id'] if ws else '', device['user_id'])))
     return manual, assigned
 
 
@@ -69,5 +81,19 @@ def update(c, dispatch, body):
     c.execute('DELETE FROM repo_devices WHERE ws_id=?', (ws['ws_id'],))
     c.executemany('INSERT INTO repo_devices VALUES(?,?,?)',
                   [(ws['ws_id'], repo, did) for repo, ids in mapping.items() for did in ids])
+    if 'repo_users' in body:
+        users = body['repo_users']
+        if not isinstance(users, dict) or any(repo not in ws['repos'] for repo in users):
+            raise ValueError('用户仓库分配格式不正确')
+        from assignments.preassignment import user_workspace
+        for repo, ids in users.items():
+            if not isinstance(ids, list) or any(not isinstance(user, str) for user in ids) or len(set(ids)) != len(ids):
+                raise ValueError('用户列表格式不正确')
+            for user in ids:
+                if user_workspace(c, dispatch, user)['ws_id'] != ws['ws_id']:
+                    raise ValueError('用户不属于当前工作区')
+        c.execute('DELETE FROM repo_users WHERE ws_id=?', (ws['ws_id'],))
+        c.executemany('INSERT INTO repo_users VALUES(?,?,?)',
+                      [(ws['ws_id'], repo, user) for repo, ids in users.items() for user in ids])
     from .transitions import reconcile
     return reconcile(c, dispatch)

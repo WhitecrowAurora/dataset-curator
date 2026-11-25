@@ -1,0 +1,13 @@
+{
+  "real_http": true,
+  "assistant_four_steps": true,
+  "no_device_member": true,
+  "native_and_concurrency": true,
+  "nl_hides_tag": true,
+  "artist_option": true,
+  "human_readable_review": true,
+  "dark_mobile": true,
+  "main_user_preassignment": true,
+  "zero_lease_before_claim": true,
+  "page_errors": []
+}

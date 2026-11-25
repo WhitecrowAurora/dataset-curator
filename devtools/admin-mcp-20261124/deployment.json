@@ -1,0 +1,1 @@
+{"ok": true, "services": ["active", "active"], "health": {"ok": true, "repos": 2, "packages": 874}, "files": 18, "backup": "/tagger/.delete/admin-mcp-20261124/before", "bridge_download": true}

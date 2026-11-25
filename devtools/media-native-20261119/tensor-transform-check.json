@@ -1,0 +1,14 @@
+[
+  {
+    "name": "A_log",
+    "inverse_max_error": 0.0
+  },
+  {
+    "name": "dt_bias",
+    "inverse_max_error": 0.0
+  },
+  {
+    "name": "conv1d.weight",
+    "inverse_max_error": 0.0
+  }
+]

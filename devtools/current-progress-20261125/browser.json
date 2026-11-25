@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "errors": [],
+  "widths": [
+    {
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "width": 768,
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "overflow": false
+    }
+  ],
+  "stale_idle_hidden": true,
+  "held_lease_still_visible": true,
+  "running_progress_visible": true,
+  "admin_idle_hidden": true
+}

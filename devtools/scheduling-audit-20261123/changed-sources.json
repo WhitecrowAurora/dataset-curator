@@ -1,0 +1,20 @@
+[
+  "tagger/artifacts.py",
+  "tagger/center_delivery.py",
+  "tagger/client.py",
+  "tagger/center_runtime/artifacts.py",
+  "tagger/center_runtime/snapshot.py",
+  "tagger/hair_color/artifact_update.py",
+  "tagger/inference/parts_resume.py",
+  "tagger/inference/part_artifacts.py",
+  "tagger/verification/local.py",
+  "tagger/web/center.py",
+  "tagger/web/center_runtime/controller.py",
+  "tagger/web/center_runtime/history_discovery.py",
+  "tagger/web/center_runtime/history_inventory.py",
+  "tagger/web/center_runtime/offline.py",
+  "tagger/web/center_runtime/offline_process.py",
+  "tagger/web/center_runtime/offline_results.py",
+  "tagger/web/center_runtime/workspace.py",
+  "devtools/release/build_worker.py"
+]

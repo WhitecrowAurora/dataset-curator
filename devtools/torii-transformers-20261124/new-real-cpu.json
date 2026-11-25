@@ -1,0 +1,166 @@
+{
+  "torch": "2.13.0+cu132",
+  "transformers": "5.22.2",
+  "runtime_version": "lulynx-qwen35-0.4",
+  "device": "cpu",
+  "cases": [
+    {
+      "case": "single",
+      "results": [
+        {
+          "text": "{\"General\": \"A minimalist digital artwork featuring a single stylized character standing outdoors",
+          "token_ids": [
+            4754,
+            14965,
+            763,
+            328,
+            32,
+            69235,
+            7143,
+            27390,
+            15963,
+            264,
+            3074,
+            46596,
+            1452,
+            3542,
+            10932,
+            32420
+          ],
+          "prompt_tokens": 835,
+          "finish_reason": "length"
+        }
+      ],
+      "timings": {
+        "prefill_s": 33.62498609999966,
+        "decode_s": 20.68457000000126,
+        "total_s": 56.41282090000095,
+        "prompt_tokens": 835,
+        "tokens": 16,
+        "batch_size": 1
+      }
+    },
+    {
+      "case": "batch",
+      "results": [
+        {
+          "text": "{\"General\": \"A minimalist digital artwork featuring a single stylized character standing outdoors",
+          "token_ids": [
+            4754,
+            14965,
+            763,
+            328,
+            32,
+            69235,
+            7143,
+            27390,
+            15963,
+            264,
+            3074,
+            46596,
+            1452,
+            3542,
+            10932,
+            32420
+          ],
+          "prompt_tokens": 835,
+          "finish_reason": "length"
+        },
+        {
+          "text": "{\"General\": \"A minimalist digital artwork featuring a single stylized character standing outdoors",
+          "token_ids": [
+            4754,
+            14965,
+            763,
+            328,
+            32,
+            69235,
+            7143,
+            27390,
+            15963,
+            264,
+            3074,
+            46596,
+            1452,
+            3542,
+            10932,
+            32420
+          ],
+          "prompt_tokens": 835,
+          "finish_reason": "length"
+        }
+      ],
+      "timings": {
+        "prefill_s": 59.18800799999735,
+        "decode_s": 14.461394100002508,
+        "total_s": 77.60885559999952,
+        "prompt_tokens": 1670,
+        "tokens": 32,
+        "batch_size": 2
+      }
+    },
+    {
+      "case": "lengths",
+      "results": [
+        {
+          "text": "{\"General\": \"A minimalist digital artwork",
+          "token_ids": [
+            4754,
+            14965,
+            763,
+            328,
+            32,
+            69235,
+            7143,
+            27390
+          ],
+          "prompt_tokens": 835,
+          "finish_reason": "length"
+        },
+        {
+          "text": "{\"General\": \"A minimalist digital artwork featuring a single styl",
+          "token_ids": [
+            4754,
+            14965,
+            763,
+            328,
+            32,
+            69235,
+            7143,
+            27390,
+            15963,
+            264,
+            3074,
+            46596
+          ],
+          "prompt_tokens": 835,
+          "finish_reason": "length"
+        }
+      ],
+      "timings": {
+        "prefill_s": 65.11017039999933,
+        "decode_s": 13.93221000000267,
+        "total_s": 82.49878199999876,
+        "prompt_tokens": 1670,
+        "tokens": 20,
+        "batch_size": 2
+      }
+    }
+  ],
+  "load_s": 92.72691810000106,
+  "runtime_info": {
+    "device": "cpu",
+    "precision": "torch.float32",
+    "linear_attention": "torch",
+    "max_pixels": 1000000,
+    "libraries": {
+      "torch": "2.13.0+cu132",
+      "transformers": "5.22.2"
+    },
+    "batch_size": 2
+  },
+  "finite_logits": true,
+  "prompt_tokens": 835,
+  "logits_argmax": 4754,
+  "passed": true
+}

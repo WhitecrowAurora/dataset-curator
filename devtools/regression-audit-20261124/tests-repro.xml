@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="12" skipped="0" tests="16" time="28.930" timestamp="2026-11-24T19:39:30.088819+08:00" hostname="DESKTOP-310LLIR"><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[None-None]" time="2.150"><failure message="AssertionError: assert {} == {'concurrency': 8}&#10;  &#10;  Right contains 1 more item:&#10;  {'concurrency': 8}&#10;  Use -v to get more diff">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:34: in test_mcp_preassignment_honors_template_and_explicit_overrides
+    assert json.loads(row[0]) == (template['config'] if configuration is None else configuration)
+E   AssertionError: assert {} == {'concurrency': 8}
+E     
+E     Right contains 1 more item:
+E     {'concurrency': 8}
+E     Use -v to get more diff</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[None-configuration1]" time="2.629"><failure message="AssertionError: assert {} == {'artist_inject': True}&#10;  &#10;  Right contains 1 more item:&#10;  {'artist_inject': True}&#10;  Use -v to get more diff">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:37: in test_mcp_preassignment_honors_template_and_explicit_overrides
+    assert (json.loads(row[0]) if row else {}) == expected
+E   AssertionError: assert {} == {'artist_inject': True}
+E     
+E     Right contains 1 more item:
+E     {'artist_inject': True}
+E     Use -v to get more diff</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[None-configuration2]" time="2.614"><failure message="AssertionError: assert {} == {'artist_inject': True}&#10;  &#10;  Right contains 1 more item:&#10;  {'artist_inject': True}&#10;  Use -v to get more diff">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:37: in test_mcp_preassignment_honors_template_and_explicit_overrides
+    assert (json.loads(row[0]) if row else {}) == expected
+E   AssertionError: assert {} == {'artist_inject': True}
+E     
+E     Right contains 1 more item:
+E     {'artist_inject': True}
+E     Use -v to get more diff</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[annotation1-None]" time="2.673"><failure message="AssertionError: assert {} == {'concurrency': 8}&#10;  &#10;  Right contains 1 more item:&#10;  {'concurrency': 8}&#10;  Use -v to get more diff">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:34: in test_mcp_preassignment_honors_template_and_explicit_overrides
+    assert json.loads(row[0]) == (template['config'] if configuration is None else configuration)
+E   AssertionError: assert {} == {'concurrency': 8}
+E     
+E     Right contains 1 more item:
+E     {'concurrency': 8}
+E     Use -v to get more diff</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[annotation1-configuration1]" time="2.665" /><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[annotation1-configuration2]" time="2.882" /><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[annotation2-None]" time="2.847"><failure message="AssertionError: assert {} == {'concurrency': 8}&#10;  &#10;  Right contains 1 more item:&#10;  {'concurrency': 8}&#10;  Use -v to get more diff">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:34: in test_mcp_preassignment_honors_template_and_explicit_overrides
+    assert json.loads(row[0]) == (template['config'] if configuration is None else configuration)
+E   AssertionError: assert {} == {'concurrency': 8}
+E     
+E     Right contains 1 more item:
+E     {'concurrency': 8}
+E     Use -v to get more diff</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[annotation2-configuration1]" time="2.416" /><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_mcp_preassignment_honors_template_and_explicit_overrides[annotation2-configuration2]" time="2.309" /><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[complete_parts-None]" time="0.592"><failure message="TypeError: 'NoneType' object is not iterable">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:59: in test_invalid_local_completion_is_rejected_without_state_changes
+    finish(store, body)
+H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_simplify.py:30: in finish
+    try:return D.finish(c,D.params(),body,ok=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1992: in finish
+    return _finish_impl(c, p, body, ok, on_open, on_event)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1530: in _finish_impl
+    register(c,__import__(__name__),lease,body)
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:23: in register
+    or not set(assigned).issubset(report.get('complete_parts', []))):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: 'NoneType' object is not iterable</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[complete_parts-1]" time="0.552"><failure message="TypeError: 'int' object is not iterable">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:59: in test_invalid_local_completion_is_rejected_without_state_changes
+    finish(store, body)
+H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_simplify.py:30: in finish
+    try:return D.finish(c,D.params(),body,ok=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1992: in finish
+    return _finish_impl(c, p, body, ok, on_open, on_event)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1530: in _finish_impl
+    register(c,__import__(__name__),lease,body)
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:23: in register
+    or not set(assigned).issubset(report.get('complete_parts', []))):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: 'int' object is not iterable</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[complete_parts-value2]" time="0.622"><failure message="Failed: DID NOT RAISE LeaseError">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:58: in test_invalid_local_completion_is_rejected_without_state_changes
+    with pytest.raises(D.LeaseError):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE LeaseError</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[parts-None]" time="0.565"><failure message="AttributeError: 'NoneType' object has no attribute 'get'">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:59: in test_invalid_local_completion_is_rejected_without_state_changes
+    finish(store, body)
+H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_simplify.py:30: in finish
+    try:return D.finish(c,D.params(),body,ok=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1992: in finish
+    return _finish_impl(c, p, body, ok, on_open, on_event)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1530: in _finish_impl
+    register(c,__import__(__name__),lease,body)
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:26: in register
+    counts = report.get('parts', {}).get(part, {})
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'get'</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[parts-value4]" time="0.609"><failure message="AttributeError: 'list' object has no attribute 'get'">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:59: in test_invalid_local_completion_is_rejected_without_state_changes
+    finish(store, body)
+H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_simplify.py:30: in finish
+    try:return D.finish(c,D.params(),body,ok=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1992: in finish
+    return _finish_impl(c, p, body, ok, on_open, on_event)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1530: in _finish_impl
+    register(c,__import__(__name__),lease,body)
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:26: in register
+    counts = report.get('parts', {}).get(part, {})
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'list' object has no attribute 'get'</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[parts.nl-None]" time="0.601"><failure message="AttributeError: 'NoneType' object has no attribute 'get'">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:59: in test_invalid_local_completion_is_rejected_without_state_changes
+    finish(store, body)
+H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_simplify.py:30: in finish
+    try:return D.finish(c,D.params(),body,ok=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1992: in finish
+    return _finish_impl(c, p, body, ok, on_open, on_event)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1530: in _finish_impl
+    register(c,__import__(__name__),lease,body)
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:27: in register
+    if (any(type(counts.get(k)) is not int or counts[k] &lt; 0 for k in ('success','excluded','failed','missing'))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:27: in &lt;genexpr&gt;
+    if (any(type(counts.get(k)) is not int or counts[k] &lt; 0 for k in ('success','excluded','failed','missing'))
+                 ^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'get'</failure></testcase><testcase classname="backend.smoke.tagger-regression-audit-20261124.test_cross_regression" name="test_invalid_local_completion_is_rejected_without_state_changes[parts.nl-value6]" time="0.548"><failure message="AttributeError: 'list' object has no attribute 'get'">H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_cross_regression.py:59: in test_invalid_local_completion_is_rejected_without_state_changes
+    finish(store, body)
+H:\lulynx-trainer\backend\smoke\tagger-regression-audit-20261124\test_simplify.py:30: in finish
+    try:return D.finish(c,D.params(),body,ok=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1992: in finish
+    return _finish_impl(c, p, body, ok, on_open, on_event)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\dispatch.py:1530: in _finish_impl
+    register(c,__import__(__name__),lease,body)
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:27: in register
+    if (any(type(counts.get(k)) is not int or counts[k] &lt; 0 for k in ('success','excluded','failed','missing'))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+server\legacy-public-20261116\fox-label\scheduling\pending_results.py:27: in &lt;genexpr&gt;
+    if (any(type(counts.get(k)) is not int or counts[k] &lt; 0 for k in ('success','excluded','failed','missing'))
+                 ^^^^^^^^^^
+E   AttributeError: 'list' object has no attribute 'get'</failure></testcase></testsuite></testsuites>

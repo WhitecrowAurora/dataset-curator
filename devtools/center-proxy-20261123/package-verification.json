@@ -1,0 +1,22 @@
+{
+  "package": "H:\\tagger\\dist\\tagger-20261123-center-proxy.zip",
+  "bytes": 76533145,
+  "sha256": "83e78ed4c1646b013e6bef7b5302ddc5cd8bd1defa00ac469b8f414e589513ab",
+  "source_and_ui_match": true,
+  "worker_match": true,
+  "machine_data_excluded": true,
+  "independent_worker_proxy_health": 200,
+  "tests": {
+    "tests": 75,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "credentials_excluded": true,
+  "related_tests": {
+    "tests": 133,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  }
+}

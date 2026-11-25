@@ -1,0 +1,9 @@
+{
+  "tagger\\fox_worker.py": "23b8b99458fd754e4a92ff525b82796d8378591cb3b944346ca4c630b1bf4ecd",
+  "server\\legacy-public-20261116\\fox-label\\worker.py": "817586a03dab584910273bf0b604cf8f11f61357b969b7b870833066b0829ed5",
+  "server\\legacy-public-20261116\\fox-label\\managed\\automation.py": "9f52b28ee24d94f0ebd8352033cc4ed94e8ebbf7176d9bcf65be9a32dd4e8893",
+  "server\\legacy-public-20261116\\fox-label\\managed\\recovery.py": "bc1b4289cc68291f4605d26851ed8fd9fbf4e0bf5415fb29e077973bfdf334da",
+  "tagger\\web\\center.py": "943b82dd7342292cfc7db6212f7d838f43d0bde53094c98e8b94ea6f1e198fb6",
+  "tagger\\web\\center_runtime\\controller.py": "c10fdeb49a693de11aaddace5fcdc22f2e01cad0de3dc58910adf10c78063600",
+  "tagger\\web\\center_runtime\\managed.py": "3206898c4b67e51cc5c192321ed5beab58326b3d5e5e0ed3ef70c03b0c39812a"
+}

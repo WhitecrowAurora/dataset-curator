@@ -1,0 +1,28 @@
+{
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261124-delivery-startup-fix.zip",
+    "bytes": 76781174,
+    "sha256": "9fa989211bcc8f2c6bf912432c09b8f8b7e42fbf308d047c32e1ea5a9f1f16e3",
+    "crc_ok": true,
+    "current_sources_match": true,
+    "embedded_worker_sources": 29,
+    "private_state_excluded": true
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261124-delivery-startup-patch.zip",
+    "bytes": 61233313,
+    "sha256": "ac36318666bdc11c6fd0b99e65072dd276377ffc850a447dfe19f7adae0e2fb8",
+    "crc_ok": true,
+    "current_sources_match": true,
+    "embedded_worker_sources": 29,
+    "private_state_excluded": true
+  },
+  "self_contained_shell": {
+    "bytes": 66240434,
+    "sha256": "6f6836428b3a385e20bb904e1f1f3d32396199dd044095dd9ad9c7d8ad8471d4"
+  },
+  "ui_assets": [
+    "/assets/index-CkLKpAdT.js",
+    "/assets/index-7Ebx__7j.css"
+  ]
+}

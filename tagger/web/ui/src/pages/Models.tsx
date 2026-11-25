@@ -31,6 +31,8 @@ import {
 } from '../lib/api'
 import { PageHeader, SectionPanel, StatusChip } from '../components/ui/launcher'
 import { QuantizeDialog } from '../components/QuantizeDialog'
+import { ReviewModels } from '../components/models/ReviewModels'
+import { TrainingTokenizer } from '../components/models/TrainingTokenizer'
 import { GgufConvertDialog } from '../components/GgufConvertDialog'
 import { QuantizeMenu, type QuantPick } from '../components/QuantizeMenu'
 import { ErrorBox } from '../components/ui/controls'
@@ -695,6 +697,9 @@ export function Models() {
 
       {error && <ErrorBox error={error} title="出错了" />}
       {saved && !error && <p className="px-1 text-[12px] text-lx-success">{saved}</p>}
+
+      <ReviewModels />
+      <TrainingTokenizer />
 
       <SectionPanel
         title="NL 模型"

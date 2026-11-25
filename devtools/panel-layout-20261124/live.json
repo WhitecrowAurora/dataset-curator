@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "workspaces": 3,
+  "sections": 4,
+  "assistant_steps": 3,
+  "top_offline_link": true,
+  "independent_offline_page": true,
+  "offline_result_import": true,
+  "settings": true,
+  "keyboard_tabs": true,
+  "javascript_errors": [],
+  "read_only_verification": true
+}

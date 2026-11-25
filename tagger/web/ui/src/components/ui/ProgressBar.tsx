@@ -48,8 +48,8 @@ export function ProgressBar({
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full transition-[width] duration-500"
-        style={{ width: `${clamped}%`, backgroundColor: FILL[resolved] }}
+        className="lx-progress-fill"
+        style={{ transform: `scaleX(${clamped / 100})`, backgroundColor: FILL[resolved] }}
       />
     </div>
   )

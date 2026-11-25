@@ -24,7 +24,7 @@ def eligible(dispatch, device, row, held, assignments, target_user=None, queued_
     return (available if not device.get('queue_only') or specified else []), specified
 
 
-def pick(c, dispatch, device, p=None, exclude=None):
+def pick(c, dispatch, device, p=None, exclude=None, allow_tuning=False):
     leases.release_offline(c)
     busy = leases.held(c)
     from delivery.conflicts import blocked
@@ -36,9 +36,17 @@ def pick(c, dispatch, device, p=None, exclude=None):
     own_packages = {(r['repo'],r['pkg']) for r in c.execute(
         "SELECT repo,pkg FROM leases WHERE device_id=? AND status='open'", (device['device_id'],))}
     preference = dispatch._device_pref(device)
+    from assignments.plans import scope
+    plan_scope = scope(c, device)
     assignments = {}
     for r in c.execute("SELECT * FROM part_assignments"):
         assignments[(r["repo"], r["pkg"], r["part"])] = dict(r)
+    from managed.store import current
+    session = current(c, device['device_id'])
+    configuration = json.loads(session['config']) if session else {}
+    from managed.parallel import permissions
+    allowed_tuning=permissions(json.loads(session['capabilities'])) if allow_tuning and session and not session['released'] else {}
+    from assignments.preassignment import mismatch
     rows = c.execute("SELECT p.*,t.user_id target_user,q.device_id queued_device,q.actor queued_actor"
                      " FROM packages p JOIN repos r ON r.repo=p.repo"
                      " LEFT JOIN package_targets t ON t.repo=p.repo AND t.pkg=p.id"
@@ -55,6 +63,14 @@ def pick(c, dispatch, device, p=None, exclude=None):
                                    row['target_user'], row['queued_device'])
         if not mine:
             continue
+        mine = [part for part in mine if not assignments.get((*key, part))
+                or not mismatch(assignments[(*key, part)], configuration, part,allowed_tuning)]
+        if not mine:
+            continue
+        if plan_scope is not None:
+            mine = [part for part in mine if (*key, part) in plan_scope]
+            if not mine:
+                continue
         row["dispatch_parts"] = mine
         row["specified"] = specified
         candidates.append(row)
@@ -74,13 +90,25 @@ def pick(c, dispatch, device, p=None, exclude=None):
         f"{r['repo']}/{r['id']}" not in local, r["id"]))
 
 
-def valid_prelock(c, dispatch, device, lease):
+def valid_prelock(c, dispatch, device, lease, allow_tuning=False):
+    from assignments.plans import scope
+    plan_scope = scope(c, device)
+    if plan_scope is not None and any((lease['repo'],lease['pkg'],part) not in plan_scope for part in leases.parts(lease)):
+        return False
     package = dispatch._row(c, 'SELECT p.*,r.enabled FROM packages p JOIN repos r ON r.repo=p.repo'
                               ' WHERE p.repo=? AND p.id=?', (lease['repo'], lease['pkg']))
     if not package or not package['enabled'] or package['repo'] not in policies.repo_order(c, device, dispatch.workspace_of(c, device)):
         return False
     assignments = {r['part']: dict(r) for r in c.execute('SELECT * FROM part_assignments WHERE repo=? AND pkg=?',
                                                        (lease['repo'], lease['pkg']))}
+    from managed.store import current
+    from assignments.preassignment import mismatch
+    session = current(c, device['device_id'])
+    configuration = json.loads(session['config']) if session else {}
+    from managed.parallel import permissions
+    tuning=permissions(json.loads(session['capabilities'])) if allow_tuning and session and not session['released'] else {}
+    if any(part in assignments and mismatch(assignments[part], configuration, part,tuning) for part in leases.parts(lease)):
+        return False
     target = c.execute('SELECT user_id FROM package_targets WHERE repo=? AND pkg=?', (lease['repo'], lease['pkg'])).fetchone()
     queue = c.execute('SELECT device_id FROM package_queue WHERE repo=? AND pkg=?', (lease['repo'], lease['pkg'])).fetchone()
     from delivery.conflicts import blocked

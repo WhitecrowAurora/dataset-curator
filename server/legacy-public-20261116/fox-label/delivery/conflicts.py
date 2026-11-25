@@ -1,9 +1,41 @@
 """分侧冲突证据与管理员决议，原始回传文件保持不变。"""
 import json
+import math
 import time
 
 from verification.history import _body
 from verification.payload import payload_done
+
+
+def variant_value(value):
+    try:
+        return json.loads(value) if isinstance(value, str) else value
+    except ValueError:
+        return value
+
+
+def variant_text(value, part):
+    value = variant_value(value)
+    if isinstance(value, dict):
+        value = value.get('tag') if part == 'tag' else value.get('caption') or value.get('nl')
+    return value.strip() if isinstance(value, str) else None
+
+
+def variant_info(value, part, count_tokens=None):
+    """只比较标注正文；生成时间必须来自产物本身。"""
+    value = variant_value(value)
+    stamp = value.get('ts') if isinstance(value, dict) else None
+    try:
+        stamp = float(stamp) if not isinstance(stamp, bool) else None
+    except (TypeError, ValueError, OverflowError):
+        stamp = None
+    if stamp is not None and (not math.isfinite(stamp) or stamp <= 0):
+        stamp = None
+    text = variant_text(value, part)
+    result = dict(timestamp=stamp, length=len(text) if text is not None else None)
+    if count_tokens is not None:
+        result['tokens'] = count_tokens(text) if text is not None else None
+    return result
 
 
 def ensure_schema(c):

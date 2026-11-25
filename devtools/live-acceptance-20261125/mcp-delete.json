@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "mcp_initialize": true,
+  "tools": [
+    "center_overview",
+    "center_workspaces",
+    "center_devices",
+    "center_packages",
+    "center_offline_jobs",
+    "center_dispatch_state",
+    "center_dispatch_control",
+    "center_preassign",
+    "center_device_command",
+    "center_offline_export",
+    "center_offline_delete",
+    "center_release_preview",
+    "center_release"
+  ],
+  "overview": {
+    "health": {
+      "ok": true,
+      "repos": 1,
+      "packages": 6
+    },
+    "speed": {
+      "ok": true,
+      "rate_per_s": 0.0,
+      "tag_rate_per_s": 0.0,
+      "nl_rate_per_s": 0.0,
+      "active_devices": 0,
+      "reporting_devices": 0,
+      "unreported_devices": 0,
+      "stale_devices": 0,
+      "sampled_at": 1795549521.203557,
+      "progress_timeout_s": 120,
+      "basis": "最近上报的分片内平均有效速度；总速度按图片结算，不重复累加 TAG 与 NL"
+    }
+  },
+  "revocation_rejects": true,
+  "delete_second_click": true,
+  "deleted": true
+}

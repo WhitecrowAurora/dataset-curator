@@ -1,0 +1,29 @@
+{
+  "full": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-automation-control-fix.zip",
+    "bytes": 76787465,
+    "sha256": "8619dec37a501347b31abbe30e3a0eb0e0eafc6c7a42d99bab7e647046d239eb",
+    "crc_ok": true,
+    "current_source_files_matched": 589,
+    "embedded_worker_sources": 29,
+    "private_state_excluded": true
+  },
+  "patch": {
+    "path": "H:\\tagger\\dist\\tagger-20261125-automation-control-patch.zip",
+    "bytes": 62962681,
+    "sha256": "93f6478758339bf21de64a839a60f81fdea85e7289fdd4e523d981ed21844833",
+    "crc_ok": true,
+    "current_source_files_matched": 428,
+    "embedded_worker_sources": 29,
+    "private_state_excluded": true
+  },
+  "self_contained_shell": {
+    "bytes": 66240434,
+    "sha256": "6f6836428b3a385e20bb904e1f1f3d32396199dd044095dd9ad9c7d8ad8471d4"
+  },
+  "ui_assets": [
+    "/assets/index-D7nXcwVd.js",
+    "/assets/index-7Ebx__7j.css"
+  ],
+  "cumulative_patch": true
+}

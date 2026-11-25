@@ -1,0 +1,595 @@
+{
+  "ok": true,
+  "observed": [
+    {
+      "running": true,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000000.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": false,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": []
+    },
+    {
+      "running": false,
+      "status": "stopped",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": []
+    },
+    {
+      "running": false,
+      "status": "managed_idle",
+      "error": "",
+      "completed": null,
+      "desired": null,
+      "leases": []
+    },
+    {
+      "running": false,
+      "status": "loading_classifier",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": []
+    },
+    {
+      "running": true,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000001.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": true,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000002.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": false,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": []
+    },
+    {
+      "running": false,
+      "status": "loading_classifier",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": []
+    },
+    {
+      "running": true,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000002.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": false,
+      "status": "stopped",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000002.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": false,
+      "status": "managed_idle",
+      "error": "",
+      "completed": null,
+      "desired": null,
+      "leases": [
+        [
+          "shard-000002.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": false,
+      "status": "loading_classifier",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000002.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": true,
+      "status": "running",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": [
+        [
+          "shard-000002.tar",
+          "active"
+        ]
+      ]
+    },
+    {
+      "running": false,
+      "status": "managed_idle",
+      "error": "",
+      "completed": 0,
+      "desired": "running",
+      "leases": []
+    },
+    {
+      "running": false,
+      "status": "managed_idle",
+      "error": "",
+      "completed": 1,
+      "desired": "paused",
+      "leases": []
+    }
+  ],
+  "global_start_persistent": true,
+  "limit_halts_next": true,
+  "final": {
+    "running": false,
+    "last_rc": 0,
+    "watchdog": {
+      "on": true,
+      "wanted": false,
+      "restarts": 0,
+      "next_in": null
+    },
+    "uptime_s": 0,
+    "config": {
+      "server": "http://127.0.0.1:31841",
+      "user_id": "live-test-member",
+      "tag_url": "http://127.0.0.1:8000",
+      "mode": "both",
+      "parts_pref": "",
+      "out_dir": "D:\\tagger-live-20261125\\online-results",
+      "interval": 5,
+      "extra_args": "",
+      "wait": false,
+      "idle_timeout": 0,
+      "max_packages": 1,
+      "download_conns": 4,
+      "cdn_probe": true,
+      "watchdog": true,
+      "hosting_mode": "passive",
+      "allow_remote_tag_batch": false,
+      "allow_remote_concurrency": false,
+      "inference_source": "existing",
+      "tag_backend": "wd-eva02",
+      "tag_device": "cuda:0",
+      "tag_precision": "bf16",
+      "tag_batch": 2,
+      "nl_engine": "native",
+      "nl_model": "qwen3vl-8b-abliterated",
+      "nl_device": "auto",
+      "nl_precision": "q6",
+      "served_name": "tagger",
+      "concurrency": 2,
+      "max_model_len": 8192,
+      "gpu_mem": 0.0,
+      "auto_download": false,
+      "auto_quantize": false,
+      "stop_service": false,
+      "resume_on_startup": false,
+      "proxy_mode": "auto",
+      "proxy_url": "",
+      "auto_upload": true,
+      "auto_start_on_connect": true
+    },
+    "credentials": {
+      "hf_token_set": false,
+      "remember_hf": false
+    },
+    "runtime": {
+      "active": true,
+      "status": "managed_idle",
+      "message": "本轮已结束，等待中心指令",
+      "error": "",
+      "preparing": false,
+      "hosting_mode": "passive",
+      "telemetry": {
+        "sampled_at": 1795548325.1870263,
+        "cpu_percent": 13.04206418039896,
+        "gpus": [
+          {
+            "physical_index": 0,
+            "device": "cuda:0",
+            "name": "NVIDIA GeForce RTX 4070 Ti SUPER",
+            "util": 5.0,
+            "mem_used_mb": 9946,
+            "mem_total_mb": 16376,
+            "mem_pct": 60.7
+          }
+        ]
+      },
+      "probe": {},
+      "pending_action": "",
+      "resolved": {
+        "server": "http://127.0.0.1:31841",
+        "user_id": "live-test-member",
+        "tag_url": "http://127.0.0.1:8000",
+        "mode": "both",
+        "parts_pref": "",
+        "out_dir": "D:\\tagger-live-20261125\\online-results",
+        "interval": 5,
+        "wait": false,
+        "idle_timeout": 0,
+        "max_packages": 1,
+        "download_conns": 4,
+        "cdn_probe": true,
+        "watchdog": true,
+        "hosting_mode": "passive",
+        "allow_remote_tag_batch": false,
+        "allow_remote_concurrency": false,
+        "inference_source": "existing",
+        "tag_backend": "wd-eva02",
+        "tag_device": "cuda:0",
+        "tag_precision": "bf16",
+        "tag_batch": 2,
+        "nl_engine": "native",
+        "nl_model": "qwen3vl-8b-abliterated",
+        "nl_device": "auto",
+        "nl_precision": "q6",
+        "served_name": "tagger",
+        "concurrency": 2,
+        "max_model_len": 8192,
+        "gpu_mem": 0.0,
+        "auto_download": false,
+        "auto_quantize": false,
+        "stop_service": false,
+        "resume_on_startup": false,
+        "proxy_mode": "auto",
+        "proxy_url": "",
+        "wanted": true,
+        "auto_upload": true,
+        "auto_start_on_connect": true,
+        "caption_format": "",
+        "tag_model_dir": "H:\\tagger\\models\\wd-eva02",
+        "tag_model": "ashen-sensored/wd-eva02-tagger-2026-canary"
+      },
+      "managed": {
+        "session_id": "82ff1cf349f14b0293facd70000229b1",
+        "status": "online",
+        "error": "",
+        "waiting_reason": "已达到本轮分片上限；点击开始开启下一轮",
+        "automation": {
+          "device_id": "7029e7adcedc",
+          "desired": "paused",
+          "pause_reason": "limit",
+          "changed_at": 1795548322.7196105,
+          "changed_by": "limit",
+          "dispatch": {
+            "running": true,
+            "changed_at": 1795547690.105569,
+            "changed_by": "test-admin"
+          },
+          "limit": {
+            "device_id": "7029e7adcedc",
+            "run_id": "4213de8d5ac74512bd13e2482b87fb2d",
+            "max_packages": 1,
+            "completed": 1
+          },
+          "pending_results": [],
+          "parallel": {
+            "tag_batch": {
+              "value": 2,
+              "source": "本机配置"
+            },
+            "concurrency": {
+              "value": 2,
+              "source": "本机配置"
+            }
+          },
+          "workspace": {
+            "ws_id": "live-test",
+            "name": "客户端实际联动测试"
+          }
+        },
+        "start_pending": false,
+        "start_intent": "start",
+        "last_seq": 1,
+        "results": [
+          {
+            "id": "auto-e8d4e2782b428a586af5cb6d",
+            "seq": 1,
+            "status": "applied",
+            "error": ""
+          }
+        ]
+      }
+    },
+    "history": {
+      "running": false,
+      "status": "failed",
+      "message": "[Errno 2] No such file or directory: 'H:\\\\lulynx-trainer\\\\backend\\\\smoke\\\\tagger-live-20261125\\\\runtime\\\\center\\\\worker.json'"
+    },
+    "progress": {
+      "done": 2,
+      "total": 2,
+      "phase": "tag",
+      "total_known": true,
+      "successful": 2,
+      "failed": 0,
+      "skipped": 0,
+      "rate_per_s": 0.245,
+      "elapsed_s": 8.2,
+      "updated_at": 1795548320.1998923,
+      "image_id": "10006",
+      "tag": {
+        "done": 2,
+        "skipped": 0,
+        "failed": 0,
+        "total": 2,
+        "settled": 2,
+        "progress": 1.0,
+        "rate_per_s": 47.62,
+        "eta_s": 0.0
+      },
+      "finished": true,
+      "updated_ago_s": 9.0,
+      "lease_id": "L674cfa80d0af",
+      "repo": "lulynx/live-acceptance",
+      "package": "shard-000002.tar",
+      "package_index": 1
+    },
+    "delivery": {
+      "lease_id": "L674cfa80d0af",
+      "repo": "lulynx/live-acceptance",
+      "package": "shard-000002.tar",
+      "status": "completed",
+      "error": "",
+      "report": {
+        "expected": 2,
+        "ids_sha256": "e5ad055b30942559f1a2d8ba1afa5e0e2489e6bcc319b146a8534d4ae2910202",
+        "parts": {
+          "tag": {
+            "success": 2,
+            "excluded": 0,
+            "failed": 0,
+            "missing": 0
+          },
+          "nl": {
+            "success": 0,
+            "excluded": 0,
+            "failed": 0,
+            "missing": 2
+          }
+        },
+        "complete_parts": [
+          "tag"
+        ],
+        "accounted": false,
+        "ok": false,
+        "conflicts": [],
+        "duplicates": 0,
+        "conflict_count": 0,
+        "source_verification": {
+          "state": "disabled"
+        }
+      },
+      "updated_at": 1795548322.617392
+    },
+    "cmd": "\"H:\\tagger\\env\\python\\python.exe\" -m tagger.cli client --shard \"{shard}\" --out-dir \"{out}\" --progress-file \"{out}/.fox-progress\"",
+    "identity": {
+      "user_id": "live-test-member",
+      "device_id": "7029e7adcedc",
+      "server": "http://127.0.0.1:31841",
+      "server_id": "fox-01"
+    },
+    "board": {
+      "user_id": "live-test-member",
+      "device_id": "7029e7adcedc",
+      "tier": "unknown",
+      "speed": 0.0,
+      "status": "online",
+      "last_seen": 1795548326.6416543,
+      "last_seen_ago": 1.0,
+      "renewal_seconds": 172800,
+      "leases": [],
+      "parts": {
+        "repo": null,
+        "total": 3,
+        "done": 0,
+        "remaining": 3,
+        "missing_tag": 2,
+        "missing_nl": 3
+      },
+      "workspace": {
+        "ws_id": "live-test",
+        "name": "客户端实际联动测试",
+        "repos": [
+          "lulynx/live-acceptance"
+        ],
+        "allow_manual_claim": true,
+        "allocation_mode": "auto",
+        "missing": false,
+        "active_repo": null
+      },
+      "dispatch": {
+        "running": true,
+        "changed_at": 1795547690.105569,
+        "changed_by": "test-admin"
+      },
+      "ok": true
+    },
+    "heartbeat": {
+      "sampled_at": 1795548329.1707299,
+      "leases": {}
+    },
+    "release": {
+      "running": false,
+      "message": "",
+      "error": "",
+      "lease_id": ""
+    },
+    "log": [
+      "[03:24:23]   失败       : 0",
+      "[03:24:23]   有效张数   : 0",
+      "[03:24:23]   输入 token : 0",
+      "[03:24:23]   输出 token : 0",
+      "[03:24:23]   总耗时     : 0.0 分钟",
+      "[03:24:24] 命令结束，退出码 1，用时 9.3s",
+      "[回传] artifacts-shard-000001-delivery.jsonl 文件上传完成 0.0 MB（1 块，0.5s）",
+      "[回传] proof.json 文件上传完成 0.0 MB（1 块，0.5s）",
+      "[回传] 文件已上传，正在等待中心逐图验收",
+      "[验收] 中心已接收检查结果，等待登记本轮完成分项",
+      "[03:24:26] [X] 本次失败（已申报 fail）：逐图检查仍有失败、漏项或冲突",
+      "[03:24:26] 已归还租约 active:shard-000002.tar",
+      "[center] 进程结束，退出码 6",
+      "[center] 看门狗：3s 后自动拉起（第 1 次）",
+      "[center] 准备本机打标配置",
+      "[center] 连接已有模型服务",
+      "[center] 检查 TAG 模型加载",
+      "[center] 启动：H:\\tagger\\env\\python\\python.exe -m tagger.fox_worker run --out E:\\tagger-live-20261125\\online-results --cmd \"H:\\tagger\\env\\python\\python.exe\" -m tagger.cli client --shard \"{shard}\" --out-dir \"{out}\" --progress-file \"{out}/.fox-progress\" --interval 5 --download-conns 4 --auto-upload",
+      "[center] 模型已就绪，开始领片",
+      "[03:24:39] 身份 live-test-member / 设备 7029e7adcedc　服务端 fox-01",
+      "[03:24:39] 派工：active:shard-000002.tar",
+      "[03:24:39] 本地已有校验通过的分片，跳过下载：E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\\shard-000002.tar",
+      "[03:24:40] 执行：\"H:\\tagger\\env\\python\\python.exe\" -m tagger.cli client --shard \"E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\\shard-000002.tar\" --out-dir \"E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\" --progress-file \"E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f/.fox-progress\"",
+      "[tagger] tag 后端 wd-eva02（模型 ashen-sensored/wd-eva02-tagger-2026-canary，cuda:0）",
+      "[tagger] CUDA Graph 已就绪（batch=2）",
+      "[tagger] 已加载 eva02_large_patch14_448（16473 个 tag，cuda:0，bf16，batch=2）",
+      "[client] 目标服务 : http://127.0.0.1:8000  模型名 tagger",
+      "[client] 产出模式 : tag  tag 12~64 个（wd-eva02）",
+      "[client] 分项补齐 : 这一片补 tag",
+      "[client] 产物目录 : E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f",
+      "[client] 并发     : 2    model_id ashen-sensored/wd-eva02-tagger-2026-canary",
+      "[client] NL 设备  : cuda:0",
+      "[client] tag 设备 : cuda:0（bf16，batch=2）",
+      "[03:24:48] ",
+      "[client] 产物形态 : jsonl 按包分片 （包名 + 进程编号 + 分片序号，每 2000 行落一次盘，已有 0 张将自动跳过）",
+      "[guard] temp 41°C  util 7%  duty 0.70  disk 370G/10%  [stop]  磁盘 370G/10% 低于 30G/15%",
+      "[03:24:48] ",
+      "[client] 已停止：temp 41°C  util 7%  duty 0.70  disk 370G/10%  [stop]  磁盘 370G/10% 低于 30G/15%",
+      "[client] 阈值在 configs/tiers.yaml 的 limits 段（disk_min_free_gb / temp_cutoff_c）。",
+      "[client] 产物已写盘，修好之后直接重跑同一条命令即可续做（已完成的会自动跳过；在途的几张没写产物，会被重做）。",
+      "[guard] temp 41°C  util 7%  duty 0.70  disk 370G/10%  [stop]  磁盘 370G/10% 低于 30G/15%",
+      "[03:24:48] ",
+      "[03:24:48]   总共       : 0",
+      "[03:24:48]   完成       : 0",
+      "[03:24:48]   其中缓存   : 0",
+      "[03:24:48]   跳过（已有）: 0",
+      "[03:24:48]   跳过（重试后依然失败）: 0",
+      "[03:24:48]   失败       : 0",
+      "[03:24:48]   有效张数   : 0",
+      "[03:24:48]   输入 token : 0",
+      "[03:24:48]   输出 token : 0",
+      "[03:24:48]   总耗时     : 0.0 分钟",
+      "[03:24:49] 命令结束，退出码 1，用时 9.3s",
+      "[03:24:49] [retry] 任务命令失败（退出码 1），3s 后重试（1/1）",
+      "[03:24:52] 执行：\"H:\\tagger\\env\\python\\python.exe\" -m tagger.cli client --shard \"E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\\shard-000002.tar\" --out-dir \"E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\" --progress-file \"E:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f/.fox-progress\"",
+      "[tagger] tag 后端 wd-eva02（模型 ashen-sensored/wd-eva02-tagger-2026-canary，cuda:0）",
+      "[center] 停止：保留当前包及预取包，48 小时内可继续",
+      "[回传] artifacts-shard-000002-delivery.jsonl 文件上传完成 0.0 MB（1 块，0.5s）",
+      "[回传] proof.json 文件上传完成 0.0 MB（1 块，0.5s）",
+      "[回传] 文件已上传，正在等待中心逐图验收",
+      "[验收] 中心已接收检查结果，等待登记本轮完成分项",
+      "[03:24:57] ",
+      "[03:24:57] 收到停止请求，租约保留，48 小时内可续做（本地产物保留）",
+      "[center] 设备已托管，等待中心指令",
+      "[center] 恢复接单已获中心确认：已自动下发开始指令",
+      "[center] 准备本机打标配置",
+      "[center] 连接已有模型服务",
+      "[center] 检查 TAG 模型加载",
+      "[center] 启动：H:\\tagger\\env\\python\\python.exe -m tagger.fox_worker run --out D:\\tagger-live-20261125\\online-results --cmd \"H:\\tagger\\env\\python\\python.exe\" -m tagger.cli client --shard \"{shard}\" --out-dir \"{out}\" --progress-file \"{out}/.fox-progress\" --interval 5 --download-conns 4 --auto-upload",
+      "[center] 模型已就绪，开始领片",
+      "[03:25:11] 身份 live-test-member / 设备 7029e7adcedc　服务端 fox-01",
+      "[03:25:11] 派工：active:shard-000002.tar",
+      "[03:25:11] 本地已有校验通过的分片，跳过下载：D:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\\shard-000002.tar",
+      "[03:25:11] 执行：\"H:\\tagger\\env\\python\\python.exe\" -m tagger.cli client --shard \"D:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\\shard-000002.tar\" --out-dir \"D:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f\" --progress-file \"D:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f/.fox-progress\"",
+      "[tagger] tag 后端 wd-eva02（模型 ashen-sensored/wd-eva02-tagger-2026-canary，cuda:0）",
+      "[tagger] CUDA Graph 已就绪（batch=2）",
+      "[tagger] 已加载 eva02_large_patch14_448（16473 个 tag，cuda:0，bf16，batch=2）",
+      "[client] 目标服务 : http://127.0.0.1:8000  模型名 tagger",
+      "[client] 产出模式 : tag  tag 12~64 个（wd-eva02）",
+      "[client] 分项补齐 : 这一片补 tag",
+      "[client] 产物目录 : D:\\tagger-live-20261125\\online-results\\sources\\0dcd694c4a390b19b7bbe4b7d25eb609f078ece1bfbb46bbf8f36089372d818f",
+      "[client] 并发     : 2    model_id ashen-sensored/wd-eva02-tagger-2026-canary",
+      "[client] NL 设备  : cuda:0",
+      "[client] tag 设备 : cuda:0（bf16，batch=2）",
+      "[03:25:19] ",
+      "[client] 产物形态 : jsonl 按包分片 （包名 + 进程编号 + 分片序号，每 2000 行落一次盘，已有 0 张将自动跳过）",
+      "[guard] temp 42°C  util 5%  duty 0.70  disk 348G/37%  [ok]",
+      "[client] 本批 : shard-000002.tar  任务 2 张",
+      "[03:25:20]   [1/2] 10005  0.12s  0 tok  1 次",
+      "[03:25:20]   [2/2] 10006  0.16s  0 tok  1 次",
+      "[03:25:20] ",
+      "[03:25:20]   总共       : 2",
+      "[03:25:20]   完成       : 2",
+      "[03:25:20]   其中缓存   : 0",
+      "[03:25:20]   跳过（已有）: 0",
+      "[03:25:20]   跳过（重试后依然失败）: 0",
+      "[03:25:20]   失败       : 0",
+      "[03:25:20]   有效张数   : 2",
+      "[03:25:20]   输入 token : 0",
+      "[03:25:20]   输出 token : 0",
+      "[03:25:20]   平均耗时   : 0.141s/张",
+      "[03:25:20]   总耗时     : 0.0 分钟",
+      "[03:25:20]   吞吐       : 5.44 张/秒",
+      "[03:25:20] ",
+      "[03:25:20]   分段计时   :",
+      "[03:25:20]     read       0.24 ms/次  共      2 次  累计    0.00s",
+      "[03:25:20]     tag       80.16 ms/次  共      2 次  累计    0.16s",
+      "[03:25:20]     write      0.24 ms/次  共      2 次  累计    0.00s",
+      "[03:25:20]     （tag 与 http 是并行跑的，各项累计之和会超过墙钟）",
+      "[03:25:20] ",
+      "[client] 下一步：把整个产物目录交回总机，总机跑 `tagger merge --roots <目录> --shard-dir <分发包目录>` 对账合并。",
+      "[03:25:21] 命令结束，退出码 0，用时 9.6s",
+      "[回传] artifacts-shard-000002-delivery.jsonl 文件上传完成 0.0 MB（1 块，0.5s）",
+      "[回传] proof.json 文件上传完成 0.0 MB（0 块，秒传 1 块，0.4s）",
+      "[回传] 文件已上传，正在等待中心逐图验收",
+      "[验收] 中心已接收检查结果，等待登记本轮完成分项",
+      "[03:25:22] 已交付 shard-000002.tar",
+      "[03:25:22] 服务端没有更多派工，收工",
+      "[center] 进程结束，退出码 0",
+      "[center] 本轮已结束，等待中心指令"
+    ],
+    "log_path": "H:\\lulynx-trainer\\backend\\smoke\\tagger-live-20261125\\runtime\\center\\logs\\center-20261125-030839-52936-433970700.log"
+  }
+}

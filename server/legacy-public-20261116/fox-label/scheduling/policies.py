@@ -6,6 +6,9 @@ import time
 def ensure_schema(c, dispatch):
     from .allocation import ensure_schema as ensure_allocation
     ensure_allocation(c, dispatch)
+    dispatch._add_columns(c, 'workspaces', (("auto_assign_at", "TEXT"),
+                                           ("preassignment_template", "TEXT NOT NULL DEFAULT '{}'"),
+                                           ("preassignment_last", "TEXT NOT NULL DEFAULT '{}'")))
     c.executescript("""
     CREATE TABLE IF NOT EXISTS user_groups (
       group_id TEXT PRIMARY KEY,name TEXT NOT NULL,workspace_id TEXT,repos TEXT NOT NULL DEFAULT '[]');
@@ -17,6 +20,7 @@ def ensure_schema(c, dispatch):
     dispatch._add_columns(c, "users", (("group_id", "TEXT"), ("repo_order", "TEXT NOT NULL DEFAULT '[]'")))
     dispatch._add_columns(c, "devices", (("repo_order", "TEXT NOT NULL DEFAULT '[]'"),
                                         ("parts_pref", "TEXT NOT NULL DEFAULT 'both'")))
+    dispatch._add_columns(c, 'part_assignments', (("config", "TEXT NOT NULL DEFAULT '{}'"),))
 
 
 def group(c, user):
@@ -54,10 +58,11 @@ def view(c, dispatch):
         devices.append(item)
     for u in users:
         u["repo_order"] = json.loads(u["repo_order"])
-    from .leases import grace
+    from .lifetime import SECONDS
+    from .control import state
     return {"ok": True, "groups": groups, "users": users, "devices": devices,
             "assignments": [dict(r) for r in c.execute("SELECT * FROM part_assignments ORDER BY repo,pkg,part")],
-            "offline_grace": grace(c)}
+            "offline_grace": SECONDS, "dispatch": state(c)}
 
 
 def ordering(value):
@@ -73,13 +78,16 @@ def update(c, dispatch, body, actor):
     action = body.get("action")
     changes = {}
     with dispatch._Tx(c):
-        if action == 'allocation':
+        if action == 'automation':
+            from .control import update as automation_update
+            changes = automation_update(c, body, actor)
+        elif action == 'allocation':
             from .allocation import update as allocate
             changes = allocate(c, dispatch, body)
         elif action == "settings":
             value = body.get("offline_grace")
-            if type(value) not in (float, int) or not 30 <= value <= 86400:
-                raise ValueError("离线宽限应为 30～86400 秒")
+            if value != 48 * 3600:
+                raise ValueError("在线租约统一为成功上报后 48 小时，旧离线宽限设置已替换")
             c.execute("INSERT INTO dispatch_settings VALUES('offline_grace',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                       (str(value),))
         elif action == "group":
@@ -159,6 +167,9 @@ def update(c, dispatch, body, actor):
                     u = c.execute("SELECT status FROM users WHERE user_id=?", (user_id,)).fetchone()
                     if not u or u["status"] != "active":
                         raise ValueError("目标用户不存在或停用")
+                    from assignments.preassignment import user_allowed
+                    if target['type'] == 'user' and user_allowed(c, dispatch, user_id, repo):
+                        candidates.append(dict(user_id=user_id, device_id='', workspace_id=None, parts=part))
                     if not candidates:
                         raise ValueError('目标用户没有可处理该分项的设备')
                     from .allocation import allowed
@@ -171,9 +182,9 @@ def update(c, dispatch, body, actor):
                               and (not queue or queue['device_id'] == candidate['device_id'])]
                     if not viable:
                         raise ValueError('分项目标与已有分片指定冲突')
-                    c.execute("INSERT INTO part_assignments VALUES(?,?,?,?,?,?,?) ON CONFLICT(repo,pkg,part)"
+                    c.execute("INSERT INTO part_assignments(repo,pkg,part,target_type,target_id,actor,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(repo,pkg,part)"
                               " DO UPDATE SET target_type=excluded.target_type,target_id=excluded.target_id,"
-                              " actor=excluded.actor,updated_at=excluded.updated_at",
+                              " actor=excluded.actor,updated_at=excluded.updated_at,config='{}'",
                               (repo, pkg, part, target["type"], ident, actor, time.time()))
         else:
             raise ValueError("未知调度配置")

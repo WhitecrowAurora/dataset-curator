@@ -1,0 +1,17 @@
+{
+  "zip": "tagger-20261121-native-perf.zip",
+  "size": 76496973,
+  "sha256": "0dd4a0d70486b91d2d184048f66db99080e5337fb344c82fb6e2bb9022b86046",
+  "files_verified": [
+    "tagger/inference/qwen35/engine.py",
+    "tagger/inference/qwen35/batching.py",
+    "tagger/inference/qwen35/runtime.py",
+    "tagger/hair_color/runtime.py",
+    "tagger/web/hair_workflow.py",
+    "tagger/inference/qwen3vl/kernels/q6_mma.py",
+    "tagger/inference/qwen3vl/kernels/cuda/gguf.py",
+    "tagger/inference/qwen3vl/runtime.py",
+    "tagger/inference/qwen3vl/continuous.py",
+    "tagger/inference/qwen3vl/decode_graph.py"
+  ]
+}

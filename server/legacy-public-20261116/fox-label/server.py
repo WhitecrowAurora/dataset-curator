@@ -509,9 +509,13 @@ class Store:
     def conn(self) -> sqlite3.Connection:
         wait_ms = int(os.environ.get("FOXLABEL_DB_TIMEOUT_MS", "15000"))
         c = sqlite3.connect(self.db_path, timeout=wait_ms / 1000, isolation_level=None)
-        c.row_factory = sqlite3.Row
-        c.execute("PRAGMA journal_mode=WAL")
-        c.execute(f"PRAGMA busy_timeout={wait_ms}")
+        try:
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute(f"PRAGMA busy_timeout={wait_ms}")
+        except BaseException:
+            c.close()
+            raise
         return c
 
     # -- 建表与迁移 -------------------------------------------------
@@ -641,12 +645,12 @@ class Store:
     # -- 事件
     def event(self, conn, kind: str, repo, pkg, actor, detail) -> int | None:
         ts = now_iso()
-        cur = conn.execute(
-            "INSERT INTO events(ts,kind,repo,pkg,actor,detail) VALUES(?,?,?,?,?,?)",
-            (ts, kind, repo, pkg, actor, detail))
-        seq = cur.lastrowid
         rec = {"ts": ts, "kind": kind, "repo": repo, "pkg": pkg, "actor": actor, "detail": detail}
         with self._write_lock:
+            cur = conn.execute(
+                "INSERT INTO events(ts,kind,repo,pkg,actor,detail) VALUES(?,?,?,?,?,?)",
+                (ts, kind, repo, pkg, actor, detail))
+            seq = cur.lastrowid
             try:
                 with self.audit_path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -1199,16 +1203,24 @@ def release(store: Store, repo: str, pkg: str, actor: str, is_admin: bool,
                 raise Conflict(f"包 {pkg} 不是已认领状态（当前 {STATUS_LABEL[row['status']]}）")
             if not is_admin and row["owner"] != actor:
                 raise Forbidden(f"包 {pkg} 由 {row['owner']} 认领，你不能释放")
+            held = c.execute("SELECT * FROM leases WHERE repo=? AND pkg=? AND status='open'",
+                             (repo, pkg)).fetchall()
+            from scheduling.release import close
+            close(c, [lease for lease in held if is_admin or lease['user_id'] == actor],
+                  reason or ('admin_release' if is_admin else 'user_release'), actor)
             ts = now_iso()
             c.execute("UPDATE packages SET status='available', owner=NULL, claimed_at=NULL,"
                       " downloaded_at=NULL, updated_at=? WHERE repo=? AND id=?", (ts, repo, pkg))
+            from scheduling.leases import refresh
+            refresh(c, repo, pkg)
             detail = reason or f"原认领人 {row['owner']}"
             if audit_extra:
                 detail = f"{detail}; {audit_extra}"
             seq = store.event(c, "admin_release" if is_admin else "release", repo, pkg, actor,
                               detail)
+            status = c.execute('SELECT status FROM packages WHERE repo=? AND id=?', (repo, pkg)).fetchone()['status']
             c.execute("COMMIT")
-            out = {"repo": repo, "id": pkg, "status": "available",
+            out = {"repo": repo, "id": pkg, "status": status,
                    "previous_owner": row["owner"]}
             if audit_extra:          # 管理路径才带 event_seq（客户端端点字段零变化）
                 out["event_seq"] = seq
@@ -1833,14 +1845,20 @@ def compute_impact(store: Store, action: str, targets: list[dict],
                 if action == "package.release":
                     if row["status"] != "claimed":
                         warnings.append(f"{row['repo']}/{row['id']} 当前状态为 {label}，执行时将返回 409")
-                    lease = c.execute(
-                        "SELECT lease_id FROM leases WHERE repo=? AND pkg=? AND status='open' LIMIT 1",
-                        (row["repo"], row["id"])).fetchone()
-                    if lease:
-                        counts["leases"] += 1
-                        warnings.append(f"包 {row['repo']}/{row['id']} 存在 open 租约 "
-                                        f"{lease['lease_id']}，建议改用「释放租约」")
-                        per_target[-1] = (2, 1)
+                    leases = c.execute("SELECT * FROM leases WHERE repo=? AND pkg=? AND status='open' ORDER BY lease_id",
+                                       (row['repo'], row['id'])).fetchall()
+                    for lease in leases:
+                        items.append(dict(kind='lease', lease_id=lease['lease_id'], repo=lease['repo'],
+                                          pkg=lease['pkg'], kind_lease=lease['kind'], status=lease['status'],
+                                          device_id=lease['device_id'], user_id=lease['user_id'],
+                                          label=f"关闭租约 {lease['lease_id']} · 设备 {lease['device_id']}"))
+                        seen_dev.add(lease['device_id'])
+                        seen_user.add(lease['user_id'])
+                    counts['leases'] += len(leases)
+                    mutations += len(leases)
+                    per_target[-1] = (1 + len(leases), 1 + len(leases))
+                    if leases:
+                        warnings.append(f"将关闭 {len(leases)} 个租约并暂停原设备自动接单，已回传结果保留")
                 if action == "package.assign":
                     device_id = params.get("device_id")
                     if not device_id:
@@ -2159,7 +2177,7 @@ def compute_impact(store: Store, action: str, targets: list[dict],
     finally:
         c.close()
 
-    if kind == "lease":
+    if kind == "lease" or action == "package.release":
         counts["devices"] = len(seen_dev)
         counts["users"] = len(seen_user)
 
@@ -2192,7 +2210,7 @@ def _impact_summary(action: str, targets: list[dict], params: dict,
         tail = "保留原认领人" if params.get("to", "claimed") == "claimed" else "退回公共池"
         return f"打回 {mutations} 个已完成包（{tail}）"
     if action == "package.release":
-        return f"释放 {mutations} 个已认领包，包回到公共池"
+        return f"释放 {counts['packages']} 个已认领包并关闭 {counts['leases']} 条租约，保留已回传结果"
     if action == "package.cancel_reservation":
         return f"取消 {mutations} 个分片的待派记录，分片重新参与调度"
     if action == "lease.release":
@@ -2349,7 +2367,7 @@ def idem_gc(store: Store) -> int:
 def admin_release_leases(store: Store, lease_ids: list[str], actor: str,
                          reason: str = "admin_release",
                          audit_extra: str | None = None) -> dict:
-    """管理路径释放任意租约。SQL 语义与 dispatch._release_lease_impl 完全一致。"""
+    """关闭指定租约、暂停原设备，并保留其他分项与已验收结果。"""
     with store._write_lock:
         c = store.conn()
         released: list[dict] = []
@@ -2363,17 +2381,12 @@ def admin_release_leases(store: Store, lease_ids: list[str], actor: str,
                 lease = dict(row)
                 if lease["status"] != "open":
                     raise Conflict(f"租约 {lease_id} 已 {lease['status']}，无需释放")
-                c.execute("UPDATE leases SET status='released', closed_reason=? WHERE lease_id=?",
-                          ((reason or "admin_release")[:60], lease_id))
-                c.execute("DELETE FROM package_queue WHERE repo=? AND pkg=?",(lease["repo"],lease["pkg"]))
-                offline_tasks.refresh(c,lease["device_id"])
+                from scheduling.release import close
+                close(c, [lease], reason or 'admin_release', actor)
                 package_back = False
                 if lease["kind"] in ("active", "offline"):
-                    cur = c.execute(
-                        "UPDATE packages SET status='available', owner=NULL, claimed_at=NULL,"
-                        " downloaded_at=NULL, updated_at=? WHERE repo=? AND id=? AND status='claimed'",
-                        (now_iso(), lease["repo"], lease["pkg"]))
-                    package_back = bool(cur.rowcount)
+                    package_back = c.execute('SELECT status FROM packages WHERE repo=? AND id=?',
+                                             (lease['repo'], lease['pkg'])).fetchone()['status'] == 'available'
                     back += 1 if package_back else 0
                 detail = f"lease={lease_id}; admin=1"
                 if audit_extra:
@@ -2566,6 +2579,9 @@ def admin_assign_package(store: Store, repo: str, pkg: str, device_id: str,
         c = store.conn()
         try:
             c.execute("BEGIN IMMEDIATE")
+            from scheduling.control import running
+            if not running(c):
+                raise Conflict('自动派单已暂停；可以保存预派，启动自动派单后再领取')
             package = c.execute("SELECT p.*, r.enabled FROM packages p JOIN repos r"
                                 " ON r.repo=p.repo WHERE p.repo=? AND p.id=?",
                                 (repo, pkg)).fetchone()
@@ -3385,6 +3401,8 @@ def admin_workspaces(store: Store) -> dict:
                 "allow_manual_claim": bool(ws.get("allow_manual_claim",1)),
                 "allocation_mode": ws.get('allocation_mode', 'auto'),
                 "repo_devices": ws.get('repo_devices', {}),
+                "preassignment_template": ws.get('preassignment_template', {}),
+                "preassignment_last": ws.get('preassignment_last', {}),
                 # registered 看的是 repos 表，不是包数——登记了但一次都没 sync 过的
                 # 仓库包数是 0，那种状态要能看出来（面板上显示"未同步"）。
                 "repo_packages": [{"repo": rp, "packages": pkg_n.get(rp, 0),
@@ -3805,11 +3823,22 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         sub = path[len("/admin/v1"):].strip("/")
         try:
+            if sub == 'result-exports' or sub.startswith('result-exports/'):
+                from result_exports.routes import read as read_result_exports
+                return read_result_exports(self,raw)
             if sub == 'source-catalog':
-                return self._json(200, source_routes.read(self.store, self._q(raw, 'repo'), self._q(raw, 'package'), self._q(raw, 'offset') or 0))
+                return self._json(200, source_routes.read(self.store, self._q(raw, 'repo'), self._q(raw, 'package'), self._q(raw, 'offset') or 0, self._q(raw, 'conflict_state') or 'all', self._q(raw,'format')=='jsonl'))
+            if sub == 'dispatch-plan':
+                from assignments.plans import load
+                c = self.store.conn()
+                try: return self._json(200, load(c, self._q(raw, 'id')))
+                finally: c.close()
             if sub == 'scheduling':
-                return self._json(200, scheduling_routes.read(self.store, v3))
+                return self._json(200, scheduling_routes.read(self.store, v3, self._q(raw, 'summary')))
             if sub == "managed/devices":
+                if self._q(raw,'summary')=='throughput':
+                    from managed.throughput import view
+                    return self._json(200,view(self.store))
                 return self._json(200, managed_store.view(self.store, self._q(raw, "device_id")))
             if sub == "history":
                 return self._json(200, history_store.view(self.store))
@@ -4036,7 +4065,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                    "writes/export", "notifications", "overdue", "managed/devices") or sub.startswith("writes/"):
             return self._json(405, {"ok": False, "error": "请使用 GET",
                                     "code": "method_not_allowed"}, {"Allow": "GET"})
-        if sub not in ("preview", "execute", "delivery/settings", "delivery/repos", "managed/commands", "history/check", "workspace-dispatch", "offline-export", "offline-cancel", "scheduling", "source-catalog"):
+        if sub not in ("preview", "execute", "delivery/settings", "delivery/repos", "managed/commands", "history/check", "workspace-dispatch", "offline-export", "offline-cancel", "offline-delete", "offline-import", "offline-import-upload", "scheduling", "source-catalog"):
             return self._json(404, {"ok": False, "error": f"未知路径 {path}",
                                     "code": "not_found"})
         if not write_enabled():
@@ -4045,6 +4074,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         if not self._admin_rate(ADMIN_PREVIEW_LIMIT if sub == "preview"
                                 else ADMIN_EXEC_LIMIT, ctx):
             return
+        if sub == 'offline-import-upload':
+            from offline_imports.routes import upload
+            return upload(self, ctx)
         try:
             body = self._read_json(limit=ADMIN_MAX_BODY, strict=True)
         except PayloadTooLarge:
@@ -4057,6 +4089,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "请求体必须是 JSON 对象",
                                     "code": "bad_request"})
         try:
+            if sub == 'offline-import':
+                from offline_imports.routes import action
+                return action(self, v3, body, ctx)
             if sub == 'source-catalog':
                 return self._json(200, source_routes.write(self.store, v3, body, ctx['actor']))
             if sub == 'scheduling':
@@ -4066,6 +4101,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200,offline_tasks.create(self.store,v3,contracts,body,ctx["actor"]))
             if sub == "offline-cancel":
                 return self._json(200,offline_tasks.cancel(self.store,v3,body.get("id"),ctx["actor"]))
+            if sub == 'offline-delete':
+                from assignments.offline_management import remove
+                return self._json(200,remove(self.store,v3,body.get('id'),ctx['actor']))
             if sub == "workspace-dispatch":
                 from assignments.service import dispatch
                 return self._json(200,dispatch(self.store,v3,body,ctx["actor"]))
@@ -4297,13 +4335,23 @@ class ApiHandler(BaseHTTPRequestHandler):
                          f"{lease['kind']} attempt={lease['attempt']} device={lease['device_id']}")
 
     def _v1_post(self, action: str, body: dict) -> None:
+        if action == 'dispatch-plan':
+            from assignments.plans import client
+            if not isinstance(body, dict):return self._json(400, {'ok':False,'error':'请求体必须是 JSON 对象'})
+            if body.get('action') in ('apply','clear') and not write_enabled():
+                return self._json(403, {'ok':False,'error':'服务端写通道已关闭'})
+            try: return self._json(200, client(self.store, v3, body))
+            except v3.AuthError as exc: return self._json(401, {'ok':False,'error':str(exc)})
+            except (ValueError, v3.LeaseError) as exc: return self._json(409, {'ok':False,'error':str(exc)})
+            except (sqlite3.Error, OSError): return self._json(503, {'ok':False,'error':'分派存储暂时不可用，请重试'})
         p = v3.params()
         # 派工是"读空闲包→插入租约"的复合操作，必须整体串行：
         # 否则并发握手会各自读到同一个空闲包（TOCTOU），把一片派给多人。
         with self.store._write_lock:
-            return self._v1_post_locked(action, body, p)
+            response = self._v1_post_locked(action, body, p)
+        self._json(*response)
 
-    def _v1_post_locked(self, action: str, body: dict, p: dict) -> None:
+    def _v1_post_locked(self, action: str, body: dict, p: dict) -> tuple[int, dict]:
         c = self.store.conn()
         common = {"on_open": self._v3_open, "on_event": self._v3_event}
         try:
@@ -4338,8 +4386,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if retry > 0:
                     c.close()
                     self._note("/api/v1/ping", 429, device_key[:60])
-                    return self._json(429, {"error": "ping 超过限流（10 次/分钟）",
-                                            "retry_after": round(retry, 1)})
+                    return 429, {"error": "ping 超过限流（10 次/分钟）",
+                                 "retry_after": round(retry, 1)}
                 res = v3.ping(c, body)
             elif action in ("done", "fail"):
                 # 上传后再完成申报必须经过逐图归并；没有启用上传的旧客户端保留原契约。
@@ -4367,25 +4415,26 @@ class ApiHandler(BaseHTTPRequestHandler):
                 res = v3.pool(c)
             else:
                 c.close()
-                return self._json(404, {"error": f"未知动作 {action}"})
+                return 404, {"error": f"未知动作 {action}"}
             c.close()
             self._note(f"/api/v1/{action}", 200, str(body.get("device_id") or ""))
-            return self._json(200, res)
+            return 200, res
         except ValueError as e:
             c.close()
-            return self._json(400,{"ok":False,"error":str(e)})
+            return 400, {"ok":False,"error":str(e),
+                         **({'report': e.report} if getattr(e, 'report', None) else {})}
         except v3.AuthError as e:
             c.close()
             if isinstance(e, v3.HwError):
                 # hw 字段非法是请求体校验错误：400 而不是 401（SPEC-link §1.1）
                 self._note(f"/api/v1/{action}", 400, str(e)[:60])
-                return self._json(400, {"error": str(e)})
+                return 400, {"error": str(e)}
             self._note(f"/api/v1/{action}", 401, str(e)[:60])
-            return self._json(401, {"error": str(e)})
+            return 401, {"error": str(e)}
         except v3.LeaseError as e:
             c.close()
             self._note(f"/api/v1/{action}", 409, str(e)[:60])
-            return self._json(409, {"error": str(e)})
+            return 409, {"error": str(e)}
         except sqlite3.OperationalError as e:
             # 磁盘满 / 库被独占 / 只读：属于"暂时不可用"，明确告诉客户端可以重试，
             # 而不是抛一个 500 让它以为请求本身有问题。
@@ -4393,7 +4442,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             low = str(e).lower()
             self._note(f"/api/v1/{action}", 503, str(e)[:60])
             if any(k in low for k in ("locked", "busy", "disk", "readonly", "unable to open")):
-                return self._json(503, {"error": "存储暂时不可用（busy/disk），请稍后重试"})
+                return 503, {"error": "存储暂时不可用（busy/disk），请稍后重试"}
             raise
         except Exception:
             c.close()
@@ -4482,6 +4531,8 @@ class FoxServer(ThreadingHTTPServer):
     def __init__(self, addr, store: Store):
         super().__init__(addr, ApiHandler)
         self.store = store
+        from result_exports.service import recover
+        recover(store)
         self.bus = Broadcaster(store)
         from scheduling.maintenance import start
         self._maintenance = start(store, v3)

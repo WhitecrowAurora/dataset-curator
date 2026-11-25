@@ -1,0 +1,82 @@
+[
+  {
+    "name": "blk.0.attn_q.weight",
+    "batch": 10,
+    "exact": false,
+    "max_error": 0.00390625,
+    "256_ms": 1.3066981680252974,
+    "2048_ms": 0.18369530068665016
+  },
+  {
+    "name": "blk.0.attn_q.weight",
+    "batch": 12,
+    "exact": false,
+    "max_error": 0.00390625,
+    "256_ms": 1.2956688411014026,
+    "2048_ms": 0.17459092279778252
+  },
+  {
+    "name": "blk.0.attn_k.weight",
+    "batch": 10,
+    "exact": false,
+    "max_error": 0.0009765625,
+    "256_ms": 0.10984626034463661,
+    "2048_ms": 0.06820063556115778
+  },
+  {
+    "name": "blk.0.attn_k.weight",
+    "batch": 12,
+    "exact": false,
+    "max_error": 0.001953125,
+    "256_ms": 0.11288845360148943,
+    "2048_ms": 0.07231323136828649
+  },
+  {
+    "name": "blk.0.ffn_gate.weight",
+    "batch": 10,
+    "exact": false,
+    "max_error": 0.00390625,
+    "256_ms": 5.30858245577131,
+    "2048_ms": 0.47175480533909325
+  },
+  {
+    "name": "blk.0.ffn_gate.weight",
+    "batch": 12,
+    "exact": false,
+    "max_error": 0.00390625,
+    "256_ms": 4.47842800617218,
+    "2048_ms": 0.4655704587697983
+  },
+  {
+    "name": "blk.0.ffn_down.weight",
+    "batch": 10,
+    "exact": false,
+    "max_error": 0.0078125,
+    "256_ms": 1.3100955796084905,
+    "2048_ms": 0.5471112055099563
+  },
+  {
+    "name": "blk.0.ffn_down.weight",
+    "batch": 12,
+    "exact": false,
+    "max_error": 0.0078125,
+    "256_ms": 1.3833320930946704,
+    "2048_ms": 0.56062133188049
+  },
+  {
+    "name": "output.weight",
+    "batch": 10,
+    "exact": false,
+    "max_error": 0.00390625,
+    "256_ms": 58.91072082519531,
+    "2048_ms": 6.17683779109608
+  },
+  {
+    "name": "output.weight",
+    "batch": 12,
+    "exact": false,
+    "max_error": 0.00390625,
+    "256_ms": 71.8028793334961,
+    "2048_ms": 7.311180830001831
+  }
+]

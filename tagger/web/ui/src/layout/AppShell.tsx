@@ -148,9 +148,8 @@ export function AppShell({
       <Sidebar items={items} actions={actions} setup={setup} footer={footer} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* relative z-30：backdrop-blur 会自建一层 stacking context，不抬 z-index 的
-            话顶栏里的下拉（配置方案）会被下面的 <main> 盖住——看得见、点不到。 */}
-        <header className="relative z-30 flex h-12 shrink-0 items-center justify-between gap-4 border-b border-lx bg-lx-surface/70 px-4 backdrop-blur md:px-5">
+        {/* 保持顶栏菜单位于工作区之上。 */}
+        <header className="lx-topbar relative z-30 flex h-12 shrink-0 items-center justify-between gap-4 border-b border-lx px-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             {/* 调度中心的入口 + 连接灯。放左边是因为它和"这是哪台机器"同属
                 连接状态；右边已经挤了显卡、配置方案和任务状态片。 */}
@@ -233,7 +232,7 @@ export function AppShell({
         {/* 底部状态条常驻：空闲时它就是一行 "-- | -- | --"。
             以前是有任务才出现，代价是整条高度来回跳，切换页面时会抖。 */}
         {statusBar ? (
-          <footer className="shrink-0 border-t border-lx bg-lx-surface/70 px-4 py-1 md:px-5">
+          <footer className="lx-statusbar shrink-0 border-t border-lx px-4 py-1 md:px-5">
             {statusBar}
           </footer>
         ) : null}

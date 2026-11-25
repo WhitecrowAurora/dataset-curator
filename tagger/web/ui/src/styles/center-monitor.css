@@ -1,0 +1,94 @@
+.center-monitor {
+  overflow: hidden;
+  border: 1px solid var(--lx-border);
+  border-radius: var(--lx-radius-lg);
+  background: var(--lx-surface);
+  box-shadow: var(--lx-shadow-inset), var(--lx-shadow-panel);
+  color: var(--lx-text);
+}
+.center-monitor-heading, .center-monitor-heading > div, .center-monitor-status,
+.center-monitor-label, .center-monitor-footer, .center-monitor-task,
+.center-monitor-parallel { display: flex; align-items: center; }
+.center-monitor-heading {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--lx-rule);
+}
+.center-monitor-heading > div { gap: 9px; }
+.center-monitor-heading svg { color: var(--lx-text-muted); }
+.center-monitor-heading h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.center-monitor-local {
+  border-left: 1px solid var(--lx-border);
+  margin-left: 3px;
+  padding-left: 12px;
+  color: var(--lx-text-dim);
+  font-size: 11px;
+}
+.center-monitor-status { gap: 7px; font-size: 11px; color: var(--lx-text-secondary); }
+.center-monitor-status i { width: 5px; height: 5px; border-radius: 50%; background: var(--lx-text-dim); }
+.center-monitor[data-active="true"] .center-monitor-status i { background: var(--lx-success); box-shadow: 0 0 0 3px var(--lx-success-subtle); }
+.center-monitor-status.is-stale { color: var(--lx-warning-text); }
+.center-monitor-status.is-stale i { background: var(--lx-warning); }
+.center-monitor-status small { font-size: 10px; color: var(--lx-text-dim); margin-left: 6px; }
+.center-monitor-grid { display: grid; grid-template-columns: 0.95fr 1.3fr 1.15fr; }
+.center-monitor-cell { min-width: 0; padding: 22px; }
+.center-monitor-cell + .center-monitor-cell { border-left: 1px solid var(--lx-rule); }
+.center-monitor-speed { background: linear-gradient(135deg, var(--lx-accent-subtle), transparent 80%); }
+.center-monitor-label { gap: 8px; font-size: 11px; color: var(--lx-text-muted); }
+.center-monitor-label > span { margin-left: auto; font-size: 10px; color: var(--lx-warning-text); }
+.center-monitor-reading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-top: 19px; }
+.center-monitor-reading strong {
+  font-family: var(--lx-font-mono);
+  font-size: clamp(26px, 3.1vw, 36px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -1.6px;
+  font-variant-numeric: tabular-nums;
+}
+.center-monitor-reading > span { font-size: 11px; color: var(--lx-text-dim); }
+.center-monitor-speed .center-monitor-reading strong { font-size: clamp(32px, 3.7vw, 44px); color: var(--lx-accent-text); }
+.center-monitor-unit { margin-top: 8px; font-size: 11px; color: var(--lx-text-secondary); }
+.center-monitor-hint { margin-top: 20px; font-size: 10px; color: var(--lx-text-dim); }
+.center-monitor-progress-caption, .center-monitor-memory { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; font-size: 10px; color: var(--lx-text-muted); }
+.center-monitor-progress-caption { margin: 17px 0 9px; }
+.center-monitor-progress-caption b { font-family: var(--lx-font-mono); font-weight: 400; color: var(--lx-text-secondary); }
+.center-monitor-meter { height: 4px; border-radius: 2px; overflow: hidden; background: var(--lx-bar-track); }
+.center-monitor-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--lx-text-muted); transition: width 260ms var(--lx-ease-smooth); }
+.center-monitor-meter.is-progress > span { background: var(--lx-accent); }
+.center-monitor-pending-line { height: 4px; border-top: 1px dashed var(--lx-border-hover); }
+.center-monitor-outcomes { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 13px; font-size: 10px; color: var(--lx-text-muted); }
+.center-monitor-outcomes b { margin-left: 4px; font-family: var(--lx-font-mono); font-weight: 400; color: var(--lx-text-secondary); }
+.center-monitor-outcomes .has-failures, .center-monitor-outcomes .has-failures b { color: var(--lx-warning-text); }
+.center-monitor-gpu + .center-monitor-gpu { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--lx-rule); }
+.center-monitor-device { display: flex; align-items: baseline; gap: 8px; margin-top: 11px; font-size: 10px; color: var(--lx-text-secondary); }
+.center-monitor-device > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.center-monitor-device small { margin-left: auto; flex-shrink: 0; font-size: 9px; color: var(--lx-text-dim); }
+.center-monitor-gpu .center-monitor-reading { margin-top: 12px; }
+.center-monitor-gpu .center-monitor-reading strong { font-size: 28px; letter-spacing: -1px; }
+.center-monitor-memory { margin: 13px 0 8px; }
+.center-monitor-memory > span:last-child { font-family: var(--lx-font-mono); }
+.center-monitor-empty { display: grid; justify-items: start; gap: 8px; padding-top: 22px; font-size: 11px; color: var(--lx-text-muted); }
+.center-monitor-empty small { font-size: 10px; color: var(--lx-text-dim); }
+.center-monitor-footer { justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 14px 22px; border-top: 1px solid var(--lx-rule); background: var(--lx-surface-raised); }
+.center-monitor-task { gap: 10px; min-width: 0; flex: 1 1 220px; }
+.center-monitor-task > svg { flex-shrink: 0; color: var(--lx-text-muted); }
+.center-monitor-task > div { min-width: 0; }
+.center-monitor-task strong { display: block; font-family: var(--lx-font-mono); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.center-monitor-task span { display: block; margin-top: 3px; font-size: 10px; color: var(--lx-text-muted); overflow-wrap: anywhere; }
+.center-monitor-parallel { flex-wrap: wrap; gap: 12px; font-size: 10px; color: var(--lx-text-muted); }
+.center-monitor-parallel b { margin-left: 7px; font-family: var(--lx-font-mono); font-weight: 500; color: var(--lx-text); }
+@media (max-width: 900px) {
+  .center-monitor-grid { grid-template-columns: 1fr 1.2fr; }
+  .center-monitor-cell:last-child { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--lx-rule); }
+}
+@media (max-width: 540px) {
+  .center-monitor-grid { grid-template-columns: 1fr; }
+  .center-monitor-cell { padding: 18px; }
+  .center-monitor-cell + .center-monitor-cell { border-left: 0; border-top: 1px solid var(--lx-rule); }
+  .center-monitor-heading, .center-monitor-footer { padding: 14px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .center-monitor-meter > span { transition: none; }
+}

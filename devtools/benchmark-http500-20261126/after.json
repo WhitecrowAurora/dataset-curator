@@ -1,0 +1,84 @@
+{
+  "statuses": {
+    "page": 200,
+    "options": 200,
+    "state": 200
+  },
+  "options": {
+    "models": [
+      {
+        "key": "qwen3vl-8b-abliterated",
+        "title": "qwen3vl-8b-abliterated",
+        "variants": [
+          {
+            "engine": "llamacpp",
+            "precisions": [
+              "q4",
+              "q6"
+            ]
+          },
+          {
+            "engine": "native",
+            "precisions": [
+              "q4",
+              "q6"
+            ]
+          }
+        ]
+      },
+      {
+        "key": "torii-gate-0.5",
+        "title": "ToriiGate-0.5",
+        "variants": [
+          {
+            "engine": "llamacpp",
+            "precisions": [
+              "q6"
+            ]
+          },
+          {
+            "engine": "native",
+            "precisions": [
+              "q6"
+            ]
+          }
+        ]
+      }
+    ],
+    "devices": [
+      {
+        "value": "cuda:0",
+        "physical_index": 0,
+        "name": "NVIDIA GeForce RTX 4070 Ti SUPER",
+        "vram_gb": 16.0
+      }
+    ],
+    "recent_source": "",
+    "default_levels": [
+      1,
+      2,
+      4,
+      6,
+      8
+    ],
+    "engine_status": {
+      "vllm": {
+        "available": false,
+        "reason": "vLLM 无法在 Windows 原生运行。两个选择：\n  1) 在 WSL2 里执行同一条命令（推荐，GPU 直通会有 10-30% 性能损失）\n  2) 在别的 Linux 机器上起服务，本机用 `tagger smoke --url http://host:8000` 连过去\n     （远程模式下 args 里的本地数据路径需要换成共享挂载或 http 地址）"
+      },
+      "llamacpp": {
+        "available": true,
+        "reason": ""
+      },
+      "native": {
+        "available": true,
+        "reason": ""
+      }
+    }
+  },
+  "torii_selection_validated": [
+    "native",
+    "llamacpp"
+  ],
+  "uses_real_torii_files": true
+}

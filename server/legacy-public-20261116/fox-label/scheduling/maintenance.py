@@ -1,4 +1,4 @@
-"""定时释放离线预约，不回收执行任务。"""
+"""定时回收连续 48 小时未成功上报的在线租约。"""
 import logging
 import threading
 
@@ -15,10 +15,10 @@ def start(store, dispatch):
                     with dispatch._Tx(c):
                         released = release_offline(c)
                         if released:
-                            store.event(c, 'prelock_offline', None, None, 'auto', 'released=' + ','.join(released))
+                            store.event(c, 'lease_expired', None, None, 'auto', 'released=' + ','.join(released))
                 except Exception:
-                    logging.exception('释放离线预锁失败')
+                    logging.exception('回收过期在线租约失败')
                 finally:
                     c.close()
-    threading.Thread(target=run, daemon=True, name='prelock-maintenance').start()
+    threading.Thread(target=run, daemon=True, name='lease-maintenance').start()
     return stop

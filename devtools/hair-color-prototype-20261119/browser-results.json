@@ -1,0 +1,12 @@
+{
+  "console_errors": [],
+  "checks": [
+    "three color diagrams",
+    "select two colors",
+    "save decision",
+    "reload retains choice",
+    "undo",
+    "mobile 390px no overflow",
+    "upload image and run real cascade"
+  ]
+}

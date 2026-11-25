@@ -316,9 +316,8 @@ archive:
 output:
   mode: both
   nl_min_tokens: 32
-  # 384 而不是 256：口径是**整个回复**（tag 段 + caption）。文字多的图（包装
-  # 上的品牌/规格/日期成串）caption 会被小字清单撑长，256 会误伤。
-  # ★与 max_tokens(800) 分开看：这条是质检的及格线，不是生成的硬顶。
+  # 生成回复长度的软提示，超过不扣分。max_tokens(800) 只是生成预算。
+  # 最终训练文本另按 Qwen3.5 tokenizer 计数：尽量 <=384，绝不超过512。
   nl_max_tokens: 384
   tag_min_count: 12
   # 64 而不是 160：规则里"多数图落在 30-60 个"才是真实分布，160 只是个
@@ -486,20 +485,10 @@ artist:
 # ---------------------------------------------------------------------------
 quality:
   enabled: true
-  # 这两条是 token 预算的字符兜底（英文约 4.4 字符/token）。
-  # 判定优先级：nl_tokens（来自 API usage，准）> 字符数（没记录 token 时才用）。
-  # 32 token ≈ 140 字符，384 token ≈ 1800 字符。
-  # ★这两条必须跟着 output.nl_*_tokens 一起改：只改 token 不改字符，
-  #   会出现"token 在预算内、却被字符线判成过短"的假失败；反过来（字符线
-  #   比 token 线紧）会把合格的图判成"caption 过长"，白扣完整度分。
-  #   max_chars 现在按 384 token 定：文字密集的包装图实测最长 1517 字符。
+  # 字符数用于过短检查与过长提示；max_chars 超出只记提示、不扣分。
   min_chars: 140
   max_chars: 1800
-  # caption 作为**单条纯文本**送进 text encoder 的 token 上限，infra 那边
-  # 超过直接截断（不报错）。512 是 infra 的硬线；入库前按句砍，落在句边界上。
-  # 实测当前产出最大 299（Qwen tokenizer），余量很大，这条只是兜底。
-  # 口径别和上面两条混：max_chars 是字符数、nl_max_tokens 是整个回复。
-  # 写 0 = 关掉这道保险。
+  # 兼容旧配置；实际硬上限在训练文本设置中执行，不能通过此项关闭。
   caption_token_limit: 512
   min_tag_coverage: 0.60
   max_repeat_ratio: 0.35

@@ -2,7 +2,7 @@
 from .managed import ManagedSession
 
 
-def execute(history, *, submit):
+def execute(history, *, submit, reinject='', candidate_id=''):
     from ...fox_worker import api
     from .history_check import execute as check
     from .history_discovery import discover
@@ -21,14 +21,15 @@ def execute(history, *, submit):
             history.phase('idle', '本地历史产物识别完成')
             return
         items = [r for r in history.snapshot()['items'] if r['local_status'] == 'ready'
-                 and r['status'] not in ('registered', 'verifying', 'incomplete')]
+                 and (not candidate_id or r['id']==candidate_id)
+                 and (reinject or r['status'] not in ('registered', 'verifying', 'incomplete'))]
         if not items:
             history.phase('idle', '没有新增待上报产物；来源不明的结果可在下方补充关联')
             return
         session = center.runtime.session
         owned = session is None or session.closed
         if owned:
-            session = ManagedSession(center)
+            session = ManagedSession(center, history_only=True)
         session.poll(state, {}, inventory=[])
         for index, item in enumerate(items, 1):
             if history.cancel.is_set() or session.closed:
@@ -39,12 +40,13 @@ def execute(history, *, submit):
                 session.poll(state, {}, inventory=[{k: item[k] for k in ('id','repo','package','fingerprint')}
                                                    | {'status': item['local_status']}])
                 result = api(session.identity, '/api/v1/history/begin',
-                             {'session_id': session.id, 'candidate_id': item['id']}, timeout=20, retries=0)
+                             {'session_id': session.id, 'candidate_id': item['id'],'reinject':reinject}, timeout=120 if reinject else 20, retries=0)
                 task = result['task']
                 check(history, {'config': task}, session, history.cancel)
             except Exception as exc:
                 message = center.credentials.redact(str(exc))
-                history.report(item['id'], {'error': message}, 'failed', item['fingerprint'])
+                current = next((r for r in history.inventory.scan() if r['id']==item['id']), item)
+                history.report(item['id'], {**getattr(exc,'report',{}), 'error': message}, 'failed', current['fingerprint'])
                 errors.append(item['package'] + '：' + message)
                 if task:
                     try:
@@ -62,8 +64,10 @@ def execute(history, *, submit):
         history.phase('failed', center.credentials.redact(str(exc)))
     finally:
         if owned and session:
-            session.closed = True
             try:
+                with session.lock:
+                    session.closed = True
+                    session._persist()
                 session.poll(state, {}, released=True, inventory=[])
             except Exception:
                 pass

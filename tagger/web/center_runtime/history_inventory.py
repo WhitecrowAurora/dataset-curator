@@ -66,9 +66,11 @@ class Inventory:
                 for r in self.scan()]
 
     def unlinked(self, rows=None):
+        from ...center_runtime.snapshot import superseded
+        from ...verification.local import is_delivery
         data = read_json(self.path) or {}
         roots = {Path(self.center.config()["out_dir"]), *(Path(p) for p in data.get('search_dirs', []))}
         linked = {str(Path(f).resolve()) for r in (rows if rows is not None else self.scan()) for f in r["files"]}
         return [{'name': p.name, 'path': str(p), 'reason': '缺少本地原分片或来源关联'}
                 for p in sorted({p.resolve() for root in roots for pattern in ('artifacts-*.jsonl','artifacts-*.json','artifacts-*.parquet')
-                                 for p in root.rglob(pattern)}) if str(p) not in linked] + data.get('discovery_issues', [])
+                                 for p in root.rglob(pattern)}) if not is_delivery(p) and not superseded(p) and str(p) not in linked] + data.get('discovery_issues', [])

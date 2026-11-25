@@ -5,7 +5,7 @@
 # 看不出来。环境是产出的一部分，所以版本必须钉住。
 #
 # 不包含的东西：
-#   torch torchvision transformers timm safetensors onnxruntime datasets
+#   torch torchvision timm safetensors onnxruntime datasets
 #   open_clip_torch           → **另一份清单 requirements-tag.txt**，由
 #                               install.bat / install.sh 默认安装（约 2.5 GB）。
 #                               不并进来是因为这份清单是"每次装都重跑"的
@@ -27,6 +27,8 @@ iniconfig==2.3.1
 # numpy 是 pyarrow 的硬依赖，但 pip 只会装"当时最新的那个"。不钉住的话，
 # 不同时间装的两个人拿到不同 numpy，parquet 的数值/布尔行为可能悄悄不一致。
 numpy==2.5.4
+# 训练文本精确计数只加载 tokenizer；API 打标也需要，不依赖 torch 权重。
+transformers==5.14.1
 packaging==26.3
 pillow==13.0.0
 pluggy==1.7.0
@@ -56,7 +58,9 @@ py7zr==1.1.4
 #   snapshot_download（几个 CLIP 打分模型就是这样加载的）；web/downloads
 #   也用它读 HF token。它只有 ~5MB，依赖的 requests/filelock/fsspec/tqdm
 #   本来就在树里。prune-env.bat 里已从删除名单中摘出来。
-huggingface_hub==2.4.0
+# Transformers 5.14.1 / tokenizers 要求 <2.0，datasets 5.1.0 要求 >=1.31.0。
+# 使用本机已验证的共同兼容版本，不能单独跟随 Hub 的最新大版本。
+huggingface_hub==1.33.0
 # psutil：拆包时按可用内存砍并发。缺了会被 except 吞掉、并发不降，
 #   表现是"内存不够时整台机器被拖死"而不是报错。纯 C 扩展，很小。
 psutil==7.2.2

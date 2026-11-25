@@ -140,7 +140,6 @@ export function Dedup() {
         icon={<Copy size={17} />}
         eyebrow="去重"
         title="素材查重"
-        description="产出排除清单，原图不动"
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>
@@ -166,10 +165,7 @@ export function Dedup() {
       <div className="grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-w-0 flex-col gap-3.5">
           <SectionPanel title="素材目录">
-            <SettingRow
-              label="输入目录"
-              help="装图的文件夹或单个大 zip"
-            >
+            <SettingRow label="输入目录">
               <div className="flex gap-2">
                 <input
                   className="lx-input font-mono text-xs"
@@ -190,7 +186,7 @@ export function Dedup() {
               </div>
             </SettingRow>
 
-            <SettingRow label="重复判定" help="相似模式额外抓重压缩的图">
+            <SettingRow label="重复判定">
               <ChoiceGrid
                 options={MODES}
                 value={mode}
@@ -206,7 +202,7 @@ export function Dedup() {
             {mode === 'similar' && (
               <SettingRow
                 label={`相似阈值：${threshold}`}
-                help="汉明距离 ≤ 阈值算同一张。调小更严、误杀少"
+                help="汉明距离上限（越小越严格）"
               >
                 <input
                   type="range"
@@ -220,7 +216,7 @@ export function Dedup() {
               </SettingRow>
             )}
 
-            <SettingRow label="组内保留" help="最先按分包编号序；最大按文件体积">
+            <SettingRow label="组内保留">
               <ChoiceGrid
                 options={KEEPS}
                 value={keep}
@@ -236,7 +232,7 @@ export function Dedup() {
             <details className="px-1">
               <summary className="cursor-pointer text-xs text-lx-muted">高级</summary>
               <div className="mt-3 space-y-4">
-                <SettingRow label="输出目录" help="默认 <输入名>-dedup，哈希缓存也放这里">
+                <SettingRow label="输出目录" help="默认 <输入名>-dedup">
                   <div className="flex gap-2">
                     <input
                       className="lx-input font-mono text-xs"
@@ -257,7 +253,7 @@ export function Dedup() {
                     </button>
                   </div>
                 </SettingRow>
-                <SettingRow label="并行线程" help="机械盘 8 通常够用">
+                <SettingRow label="并行线程">
                   <input
                     type="number"
                     className="lx-input w-24 font-mono tabular-nums"
@@ -272,7 +268,6 @@ export function Dedup() {
                   checked={recursive}
                   onChange={setRecursive}
                   label="包含子目录"
-                  hint="关掉只扫第一层"
                   disabled={running}
                 />
               </div>

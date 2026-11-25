@@ -52,10 +52,14 @@ def _child(shards, out):
     threading.Thread(target=watch, daemon=True).start()
     start = time.monotonic()
     shard = _shard(task, shards, state)
-    metrics = {"download_s": round(time.monotonic() - start, 2), **worker._dl_stats(task)}
+    metrics = {"source": str(shard.resolve()), "download_s": round(time.monotonic() - start, 2), **worker._dl_stats(task)}
     if state.stop.is_set():
         return 1
-    env = {**os.environ, "FOXLABEL_PARTS": ",".join(task["missing_parts"])}
+    env = {**os.environ, "FOXLABEL_PARTS": ",".join(task["missing_parts"]), "FOXLABEL_PACKAGE": task['package']}
+    from ...center_runtime.artist import prepare as prepare_artist
+    prepare_artist({}, task, out)
+    from ...center_runtime.annotation import environment as annotation_environment
+    env.update(annotation_environment(task))
     start = time.monotonic()
     proc = subprocess.Popen([sys.executable, "-m", "tagger.cli", "client", "--shard", str(shard),
                              "--out-dir", str(out), "--artifact-format", "jsonl",

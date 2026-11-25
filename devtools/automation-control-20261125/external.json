@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "direct_external_http": true,
+  "checks": {
+    "/health": {
+      "status": 200,
+      "bytes": 41,
+      "sha256": "dee2773f273bad21ec3763f17ab48f5ae5c9778e8531af5c05bb1f3c156ddfe2"
+    },
+    "/login": {
+      "status": 200,
+      "bytes": 1709,
+      "sha256": "ac6bffb1b5c8a8fabf37c1b9ab4af71d65b066b03cc7ca094b7f0e2585ec9467"
+    },
+    "/static/automation.js": {
+      "status": 200,
+      "bytes": 2476,
+      "sha256": "af770102a81edb5fec7732ca75f5f5c8ef234832711aa67cd6f47d248faa1b65",
+      "served_source_matches": true
+    },
+    "/static/managed.js": {
+      "status": 200,
+      "bytes": 8874,
+      "sha256": "f452aec2d58f55036146e2b50ee395607cc3beede8306bb7c8be7293c8a4c364",
+      "served_source_matches": true
+    },
+    "/static/managed-tuning.js": {
+      "status": 200,
+      "bytes": 6643,
+      "sha256": "254f56caab16803138dbd77a4024896fe8fd9943c6c6da3ec76c4f63aa2c398a",
+      "served_source_matches": true
+    },
+    "/static/workspace-sections.css": {
+      "status": 200,
+      "bytes": 3599,
+      "sha256": "3468e2be5daabb9f624e5e46d2d52fbcdf8c0dc7bf20ca3888796aa7dbd83881",
+      "served_source_matches": true
+    }
+  }
+}

@@ -5,8 +5,9 @@ import asyncio
 
 
 class BatchScheduler:
-    def __init__(self, engine, batch_size):
+    def __init__(self, engine, batch_size, *, batch_window_s=0.01):
         self.engine, self.batch_size = engine, batch_size
+        self.batch_window_s = batch_window_s
         self.queue = asyncio.Queue(maxsize=max(8, batch_size * 4))
         self.task = None
         self.closed = False
@@ -38,7 +39,7 @@ class BatchScheduler:
             if first is None:
                 break
             pending = [first]
-            deadline = asyncio.get_running_loop().time() + 0.01
+            deadline = asyncio.get_running_loop().time() + self.batch_window_s
             while len(pending) < self.batch_size:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:

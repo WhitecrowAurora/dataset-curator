@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"backup\": \"/tagger/.delete/workspace-list-20261123\", \"baseline\": \"39b3541b0522f5b11c29468bd90f5c8bcb1f5bf7381eb4f30d7d1c17773a30c8\", \"services\": {\"lulynx-label.service\": \"26437\", \"lulynx-panel.service\": \"26438\"}}\n",
+  "stderr": ""
+}

@@ -1,0 +1,1 @@
+{"ok": true, "files": 10, "services": ["active", "active"], "health": {"ok": true, "repos": 2, "packages": 874}, "label_restarted": false, "backup": "/tagger/.delete/panel-layout-20261124/before", "free": 8987475968}

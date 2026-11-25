@@ -1,0 +1,14 @@
+{
+  "http": true,
+  "actual_package_drawer": true,
+  "actual_workspace": true,
+  "actual_client_page": true,
+  "anonymous_share": true,
+  "revoke": true,
+  "admin_download_after_revoke": true,
+  "cache_reuse": true,
+  "image": true,
+  "decision_export": true,
+  "conflicts_unchanged": true,
+  "page_errors": []
+}

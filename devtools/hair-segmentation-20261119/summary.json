@@ -1,0 +1,61 @@
+{
+  "originals": 15,
+  "head_crops": 2,
+  "segmentation_runs": 68,
+  "classified_input_variants": 72,
+  "model_stats": {
+    "anime": {
+      "cases": 17,
+      "empty_masks": 0,
+      "median_ms": 622.7
+    },
+    "anime-official": {
+      "cases": 17,
+      "empty_masks": 0,
+      "median_ms": 650.8
+    },
+    "face": {
+      "cases": 17,
+      "empty_masks": 7,
+      "median_ms": 74.1
+    },
+    "bisenet": {
+      "cases": 17,
+      "empty_masks": 6,
+      "median_ms": 14.9
+    }
+  },
+  "input": "shared 256x256 center crop following anime repo preprocessing; masks produced in this coordinate system",
+  "mask_postprocess": "argmax class; nonhair white; tight bounding rectangle; no smoothing, thresholds or manual corrections",
+  "limitations": "visual spot check, no pixel ground truth; not mask IoU or color accuracy benchmark",
+  "provenance": {
+    "anime": {
+      "repo": "pit-ray/Anime-Semantic-Segmentation-GAN",
+      "revision": "fbc300b17f6f99a99e5df7006a1004bb13350ef1",
+      "weight_id": "1k9WSqT8H2t5WSO_dfaERrA90N4R_nehO",
+      "sha256": "6bdd5e7b78e07c475223668890e62ebf3f388e2ebc432cd46bdc9fcf6300bc0a",
+      "hair_label": 2,
+      "license": "MIT repo; separate weight/data license not specified"
+    },
+    "face": {
+      "repo": "jonathandinu/face-parsing",
+      "revision": "758b82e15a0178c9db39c1ff666a8b56e3a550c8",
+      "hashes": {
+        "config.json": "01d82e818569beda6aec804642e34ce187bed43326337d52ce370ff015964d68",
+        "preprocessor_config.json": "e5a25d8fc054bf780be930e161b47d188bec1b0bf0a44fd5fdfb3f3312c0be0b",
+        "model.safetensors": "c2bec795a8c243db71bd95be538fd62559003566466c71237e45c99b920f4b62",
+        "README.md": "d98d46f09fe6cf246482edff8cc386a0cb8c0dd2109fd04883b298c6069b5d82"
+      },
+      "hair_label": 13,
+      "license": "non-commercial research and educational purposes; experiment only"
+    },
+    "bisenet": {
+      "repo": "xinntao/facexlib",
+      "revision": "260620ae93990a300f4b16448df9bb459f1caba9",
+      "weight_url": "https://github.com/xinntao/facexlib/releases/download/v0.2.0/parsing_bisenet.pth",
+      "sha256": "468e13ca13a9b43cc0881a9f99083a430e9c0a38abd935431d1c28ee94b26567",
+      "hair_label": 17,
+      "license": "MIT source; CelebAMask-HQ trained, research experiment only"
+    }
+  }
+}

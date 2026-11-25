@@ -1,0 +1,9 @@
+{
+  "actual_http": true,
+  "header_persistent": true,
+  "desktop": true,
+  "mobile": true,
+  "stale_excluded": true,
+  "network_recovery": true,
+  "page_errors": []
+}

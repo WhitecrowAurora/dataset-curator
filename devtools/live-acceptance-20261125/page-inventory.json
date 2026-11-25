@@ -1,0 +1,481 @@
+{
+  "pages": [
+    {
+      "url": "http://127.0.0.1:27100/#/center",
+      "title": "Tagger · NL + tag 打标工作台",
+      "text": "lulynx / tagger\nNL + tag 打标工作台\n任务\n调度中心\n新建任务\n运行\n运行中\n历史任务\n统计\n查看结果\n数据\n打标管理\n工具\n冲突与决策\n去重\n数据打包\n回传\n打标清单\n环境\n模型管理\n分片下载\n依赖检测\n部署自检\n设置\n重试失败\n快速配置向导\n几步完成基础设置\n已连接 · lulu\n\n本机服务 · 只监听 127.0.0.1\n\n调度中心\n已连接\nWindows 10\nPython 3.12.9\ncuda:0\ncu126\n配置方案\n空闲\n局域网协作\n调度中心\n\n自动分工，分到的分片在本机打标\n\n已停止\n连接\n已连接\nhttp://119.28.16.93\n持有租约\n0\n执行 0 · 预取 0\n全池剩余\n872\n共 874 片 · 已完成 2\n缺 NL\n868\n只等描述的那一侧\n缺 TAG\n872\n只等标签的那一侧\n上次退出码\n—\n实时执行\n\n逐图进度与整包交付分开统计；流式输入读完前不显示百分比\n\n等待任务\n强制继续\n持有分片与释放\n\n当前包和预取包成功上报后均续期 48 小时；释放保留本地产物\n\n当前没有租约\n\n中心分派通知与导入\n\n收到分派后先查看任务与配置，确认应用后再点击开始。支持 JSON 或按用户 ZIP。\n\n分派清单\n浏览\n导入分派\n检查中心分派\n接单控制\n\n开始后由中心自动派发；退出托管保留租约，48 小时内可续做；归还分片请使用停止并释放\n\n保存配置\n探测并发\n开始自动接单\nTAG + NL · 由中心统一派发\n接单与托管\n连接与账号\n模型与执行\n下载与交付\n任务与记录\n\n选择产出内容与接单上限，开始后由中心派发。\n\n接单与托管\n\n设置产出内容；已有分派优先，空闲时自动领取\n\n产出模式\nTAG + NL\nTAG\nNL\n高级：派工偏好\n分片上限\n\n0 = 不限；达到上限后暂停接单，重启沿用本轮计数\n\n高级：自动恢复与服务行为\n空闲\n-- | -- | --\nCPU\n11%\n|\nGPU\n38%\n39°\n|\n内存\n26%\n|\n显存\n12%\n计划",
+      "inputs": [
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "D:\\datasets\\my-images 或 D:\\datasets\\shard-0001.tar",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "range",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "阈值"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "models\\wd-eva02",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "跟随输入路径",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "K:/anlia/_artist/shards",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "range",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "批大小"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "批大小数值"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "range",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "占空比"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "温度闭环目标"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "警告温度"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "熔断温度"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "恢复温度"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "连续运行"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "单次休息"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "比例 kp"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "积分 ki"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "死区"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "最低占空比"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "单次让步上限"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "jsonl-clean-path",
+          "placeholder": "JSONL 文件路径，或存放 JSONL 的文件夹",
+          "aria": "已打好的 JSONL 文件或文件夹"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "分派清单路径"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "0",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "http://1.2.3.4:31831",
+          "aria": "调度中心地址"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "zhangsan",
+          "aria": "用户 ID"
+        },
+        {
+          "type": "password",
+          "name": "",
+          "id": "",
+          "placeholder": "已登录",
+          "aria": null
+        },
+        {
+          "type": "password",
+          "name": "",
+          "id": "",
+          "placeholder": "可选，hf_…",
+          "aria": "Hugging Face Token"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "tag_batch"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "max_model_len"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "gpu_mem"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "服务模型名"
+        },
+        {
+          "type": "number",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "concurrency"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "http://127.0.0.1:8000",
+          "aria": "推理服务地址"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "work/fox-work",
+          "aria": "产物目录"
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "checkbox",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "4",
+          "aria": null
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "离线清单路径"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "源仓库"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "源分片"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "原始分片路径"
+        },
+        {
+          "type": "text",
+          "name": "",
+          "id": "",
+          "placeholder": "",
+          "aria": "产物目录"
+        }
+      ]
+    },
+    {
+      "url": "http://127.0.0.1:31842/login",
+      "title": "登录 · fox-label 面板",
+      "text": "fox-label 面板\n只读管理面板\n账号\n密码\n登录\n\n只读面板 · 账号密码由管理员通过 python3 panel.py init 设置",
+      "inputs": [
+        {
+          "type": "text",
+          "name": "user",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        },
+        {
+          "type": "password",
+          "name": "password",
+          "id": "",
+          "placeholder": "",
+          "aria": null
+        }
+      ]
+    }
+  ],
+  "errors": []
+}

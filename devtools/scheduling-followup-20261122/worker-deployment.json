@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"before\": {\"worker.py\": \"e19a47b67232a7374a8d1012295b0e3a4927dccef56f9793f964640614c1e4ce\", \"worker-sources.json\": \"6caf2fd9790445fcdb40c5ed1a8412b55dac0cd6f85747e4238fb67208ee6d08\"}, \"after\": {\"worker.py\": \"fc7bc6043a83a4bf1f83ce803f233ca188a1147a35e5d3a453d934eaf9f869bf\", \"worker-sources.json\": \"86e58e2ed0cfe0c5f04cbc666f3c77d87097e2b5240e915cc1382d653bab1187\"}, \"backup\": \"/tagger/.delete/scheduling-followup-worker-20261122\", \"services\": [\"active\", \"active\"], \"worker_help\": true}\n",
+  "stderr": ""
+}

@@ -41,11 +41,11 @@ class OutputProgress:
                 ready.add(part)
                 self._done(part)
 
-    def settle(self, kind: str, task, outcome) -> None:
+    def settle(self, kind: str, task, outcome, parts=("tag", "nl")) -> None:
         with self._lock:
             ready = self._active.pop(task.image_id, set())
             for part, counts in self._counts.items():
-                if part in ready or kind == "busy":
+                if part not in parts or part in ready or kind == "busy":
                     continue
                 if kind == "done" and getattr(outcome, part, None) is not None:
                     self._done(part)

@@ -252,6 +252,7 @@ def describe_guard(policy) -> str:
     parts.append(f"闭环 {policy.target_temp_c:.0f}°C" if policy.target_temp_c
                  else "闭环 关")
     parts.append(f"熔断 {policy.temp_cutoff_c:.0f}°C/恢复 {policy.temp_resume_c:.0f}°C")
+    parts.append(f"磁盘下限 {policy.disk_min_free_gb:g} GB/{policy.disk_min_free_pct * 100:g}%")
     if policy.continuous_minutes:
         parts.append(f"每 {policy.continuous_minutes:.0f} 分钟休 {policy.rest_minutes:.0f} 分钟")
     return " · ".join(parts)
@@ -474,6 +475,9 @@ class JobSpec:
     # ---- 引擎。local = 本地 tag 后端；vlm = vLLM 出 NL（tag 可由本地后端并行出）。
 
     engine: str = "local"
+    hair_review: bool = False
+    nl_by_media: bool = False
+    hair_media: str = "unknown"
 
     # ---- VLM 服务（engine="vlm" 时生效）
 
@@ -1686,10 +1690,25 @@ class JobManager:
 
     def create(self, spec: JobSpec) -> Job:
         """扫输入、建任务。**不启动**——启动与创建分开，HTTP 层才能先回 202。"""
+        if spec.hair_media not in ("anime", "photo", "unknown"):
+            raise ValueError("发色复核的数据类型请选择动漫、真人或混合/未知")
+        if spec.nl_by_media and spec.output_mode == "both" and spec.backend == "none":
+            raise ValueError("按数据类型生成描述时，请选择 PixAI 等分类后端生成标签")
+        if (spec.hair_review or spec.nl_by_media) and (len(spec.tag_device_list()) > 1 or spec.multi_gpu):
+            raise ValueError("发色复核当前按单卡串行阶段执行，请选择一个打标设备")
         if self.running() is not None:
             raise RuntimeError("已有任务在跑。单卡上并行只会两个都慢，等它结束或先停止。")
 
         options = spec.pack_options()          # 先校验封包参数再扫盘，错得便宜
+        if spec.guard and not spec.check_space:
+            from ..config import ConfigError
+            from ..runtime.disk_space import require_space
+            try:
+                policy = guard_policy_for(spec)
+            except ConfigError:
+                pass  # 保留配置不可读时由 _make_guard 降级的既有行为。
+            else:
+                require_space(policy, spec.out_dir)
         if spec.guard and spec.guard_policy:
             # 阈值不合法要在建任务时就 400。跑进线程才抛的话，HTTP 已经回了
             # 202，页面上表现为"任务失败"，实际是表单填错（与 output_mode 同理）。
@@ -1724,9 +1743,11 @@ class JobManager:
             mode = str(spec.output_mode or "both").strip().lower()
             if mode not in VLM_MODES:
                 raise ValueError(f"output_mode 只能是 nl / tag / both，收到 {spec.output_mode!r}")
+            from ..text_encoding.tokenizer import require_training_text
+            require_training_text(mode)
             # 推理来源同样要在这里校验：写错值等到线程里才抛，页面只会显示
             # "任务失败"，而真实原因是表单里那个词（"gpt" / "claude" 之类）。
-            provider = spec_provider(spec)
+            provider = "" if spec.nl_by_media else spec_provider(spec)
             if provider:
                 # API 模式没有本地服务来兜底模型名：`tagger` 这种占位名会 404。
                 if not str(spec.vlm_model or "").strip():
@@ -2067,6 +2088,16 @@ class JobManager:
     # ---- 执行
 
     def _run(self, job: Job) -> None:
+        from ..runtime.inference_queue import INFERENCE_LOCK
+        with INFERENCE_LOCK:
+            if job.spec.hair_review or job.spec.nl_by_media:
+                from .hair_workflow import suspend_main
+                with suspend_main(job):
+                    self._run_serial(job)
+            else:
+                self._run_serial(job)
+
+    def _run_serial(self, job: Job) -> None:
         spec = job.spec
         from ..storage.resume import running_lock
         # 续做任务在 resume_last() 里就已经把锁拿住了，这里必须**接着用同一把**
@@ -2092,7 +2123,7 @@ class JobManager:
             job.guard = guard
             if spec.engine == "vlm":
                 # VLM 引擎的整条主流程在 run_client 里（重试升级/失败累计上限/
-                # 断点续做/HF 流式读），guard 的 start/stop 也归它管。
+                # 断点续做/HF 流式读）；共享 guard 由本任务统一停止。
                 self._run_vlm(job, guard)
                 return
             job.phase = "tag"
@@ -2149,6 +2180,9 @@ class JobManager:
                     pack_parallel.merge_tag_stats(job.stats, parts)
             else:
                 backend = _build_backend(spec)
+                if spec.hair_review:
+                    from .hair_workflow import attach_backend
+                    attach_backend(backend, job)
                 job.push("log", message=f"加载后端 {backend.name}（{spec.precision}"
                                          f"，batch={spec.batch}"
                                          f"，{getattr(backend, 'preprocess', 'pil')} 预处理）…")
@@ -2168,6 +2202,9 @@ class JobManager:
                     read_bytes=job.reader.read, guard=guard,
                 )
 
+            if spec.hair_review:
+                from .hair_workflow import finish_local
+                finish_local(backend, job)
             stopped = job.stats.stopped or job.stop_flag.is_set() or bool(job.stats.busy)
             if stopped:
                 job.status = "stopped"
@@ -2406,7 +2443,7 @@ class JobManager:
         # 单模式（nl / tag）则连后端一起关掉——具体理由见 vlm_backend_for。
         mode = str(spec.output_mode or "both").strip().lower()
         backend_name = vlm_backend_for(mode, spec.backend)
-        provider = spec_provider(spec)
+        provider = "" if spec.nl_by_media else spec_provider(spec)
 
         # 提示词在真正开跑时现读一次：从建任务到线程启动之间用户可能刚编辑过，
         # 页面显示的和实际发出去的对不上是最难查的那类问题。
@@ -2517,6 +2554,8 @@ class JobManager:
             cache_max_gb=float(spec.cache_max_gb or 8.0),
         )
 
+        workflow_part = ""
+
         def hook(kind: str, task, outcome, stats) -> None:
             job.client_stats = stats
             job.current = task.image_id
@@ -2524,7 +2563,10 @@ class JobManager:
                 job.output_progress.ready(kind.removesuffix("_ready"), task)
                 return
             if mode == "both":
-                job.output_progress.settle(kind, task, outcome)
+                parts = (workflow_part,) if workflow_part else ("tag", "nl")
+                job.output_progress.settle(kind, task, outcome, parts)
+            if workflow_part == "tag" and kind in ("done", "skipped"):
+                return
             if kind in ("done", "failed"):
                 if not job.first_settled:
                     job.first_settled = time.time()
@@ -2580,8 +2622,12 @@ class JobManager:
             f"  模型 {spec.vlm_model}  产物 {spec.artifact_format}"
             + (f"  HF 仓库 {spec.hf_repo}" if spec.hf_repo else "  本地分片输入")))
         def _one_run(lane_args, lane_hook) -> int:
+            nonlocal workflow_part
+            workflow_part = str(getattr(lane_args, "workflow_part", ""))
             progress_hook = OutputProgressHook(lane_hook) if mode == "both" else lane_hook
+            part_options = {"parts_env": workflow_part} if workflow_part else {}
             return run_client(lane_args, ops, table, on_progress=progress_hook,
+                              **part_options,
                               should_stop=job.stop_flag.is_set,
                               paused=job.pause_flag.is_set,
                               on_log=lambda message: job.push("log", message=message),
@@ -2660,7 +2706,17 @@ class JobManager:
                 merged, [s for s in captured if s is not None])
             job.client_stats = merged
         else:
-            code = _one_run(args, hook)
+            if spec.hair_review:
+                from .hair_workflow import batch_for
+                args.hair_batch = batch_for(job)
+            if spec.nl_by_media and mode != "tag":
+                from .hair_workflow import run_caption_stages
+                code = run_caption_stages(args, job, _one_run, hook)
+            else:
+                code = _one_run(args, hook)
+            if spec.hair_review:
+                from .hair_workflow import finish_client
+                finish_client(args.hair_batch, job)
         if job.stop_flag.is_set():
             job.status = "stopped"
             job.push("log", message="已停止：产物与断点都在盘上，重跑可续做")

@@ -1,0 +1,6 @@
+{
+  "tagger/inference/qwen35/normalization.py": "0cc4d78053c16c379edddf4facf97daca6ee921f569e7f179b2b0b97255c4999",
+  "tagger/inference/qwen35/kernels/normalization.py": "d2e9db2eec65478d348da54c61744331d94f160760c4f58032b03f8fe9e99a4d",
+  "tagger/inference/qwen35/weights.py": "dc2947c48cc91cf370990ad914b307f0b4be0d1679b88205999c0a65dcdcad3a",
+  "tagger/inference/qwen35/runtime.py": "4c4c0039e2b2339651c31975e0453419d719da890ec1e163d40c58f38a868b56"
+}

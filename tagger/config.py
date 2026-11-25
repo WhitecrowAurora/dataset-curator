@@ -391,12 +391,9 @@ DEFAULT_TEXT_RULES = "图中文字规则"
 class OutputSpec:
     """产出什么、多长。决定一次打标要生成哪些字段。
 
-    两个区间都是**硬约束**（越界判不合格），不是目标值：
-        NL  : 32 ~ 256 token。下限压这么低是为了不因"图简单、话少"就判废，
-              但 prompt 仍会要求写满中段（见 client._prompt_for），
-              硬线与引导值刻意分开——把引导值降到 32 等于教模型写短句。
-        tag : 10 ~ 160 个。上限给到 160 是因为高密度图（群像、复杂场景）
-              真的能出上百个有效 tag，卡在 40 会白扔信息。
+    NL 下限用于发现过短回复，上限用于长度引导与提示，不因超过它判废。
+    最终训练文本由 text_encoding 按真实 tokenizer 执行 512 token 硬上限。
+    tag 数量仍按配置的上下限筛选。
     """
 
     # both | nl | tag
@@ -405,11 +402,7 @@ class OutputSpec:
     nl_max_tokens: int = 256
     tag_min_count: int = 12
     tag_max_count: int = 160
-    # 描述长度的**引导值**（字符区间），与上面两个**硬约束**（token 区间）分开。
-    # 这两个数字回答的问题不同：
-    #   nl_min/max_tokens —— 写出来的东西算不算合格（越界判废）
-    #   caption_chars     —— 让模型往多长写
-    # 混在一起改不了的坑：把一个调小会同时把闸门调松，把另一个调大会把闸门调紧。
+    # 描述长度的引导值（字符区间），不作为最终训练文本的裁剪边界。
     # None = 按 token 区间派生（400 ~ min(1200, max_tokens*4)），即今天的默认行为。
     # ★改它等于改产出分布，必须进 provenance/fingerprint，否则两批数据无法判断同源。
     #   实测（Q4 8B，126 张）：400-1024 → 250-500 时字数 −33%、延迟 −36%，
@@ -583,8 +576,9 @@ class OpsConfig:
     def guard_policy(self):
         """延迟导入，避免 config 依赖 guard。"""
         from .guard import GuardPolicy
+        from .storage.disk_policy import load
 
-        return GuardPolicy.from_dict(self.limits or {})
+        return GuardPolicy.from_dict({**(self.limits or {}), **load()})
 
     def quality_policy(self):
         from .quality import QualityPolicy
@@ -961,7 +955,7 @@ def resolve_profile(
         max_pixels=max_pixels,
         # 上下文长度可以自己填：分档表只有三档粗粒度，而"这张卡到底能开多大"
         # 取决于权重精度和预留显存，用户比配置更清楚。
-        max_model_len=int(max_model_len_override or (min(2048, tier.max_model_len) if engine == "native" else tier.max_model_len)),
+        max_model_len=int(max_model_len_override or (min(4096, tier.max_model_len) if engine == "native" else tier.max_model_len)),
         max_num_seqs=(_positive(max_num_seqs_override, name="--max-num-seqs")
                       or (min(4, tier.max_num_seqs) if engine == "native" else tier.max_num_seqs)),
         # 槽位沿用同一个用户输入：`--max-num-seqs 12` 在两个引擎上都该是 12。

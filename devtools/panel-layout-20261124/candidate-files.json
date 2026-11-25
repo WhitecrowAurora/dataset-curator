@@ -1,0 +1,12 @@
+{
+  "fox-panel/panel.py": "35195f44d42fab1033b25236cddc28caf377ed34beff092b95067ec66b491187",
+  "fox-panel/web/index.html": "f65d4b396acc1c9820d4221b2f10a9e1a1495dafa349363e600a0f4851d01180",
+  "fox-panel/web/app.js": "743fb897be99c9d9c43645ee4f48de52d30f6924f39b48b54a80e015b91150a9",
+  "fox-panel/web/workspace.js": "e01982e90e334d3479ccc8e7f662c3f1448927fc3e55d1264fed67808456827f",
+  "fox-panel/web/dispatch-assistant.js": "43809d4f91b6e8ef428bb823728fc01c28753b52b954aee7d79773d4135a0ec5",
+  "fox-panel/web/dispatch-template.js": "79ac23d7cf1ac61d4bdc939647eb32484a207f36abb7774485d53c554a2367e5",
+  "fox-panel/web/source-catalog.js": "6fd8d09f33c0617c599a5327ca5eb6e22ffd944d39408645f2d17e1a4563ea96",
+  "fox-panel/web/artist.js": "aba88f537ee497435126811720b16144cad796703fd4342854be72bacee1d830",
+  "fox-panel/web/workspace-sections.js": "bac254ec436ff1c8e47bb4ac3746b38422691b6ffa3c7e0ee1ab874c8221c0a1",
+  "fox-panel/web/workspace-sections.css": "fe22ab0d5e4c06feb1060c82c306a6f6c43d3b7a40ff91f35770d5e467ab0ba5"
+}

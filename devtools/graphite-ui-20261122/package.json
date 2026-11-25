@@ -1,0 +1,23 @@
+{
+  "package": "H:\\tagger\\dist\\tagger-20261122-graphite-ui.zip",
+  "size": 76501705,
+  "sha256": "c088de2e9a2691e69f3f1568d571299a043cdbe14664ccb43b16bc694cacc9bd",
+  "verified_files": [
+    "tagger/web/ui/dist/index.html",
+    "tagger/web/ui/src/styles/tokens.css",
+    "tagger/web/ui/src/styles/workbench.css",
+    "tagger/web/ui/src/components/ui/FormSections.tsx",
+    "tagger/web/ui/src/components/ui/controls.tsx",
+    "tagger/web/ui/src/components/ui/ProgressBar.tsx",
+    "tagger/web/ui/src/components/ui/launcher.tsx",
+    "tagger/web/ui/src/layout/Sidebar.tsx",
+    "tagger/web/ui/src/layout/AppShell.tsx",
+    "tagger/web/ui/src/main.tsx",
+    "tagger/web/ui/src/lib/motion.ts",
+    "tagger/web/torii_service.py",
+    "tagger/web/center_runtime/inference.py",
+    "tagger/web/ui/dist/assets/index-C1FnD9dM.js",
+    "tagger/web/ui/dist/assets/index-DoWL9yaj.css"
+  ],
+  "private_state_excluded": true
+}

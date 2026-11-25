@@ -6,7 +6,7 @@
   function choices(select,items) { items.forEach(function(item){var option=node('option',item[1]);option.value=item[0];select.append(option);}); }
   function button(text,label) { var b=node('button',text);b.type='button';b.className='fp-btn fp-btn--sm';if(label)b.setAttribute('aria-label',label);return b; }
   window.FoxAllocation={mount:function(parent,ws,all,writable,refresh){
-    var box=node('fieldset'),toolbar=node('div'),rows=node('div'),message=node('p'),save=button('保存分配'),selections={},views=[],busy=false;
+    var box=node('fieldset'),toolbar=node('div'),rows=node('div'),message=node('p'),save=button('保存分配'),selections={},userSelections={},views=[],busy=false;
     box.className='fp-allocation';toolbar.className='fp-allocation-toolbar';message.setAttribute('role','status');
     box.append(node('legend','仓库设备分配'),toolbar,rows,message,save);parent.append(box);
     var mode=field(toolbar,'分配模式',node('select')),view=field(toolbar,'配置视图',node('select'));
@@ -18,18 +18,20 @@
     function changed(){box.dataset.editing='1';}
     (ws.repos||[]).forEach(function(repo){
       var selected=new Set((ws.repo_devices&&ws.repo_devices[repo]||[]).filter(function(id){return valid.has(id);}));selections[repo]=selected;
+      var selectedUsers=new Set(ws.repo_users&&ws.repo_users[repo]||[]);userSelections[repo]=selectedUsers;
       var row=node('fieldset'),simple=node('div'),detail=node('div');
       row.className='fp-allocation-repo';
-      row.append(node('legend',repo),node('p','处理设备'),simple,detail);rows.append(row);
-      var userList=window.FoxUsers.mount(simple,{title:'用户',items:directory.items,disabled:locked,
-        onChange:function(users){groups.forEach(function(ids,user){var count=ids.filter(function(id){return selected.has(id);}).length;
+      row.append(node('legend',repo),node('p','用户许可覆盖其后续上线设备；详细视图可额外指定现有设备。'),simple,detail);rows.append(row);
+      var userItems=directory.items.map(function(item){var user=(all.users||[]).find(function(u){return u.user_id===item.id;});return Object.assign({},item,{disabled:!user||user.status!=='active'||(user.effective_workspace_id||user.workspace_id)!==ws.ws_id});});
+      var userList=window.FoxUsers.mount(simple,{title:'用户',items:userItems,disabled:locked,
+        onChange:function(users){selectedUsers=new Set(users);userSelections[repo]=selectedUsers;groups.forEach(function(ids,user){var count=ids.filter(function(id){return selected.has(id);}).length;
           if(!users.includes(user))ids.forEach(function(id){selected.delete(id);});
           else if(!count)ids.forEach(function(id){selected.add(id);});
         });changed();render();}});
       var deviceList=window.FoxSelection.mount(detail,{title:'设备',items:devices.map(function(d){return {id:d.device_id,label:d.user_id+' · '+d.device_id};}),disabled:locked,
         onChange:function(ids){selected.clear();ids.forEach(function(id){selected.add(id);});changed();render();}});
       function render(){
-        userList.setValues(Array.from(groups.keys()).filter(function(user){return groups.get(user).some(function(id){return selected.has(id);});}));userList.refresh();
+        userList.setValues(Array.from(new Set([...selectedUsers,...Array.from(groups.keys()).filter(function(user){return groups.get(user).some(function(id){return selected.has(id);});})])));userList.refresh();
         deviceList.setValues(Array.from(selected));deviceList.refresh();
       }
       views.push({simple:simple,detail:detail,render:render});render();
@@ -39,7 +41,8 @@
     save.onclick=async function(){
       if(locked())return;
       var mapping={};Object.keys(selections).forEach(function(repo){mapping[repo]=Array.from(selections[repo]);});
-      var body={action:'allocation',ws_id:ws.ws_id,mode:mode.value,repo_devices:mapping};busy=true;box.dataset.busy='1';show();
+      var userMapping={};Object.keys(userSelections).forEach(function(repo){userMapping[repo]=Array.from(userSelections[repo]);});
+      var body={action:'allocation',ws_id:ws.ws_id,mode:mode.value,repo_devices:mapping,repo_users:userMapping};busy=true;box.dataset.busy='1';show();
       try{
         var csrf=document.cookie.match(/(?:^|;\s*)fp_csrf=([^;]+)/);
         var r=await fetch('/api/scheduling',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf?decodeURIComponent(csrf[1]):''},body:JSON.stringify(body)}),data=await r.json();

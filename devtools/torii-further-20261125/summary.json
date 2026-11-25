@@ -1,0 +1,43 @@
+{
+  "1": {
+    "before_s": 2.211551350002992,
+    "after_s": 1.9809068999966257,
+    "throughput_gain": 0.11643376576999098,
+    "output_exact": true
+  },
+  "8": {
+    "before_s": 4.862111300004472,
+    "after_s": 3.849990950002393,
+    "throughput_gain": 0.26288902055768437,
+    "output_exact": true
+  },
+  "captions": {
+    "before_s": 14.107253399997717,
+    "after_s": 9.815890799989575,
+    "throughput_gain": 0.43718524252660806,
+    "output_exact": true,
+    "tokens": 2777
+  },
+  "logits": [
+    {
+      "case": "logits",
+      "mode": "both",
+      "batch": 1,
+      "steps": 64,
+      "max_error": 0.0,
+      "rmse": 0.0,
+      "psnr_db": "inf",
+      "argmax_equal_steps": 64
+    },
+    {
+      "case": "logits",
+      "mode": "both",
+      "batch": 8,
+      "steps": 64,
+      "max_error": 0.0,
+      "rmse": 0.0,
+      "psnr_db": "inf",
+      "argmax_equal_steps": 64
+    }
+  ]
+}

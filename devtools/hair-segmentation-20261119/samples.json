@@ -1,0 +1,128 @@
+[
+  {
+    "id": "4",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\004_z-image_000_8f7fee3506595b92.jpg",
+    "repo": "jasperai/monet",
+    "member": "000_8f7fee3506595b92.jpg",
+    "crop": null
+  },
+  {
+    "id": "26",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\026_z-image_013_de68829d3040cad9.jpg",
+    "repo": "jasperai/monet",
+    "member": "013_de68829d3040cad9.jpg",
+    "crop": null
+  },
+  {
+    "id": "41",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\041_flux-schnell_005_1c43ec14a020ef74.jpg",
+    "repo": "jasperai/monet",
+    "member": "005_1c43ec14a020ef74.jpg",
+    "crop": null
+  },
+  {
+    "id": "42",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\042_flux-schnell_005_eea4feaf8603c4ce.jpg",
+    "repo": "jasperai/monet",
+    "member": "005_eea4feaf8603c4ce.jpg",
+    "crop": null
+  },
+  {
+    "id": "45",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\045_flux-schnell_005_2958102cadc1e159.jpg",
+    "repo": "jasperai/monet",
+    "member": "005_2958102cadc1e159.jpg",
+    "crop": null
+  },
+  {
+    "id": "58",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\058_flux-schnell_017_21c7a6cd9dbdee5b.jpg",
+    "repo": "jasperai/monet",
+    "member": "017_21c7a6cd9dbdee5b.jpg",
+    "crop": null
+  },
+  {
+    "id": "61",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\061_flux-schnell_017_5b918aa11793d69e.jpg",
+    "repo": "jasperai/monet",
+    "member": "017_5b918aa11793d69e.jpg",
+    "crop": null
+  },
+  {
+    "id": "95",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\095_flux-klein_022_5a900a0ab5a3922c.jpg",
+    "repo": "jasperai/monet",
+    "member": "022_5a900a0ab5a3922c.jpg",
+    "crop": null
+  },
+  {
+    "id": "101",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\people-data\\101_z-image_013_df736bd240db7816.jpg",
+    "repo": "jasperai/monet",
+    "member": "013_df736bd240db7816.jpg",
+    "crop": null
+  },
+  {
+    "id": "102",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\people-data\\102_z-image_015_275ac8507639b865.jpg",
+    "repo": "jasperai/monet",
+    "member": "015_275ac8507639b865.jpg",
+    "crop": null
+  },
+  {
+    "id": "103",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\people-data\\103_z-image_015_f50e948899de76ee.jpg",
+    "repo": "jasperai/monet",
+    "member": "015_f50e948899de76ee.jpg",
+    "crop": null
+  },
+  {
+    "id": "107",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\people-data\\107_z-image_015_5286976755118034.jpg",
+    "repo": "jasperai/monet",
+    "member": "015_5286976755118034.jpg",
+    "crop": null
+  },
+  {
+    "id": "portrait",
+    "source": "H:\\tagger\\.delete\\hair-prototype-tests-20261119\\backend\\smoke\\hair-prototype\\portrait.jpg",
+    "repo": "deepghs/imgutils test images",
+    "crop": null
+  },
+  {
+    "id": "hutao",
+    "source": "H:\\tagger\\.delete\\hair-prototype-tests-20261119\\backend\\smoke\\hair-prototype\\hutao.jpg",
+    "repo": "deepghs/imgutils test images",
+    "crop": null
+  },
+  {
+    "id": "mostima",
+    "source": "H:\\tagger\\.delete\\hair-prototype-tests-20261119\\backend\\smoke\\hair-prototype\\mostima.jpg",
+    "repo": "deepghs/imgutils test images",
+    "crop": null
+  },
+  {
+    "id": "101-head",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\people-data\\101_z-image_013_df736bd240db7816.jpg",
+    "repo": "jasperai/monet",
+    "member": "013_df736bd240db7816.jpg",
+    "crop": [
+      300,
+      210,
+      565,
+      550
+    ]
+  },
+  {
+    "id": "107-head",
+    "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\people-data\\107_z-image_015_5286976755118034.jpg",
+    "repo": "jasperai/monet",
+    "member": "015_5286976755118034.jpg",
+    "crop": [
+      470,
+      110,
+      890,
+      655
+    ]
+  }
+]

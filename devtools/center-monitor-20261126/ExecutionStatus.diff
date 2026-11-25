@@ -1,0 +1,72 @@
+--- tagger/web/ui/src/components/center/ExecutionStatus.tsx (before)
++++ tagger/web/ui/src/components/center/ExecutionStatus.tsx
+@@ -1,5 +1,6 @@
+ import type { CenterState } from '../../lib/api'
+ import { SectionPanel, StatusChip } from '../ui/launcher'
++import { executionMode } from './executionMode'
+ 
+ export function ExecutionStatus({ state, busy = false, onResume, onForceContinue }: { state: CenterState | null; busy?: boolean; onResume?: () => void; onForceContinue?: () => void }) {
+   if (!state) return null
+@@ -12,18 +13,13 @@
+   const dispatchPaused = runtime.managed?.automation?.dispatch?.running === false
+   const devicePaused = runtime.managed?.automation?.desired === 'paused'
+   const limit = runtime.managed?.automation?.limit
+-  const gpus = runtime.telemetry?.gpus ?? []
+   const probe = runtime.probe
+-  const mode = p.package && ['tag', 'nl', 'both'].includes(p.phase ?? '')
+-    ? p.phase : runtime.resolved.mode ?? state.config.mode
+-  const showNl = mode !== 'tag'
+-  const showTag = mode !== 'nl' && (runtime.resolved.tag_backend ?? state.config.tag_backend) !== 'none'
+-  const settings = [
+-    showNl && runtime.resolved.concurrency !== undefined ? `实际 NL 并发 ${runtime.resolved.concurrency}` : '',
+-    showTag && runtime.resolved.tag_batch !== undefined ? `TAG 批大小 ${runtime.resolved.tag_batch}` : '',
+-  ].filter(Boolean)
++  const { showNl, showTag } = executionMode(state)
++  const parallel = Object.entries(runtime.managed?.automation?.parallel ?? {})
++    .filter(([key]) => key === 'concurrency' ? showNl : showTag)
+   const stale = typeof p.updated_ago_s === 'number' && p.updated_ago_s >= 120 && state.running
+-  return <SectionPanel title="实时执行" description="逐图进度与整包交付分开统计；流式输入读完前不显示百分比">
++  return <SectionPanel title="任务与交付" trailing={typeof limit?.completed === 'number'
++    ? <span className="text-[11px] text-lx-muted">本轮完成 <b className="font-mono font-medium text-lx">{limit.completed}</b> 片 · 上限 {limit.max_packages || '不限'}</span> : undefined}>
+     {dispatchPaused && <p className="mb-3 text-xs text-lx-warning">{devicePaused
+       ? '自动派单和本设备接单均已暂停；恢复设备后，仍需管理员启动自动派单。'
+       : '管理员已暂停自动派单：当前分片可继续，下一片等待管理员启动。'}</p>}
+@@ -55,29 +51,18 @@
+       </>}
+     </div>}
+     {runtime.managed?.start_pending && <p className="mt-2 text-xs text-lx-secondary">恢复请求已保留，等待中心确认；断线后会自动重送。</p>}
+-    {typeof limit?.completed === 'number' && <p className="mt-2 text-xs text-lx-muted">本轮完成 {limit.completed} 片
+-      {' · '}上限 {limit.max_packages || '不限'}</p>}
+     {runtime.managed?.automation?.pending_results?.map(r => <p key={`${r.repo}/${r.pkg}`} className="mt-2 text-xs text-lx-warning">
+       本地完成、待回传：{r.pkg} · {r.parts.join(' / ').toUpperCase()}</p>)}
+-    {runtime.managed?.automation?.workspace && <p className="mt-2 text-xs text-lx-muted">
+-      接单工作区：{runtime.managed.automation.workspace.name || runtime.managed.automation.workspace.ws_id}
+-    </p>}
+-    {p.package && <p className="mt-3 truncate font-mono text-xs" title={`${p.repo}/${p.package}`}>当前分片：{p.package} {p.package_index ? `· 本轮第 ${p.package_index} 片` : ''} · {p.phase?.toUpperCase() || '等待进度上报'}</p>}
+     {!state.running && <p className="mt-3 text-xs text-lx-muted">当前没有执行分片；已保留的租约可在下方查看。</p>}
+-    {typeof p.done === 'number' && <p className="mt-2 text-xs text-lx-muted">
+-      已处理 {p.done} 张 · {p.total_known ? `总计 ${p.total}` : `已读取 ${p.total ?? 0}，总量待确定`}
+-      {' · '}成功 {p.successful ?? '—'} · 跳过 {p.skipped ?? '—'} · 失败 {p.failed ?? '—'}
+-      {' · '}有效速度 {typeof p.rate_per_s === 'number' ? `${(p.rate_per_s * 60).toFixed(1)} 张/分钟` : '待上报'}
+-      {typeof p.updated_ago_s === 'number' && ` · ${Math.round(p.updated_ago_s)} 秒前更新`}
+-    </p>}
+-    {p.image_id && <p className="mt-1 text-xs text-lx-dim">最近结算图片：{p.image_id}</p>}
+-    {gpus.map(g => <p className="mt-2 text-xs text-lx-muted" key={g.device}>
+-      {g.device} · {g.name} · GPU {g.util}% · 显存 {(g.mem_used_mb / 1024).toFixed(1)} / {(g.mem_total_mb / 1024).toFixed(1)} GB
+-    </p>)}
+-    {settings.length > 0 && <p className="mt-2 text-xs text-lx-dim">{settings.join(' · ')}</p>}
+-    {Object.entries(runtime.managed?.automation?.parallel ?? {}).map(([key,value]) =>
+-      <p key={key} className="mt-1 text-xs text-lx-dim">{key==='concurrency'?'NL 并发':'TAG 批大小'}：{value.value || '自动'} · 来源：{value.source}
+-        {value.warning && <span className="block text-lx-warning">{value.warning}</span>}</p>)}
++    {parallel.filter(([, value]) => value.warning).map(([key, value]) =>
++      <p key={key} className="mt-2 text-xs text-lx-warning">{key === 'concurrency' ? 'NL 并发' : 'TAG 批大小'}：{value.warning}</p>)}
++    {(p.image_id || parallel.length > 0) && <details className="mt-3 text-[11px] text-lx-dim">
++      <summary className="cursor-pointer">执行详情</summary>
++      {p.image_id && <p className="mt-2 break-all">最近结算图片：{p.image_id}</p>}
++      {parallel.map(([key, value]) => <p key={key} className="mt-1">
++        {key === 'concurrency' ? 'NL 并发' : 'TAG 批大小'}：{value.value || '自动'} · 来源：{value.source}
++      </p>)}
++    </details>}
+     {probe?.error && <p className="mt-2 text-xs text-lx-warning">探测：{probe.error}</p>}
+     {probe?.recommended && <p className="mt-2 text-xs text-lx-secondary">{probe.sample_count} 张小样本探测建议：
+       {showNl && probe.recommended.concurrency !== undefined && ` NL 并发 ${probe.recommended.concurrency}`}

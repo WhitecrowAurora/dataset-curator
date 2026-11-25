@@ -1,0 +1,43 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"General\": \"A bright, whimsical outdoor scene featuring a winding dirt path through a grassy field dotted with colorful flowers. The background includes floating islands topped with small houses and trees, a tall red-and-white striped tower, and a clear blue sky with fluffy clouds and twinkling stars. The overall style is cartoonish with soft shading and vibrant colors, evoking a magical, storybook atmosphere.\", \"Character 1\": \"A large anthropomorphic figure with a round face, big blue eyes, and rosy cheeks. The character wears a tall, red-and-white striped top hat and has a small orange triangular nose. The face is framed by short, curly brown hair. The character smiles gently and looks off to the side, exuding a friendly and curious demeanor. A small yellow bird perches calmly on the brim of the hat, adding a natural touch to the scene.\"}"
+      }
+    }
+  ],
+  "created": 1795042405,
+  "model": "ToriiGate-0.5",
+  "system_fingerprint": "b12188-095668452",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 181,
+    "prompt_tokens": 281,
+    "total_tokens": 462,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "id": "chatcmpl-kjwh8HvXpPJ6qJh9kC5ft3aUknvaY7CL",
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 281,
+    "prompt_ms": 4296.785,
+    "prompt_per_token_ms": 15.291049822064057,
+    "prompt_per_second": 65.3977334216164,
+    "predicted_n": 181,
+    "predicted_ms": 32709.439,
+    "predicted_per_token_ms": 181.71910555555556,
+    "predicted_per_second": 5.502998690989473
+  },
+  "key": "2",
+  "source": "H:\\tagger\\.delete\\hair-pack-tests-20261119\\backend\\smoke\\hair-pack-evaluation\\data\\002_z-image_000_9fbeb2b203623ccc.jpg",
+  "load_s": 2.949745099998836,
+  "wall_s": 37.05150819999835,
+  "rss_bytes": 4941234176,
+  "image_tokens_budget": 64,
+  "cpu_threads": 8
+}

@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "tests": {
+    "mcp.xml": {
+      "tests": 10,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    "regression.xml": {
+      "tests": 158,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    }
+  },
+  "production_state_unchanged": true,
+  "label_not_restarted": true,
+  "test_keys_revoked": true,
+  "services": [
+    "active",
+    "active"
+  ],
+  "source_matches_deployed": true,
+  "archive": "H:\\lulynx-trainer\\.delete\\tagger-mcp-preassignment-20261125\\backend\\smoke\\tagger-mcp-preassignment-20261125"
+}

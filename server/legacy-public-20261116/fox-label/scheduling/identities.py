@@ -18,6 +18,7 @@ def rebind(c, dispatch, device_id, user_id=None):
     dispatch.package_queue.clear_device(c, device_id)
     forget(c, device_id=device_id)
     retire_device(c, device_id)
+    c.execute('DELETE FROM managed_policy WHERE device_id=?', (device_id,))
     c.execute('UPDATE devices SET workspace_id=NULL,repo_order=\'[]\' WHERE device_id=?', (device_id,))
     if user_id is not None:
         c.execute('UPDATE devices SET user_id=? WHERE device_id=?', (user_id, device_id))
@@ -30,8 +31,12 @@ def rename(c, dispatch, old, new):
         raise dispatch.AuthError('该用户还有执行或预约任务，请先完成或回收后改名')
     if c.execute('SELECT 1 FROM managed_sessions WHERE user_id=? AND released=0', (old,)).fetchone():
         raise dispatch.AuthError('该用户仍在托管，请先退出托管后改名')
+    from assignments.plans import clear_device
+    for device in c.execute('SELECT device_id FROM devices WHERE user_id=?', (old,)).fetchall():
+        clear_device(c, device['device_id'])
     c.execute('UPDATE users SET user_id=? WHERE user_id=?', (new, old))
     c.execute('UPDATE devices SET user_id=? WHERE user_id=?', (new, old))
     c.execute("UPDATE part_assignments SET target_id=? WHERE target_type='user' AND target_id=?", (new, old))
     c.execute('UPDATE package_targets SET user_id=? WHERE user_id=?', (new, old))
     c.execute('UPDATE package_queue SET user_id=? WHERE user_id=?', (new, old))
+    c.execute('UPDATE repo_users SET user_id=? WHERE user_id=?', (new, old))

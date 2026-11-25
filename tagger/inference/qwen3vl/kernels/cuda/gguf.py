@@ -49,10 +49,15 @@ def linear(x, packed, rows, kind, tile_rows=256):
                               C.c_void_p(output.data_ptr()), C.c_int(rows), C.c_int(width),
                               C.c_int(packed.stride(0))])
             else:
-                scratch = torch.empty(min(tile_rows, rows), width, device=x.device, dtype=x.dtype)
-                for start in range(0, rows, tile_rows):
-                    end = min(start + tile_rows, rows)
+                # Decode several row tiles in one launch, but retain the original
+                # GEMM shapes and accumulation order (larger GEMMs change rounding).
+                chunk_rows = tile_rows * 8
+                scratch = torch.empty(min(chunk_rows, rows), width, device=x.device, dtype=x.dtype)
+                for start in range(0, rows, chunk_rows):
+                    end = min(start + chunk_rows, rows)
                     weight = scratch[:end - start]
                     _dequantize(runtime, functions["dequantize"], stream, packed[start:end], weight)
-                    output[:, start:end] = torch.nn.functional.linear(flat, weight)
+                    for offset in range(0, end - start, tile_rows):
+                        tile = weight[offset:offset + tile_rows]
+                        output[:, start + offset:start + offset + tile.shape[0]] = torch.nn.functional.linear(flat, tile)
     return output.reshape(*x.shape[:-1], rows)

@@ -1,0 +1,5 @@
+{
+  "rc": 0,
+  "stdout": "{\"before\": {\"worker.py\": \"fc7bc6043a83a4bf1f83ce803f233ca188a1147a35e5d3a453d934eaf9f869bf\", \"worker-sources.json\": \"86e58e2ed0cfe0c5f04cbc666f3c77d87097e2b5240e915cc1382d653bab1187\"}, \"after\": {\"worker.py\": \"e238f1ca706bb0dd36c30a90e4adbe6bdffe600dcf284fd03b500d75ee3869ac\", \"worker-sources.json\": \"09daf919fe14270fa3e5b7e4513de85083b7012793c9eeb518c29b1f01eff9ec\"}, \"backup\": \"/tagger/.delete/scheduling-audit-worker-20261123\", \"services\": [\"active\", \"active\"], \"worker_help\": true, \"worker_snapshot_probe\": \"{\\\"independent_worker_snapshot_resume_and_delivery\\\": true, \\\"workspace_imports\\\": false}\"}\n",
+  "stderr": ""
+}

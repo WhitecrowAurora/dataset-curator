@@ -26,6 +26,10 @@ def page(c, dispatch, device=None, ws_id=None, offset=0):
     rows = c.execute('SELECT p.*' + query + ' ORDER BY p.repo,p.id LIMIT 100 OFFSET ?', [*repos, offset]).fetchall()
     items = []
     busy = held(c)
+    from assignments.preassignment import states
+    page_keys = {(r['repo'], r['id']) for r in rows}
+    page_assignments = [dict(a) for a in c.execute('SELECT * FROM part_assignments') if (a['repo'], a['pkg']) in page_keys]
+    pending_states = states(c, dispatch, page_assignments) if not device else {}
     from delivery.conflicts import blocked
     for key, parts in blocked(c).items():
         busy.setdefault(key, set()).update(parts)
@@ -34,16 +38,25 @@ def page(c, dispatch, device=None, ws_id=None, offset=0):
         occupied = [dict(l) for l in c.execute("SELECT l.lease_id,l.device_id,l.kind,lp.part FROM lease_parts lp"
                    " JOIN leases l ON l.lease_id=lp.lease_id WHERE lp.repo=? AND lp.pkg=? AND lp.open=1", (r['repo'], r['id']))]
         item['leases'] = occupied
+        item['pending_results']=[dict(x) for x in c.execute('SELECT device_id,parts_json,created_at FROM pending_local_results'
+                                                          ' WHERE repo=? AND pkg=? AND source_sha256=?',(r['repo'],r['id'],r['sha256']))]
         item['missing_parts'] = dispatch.missing_parts(item)
         free = [p for p in item['missing_parts'] if p not in busy.get((r['repo'], r['id']), ())]
         assignments = [dict(a) for a in c.execute('SELECT * FROM part_assignments WHERE repo=? AND pkg=?', (r['repo'], r['id']))]
         q = c.execute('SELECT device_id FROM package_queue WHERE repo=? AND pkg=?', (r['repo'], r['id'])).fetchone()
         target = c.execute('SELECT user_id FROM package_targets WHERE repo=? AND pkg=?', (r['repo'], r['id'])).fetchone()
+        item['unassigned_parts'] = ([part for part in free if not any(a['part'] == part for a in assignments)]
+                                    if not q and not target else [])
+        item['reserved_user'] = target['user_id'] if target else None
         if device:
             free, _ = eligible(dispatch, device, item, busy.get((r['repo'], r['id']), ()),
                                {a['part']: a for a in assignments}, target['user_id'] if target else None,
                                q['device_id'] if q else None)
         item['assignments'] = assignments
+        for target in assignments:
+            target['state'] = '执行中' if any(l['part'] == target['part'] for l in occupied) else pending_states.get((r['repo'], r['id'], target['part']), '待领取')
+        from assignments.annotation import for_package as annotation_for_package
+        item['annotation'] = annotation_for_package(c, item, ('tag', 'nl'))
         item['claimable_parts'] = free
         item['claimable'] = bool(free) and (not device or ws is None or bool(ws.get('allow_manual_claim')))
         item['working_device'] = occupied[0]['device_id'] if occupied else None

@@ -349,7 +349,6 @@ export function Upload() {
         icon={<CloudUpload size={17} />}
         eyebrow="回传"
         title="产物回传"
-        description={channel === 'blob' ? '分块续传 · 已传块自动秒传' : '断线自动续传'}
         actions={
           running ? (
             <button type="button" className="lx-btn-ghost" onClick={() => void stop()}>
@@ -383,7 +382,7 @@ export function Upload() {
             ) : undefined
           }
         >
-          <SettingRow label="产物目录" help="打标输出目录，或放着 merged.jsonl 的目录" notice={dirNotice}>
+          <SettingRow label="产物目录" notice={dirNotice}>
             <div className="flex gap-2">
               <input
                 className="lx-input font-mono text-xs"
@@ -475,10 +474,7 @@ export function Upload() {
 
         <div className="flex min-w-0 flex-col gap-3.5">
           <SectionPanel title="连接方式">
-            <SettingRow
-              label="通道"
-              help={channel === 'blob' ? '对端跑着本服务' : '对端只给了 FTP 账号'}
-            >
+            <SettingRow label="通道">
               <ChoiceGrid
                 options={CHANNELS}
                 value={channel}
@@ -495,7 +491,7 @@ export function Upload() {
 
             {channel === 'blob' ? (
               <>
-                <SettingRow label="回传地址" help="汇总机的服务地址，例如 http://10.0.0.5:8000" notice={urlNotice}>
+                <SettingRow label="回传地址" notice={urlNotice}>
                   <input
                     className="lx-input font-mono text-xs"
                     value={url}
@@ -510,8 +506,8 @@ export function Upload() {
                   label="令牌"
                   help={
                     auth?.required
-                      ? `请填写接收端的令牌；本机接收端已开启鉴权${auth.token_hint ? `（${auth.token_hint}）` : ''}`
-                      : '接收端要求鉴权时填写其令牌；请向接收端管理员确认'
+                      ? `本机接收端已开启鉴权${auth.token_hint ? `（${auth.token_hint}）` : ''}`
+                      : undefined
                   }
                 >
                   <input
@@ -523,12 +519,12 @@ export function Upload() {
                     autoComplete="off"
                   />
                 </SettingRow>
-                <SettingRow label="远端子目录" help="留空落在仓库根；会自动创建">
+                <SettingRow label="远端子目录">
                   <input
                     className="lx-input font-mono text-xs"
                     value={blobRemote}
                     onChange={(e) => setBlobRemote(e.target.value)}
-                    placeholder="batch-2026-11"
+                    placeholder="batch-2026-11（留空放仓库根）"
                     spellCheck={false}
                   />
                 </SettingRow>
@@ -564,7 +560,7 @@ export function Upload() {
                     autoComplete="off"
                   />
                 </SettingRow>
-                <SettingRow label="密码" help="不落盘、不进日志">
+                <SettingRow label="密码">
                   <input
                     className="lx-input font-mono text-xs"
                     type="password"
@@ -573,7 +569,7 @@ export function Upload() {
                     autoComplete="new-password"
                   />
                 </SettingRow>
-                <SettingRow label="远端路径" help="不存在会自动创建">
+                <SettingRow label="远端路径">
                   <input
                     className="lx-input font-mono text-xs"
                     value={remoteDir}
@@ -582,7 +578,7 @@ export function Upload() {
                     spellCheck={false}
                   />
                 </SettingRow>
-                <SettingRow label="传输模式" help="防火墙 / NAT 后用被动更稳">
+                <SettingRow label="传输模式" help="NAT / 防火墙后建议被动">
                   <ChoiceGrid
                     options={MODES}
                     value={mode}

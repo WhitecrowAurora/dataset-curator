@@ -1,0 +1,185 @@
+--- fox-label\dispatch.py
++++ fox-label\dispatch.py
+@@ -744,6 +744,7 @@
+     from scheduling.allocation import user_members
+     row['repo_users'] = user_members(c, ws_id)
+     row['preassignment_template'] = json.loads(row.get('preassignment_template') or '{}')
++    row['preassignment_last'] = json.loads(row.get('preassignment_last') or '{}')
+     return row
+ 
+ 
+--- fox-label\server.py
++++ fox-label\server.py
+@@ -3386,6 +3386,7 @@
+                 "allocation_mode": ws.get('allocation_mode', 'auto'),
+                 "repo_devices": ws.get('repo_devices', {}),
+                 "preassignment_template": ws.get('preassignment_template', {}),
++                "preassignment_last": ws.get('preassignment_last', {}),
+                 # registered 看的是 repos 表，不是包数——登记了但一次都没 sync 过的
+                 # 仓库包数是 0，那种状态要能看出来（面板上显示"未同步"）。
+                 "repo_packages": [{"repo": rp, "packages": pkg_n.get(rp, 0),
+--- fox-label\assignments\preassignment.py
++++ fox-label\assignments\preassignment.py
+@@ -59,12 +59,15 @@
+     now = time.time()
+     with dispatch._Tx(c):
+         ws = dispatch.ws_get(c, body.get('ws_id'))
+-        from .templates import defaults
++        from .templates import defaults, remember
+         body = defaults(c, ws['ws_id'], body)
+         mode, start = body.get('mode', 'both'), body.get('start', True)
+         if mode not in ('tag', 'nl', 'both') or type(start) is not bool:
+             raise ValueError('打标内容或自动开始选项不正确')
+         config = requirements(body.get('config', {}), mode)
++        source = body['config_source']
++        if source not in ('inherit', 'specified') or source == 'inherit' and config:
++            raise ValueError('执行配置来源与模型配置不匹配')
+         options = annotation.options(body['annotation']) if 'annotation' in body else None
+         assign_workspace = body.get('assign_workspace', False)
+         if type(assign_workspace) is not bool:
+@@ -123,7 +126,9 @@
+                     loads[user] += 1
+                     reserved += 1
+                 assigned.append(dict(repo=repo, id=pkg, part=part, user_id=user))
+-        return dict(ok=True, assigned=assigned, reserved=reserved, already_reserved=len(assigned)-reserved)
++        last = remember(c, ws['ws_id'], mode, source, config, options)
++        return dict(ok=True, assigned=assigned, reserved=reserved, already_reserved=len(assigned)-reserved,
++                    preassignment_last=last)
+ 
+ 
+ def cancel(c, dispatch, body):
+--- fox-label\assignments\templates.py
++++ fox-label\assignments\templates.py
+@@ -26,11 +26,22 @@
+     value = {} if body['action'] == 'clear_preassignment_template' else normalize(body.get('template'))
+     with dispatch._Tx(c):
+         ws = dispatch.ws_get(c, body.get('ws_id'))
+-        c.execute('UPDATE workspaces SET preassignment_template=? WHERE ws_id=?',
++        c.execute("UPDATE workspaces SET preassignment_template=?,preassignment_last='{}' WHERE ws_id=?",
+                   (json.dumps(value, ensure_ascii=False), ws['ws_id']))
+     return dict(ok=True, template=value)
+ 
+ 
+ def defaults(c, ws_id, body):
+     template = load(c, ws_id)
+-    return {**{key: template[key] for key in ('mode', 'config', 'annotation') if key in template}, **body}
++    result = {**{key: template[key] for key in ('mode', 'config', 'annotation') if key in template}, **body}
++    if 'config_source' not in result:
++        result['config_source'] = (template.get('config_source', 'inherit') if 'config' not in body
++                                   else 'specified' if result.get('config') else 'inherit')
++    return result
++
++
++def remember(c, ws_id, mode, source, configuration, options):
++    value = dict(mode=mode, config_source=source, config=configuration, annotation=options or {})
++    c.execute('UPDATE workspaces SET preassignment_last=? WHERE ws_id=?',
++              (json.dumps(value, ensure_ascii=False), ws_id))
++    return value
+--- fox-label\scheduling\policies.py
++++ fox-label\scheduling\policies.py
+@@ -6,7 +6,8 @@
+ def ensure_schema(c, dispatch):
+     from .allocation import ensure_schema as ensure_allocation
+     ensure_allocation(c, dispatch)
+-    dispatch._add_columns(c, 'workspaces', (("preassignment_template", "TEXT NOT NULL DEFAULT '{}'"),))
++    dispatch._add_columns(c, 'workspaces', (("preassignment_template", "TEXT NOT NULL DEFAULT '{}'"),
++                                           ("preassignment_last", "TEXT NOT NULL DEFAULT '{}'")))
+     c.executescript("""
+     CREATE TABLE IF NOT EXISTS user_groups (
+       group_id TEXT PRIMARY KEY,name TEXT NOT NULL,workspace_id TEXT,repos TEXT NOT NULL DEFAULT '[]');
+--- fox-panel\web\dispatch-assistant.js
++++ fox-panel\web\dispatch-assistant.js
+@@ -21,10 +21,12 @@
+     var fields=node('div');panels[1].append(fields);
+     var form=window.FoxExecutionForm.mount(fields,{prefix:'预派',tag:'pixai',engine:'native',precision:'q6',parallel:true,writable:writable});
+     var artist=choice(panels[1],'预派画师注入',[['inherit','沿用仓库设置'],['nl','仅 NL 注入'],['tag','仅 TAG 注入'],['both','TAG 与 NL 都注入'],['off','关闭注入']]);
++    var configNote=node('p'),useTemplate=button('使用工作区默认模板');panels[1].append(configNote,useTemplate);
+     panels[1].append(node('p','指定配置会在领取前比对；不匹配时提示成员调整。0 并发／批大小表示使用本机自动值。成员主动暂停时保持暂停。'));
+     function updateFields(){fields.hidden=configSource.value==='inherit';var groups=fields.querySelectorAll('.fp-dispatch-form-group');groups[0].hidden=mode.value==='nl';groups[1].hidden=mode.value==='tag';}
+     configSource.onchange=mode.onchange=function(){updateFields();changed();};
+-    function applyTemplate(){var value=ws.preassignment_template||{};mode.value=value.mode||'nl';configSource.value=value.config_source||'inherit';artist.value=window.FoxDispatchTemplate.artistValue(value.annotation||{});form.setValue(Object.assign({tag_backend:'pixai',nl_engine:'native',nl_precision:'q6'},value.config||{}));updateFields();}
++    function applyTemplate(templateOnly){var last=ws.preassignment_last||{},value=!templateOnly&&last.mode?last:ws.preassignment_template||{};mode.value=value.mode||'nl';configSource.value=value.config_source||'inherit';artist.value=window.FoxDispatchTemplate.artistValue(value.annotation||{});form.setValue(Object.assign({tag_backend:'pixai',nl_engine:'native',nl_precision:'q6'},value.config||{}));configNote.textContent=value===last?'已带入此工作区上次成功派单的配置；本次可单独修改。':'已带入工作区默认模板；派单成功后记住本次配置。';updateFields();}
++    useTemplate.onclick=function(){applyTemplate(true);changed();};
+     applyTemplate();
+     var packages=window.FoxSelection.mount(panels[2],{title:'预派分包',max:500,disabled:function(){return busy||loading||!writable();},onChange:changed});
+     var more=button('加载更多分包'),packageMessage=node('p');panels[2].append(more,packageMessage);
+@@ -35,7 +37,7 @@
+     function selected(){return packages.values().map(function(key){return loaded.get(key);}).filter(Boolean);}
+     function configurationText(){if(configSource.value==='inherit')return '沿用成员本机配置';var v=form.value(),text=[];if(mode.value!=='nl')text.push('TAG：'+v.tag_backend+'，批大小 '+(v.tag_batch||'自动'));if(mode.value!=='tag')text.push('NL：'+v.nl_engine+' / '+(v.nl_model||'本机默认模型')+' / '+v.nl_precision.toUpperCase()+'，并发 '+(v.concurrency||'自动'));return text.join('；');}
+     function render(){panels.forEach(function(panel,index){panel.hidden=index!==step;steps.children[index].setAttribute('aria-current',index===step?'step':'false');});previous.hidden=step===0;next.hidden=step===3;submit.hidden=step!==3;
+-      previous.disabled=next.disabled=close.disabled=busy;submit.disabled=busy||!writable();members.refresh();packages.refresh();
++      previous.disabled=next.disabled=close.disabled=busy;submit.disabled=useTemplate.disabled=busy||!writable();members.refresh();packages.refresh();
+       panels[1].querySelectorAll('input,select').forEach(function(input){input.disabled=busy||!writable();});
+       if(step===3){review.replaceChildren();[['工作区',ws.name||ws.ws_id],['成员',members.values().join('、')],['打标内容',mode.selectedOptions[0].textContent],['执行配置',configurationText()],['画师注入',artist.selectedOptions[0].textContent],['分包数量',selected().length],['上线后','上线托管后自动领取；主动暂停时保持暂停']].forEach(function(row){var p=node('p');p.append(node('strong',row[0]+'：'),node('span',String(row[1])));review.append(p);});}}
+     function available(p){var parts=mode.value==='both'?['tag','nl']:[mode.value];return (p.claimable_parts||[]).some(function(part){return parts.includes(part);});}
+@@ -45,9 +47,9 @@
+     previous.onclick=function(){step--;render();};next.onclick=function(){message.textContent='';if(step===0&&!members.values().length){message.textContent='请至少选择一位成员';return;}if(step===2&&!selected().length){message.textContent='请至少选择一个分包';return;}if(step===1)updatePackages();step++;render();};
+     submit.onclick=async function(){if(busy||parent.dataset.busy==='1'||!writable())return;var value=artist.value,annotation=value==='inherit'?{}:{artist_inject:value==='nl'||value==='both',artist_inject_tags:value==='tag'||value==='both'};
+       var body={ws_id:ws.ws_id,users:members.values(),items:selected().map(function(p){return {repo:p.repo,id:p.id};}),mode:mode.value,start:true,annotation:annotation,
+-        config:configSource.value==='inherit'?{}:form.value(),assign_workspace:true,grant_repos:ws.allocation_mode==='manual'};
++        config:configSource.value==='inherit'?{}:form.value(),config_source:configSource.value,assign_workspace:true,grant_repos:ws.allocation_mode==='manual'};
+       busy=true;box.dataset.busy=parent.dataset.busy='1';render();message.textContent='正在保存预派单…';
+-      try{var result=await post('/api/workspace-dispatch',body);box.dataset.editing='0';message.textContent='已保存 '+result.assigned.length+' 个分项，等待成员上线托管后领取。';packages.setValues([]);await refresh();}
++      try{var result=await post('/api/workspace-dispatch',body);ws.preassignment_last=result.preassignment_last;box.dataset.editing='0';message.textContent='已保存 '+result.assigned.length+' 个分项，等待成员上线托管后领取；已记住本次配置。';packages.setValues([]);await refresh();}
+       catch(e){message.textContent='保存失败：'+e.message;}finally{busy=false;box.dataset.busy=parent.dataset.busy='0';render();}
+     };
+     box.addEventListener('change',function(){box.dataset.editing='1';});render();
+--- fox-panel\web\dispatch-template.js
++++ fox-panel\web\dispatch-template.js
+@@ -19,7 +19,7 @@
+     function load(){var value=ws.preassignment_template||{};mode.value=value.mode||'nl';source.value=value.config_source||'inherit';artist.value=artistValue(value.annotation||{});form.setValue(Object.assign({tag_backend:'pixai',nl_engine:'native',nl_precision:'q6'},value.config||{}));update();message.textContent=value.mode?'已配置工作区默认模板':'尚未配置模板，预派单沿用原默认值';}
+     box.addEventListener('input',function(){box.dataset.editing='1';});box.addEventListener('change',function(){box.dataset.editing='1';update();});
+     async function write(remove){if(busy||parent.dataset.busy==='1'||!writable())return;busy=true;box.dataset.busy=parent.dataset.busy='1';update();message.textContent='正在保存…';
+-      try{var result=await post('/api/workspace-dispatch',{action:remove?'clear_preassignment_template':'save_preassignment_template',ws_id:ws.ws_id,template:{mode:mode.value,config_source:source.value,config:source.value==='specified'?form.value():{},annotation:annotation(artist.value)}});ws.preassignment_template=result.template;box.dataset.editing='0';load();message.textContent=remove?'已清除默认模板，后续派单使用原默认值':'默认模板已保存，仅用于后续未单独设置的预派单';saved();}
++      try{var result=await post('/api/workspace-dispatch',{action:remove?'clear_preassignment_template':'save_preassignment_template',ws_id:ws.ws_id,template:{mode:mode.value,config_source:source.value,config:source.value==='specified'?form.value():{},annotation:annotation(artist.value)}});ws.preassignment_template=result.template;ws.preassignment_last={};box.dataset.editing='0';load();message.textContent=remove?'已清除默认模板和上次派单记忆，后续派单使用原默认值':'默认模板已保存，上次派单记忆已重置；后续派单带入此模板';saved();}
+       catch(e){message.textContent='保存失败：'+e.message;}finally{busy=false;box.dataset.busy=parent.dataset.busy='0';update();}
+     }
+     save.onclick=function(){write(false);};clear.onclick=function(){write(true);};load();return {element:box};
+--- fox-panel\web\workspace.js
++++ fox-panel\web\workspace.js
+@@ -26,8 +26,8 @@
+     offline.addEventListener('input',function(){offlineDirty=true;edited();});
+     offline.addEventListener('change',function(){offlineDirty=true;edited();});
+     box.append(node("h3","工作区分片"),node("p","按用户预派分包，成员上线托管后领取。首次配置可使用快速助手。"));
+-    var assistant=window.FoxDispatchAssistant.mount(box,ws,all,api,post,writable,async function(){reset();await load();});
+-    window.FoxDispatchTemplate.mount(box,ws,post,writable,function(){if(!selected.size&&!selectedUsers.size){dispatchMode.value=(ws.preassignment_template||{}).mode||'both';artist.value='template';}});
++    var assistant=window.FoxDispatchAssistant.mount(box,ws,all,api,post,writable,async function(){rememberOptions();reset();await load();});
++    window.FoxDispatchTemplate.mount(box,ws,post,writable,function(){rememberOptions();if(!selected.size&&!selectedUsers.size){dispatchMode.value=(ws.preassignment_template||{}).mode||'both';artist.value='template';executionSource.value='template';}});
+     box.append(message,list,more,devices,send,advanced,offline);
+     card.appendChild(box);
+     packagePicker=window.FoxSelection.mount(list,{title:'分片',max:500,disabled:function(){return busy||loading||!writable();},onChange:function(ids){
+@@ -65,17 +65,19 @@
+     var start=check(devices,"同时启动",function(){});start.checked=true;
+     start.parentElement.hidden=true;
+     devices.append(node('p','按用户预派：成员上线托管后自动领取；已主动暂停的设备保持暂停。'));
+-    var partsLabel=node('label','预派打标内容 '),dispatchMode=node('select');dispatchMode.setAttribute('aria-label','分片预派打标内容');[['both','TAG + NL'],['nl','只出 NL'],['tag','只出 TAG']].forEach(function(v){var o=node('option',v[1]);o.value=v[0];dispatchMode.append(o);});dispatchMode.value=(ws.preassignment_template||{}).mode||'both';partsLabel.append(dispatchMode);devices.append(partsLabel,node('p','执行配置默认使用工作区预派单模板；需要本次单独指定时使用快速助手。'));
++    var last=ws.preassignment_last||{},partsLabel=node('label','预派打标内容 '),dispatchMode=node('select');dispatchMode.setAttribute('aria-label','分片预派打标内容');[['both','TAG + NL'],['nl','只出 NL'],['tag','只出 TAG']].forEach(function(v){var o=node('option',v[1]);o.value=v[0];dispatchMode.append(o);});dispatchMode.value=last.mode||(ws.preassignment_template||{}).mode||'both';partsLabel.append(dispatchMode);devices.append(partsLabel);
++    var executionLabel=node('label','预派执行配置 '),executionSource=node('select');executionSource.setAttribute('aria-label','分片预派执行配置');[['last','沿用上次成功派单配置'],['template','使用工作区默认模板'],['inherit','沿用成员本机配置']].forEach(function(v){var o=node('option',v[1]);o.value=v[0];o.disabled=v[0]==='last'&&!last.mode;executionSource.append(o);});executionSource.value=last.mode?'last':'template';executionLabel.append(executionSource);devices.append(executionLabel,node('p','按工作区记住成功派单的配置；需要调整模型或并发时使用快速助手。'));
+     var cancelPreassigned=node('button','取消选中分包的用户预派');cancelPreassigned.type='button';cancelPreassigned.className='fp-btn fp-btn--sm';advanced.append(cancelPreassigned);
+     cancelPreassigned.onclick=async function(){if(busy||!writable())return;busy=true;box.dataset.busy='1';update();try{var r=await post('/api/workspace-dispatch',{action:'cancel_preassignment',ws_id:ws.ws_id,items:Array.from(selected.values()),mode:dispatchMode.value});reset();await load();message.textContent='已取消 '+r.canceled+' 个尚未领取的用户分项';}catch(e){message.textContent=e.message;}finally{busy=false;box.dataset.busy='0';update();}};
+     var artistLabel=node('label','画师注入 '),artist=node('select');
+     artist.setAttribute('aria-label','派单画师注入');
+-    [['template','预派单使用默认模板（设备／离线沿用仓库）'],['inherit','沿用仓库设置（未配置时沿用客户端）'],['off','关闭注入'],['nl','仅 NL 描述'],['tag','仅 TAG 标签'],['both','NL 与 TAG 都注入']].forEach(function(v){var option=node('option',v[1]);option.value=v[0];artist.append(option);});
++    [['last','沿用上次派单画师设置（设备／离线沿用仓库）'],['template','预派单使用默认模板（设备／离线沿用仓库）'],['inherit','沿用仓库设置（未配置时沿用客户端）'],['off','关闭注入'],['nl','仅 NL 描述'],['tag','仅 TAG 标签'],['both','NL 与 TAG 都注入']].forEach(function(v){var option=node('option',v[1]);option.value=v[0];option.disabled=v[0]==='last'&&!last.mode;artist.append(option);});
+     artistLabel.append(artist);devices.append(artistLabel,node('p','应用于本次所选分包（含离线清单），已有产物不自动重打。仅注入已有来源的画师；客户端需更新至支持派单画师选项的版本。'));
+-    artist.value=(ws.preassignment_template||{}).mode?'template':'inherit';
++    artist.value=last.mode?'last':(ws.preassignment_template||{}).mode?'template':'inherit';
++    function rememberOptions(){var has=!!(ws.preassignment_last||{}).mode;[executionSource,artist].forEach(function(select){select.querySelector('option[value="last"]').disabled=!has;if(!has&&select.value==='last')select.value='template';});}
+     artist.disabled=!writable();
+     artist.addEventListener('change',function(){offlineDirty=true;update();});
+-    function annotation(){return artist.value==='inherit'||artist.value==='template'?{}:{artist_inject:artist.value==='nl'||artist.value==='both',artist_inject_tags:artist.value==='tag'||artist.value==='both'};}
++    function annotation(){return ['inherit','template','last'].includes(artist.value)?{}:{artist_inject:artist.value==='nl'||artist.value==='both',artist_inject_tags:artist.value==='tag'||artist.value==='both'};}
+     function reset(){++loadId;selected.clear();loaded.clear();packagePicker.setValues([]);packagePicker.setItems([]);diagnostics.replaceChildren();offset=0;}
+     async function load(){if(loading)return;var id=++loadId;loading=true;more.disabled=true;update();try{
+       var page=await api("/api/workspace-packages?ws_id="+encodeURIComponent(ws.ws_id)+"&offset="+offset);
+@@ -98,8 +100,9 @@
+     refresh.addEventListener("click",function(){if(busy||loading)return;box.dataset.editing='0';reset();load();});box.append(refresh);
+     more.addEventListener("click",load);send.addEventListener("click",async function(){if(busy||box.dataset.busy==='1'||!writable()||!selected.size)return;busy=true;box.dataset.busy='1';update();try{
+       var body={ws_id:ws.ws_id,items:Array.from(selected.values()),start:start.checked,annotation:annotation()};
+-      if(dispatchTarget.value==='device')body.devices=Array.from(chosen);else{body.users=Array.from(selectedUsers);body.mode=dispatchMode.value;if(artist.value==='template')delete body.annotation;}
++      if(dispatchTarget.value==='device')body.devices=Array.from(chosen);else{body.users=Array.from(selectedUsers);body.mode=dispatchMode.value;if(artist.value==='template')delete body.annotation;else if(artist.value==='last')body.annotation=(ws.preassignment_last||{}).annotation||{};if(executionSource.value==='last'){body.config=(ws.preassignment_last||{}).config||{};body.config_source=(ws.preassignment_last||{}).config_source||'inherit';}else if(executionSource.value==='inherit'){body.config={};body.config_source='inherit';}}
+       var result=await post("/api/workspace-dispatch",body);
++      if(body.users){ws.preassignment_last=result.preassignment_last;rememberOptions();}
+       reset();await load();
+       message.textContent="已分配 "+result.assigned.length+" 个分项"+(body.users?'；等待成员上线托管后领取':'')+(result.starts||[]).map(function(s){return "；"+s.device_id+"："+(s.status==="queued"?"开始指令已下发":s.status==="running"?"正在执行":s.message);}).join("");
+     }catch(e){message.textContent="下发失败："+e.message;}finally{busy=false;box.dataset.busy='0';update();}});
